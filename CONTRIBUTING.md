@@ -68,6 +68,15 @@ dictation_hints = '''
 - "list comp x for x in y" is `[x for x in y]`.
 - Common mishearings: "in put" is `input`, "split lines" is `splitlines`.
 '''
+
+# Shown in the app's help: something to say, and the line it produces.
+[[examples]]
+say = "def part one of data colon"
+result = "def part1(data):"
+
+[[examples]]
+say = "return sum of int of x for x in data dot split lines"
+result = "    return sum(int(x) for x in data.splitlines())"
 ```
 
 Then:
@@ -77,6 +86,8 @@ Then:
 3. Check it works: `workshop doctor` should find the runner, and running the template on a sample should print two lines (or a clear error).
 
 Commands are lists of arguments, not shell strings. The placeholders are `{file}`, `{dir}` (the solution's directory), `{build_dir}` (a scratch directory outside the solutions repo, for build output), `{year}` and `{day}`; `{day:02}` pads with zeros. An unknown placeholder is an error.
+
+`examples` appear in the app's help, so new users see how to dictate in their own language. Keep them short and check each one really produces its `result`.
 
 Dictation hints matter most. They're given to the edit model with every request, so keep them short, and focus on how the language's operators, chaining and idioms are spoken, and which words speech recognition commonly gets wrong.
 
