@@ -316,3 +316,144 @@ part1 = sum . map read . lines
 
 part2 = ‸'''
 unsure = true
+
+# Phrasing as it actually arrives from speech recognition
+
+[[case]]
+name = "chatty-with-misheard-line"
+utterance = "can you replace the brackets online six and seven with dollars after print"
+before = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)‸'''
+after = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print $ part1 input
+  print $ part2 input‸'''
+also = ['''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print $ part1 input‸
+  print $ part2 input''']
+
+[[case]]
+name = "change-type-on-line"
+utterance = "on line one change int to integer"
+before = '''
+part1 :: String -> Int‸
+part1 = sum . map read . lines'''
+after = '''
+part1 :: String -> Integer‸
+part1 = sum . map read . lines'''
+also = ['''
+part1 :: String -> Integer
+part1 = sum . map read . lines‸''']
+
+[[case]]
+name = "append-to-line"
+utterance = "at the end of line one add dot filter even"
+before = '''
+evens = map read . lines
+‸'''
+after = '''
+evens = map read . lines . filter even‸
+'''
+also = ['''
+evens = map read . lines . filter even
+‸''']
+
+[[case]]
+name = "edit-by-line-number-in-longer-file"
+utterance = "on line twenty two swap a and b in the subtraction"
+before = '''
+module Main where
+
+import Data.List (sort)
+import qualified Data.Map as M
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> [(Int, Int)]
+parse = map pair . lines
+  where
+    pair l = case words l of
+      [a, b] -> (read a, read b)
+      _ -> error l
+
+part1 :: String -> Int
+part1 = sum . map dist . pairs . parse
+  where
+    dist (a, b) = abs (a - b)
+    pairs ps = zip (sort (map fst ps)) (sort (map snd ps))
+
+part2 :: String -> Int
+part2 = undefined‸'''
+after = '''
+module Main where
+
+import Data.List (sort)
+import qualified Data.Map as M
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> [(Int, Int)]
+parse = map pair . lines
+  where
+    pair l = case words l of
+      [a, b] -> (read a, read b)
+      _ -> error l
+
+part1 :: String -> Int
+part1 = sum . map dist . pairs . parse
+  where
+    dist (a, b) = abs (b - a)‸
+    pairs ps = zip (sort (map fst ps)) (sort (map snd ps))
+
+part2 :: String -> Int
+part2 = undefined'''
+also = ['''
+module Main where
+
+import Data.List (sort)
+import qualified Data.Map as M
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> [(Int, Int)]
+parse = map pair . lines
+  where
+    pair l = case words l of
+      [a, b] -> (read a, read b)
+      _ -> error l
+
+part1 :: String -> Int
+part1 = sum . map dist . pairs . parse
+  where
+    dist (a, b) = abs (b - a)
+    pairs ps = zip (sort (map fst ps)) (sort (map snd ps))
+
+part2 :: String -> Int
+part2 = undefined‸''']
