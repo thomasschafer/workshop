@@ -139,7 +139,7 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
             ),
         )
     });
-    checks.push(check_network().await);
+    checks.push(check_network(&config.aoc.user_agent).await);
     checks.push(check_https(config).await);
     checks
 }
@@ -189,8 +189,9 @@ async fn check_provider(config: &Config, id: &str) -> Vec<Check> {
     checks
 }
 
-async fn check_network() -> Check {
+async fn check_network(user_agent: &str) -> Check {
     let client = reqwest::Client::builder()
+        .user_agent(user_agent)
         .timeout(Duration::from_secs(10))
         .build();
     let reachable = match client {

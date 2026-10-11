@@ -2,6 +2,13 @@
 name = "workshop"
 version = "0.1.0"
 edition = "2024"
+description = "Solve Advent of Code puzzles by voice, from your phone"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/thomasschafer/workshop"
+readme = "README.md"
+keywords = ["advent-of-code", "voice", "editor"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
 
 [dependencies]
 anyhow = "1.0.104"
