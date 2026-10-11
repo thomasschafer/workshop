@@ -258,27 +258,30 @@ impl ProviderRunner {
             OutputMode::ClaudeStreamJson => {
                 let mut lines = BufReader::new(stdout).lines();
                 let mut model = None;
-                let mut result = None;
+                let mut reply = None;
                 while let Some(line) = lines.next_line().await? {
-                    let event: serde_json::Value =
-                        serde_json::from_str(&line).with_context(|| {
-                            format!("model CLI printed a line that isn't JSON: {line}")
-                        })?;
-                    match event.get("type").and_then(|t| t.as_str()) {
-                        Some("system") => {
-                            if let Some(m) = event.get("model").and_then(|m| m.as_str()) {
-                                model = Some(m.to_owned());
-                            }
-                        }
-                        Some("result") => {
-                            result = Some(parse_claude_result(&line));
+                    match parse_stream_event(&line)? {
+                        StreamEvent::Init { model: m } => model = m.or(model),
+                        StreamEvent::Text { text, model: m } => {
+                            reply = Some(Ok((text, m.or(model.take()))));
                             break;
                         }
-                        _ => {}
+                        StreamEvent::Result(result) => {
+                            reply = Some(result.map(|(text, m)| (text, m.or(model.take()))));
+                            break;
+                        }
+                        StreamEvent::Other => {}
                     }
                 }
-                match result {
-                    Some(Ok((text, reported))) => Ok((text, reported.or(model))),
+                let reply = reply.map(|r| r.map_err(|e| anyhow::anyhow!(e)));
+                match reply {
+                    // The CLI does more work after the answer, such as summarising the turn,
+                    // which only adds latency here, so it is stopped rather than awaited.
+                    Some(Ok(reply)) => {
+                        let _ = child.start_kill();
+                        stderr_task.abort();
+                        return Ok(reply);
+                    }
                     Some(Err(err)) => Err(err),
                     None => Err(anyhow::anyhow!("model CLI exited without a result")),
                 }
@@ -295,6 +298,57 @@ impl ProviderRunner {
             Err(err) => Err(err),
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum StreamEvent {
+    Init {
+        model: Option<String>,
+    },
+    /// The model's complete answer. With tools disabled there is exactly one per turn.
+    Text {
+        text: String,
+        model: Option<String>,
+    },
+    Result(Result<(String, Option<String>), String>),
+    Other,
+}
+
+fn parse_stream_event(line: &str) -> Result<StreamEvent> {
+    let event: serde_json::Value = serde_json::from_str(line)
+        .with_context(|| format!("model CLI printed a line that isn't JSON: {line}"))?;
+    let string = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_str()).map(str::to_owned);
+    Ok(match event.get("type").and_then(|t| t.as_str()) {
+        Some("system") if event.get("subtype").and_then(|s| s.as_str()) == Some("init") => {
+            StreamEvent::Init {
+                model: string(event.get("model")),
+            }
+        }
+        Some("assistant") => {
+            let message = event.get("message");
+            let model = string(message.and_then(|m| m.get("model")));
+            let text: String = message
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+                .into_iter()
+                .flatten()
+                .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
+                .collect();
+            if text.is_empty() {
+                StreamEvent::Other
+            } else if model.as_deref() == Some("<synthetic>") {
+                // The CLI reports failures such as API errors as messages from a synthetic model.
+                StreamEvent::Result(Err(text))
+            } else {
+                StreamEvent::Text { text, model }
+            }
+        }
+        Some("result") => {
+            StreamEvent::Result(parse_claude_result(line).map_err(|e| format!("{e:#}")))
+        }
+        _ => StreamEvent::Other,
+    })
 }
 
 /// Parses a Claude Code `result` object, from either `json` output or the final `stream-json` line.
@@ -371,6 +425,38 @@ mod tests {
                 .to_string()
                 .contains("Not logged in")
         );
+    }
+
+    #[test]
+    fn parses_stream_events() {
+        assert_eq!(
+            parse_stream_event(r#"{"type":"system","subtype":"init","model":"claude-haiku-x"}"#)
+                .unwrap(),
+            StreamEvent::Init {
+                model: Some("claude-haiku-x".into())
+            }
+        );
+        assert_eq!(
+            parse_stream_event(r#"{"type":"assistant","message":{"model":"m","content":[{"type":"thinking","thinking":""}]}}"#).unwrap(),
+            StreamEvent::Other
+        );
+        assert_eq!(
+            parse_stream_event(r#"{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"{}"}]}}"#).unwrap(),
+            StreamEvent::Text {
+                text: "{}".into(),
+                model: Some("m".into())
+            }
+        );
+        assert!(matches!(
+            parse_stream_event(r#"{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error"}]}}"#).unwrap(),
+            StreamEvent::Result(Err(e)) if e == "API Error"
+        ));
+        assert!(matches!(
+            parse_stream_event(r#"{"type":"result","is_error":true,"result":"Not logged in"}"#)
+                .unwrap(),
+            StreamEvent::Result(Err(_))
+        ));
+        assert!(parse_stream_event("not json").is_err());
     }
 
     #[cfg(unix)]

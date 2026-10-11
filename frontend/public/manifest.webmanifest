@@ -1,0 +1,8 @@
+{
+  "name": "Workshop",
+  "short_name": "Workshop",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#16161a",
+  "theme_color": "#16161a"
+}
