@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Problem } from "./api";
-import { EMPTY_META, sampleInput, toggleAnswer, toggleSample, withSuggestions } from "./samples";
+import {
+  EMPTY_META,
+  sampleInput,
+  setAnswer,
+  setSampleText,
+  toggleAnswer,
+  toggleSample,
+  withSuggestions,
+} from "./samples";
 
 const problem = (overrides: Partial<Problem> = {}): Problem => ({
   title: "Day 1",
   parts_html: ["<p>one</p>", "<p>two</p>"],
   text: "",
   answers: ["10"],
+  stars: 1,
+  final_star: null,
   suggested_sample_answers: ["3", "7"],
   suggested_sample_blocks: [0, null],
   blocks: ["1\n2\n", "illustration", "5\n6\n"],
@@ -47,5 +57,17 @@ describe("toggles", () => {
     const off = toggleSample(on, problem(), 1, 2);
     expect(off.sample_blocks[1]).toBeNull();
     expect(toggleAnswer(toggleAnswer(EMPTY_META, 0, "4"), 0, "4").sample_answers[0]).toBeNull();
+  });
+});
+
+describe("manual samples", () => {
+  it("sets typed sample input and answers, clearing the chosen block", () => {
+    const withBlock = toggleSample(EMPTY_META, problem(), 0, 0);
+    const typed = setSampleText(withBlock, 0, "+1\n-2\n");
+    expect(typed.sample_blocks[0]).toBeNull();
+    expect(sampleInput(typed, 0)).toBe("+1\n-2\n");
+    expect(setSampleText(typed, 0, "  ").sample_inputs[0]).toBeNull();
+    expect(setAnswer(EMPTY_META, 1, " 7 ").sample_answers[1]).toBe("7");
+    expect(setAnswer(EMPTY_META, 1, "").sample_answers[1]).toBeNull();
   });
 });

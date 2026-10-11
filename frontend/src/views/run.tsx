@@ -1,4 +1,4 @@
-import type { RunResult, SubmitOutcome } from "../api";
+import type { FinalStar, RunResult, SubmitOutcome } from "../api";
 
 export type InputKind = "sample" | "real";
 
@@ -30,6 +30,8 @@ interface Props {
   onAskSubmit: () => void;
   onSubmit: (answer: string) => void;
   onDismissSubmit: () => void;
+  finalStar: FinalStar | null;
+  onClaimFinalStar: () => void;
 }
 
 export function describeEnding(result: RunResult): string {
@@ -67,6 +69,8 @@ export function RunSheet({
   onAskSubmit,
   onSubmit,
   onDismissSubmit,
+  finalStar,
+  onClaimFinalStar,
 }: Props) {
   const last = state.last;
   const partIndex = part === null ? null : part - 1;
@@ -75,6 +79,35 @@ export function RunSheet({
     last?.input === "sample" && expected !== null && answer !== null && answer === expected;
   const canSubmit =
     last?.input === "real" && answer !== null && part !== null && last.result.phase === "run";
+
+  if (finalStar !== null && part === 2) {
+    return (
+      <div class="run">
+        <p>
+          The last day's second part isn't a puzzle: its star is awarded for having every other star
+          this year.
+        </p>
+        {finalStar.state === "needs_more_stars" ? (
+          <p class="muted">
+            {finalStar.more === null
+              ? "You don't have them all yet."
+              : `You need ${finalStar.more} more star${finalStar.more === 1 ? "" : "s"}.`}
+          </p>
+        ) : (
+          <button
+            type="button"
+            class="pill primary wide"
+            disabled={state.submitting}
+            onClick={onClaimFinalStar}
+          >
+            {state.submitting ? "Claiming…" : "Claim the final star"}
+          </button>
+        )}
+        {state.submitted ? <p class="submitted">{describeSubmission(state.submitted)}</p> : null}
+        {state.error ? <p class="error-text">{state.error}</p> : null}
+      </div>
+    );
+  }
 
   return (
     <div class="run">

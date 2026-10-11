@@ -104,6 +104,7 @@ pub fn router(app: Shared) -> Router {
         .route("/puzzles/{year}/{day}/notes", put(save_notes))
         .route("/puzzles/{year}/{day}/meta", put(save_meta))
         .route("/puzzles/{year}/{day}/problem", get(problem))
+        .route("/puzzles/{year}/{day}/input", get(input))
         .route("/puzzles/{year}/{day}/run", post(run))
         .route("/puzzles/{year}/{day}/submit", post(submit))
         .route("/run/cancel", post(cancel_run))
@@ -410,6 +411,23 @@ async fn problem(
     Ok(Json(
         app.aoc.problem(puzzle(year, day)?, query.refresh).await?,
     ))
+}
+
+#[derive(Serialize)]
+struct PuzzleInput {
+    text: String,
+    lines: usize,
+}
+
+async fn input(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+) -> ApiResult<PuzzleInput> {
+    let text = app.aoc.input(puzzle(year, day)?).await?;
+    Ok(Json(PuzzleInput {
+        lines: text.lines().count(),
+        text,
+    }))
 }
 
 #[derive(Deserialize)]

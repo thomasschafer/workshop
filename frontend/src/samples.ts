@@ -59,3 +59,18 @@ export function toggleAnswer(meta: DayMeta, part: PartIndex, answer: string): Da
   answers[part] = answers[part] === answer ? null : answer;
   return { ...meta, sample_answers: answers };
 }
+
+/** Uses text typed or picked by the user as a part's sample input, rather than a code block. */
+export function setSampleText(meta: DayMeta, part: PartIndex, text: string | null): DayMeta {
+  const blocks: [number | null, number | null] = [...meta.sample_blocks];
+  const inputs: [string | null, string | null] = [...meta.sample_inputs];
+  blocks[part] = null;
+  inputs[part] = text === null || text.trim() === "" ? null : text;
+  return { ...meta, sample_blocks: blocks, sample_inputs: inputs };
+}
+
+export function setAnswer(meta: DayMeta, part: PartIndex, answer: string | null): DayMeta {
+  const answers: [string | null, string | null] = [...meta.sample_answers];
+  answers[part] = answer === null || answer.trim() === "" ? null : answer.trim();
+  return { ...meta, sample_answers: answers };
+}

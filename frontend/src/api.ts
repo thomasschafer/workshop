@@ -60,10 +60,15 @@ export interface Problem {
   parts_html: string[];
   text: string;
   answers: string[];
+  stars: number;
+  final_star: FinalStar | null;
   suggested_sample_answers: (string | null)[];
   suggested_sample_blocks: (number | null)[];
   blocks: string[];
 }
+
+/** On the last day of a year, part 2's star is awarded for having every other star. */
+export type FinalStar = { state: "needs_more_stars"; more: number | null } | { state: "claimable" };
 
 export type Ending =
   | { status: "exited"; code: number | null }
@@ -159,6 +164,7 @@ export const api = {
     request<null>("PUT", `${day(p)}/meta`, meta, { keepalive }),
   problem: (p: Puzzle, refresh = false) =>
     request<Problem>("GET", `${day(p)}/problem?refresh=${refresh}`),
+  input: (p: Puzzle) => request<{ text: string; lines: number }>("GET", `${day(p)}/input`),
   run: (p: Puzzle, input: "sample" | "real", part: number) =>
     request<RunResult>("POST", `${day(p)}/run`, { input, part }),
   cancelRun: () => request<null>("POST", "/run/cancel"),

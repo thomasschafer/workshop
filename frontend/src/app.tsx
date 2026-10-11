@@ -21,6 +21,7 @@ import {
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
 import { DiscussView } from "./views/discuss";
+import { Help } from "./views/help";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
 import {
@@ -39,7 +40,7 @@ import {
   wakeLockSupported,
 } from "./wakelock";
 
-type Sheet = "run" | "settings" | null;
+type Sheet = "run" | "settings" | "help" | null;
 
 interface Feedback {
   kind: "pending" | "ok" | "warn" | "error" | "info";
@@ -332,7 +333,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     };
   }, [stateSaver]);
 
-  const part = problem ? (problem.answers.length >= 2 ? null : problem.answers.length + 1) : 1;
+  const part = problem ? (problem.stars >= 2 ? null : problem.stars + 1) : 1;
   const expected = part === null ? null : (meta.sample_answers[part - 1] ?? null);
 
   const doRun = async (input: InputKind) => {
@@ -600,7 +601,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     setNotesConflict(null);
   };
 
-  const stars = problem ? "★".repeat(problem.answers.length) : "";
+  const stars = problem ? "★".repeat(problem.stars) : "";
   const statusParts: string[] = [];
   if (lsp && lspStatus !== "ready") {
     statusParts.push("starting checks");
@@ -641,14 +642,24 @@ export function App({ boot }: { boot: Bootstrap }) {
             {stars ? <span class="stars"> {stars}</span> : null}
           </button>
         )}
-        <button
-          type="button"
-          class="icon-button"
-          aria-label="Settings"
-          onClick={() => setSheet(sheet === "settings" ? null : "settings")}
-        >
-          ⚙
-        </button>
+        <span class="header-actions">
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Help"
+            onClick={() => setSheet(sheet === "help" ? null : "help")}
+          >
+            ?
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Settings"
+            onClick={() => setSheet(sheet === "settings" ? null : "settings")}
+          >
+            ⚙
+          </button>
+        </span>
       </header>
 
       <nav class={`tabs ${showPicker ? "hidden" : ""}`}>
@@ -696,6 +707,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         </div>
         {!showPicker && tab === "problem" ? (
           <ProblemView
+            puzzle={puzzle}
             problem={problem}
             error={problemError}
             loading={problemLoading}
@@ -729,7 +741,11 @@ export function App({ boot }: { boot: Bootstrap }) {
           />
         ) : null}
         {sheet ? (
-          <SheetFrame title={sheet === "run" ? "Run" : "Settings"} onClose={() => setSheet(null)}>
+          <SheetFrame
+            title={sheet === "run" ? "Run" : sheet === "help" ? "How Workshop works" : "Settings"}
+            onClose={() => setSheet(null)}
+          >
+            {sheet === "help" ? <Help /> : null}
             {sheet === "run" ? (
               <RunSheet
                 state={run}
@@ -740,6 +756,8 @@ export function App({ boot }: { boot: Bootstrap }) {
                 onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}
                 onSubmit={(answer) => void doSubmit(answer)}
                 onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}
+                finalStar={problem?.final_star ?? null}
+                onClaimFinalStar={() => void doSubmit("0")}
               />
             ) : null}
             {sheet === "settings" ? (

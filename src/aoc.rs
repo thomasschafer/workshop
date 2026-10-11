@@ -63,6 +63,11 @@ pub struct Problem {
     pub text: String,
     /// The answers the user has already had accepted, by part.
     pub answers: Vec<String>,
+    /// Stars earned on this puzzle.
+    pub stars: u8,
+    /// On the last day of a year, part 2 isn't a puzzle: its star is awarded for having every
+    /// other star.
+    pub final_star: Option<FinalStar>,
     /// For each part, the last emphasised inline code that looks like an answer, which is
     /// usually the sample's answer.
     pub suggested_sample_answers: Vec<Option<String>>,
@@ -71,6 +76,15 @@ pub struct Problem {
     /// which case this is `None`.
     pub suggested_sample_blocks: Vec<Option<usize>>,
     pub blocks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FinalStar {
+    /// Every other star is needed first.
+    NeedsMoreStars { more: Option<u32> },
+    /// The star can be claimed by submitting part 2.
+    Claimable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -357,13 +371,49 @@ pub fn parse_problem(html: &str) -> Result<Problem> {
         })
         .filter_map(|p| p.select(&selector("code")).next())
         .map(|c| c.text().collect::<String>().trim().to_owned())
+        .collect::<Vec<_>>();
+
+    let success: String = document
+        .select(&selector("p.day-success"))
+        .flat_map(|p| p.text())
         .collect();
+    let stars = if success.contains("Both parts") {
+        2
+    } else if success.contains("first half") {
+        1
+    } else {
+        u8::try_from(answers.len().min(2)).expect("at most 2")
+    };
+
+    let main_text = document
+        .select(&selector("main"))
+        .next()
+        .map(|m| m.text().collect::<String>())
+        .unwrap_or_default();
+    let final_star = if document
+        .select(&selector("main form input[type=hidden][name=answer]"))
+        .next()
+        .is_some()
+        && stars < 2
+    {
+        Some(FinalStar::Claimable)
+    } else if main_text.contains("enough stars") {
+        let more = regex::Regex::new(r"You need (\d+) more")
+            .expect("valid regex")
+            .captures(&main_text)
+            .and_then(|c| c[1].parse().ok());
+        Some(FinalStar::NeedsMoreStars { more })
+    } else {
+        None
+    };
 
     Ok(Problem {
         title,
         parts_html,
         text: text.trim_end().to_owned(),
         answers,
+        stars,
+        final_star,
         suggested_sample_answers,
         suggested_sample_blocks,
         blocks: sanitiser.blocks,
@@ -646,6 +696,54 @@ mod tests {
             problem.suggested_sample_answers,
             vec![Some("4".to_owned()), None, Some("1".to_owned())]
         );
+    }
+
+    // The last day of a year, in the shapes the page takes as the user progresses.
+    fn final_day(after_part_one: &str) -> String {
+        format!(
+            r#"<html><body><main>
+<article class="day-desc"><h2>--- Day 25: Invented Ending ---</h2><p>Count it.</p></article>
+<p>Your puzzle answer was <code>42</code>.</p><p class="day-success">The first half of this puzzle is complete! It provides one gold star: *</p>
+<article class="day-desc"><h2 id="part2">--- Part Two ---</h2><p>The rest needs every star.</p></article>
+{after_part_one}
+</main></body></html>"#
+        )
+    }
+
+    #[test]
+    fn final_day_needing_more_stars() {
+        let problem = parse_problem(&final_day(
+            "<p>You don't have enough stars to finish, though. You need 2 more.</p>",
+        ))
+        .unwrap();
+        assert_eq!(problem.stars, 1);
+        assert_eq!(
+            problem.final_star,
+            Some(FinalStar::NeedsMoreStars { more: Some(2) })
+        );
+    }
+
+    #[test]
+    fn final_day_ready_to_claim() {
+        let problem = parse_problem(&final_day(
+            r#"<form method="post" action="25/answer"><input type="hidden" name="level" value="2"/><input type="hidden" name="answer" value="0"/><p>You can <input type="submit" value="[Finish]"/>.</p></form>"#,
+        ))
+        .unwrap();
+        assert_eq!(problem.final_star, Some(FinalStar::Claimable));
+    }
+
+    #[test]
+    fn final_day_complete() {
+        let page = final_day("")
+            .replace("The first half of this puzzle is complete! It provides one gold star: *", "")
+            .replace(
+                "</main>",
+                r#"<form method="post" action="25/answer"><input type="hidden" name="level" value="2"/><input type="hidden" name="answer" value="0"/></form><p class="day-success">Both parts of this puzzle are complete! They provide two gold stars: **</p></main>"#,
+            );
+        let problem = parse_problem(&page).unwrap();
+        assert_eq!(problem.stars, 2);
+        assert_eq!(problem.answers.len(), 1);
+        assert_eq!(problem.final_star, None);
     }
 
     #[test]
