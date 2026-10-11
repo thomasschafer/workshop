@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
+use crate::process::{self, GroupedChild};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use crate::template::{self, Vars};
@@ -108,7 +108,7 @@ pub struct Reply {
 
 struct Spare {
     spec: CallSpec,
-    child: Child,
+    process: GroupedChild,
 }
 
 /// Runs one provider, keeping a pre-started process ready when the provider supports it.
@@ -137,21 +137,21 @@ impl ProviderRunner {
         let mut spare = self.spare.lock().await;
         if let Some(existing) = spare.as_mut()
             && existing.spec == *spec
-            && existing.child.try_wait()?.is_none()
+            && existing.process.child.try_wait()?.is_none()
         {
             return Ok(());
         }
         *spare = Some(Spare {
             spec: spec.clone(),
-            child: self.spawn(spec, None)?,
+            process: self.spawn(spec, None)?,
         });
         Ok(())
     }
 
     pub async fn call(&self, spec: &CallSpec, prompt: &str, timeout: Duration) -> Result<Reply> {
         let started = std::time::Instant::now();
-        let child = match self.take_spare(spec).await? {
-            Some(child) => child,
+        let process = match self.take_spare(spec).await? {
+            Some(process) => process,
             None => self.spawn(spec, Some(prompt))?,
         };
         if self.provider.prespawn {
@@ -160,7 +160,7 @@ impl ProviderRunner {
                 tracing::warn!("could not start a spare model process: {err:#}");
             }
         }
-        let result = tokio::time::timeout(timeout, self.communicate(child, prompt)).await;
+        let result = tokio::time::timeout(timeout, self.communicate(process, prompt)).await;
         let (text, model) = match result {
             Ok(reply) => reply?,
             Err(_) => bail!("the model took longer than {}s to reply", timeout.as_secs()),
@@ -172,19 +172,19 @@ impl ProviderRunner {
         })
     }
 
-    async fn take_spare(&self, spec: &CallSpec) -> Result<Option<Child>> {
+    async fn take_spare(&self, spec: &CallSpec) -> Result<Option<GroupedChild>> {
         let mut guard = self.spare.lock().await;
         let Some(mut spare) = guard.take() else {
             return Ok(None);
         };
-        if spare.spec != *spec || spare.child.try_wait()?.is_some() {
-            // Dropping the spare kills it (`kill_on_drop`).
+        if spare.spec != *spec || spare.process.child.try_wait()?.is_some() {
+            // Dropping the spare kills it.
             return Ok(None);
         }
-        Ok(Some(spare.child))
+        Ok(Some(spare.process))
     }
 
-    fn spawn(&self, spec: &CallSpec, prompt: Option<&str>) -> Result<Child> {
+    fn spawn(&self, spec: &CallSpec, prompt: Option<&str>) -> Result<GroupedChild> {
         let mut vars = Vars::new()
             .set("model", spec.model.clone())
             .set("system_prompt", spec.system_prompt.clone());
@@ -196,25 +196,26 @@ impl ProviderRunner {
         let (program, rest) = args.split_first().context("empty provider command")?;
         std::fs::create_dir_all(&self.working_dir)
             .with_context(|| format!("creating {}", self.working_dir.display()))?;
-        Command::new(program)
-            .args(rest)
-            .current_dir(&self.working_dir)
-            .stdin(match self.provider.input {
-                InputMode::Argument => Stdio::null(),
-                InputMode::Stdin | InputMode::ClaudeStreamJson => Stdio::piped(),
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| format!("starting `{program}`"))
+        GroupedChild::spawn(
+            process::command(program)
+                .args(rest)
+                .current_dir(&self.working_dir)
+                .stdin(match self.provider.input {
+                    InputMode::Argument => Stdio::null(),
+                    InputMode::Stdin | InputMode::ClaudeStreamJson => Stdio::piped(),
+                })
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        )
+        .with_context(|| format!("starting `{program}`"))
     }
 
     async fn communicate(
         &self,
-        mut child: Child,
+        mut process: GroupedChild,
         prompt: &str,
     ) -> Result<(String, Option<String>)> {
+        let child = &mut process.child;
         if let Some(mut stdin) = child.stdin.take() {
             let payload = match self.provider.input {
                 InputMode::Argument => String::new(),
@@ -278,8 +279,8 @@ impl ProviderRunner {
                     // The CLI does more work after the answer, such as summarising the turn,
                     // which only adds latency here, so it is stopped rather than awaited.
                     Some(Ok(reply)) => {
-                        let _ = child.start_kill();
                         stderr_task.abort();
+                        drop(process);
                         return Ok(reply);
                     }
                     Some(Err(err)) => Err(err),
@@ -289,6 +290,7 @@ impl ProviderRunner {
         };
 
         let status = child.wait().await?;
+        process.finish();
         let stderr = stderr_task.await.unwrap_or_default();
         match parsed {
             Ok(reply) => Ok(reply),

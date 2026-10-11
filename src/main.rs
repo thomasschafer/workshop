@@ -7,6 +7,7 @@ mod eval;
 mod language;
 mod lsp;
 mod paths;
+mod process;
 mod provider;
 mod runner;
 mod server;

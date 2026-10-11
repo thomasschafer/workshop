@@ -12,7 +12,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::aoc::{AocClient, Part, Problem, SubmitOutcome};
 use crate::config::{Config, Snippet};
@@ -23,7 +24,7 @@ use crate::language::Puzzle;
 use crate::paths::Paths;
 use crate::provider::{CallSpec, ProviderRunner};
 use crate::runner::{self, RunResult};
-use crate::workspace::{CodeFile, DayMeta, SaveError, UiState, Workspace};
+use crate::workspace::{DayMeta, SaveError, UiState, VersionedFile, Workspace};
 
 const TOKEN_COOKIE: &str = "workshop_token";
 const EDIT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -42,7 +43,8 @@ pub struct App {
     edit_model: ProviderRunner,
     discuss_model: ProviderRunner,
     run_lock: Mutex<()>,
-    cancel_run: Notify,
+    /// Cancels the run in progress, if there is one.
+    current_run: std::sync::Mutex<Option<CancellationToken>>,
 }
 
 type Shared = Arc<App>;
@@ -67,7 +69,7 @@ impl App {
                 model_dir,
             )?,
             run_lock: Mutex::new(()),
-            cancel_run: Notify::new(),
+            current_run: std::sync::Mutex::new(None),
             config,
             paths,
             token,
@@ -212,10 +214,11 @@ async fn static_asset(uri: Uri) -> Response {
         },
     };
     let mime = mime_guess::from_path(path).first_or_octet_stream();
-    let cache = if path == "index.html" {
-        "no-cache"
-    } else {
+    // Only Vite's hashed build output can be cached forever; anything else may change.
+    let cache = if path.starts_with("assets/") {
         "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
     };
     (
         [
@@ -328,9 +331,9 @@ async fn stars(
 
 #[derive(Serialize)]
 struct OpenPuzzle {
-    code: CodeFile,
+    code: VersionedFile,
     file_uri: String,
-    notes: String,
+    notes: VersionedFile,
     meta: DayMeta,
 }
 
@@ -350,7 +353,7 @@ async fn open_puzzle(
 }
 
 #[derive(Deserialize)]
-struct SaveCode {
+struct SaveText {
     text: String,
     version: String,
 }
@@ -358,13 +361,29 @@ struct SaveCode {
 async fn save_code(
     State(app): State<Shared>,
     Path((year, day)): Path<(u16, u8)>,
-    Json(body): Json<SaveCode>,
-) -> ApiResult<CodeFile> {
+    Json(body): Json<SaveText>,
+) -> ApiResult<VersionedFile> {
     let puzzle = puzzle(year, day)?;
-    match app
-        .workspace
-        .save_code(app.config.language(), puzzle, &body.text, &body.version)
-    {
+    saved(
+        app.workspace
+            .save_code(app.config.language(), puzzle, &body.text, &body.version),
+    )
+}
+
+async fn save_notes(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Json(body): Json<SaveText>,
+) -> ApiResult<VersionedFile> {
+    saved(
+        app.workspace
+            .save_notes(puzzle(year, day)?, &body.text, &body.version),
+    )
+}
+
+/// A conflict is reported with the current file, so the editor can offer to load it.
+fn saved(result: Result<VersionedFile, SaveError>) -> ApiResult<VersionedFile> {
+    match result {
         Ok(file) => Ok(Json(file)),
         Err(SaveError::Conflict { current }) => Err(ApiError(
             StatusCode::CONFLICT,
@@ -372,20 +391,6 @@ async fn save_code(
         )),
         Err(SaveError::Other(err)) => Err(err.into()),
     }
-}
-
-#[derive(Deserialize)]
-struct SaveNotes {
-    text: String,
-}
-
-async fn save_notes(
-    State(app): State<Shared>,
-    Path((year, day)): Path<(u16, u8)>,
-    Json(body): Json<SaveNotes>,
-) -> ApiResult<()> {
-    app.workspace.save_notes(puzzle(year, day)?, &body.text)?;
-    Ok(Json(()))
 }
 
 async fn save_meta(
@@ -427,20 +432,29 @@ async fn run(
     Json(body): Json<RunBody>,
 ) -> ApiResult<RunResult> {
     let puzzle = puzzle(year, day)?;
-    let input = match body.input {
-        InputKind::Sample => app
-            .workspace
-            .load_day_meta(puzzle)?
-            .sample_input(Part::from_number(body.part)?)
-            .context("no sample input is chosen yet; tap a code block in the puzzle to choose one")?
-            .to_owned(),
-        InputKind::Real => app.aoc.input(puzzle).await?,
-    };
+    let part = Part::from_number(body.part)?;
     let Ok(_guard) = app.run_lock.try_lock() else {
         return Err(ApiError(
             StatusCode::CONFLICT,
             serde_json::json!({ "error": "Something is already running." }),
         ));
+    };
+    // Registered before fetching the input, so a cancel while fetching isn't lost.
+    let cancel = CancellationToken::new();
+    *lock(&app.current_run) = Some(cancel.clone());
+    let _clear = scopeguard(|| *lock(&app.current_run) = None);
+
+    let input = match body.input {
+        InputKind::Sample => app
+            .workspace
+            .load_day_meta(puzzle)?
+            .sample_input(part)
+            .context("no sample input is chosen yet; tap a code block in the puzzle to choose one")?
+            .to_owned(),
+        InputKind::Real => tokio::select! {
+            input = app.aoc.input(puzzle) => input?,
+            () = cancel.cancelled() => return Err(anyhow::anyhow!("Cancelled.").into()),
+        },
     };
     let profile = app.config.language();
     let file = profile.solution_path(&app.config.solutions_dir, puzzle)?;
@@ -456,15 +470,37 @@ async fn run(
         puzzle,
         input: &input,
         timeout: Duration::from_secs(app.config.run.timeout_secs),
-        cancel: &app.cancel_run,
+        cancel: &cancel,
     })
     .await?;
     Ok(Json(result))
 }
 
 async fn cancel_run(State(app): State<Shared>) -> ApiResult<()> {
-    app.cancel_run.notify_waiters();
+    if let Some(cancel) = lock(&app.current_run).as_ref() {
+        cancel.cancel();
+    }
     Ok(Json(()))
+}
+
+/// Locks a mutex that guards plain data, which stays usable even if a holder panicked.
+fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Runs `f` when dropped, however the enclosing scope is left.
+fn scopeguard(f: impl FnOnce()) -> impl Drop {
+    struct Guard<F: FnOnce()>(Option<F>);
+    impl<F: FnOnce()> Drop for Guard<F> {
+        fn drop(&mut self) {
+            if let Some(f) = self.0.take() {
+                f();
+            }
+        }
+    }
+    Guard(Some(f))
 }
 
 #[derive(Deserialize)]
@@ -568,8 +604,8 @@ async fn discuss(State(app): State<Shared>, Json(body): Json<DiscussBody>) -> Ap
         .into());
     }
     let puzzle = puzzle(body.year, body.day)?;
-    // The puzzle is only used if it's already cached; discussing shouldn't trigger a fetch.
-    let problem = app.aoc.problem(puzzle, false).await.ok();
+    // Only a cached puzzle is used; discussing shouldn't make requests to Advent of Code.
+    let problem = app.aoc.cached_problem(puzzle)?;
     let prompt = discuss::prompt(
         &discuss::Context {
             language: &app.config.language().name,
@@ -676,12 +712,7 @@ pub fn load_or_create_token(paths: &Paths) -> Result<String> {
         rand::random::<u128>(),
         rand::random::<u128>()
     );
-    crate::paths::write_atomic(&file, token.as_bytes())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))?;
-    }
+    crate::paths::write_private(&file, token.as_bytes())?;
     Ok(token)
 }
 

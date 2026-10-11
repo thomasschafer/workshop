@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -25,10 +26,14 @@ dist-newstyle/
 pub struct Workspace {
     pub solutions_dir: PathBuf,
     paths: Paths,
+    /// Held while checking a file's version and writing it, so two saves based on the same
+    /// version can't both succeed.
+    save_lock: std::sync::Mutex<()>,
 }
 
+/// A file the user edits, both here and elsewhere, such as at a desk.
 #[derive(Debug, Clone, Serialize)]
-pub struct CodeFile {
+pub struct VersionedFile {
     pub text: String,
     /// Identifies this version of the file, so saves can detect changes made elsewhere.
     pub version: String,
@@ -38,7 +43,7 @@ pub struct CodeFile {
 #[derive(Debug, thiserror::Error)]
 pub enum SaveError {
     #[error("the file changed on disk since it was loaded")]
-    Conflict { current: CodeFile },
+    Conflict { current: VersionedFile },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -116,6 +121,7 @@ impl Workspace {
         Self {
             solutions_dir,
             paths,
+            save_lock: std::sync::Mutex::new(()),
         }
     }
 
@@ -136,12 +142,12 @@ impl Workspace {
     }
 
     /// Loads a solution, creating it from the language's template the first time.
-    pub fn load_code(&self, profile: &LanguageProfile, puzzle: Puzzle) -> Result<CodeFile> {
+    pub fn load_code(&self, profile: &LanguageProfile, puzzle: Puzzle) -> Result<VersionedFile> {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
         if !path.exists() {
             paths::write_atomic(&path, profile.template.as_bytes())?;
         }
-        read_code(&path)
+        read_versioned(&path)
     }
 
     pub fn save_code(
@@ -150,17 +156,34 @@ impl Workspace {
         puzzle: Puzzle,
         text: &str,
         expected_version: &str,
-    ) -> Result<CodeFile, SaveError> {
+    ) -> Result<VersionedFile, SaveError> {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
-        let current = read_code(&path)?;
+        self.save_versioned(&path, text, expected_version)
+    }
+
+    /// Writes `text` only if the file is still at `expected_version`. A missing file counts as
+    /// empty.
+    fn save_versioned(
+        &self,
+        path: &Path,
+        text: &str,
+        expected_version: &str,
+    ) -> Result<VersionedFile, SaveError> {
+        let _guard = self
+            .save_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current = read_versioned(path)?;
         if current.version != expected_version {
             return Err(SaveError::Conflict { current });
         }
-        paths::write_atomic(&path, text.as_bytes())?;
-        Ok(CodeFile {
+        if text != current.text {
+            paths::write_atomic(path, text.as_bytes())?;
+        }
+        Ok(VersionedFile {
             text: text.to_owned(),
             version: version_of(text),
-            path,
+            path: path.to_owned(),
         })
     }
 
@@ -171,16 +194,17 @@ impl Workspace {
             .join(format!("day{:02}.md", puzzle.day))
     }
 
-    pub fn load_notes(&self, puzzle: Puzzle) -> Result<String> {
-        read_optional(&self.notes_path(puzzle)).map(Option::unwrap_or_default)
+    pub fn load_notes(&self, puzzle: Puzzle) -> Result<VersionedFile> {
+        read_versioned(&self.notes_path(puzzle))
     }
 
-    pub fn save_notes(&self, puzzle: Puzzle, text: &str) -> Result<()> {
-        let path = self.notes_path(puzzle);
-        if text.is_empty() && !path.exists() {
-            return Ok(());
-        }
-        paths::write_atomic(&path, text.as_bytes())
+    pub fn save_notes(
+        &self,
+        puzzle: Puzzle,
+        text: &str,
+        expected_version: &str,
+    ) -> Result<VersionedFile, SaveError> {
+        self.save_versioned(&self.notes_path(puzzle), text, expected_version)
     }
 
     fn day_meta_path(&self, puzzle: Puzzle) -> PathBuf {
@@ -241,10 +265,10 @@ impl Workspace {
     }
 }
 
-fn read_code(path: &Path) -> Result<CodeFile> {
-    let text =
-        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(CodeFile {
+/// Reads a file the user edits; a missing file counts as empty.
+fn read_versioned(path: &Path) -> Result<VersionedFile> {
+    let text = read_optional(path)?.unwrap_or_default();
+    Ok(VersionedFile {
         version: version_of(&text),
         text,
         path: path.to_owned(),
@@ -269,13 +293,30 @@ pub fn version_of(text: &str) -> String {
     format!("{hash:016x}")
 }
 
+/// Pushing can need credentials, and there's nobody at the laptop to type them, so git is told
+/// not to prompt and is given up on after a while.
+const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+
 async fn git(dir: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
-        .output()
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .kill_on_drop(true);
+    if std::env::var_os("GIT_SSH_COMMAND").is_none() {
+        command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
+    }
+    let output = tokio::time::timeout(GIT_TIMEOUT, command.output())
         .await
+        .with_context(|| {
+            format!(
+                "`git {}` took longer than {}s",
+                args.join(" "),
+                GIT_TIMEOUT.as_secs()
+            )
+        })?
         .context("running git; is it installed?")?;
     if !output.status.success() {
         bail!(
@@ -345,8 +386,16 @@ mod tests {
         workspace.save_ui_state(&ui).unwrap();
         assert_eq!(workspace.load_ui_state().unwrap(), ui);
 
-        workspace.save_notes(puzzle, "try a map").unwrap();
-        assert_eq!(workspace.load_notes(puzzle).unwrap(), "try a map");
+        let empty = workspace.load_notes(puzzle).unwrap();
+        assert_eq!(empty.text, "");
+        let saved = workspace
+            .save_notes(puzzle, "try a map", &empty.version)
+            .unwrap();
+        assert_eq!(workspace.load_notes(puzzle).unwrap().text, "try a map");
+        assert!(matches!(
+            workspace.save_notes(puzzle, "stale", &empty.version),
+            Err(SaveError::Conflict { current }) if current.version == saved.version
+        ));
         assert!(
             !workspace
                 .solutions_dir
@@ -374,6 +423,33 @@ mod tests {
             ..DayMeta::default()
         };
         assert_eq!(meta.sample_input(Part::Two), Some("b"));
+    }
+
+    #[test]
+    fn only_one_of_two_saves_from_the_same_version_succeeds() {
+        let (_dir, workspace, profile) = setup();
+        let puzzle = Puzzle::new(2017, 4).unwrap();
+        let base = workspace.load_code(&profile, puzzle).unwrap().version;
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = ["a", "b"]
+                .into_iter()
+                .map(|text| {
+                    let (workspace, profile, base) = (&workspace, &profile, &base);
+                    scope.spawn(move || workspace.save_code(profile, puzzle, text, base).is_ok())
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert_eq!(results.iter().filter(|ok| **ok).count(), 1);
+    }
+
+    #[test]
+    fn saving_empty_notes_creates_no_file() {
+        let (_dir, workspace, _) = setup();
+        let puzzle = Puzzle::new(2017, 4).unwrap();
+        let empty = workspace.load_notes(puzzle).unwrap();
+        workspace.save_notes(puzzle, "", &empty.version).unwrap();
+        assert!(!workspace.notes_path(puzzle).exists());
     }
 
     #[test]

@@ -34,7 +34,8 @@ export interface Bootstrap {
   has_aoc_session: boolean;
 }
 
-export interface CodeFile {
+/** A file the user edits, here or elsewhere. */
+export interface VersionedFile {
   text: string;
   version: string;
   path: string;
@@ -48,9 +49,9 @@ export interface DayMeta {
 }
 
 export interface OpenPuzzle {
-  code: CodeFile;
+  code: VersionedFile;
   file_uri: string;
-  notes: string;
+  notes: VersionedFile;
   meta: DayMeta;
 }
 
@@ -112,8 +113,17 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method, headers: {} };
+/**
+ * `keepalive` lets a request finish after the page is hidden or closed, which is when the
+ * phone is put down.
+ */
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  { keepalive = false }: { keepalive?: boolean } = {},
+): Promise<T> {
+  const init: RequestInit = { method, headers: {}, keepalive };
   if (body !== undefined) {
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);
@@ -135,15 +145,18 @@ const day = (p: Puzzle) => `/puzzles/${p.year}/${p.day}`;
 
 export const api = {
   bootstrap: () => request<Bootstrap>("GET", "/bootstrap"),
-  saveState: (state: UiState) => request<null>("PUT", "/state", state),
+  saveState: (state: UiState, keepalive = false) =>
+    request<null>("PUT", "/state", state, { keepalive }),
   doctor: () => request<Check[]>("GET", "/doctor"),
   stars: (year: number, refresh = false) =>
     request<Record<string, number>>("GET", `/years/${year}/stars?refresh=${refresh}`),
   open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),
-  saveCode: (p: Puzzle, text: string, version: string) =>
-    request<CodeFile>("PUT", `${day(p)}/code`, { text, version }),
-  saveNotes: (p: Puzzle, text: string) => request<null>("PUT", `${day(p)}/notes`, { text }),
-  saveMeta: (p: Puzzle, meta: DayMeta) => request<null>("PUT", `${day(p)}/meta`, meta),
+  saveCode: (p: Puzzle, text: string, version: string, keepalive = false) =>
+    request<VersionedFile>("PUT", `${day(p)}/code`, { text, version }, { keepalive }),
+  saveNotes: (p: Puzzle, text: string, version: string, keepalive = false) =>
+    request<VersionedFile>("PUT", `${day(p)}/notes`, { text, version }, { keepalive }),
+  saveMeta: (p: Puzzle, meta: DayMeta, keepalive = false) =>
+    request<null>("PUT", `${day(p)}/meta`, meta, { keepalive }),
   problem: (p: Puzzle, refresh = false) =>
     request<Problem>("GET", `${day(p)}/problem?refresh=${refresh}`),
   run: (p: Puzzle, input: "sample" | "real", part: number) =>

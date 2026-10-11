@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks"
 import {
   api,
   type Bootstrap,
-  type CodeFile,
   type DayMeta,
   type Problem,
   type Puzzle,
@@ -20,7 +19,7 @@ import {
   type LanguageServerStatus,
 } from "./editor";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
-import { CodeSaver, debounced, LatestSaver, type SaveStatus } from "./saver";
+import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
 import { DiscussView } from "./views/discuss";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
@@ -84,7 +83,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [diagnostics, setDiagnostics] = useState<Diagnostics>({ errors: 0, warnings: 0 });
   const [hover, setHover] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
-  const [conflict, setConflict] = useState<CodeFile | null>(null);
+  const [codeConflict, setCodeConflict] = useState<FileVersion | null>(null);
+  const [notesConflict, setNotesConflict] = useState<FileVersion | null>(null);
   const [keyboard, setKeyboard] = useState(false);
   const [run, setRun] = useState<RunState>(initialRunState);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -94,7 +94,8 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<CodeEditor | null>(null);
-  const saver = useRef<CodeSaver | null>(null);
+  const saver = useRef<VersionedSaver | null>(null);
+  const notesSaver = useRef<VersionedSaver | null>(null);
   const [lspStatus, setLspStatus] = useState<LanguageServerStatus>("connecting");
   const lsp = useMemo(
     () =>
@@ -132,7 +133,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     let saver = metaSavers.current.get(key);
     if (!saver) {
       saver = new LatestSaver<DayMeta>(
-        (meta) => api.saveMeta(p, meta),
+        (meta, keepalive) => api.saveMeta(p, meta, keepalive),
         600,
         (e) => setFeedback({ kind: "error", text: `Couldn't save, retrying: ${e}` }),
       );
@@ -149,28 +150,22 @@ export function App({ boot }: { boot: Bootstrap }) {
     [saveMetaSoon],
   );
 
-  const notesSavers = useRef(new Map<string, LatestSaver<string>>());
-  const saveNotesSoon = useCallback(({ p, text }: { p: Puzzle; text: string }) => {
-    const key = `${p.year}-${p.day}`;
-    let saver = notesSavers.current.get(key);
-    if (!saver) {
-      saver = new LatestSaver<string>(
-        (notes) => api.saveNotes(p, notes),
-        500,
-        (e) => setFeedback({ kind: "error", text: `Couldn't save notes, retrying: ${e}` }),
-      );
-      notesSavers.current.set(key, saver);
-    }
-    saver.schedule(text);
-  }, []);
   const updateNotes = (text: string) => {
     latest.current.notes = text;
     setNotes(text);
-    if (puzzle) saveNotesSoon({ p: puzzle, text });
+    notesSaver.current?.schedule(text);
   };
 
   // Remember where the user is, so a reload reopens the same view.
-  const stateSaver = useMemo(() => new LatestSaver<UiState>(api.saveState, 500, () => {}), []);
+  const stateSaver = useMemo(
+    () =>
+      new LatestSaver<UiState>(
+        (state, keepalive) => api.saveState(state, keepalive),
+        500,
+        () => {},
+      ),
+    [],
+  );
   useEffect(() => {
     stateSaver.schedule({ puzzle, tab, discuss_model: discussModel });
   }, [puzzle, tab, discussModel, stateSaver]);
@@ -214,7 +209,9 @@ export function App({ boot }: { boot: Bootstrap }) {
     setProblem(null);
     setOpenError(null);
     setRun(initialRunState);
-    setConflict(null);
+    setCodeConflict(null);
+    setNotesConflict(null);
+    setSaveStatus("saved");
     setDiagnostics({ errors: 0, warnings: 0 });
     setHover(null);
     setTurns(loadTurns(puzzle));
@@ -226,16 +223,39 @@ export function App({ boot }: { boot: Bootstrap }) {
         if (cancelled) return;
         metaRef.current = opened.meta;
         setMeta(opened.meta);
-        setNotes(opened.notes);
         void loadProblem(puzzle, false);
 
         const host = editorHost.current;
         if (!host) return;
         fileUri.current = opened.file_uri;
-        const codeSaver = new CodeSaver(puzzle, opened.code.version, setSaveStatus, setConflict);
+        const key = `${puzzle.year}-${puzzle.day}`;
+        const codeSaver = new VersionedSaver(
+          (text, version, keepalive) => api.saveCode(puzzle, text, version, keepalive),
+          `workshop:unsaved:code:${key}`,
+          opened.code.version,
+          opened.code.text,
+          setSaveStatus,
+          setCodeConflict,
+        );
         saver.current = codeSaver;
+        const notes = new VersionedSaver(
+          (text, version, keepalive) => api.saveNotes(puzzle, text, version, keepalive),
+          `workshop:unsaved:notes:${key}`,
+          opened.notes.version,
+          opened.notes.text,
+          (status, detail) => {
+            if (status === "error") {
+              setFeedback({ kind: "error", text: `Couldn't save notes, retrying: ${detail}` });
+            }
+          },
+          setNotesConflict,
+        );
+        notesSaver.current = notes;
+        const notesText = notes.recover();
+        latest.current.notes = notesText;
+        setNotes(notesText);
         editor.current = new CodeEditor(host, {
-          doc: opened.code.text,
+          doc: codeSaver.recover(),
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
           lsp: lsp
@@ -255,7 +275,6 @@ export function App({ boot }: { boot: Bootstrap }) {
               prev.errors === d.errors && prev.warnings === d.warnings ? prev : d,
             ),
         });
-        setSaveStatus("saved");
       } catch (e) {
         if (!cancelled) setOpenError(message(e));
       }
@@ -263,9 +282,10 @@ export function App({ boot }: { boot: Bootstrap }) {
 
     return () => {
       cancelled = true;
-      saver.current?.flushOnExit();
-      saver.current?.stop();
+      saver.current?.close();
       saver.current = null;
+      notesSaver.current?.close();
+      notesSaver.current = null;
       editor.current?.destroy();
       editor.current = null;
     };
@@ -273,7 +293,12 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   // Save when the phone is put down, and pick up changes made at a desk when it comes back.
   useEffect(() => {
-    const onHide = () => saver.current?.flushOnExit();
+    const onHide = () => {
+      saver.current?.flushOnExit();
+      notesSaver.current?.flushOnExit();
+      for (const metaSaver of metaSavers.current.values()) metaSaver.flushOnExit();
+      stateSaver.flushOnExit();
+    };
     const onVisibility = async () => {
       if (document.visibilityState === "hidden") {
         onHide();
@@ -281,13 +306,19 @@ export function App({ boot }: { boot: Bootstrap }) {
       }
       const p = puzzleRef.current;
       const current = editor.current;
-      if (!p || !current || saveStatus !== "saved") return;
+      if (!p || !current) return;
       try {
         const opened = await api.open(p);
-        if (opened.code.text !== current.text()) {
+        if (puzzleRef.current !== p || editor.current !== current) return;
+        // Each saver only takes the version from elsewhere if there are no local changes;
+        // otherwise it saves them, which reports a conflict if the file changed.
+        if (saver.current?.adopt(opened.code)) {
           current.replaceAll(opened.code.text);
-          saver.current?.resume(opened.code.version);
-          setFeedback({ kind: "info", text: "Loaded changes made elsewhere." });
+          setFeedback({ kind: "info", text: "Loaded code changed elsewhere." });
+        }
+        if (notesSaver.current?.adopt(opened.notes)) {
+          latest.current.notes = opened.notes.text;
+          setNotes(opened.notes.text);
         }
       } catch {
         // Offline or the server restarted; the next save will report any real problem.
@@ -299,7 +330,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       window.removeEventListener("pagehide", onHide);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [saveStatus]);
+  }, [stateSaver]);
 
   const part = problem ? (problem.answers.length >= 2 ? null : problem.answers.length + 1) : 1;
   const expected = part === null ? null : (meta.sample_answers[part - 1] ?? null);
@@ -318,7 +349,12 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
     try {
-      await saver.current?.flush();
+      try {
+        await saver.current?.flush();
+      } catch (e) {
+        setRun((r) => ({ ...r, running: null, error: `Not run: ${message(e)}` }));
+        return;
+      }
       const result = await api.run(p, input, runPart);
       setRun((r) => ({ ...r, running: null, last: { input, result } }));
     } catch (e) {
@@ -541,11 +577,27 @@ export function App({ boot }: { boot: Bootstrap }) {
     editor.current?.setKeyboard(next);
   };
 
-  const takeDiskVersion = () => {
-    if (!conflict) return;
-    editor.current?.replaceAll(conflict.text);
-    saver.current?.resume(conflict.version);
-    setConflict(null);
+  const resolveCodeConflict = (keep: "mine" | "theirs") => {
+    if (!codeConflict) return;
+    if (keep === "mine") {
+      saver.current?.keepMine(codeConflict);
+    } else {
+      saver.current?.takeTheirs(codeConflict);
+      editor.current?.replaceAll(codeConflict.text);
+    }
+    setCodeConflict(null);
+  };
+
+  const resolveNotesConflict = (keep: "mine" | "theirs") => {
+    if (!notesConflict) return;
+    if (keep === "mine") {
+      notesSaver.current?.keepMine(notesConflict);
+    } else {
+      notesSaver.current?.takeTheirs(notesConflict);
+      latest.current.notes = notesConflict.text;
+      setNotes(notesConflict.text);
+    }
+    setNotesConflict(null);
   };
 
   const stars = problem ? "★".repeat(problem.answers.length) : "";
@@ -629,13 +681,11 @@ export function App({ boot }: { boot: Bootstrap }) {
           </div>
         ) : null}
         {openError && !showPicker ? <p class="pane error-text">{openError}</p> : null}
-        {conflict && !showPicker ? (
-          <div class="banner">
-            This file changed on disk.
-            <button type="button" class="text-button" onClick={takeDiskVersion}>
-              Load it
-            </button>
-          </div>
+        {codeConflict && !showPicker ? (
+          <ConflictBanner what="code" onResolve={resolveCodeConflict} />
+        ) : null}
+        {notesConflict && !showPicker ? (
+          <ConflictBanner what="notes" onResolve={resolveNotesConflict} />
         ) : null}
         <div class={`code-pane ${tab === "code" && !showPicker ? "" : "hidden"}`}>
           <div class="status-line">
@@ -786,6 +836,28 @@ export function App({ boot }: { boot: Bootstrap }) {
           </button>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function ConflictBanner({
+  what,
+  onResolve,
+}: {
+  what: string;
+  onResolve: (keep: "mine" | "theirs") => void;
+}) {
+  return (
+    <div class="banner">
+      <span>The {what} changed elsewhere.</span>
+      <span class="banner-actions">
+        <button type="button" class="text-button" onClick={() => onResolve("mine")}>
+          Keep mine
+        </button>
+        <button type="button" class="text-button" onClick={() => onResolve("theirs")}>
+          Load theirs
+        </button>
+      </span>
     </div>
   );
 }

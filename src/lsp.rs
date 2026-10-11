@@ -3,29 +3,39 @@
 
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use tokio::sync::mpsc;
+
+use crate::process::{self, ProcessGroup};
 
 /// Larger messages are treated as a protocol error rather than buffered.
 const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+/// A phone that sleeps or drops off the network can leave its connection half-open, which would
+/// keep the language server (often over a gigabyte of memory) running. Browsers answer pings
+/// automatically, so a connection that stops answering is closed.
+const PING_INTERVAL: Duration = Duration::from_secs(30);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(75);
 
 pub async fn relay(socket: WebSocket, command: &[String], root: &Path) -> Result<()> {
     let (program, args) = command
         .split_first()
         .context("empty language server command")?;
-    let mut child = Command::new(program)
+    let mut child = process::command(program)
         .args(args)
         .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("starting language server `{program}`"))?;
+    let group = ProcessGroup::of(&child);
     let mut stdin = child.stdin.take().context("stdin not captured")?;
     let stdout = child.stdout.take().context("stdout not captured")?;
     let stderr = child.stderr.take().context("stderr not captured")?;
@@ -37,9 +47,27 @@ pub async fn relay(socket: WebSocket, command: &[String], root: &Path) -> Result
         }
     });
 
+    let started = Instant::now();
+    let last_heard_ms = Arc::new(AtomicU64::new(0));
+    let heard = {
+        let last_heard_ms = last_heard_ms.clone();
+        move || {
+            let now = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            last_heard_ms.store(now, Ordering::Relaxed);
+        }
+    };
+
     let (mut ws_tx, mut ws_rx) = socket.split();
+    let (outgoing, mut outgoing_rx) = mpsc::channel::<Message>(64);
+    let send = async {
+        while let Some(message) = outgoing_rx.recv().await {
+            ws_tx.send(message).await?;
+        }
+        anyhow::Ok(())
+    };
     let to_server = async {
         while let Some(message) = ws_rx.next().await {
+            heard();
             match message? {
                 Message::Text(text) => {
                     let framed = format!("Content-Length: {}\r\n\r\n{}", text.len(), text.as_str());
@@ -52,22 +80,41 @@ pub async fn relay(socket: WebSocket, command: &[String], root: &Path) -> Result
         }
         anyhow::Ok(())
     };
-    let to_client = async {
-        let mut reader = BufReader::new(stdout);
-        while let Some(message) = read_message(&mut reader).await? {
-            ws_tx.send(Message::Text(message.into())).await?;
+    let to_client = {
+        let outgoing = outgoing.clone();
+        async move {
+            let mut reader = BufReader::new(stdout);
+            while let Some(message) = read_message(&mut reader).await? {
+                outgoing.send(Message::Text(message.into())).await?;
+            }
+            anyhow::Ok(())
         }
-        anyhow::Ok(())
+    };
+    let keep_alive = async {
+        let mut interval = tokio::time::interval(PING_INTERVAL);
+        loop {
+            interval.tick().await;
+            let silent_for = started
+                .elapsed()
+                .saturating_sub(Duration::from_millis(last_heard_ms.load(Ordering::Relaxed)));
+            if silent_for > IDLE_TIMEOUT {
+                bail!("the editor stopped responding");
+            }
+            outgoing.send(Message::Ping(Vec::new().into())).await?;
+        }
     };
     let result = tokio::select! {
+        r = send => r,
         r = to_server => r,
         r = to_client => r,
+        r = keep_alive => r,
         status = child.wait() => {
             let status = status?;
             if status.success() { Ok(()) } else { Err(anyhow::anyhow!("language server exited with {status}")) }
         }
     };
-    // Dropping the child kills the server if it's still running.
+    // Stops the language server and anything it started, such as compiler processes.
+    group.finish();
     drop(child);
     result
 }

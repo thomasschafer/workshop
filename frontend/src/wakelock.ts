@@ -59,6 +59,11 @@ export class ScreenWakeLock {
     if (!api || this.sentinel || document.visibilityState !== "visible") return;
     try {
       const sentinel = await api.request("screen");
+      // The setting may have been turned off while waiting.
+      if (!this.enabled || this.sentinel !== null) {
+        void sentinel.release();
+        return;
+      }
       this.sentinel = sentinel;
       sentinel.addEventListener("release", () => {
         if (this.sentinel === sentinel) this.sentinel = null;

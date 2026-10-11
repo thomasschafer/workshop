@@ -241,6 +241,7 @@ async fn output(command: &[String]) -> Option<(bool, String)> {
         Command::new(program)
             .args(args)
             .stdin(Stdio::null())
+            .kill_on_drop(true)
             .output(),
     )
     .await

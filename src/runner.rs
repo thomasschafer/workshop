@@ -7,14 +7,17 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::language::{LanguageProfile, Puzzle};
+use crate::process::{self, ProcessGroup};
 use crate::template::{self, Vars};
 
 /// Output beyond this is dropped, so a runaway print loop can't exhaust memory or the phone.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+/// How long to wait for output after the program has ended. Only a process that escaped its
+/// process group could keep the pipes open longer.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,7 +60,7 @@ pub struct RunRequest<'a> {
     pub puzzle: Puzzle,
     pub input: &'a str,
     pub timeout: Duration,
-    pub cancel: &'a Notify,
+    pub cancel: &'a CancellationToken,
 }
 
 pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
@@ -127,10 +130,10 @@ async fn execute(
     dir: &Path,
     stdin: Option<&str>,
     timeout: Duration,
-    cancel: &Notify,
+    cancel: &CancellationToken,
 ) -> Result<Output> {
     let (program, rest) = args.split_first().context("empty command")?;
-    let mut child = Command::new(program)
+    let mut child = process::command(program)
         .args(rest)
         .current_dir(dir)
         .stdin(if stdin.is_some() {
@@ -140,9 +143,9 @@ async fn execute(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("starting `{program}`; is it installed and on your PATH?"))?;
+    let group = ProcessGroup::of(&child);
 
     let stdin_task = match (child.stdin.take(), stdin) {
         (Some(mut pipe), Some(input)) => {
@@ -161,23 +164,32 @@ async fn execute(
 
     let ending = tokio::select! {
         status = child.wait() => Ending::Exited { code: status?.code() },
-        () = tokio::time::sleep(timeout) => {
-            child.kill().await?;
-            Ending::TimedOut
-        }
-        () = cancel.notified() => {
-            child.kill().await?;
-            Ending::Cancelled
-        }
+        () = tokio::time::sleep(timeout) => Ending::TimedOut,
+        () = cancel.cancelled() => Ending::Cancelled,
     };
+    // Also stops anything the program left running in the background.
+    group.kill();
+    child.wait().await?;
+    group.finish();
     if let Some(task) = stdin_task {
         task.abort();
     }
     Ok(Output {
         ending,
-        stdout: stdout.await??,
-        stderr: stderr.await??,
+        stdout: drain(stdout).await?,
+        stderr: drain(stderr).await?,
     })
+}
+
+async fn drain(task: tokio::task::JoinHandle<Result<String>>) -> Result<String> {
+    let abort = task.abort_handle();
+    match tokio::time::timeout(DRAIN_TIMEOUT, task).await {
+        Ok(output) => output?,
+        Err(_) => {
+            abort.abort();
+            Ok("… output cut off: a process the program started kept running".to_owned())
+        }
+    }
 }
 
 async fn read_limited(mut reader: impl AsyncReadExt + Unpin) -> Result<String> {
@@ -231,7 +243,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("solution.sh");
         std::fs::write(&file, script).unwrap();
-        let cancel = Notify::new();
+        let cancel = CancellationToken::new();
         run(RunRequest {
             profile,
             file: &file,
@@ -274,11 +286,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn times_out() {
+    async fn times_out_promptly_even_with_background_processes() {
         let profile = profile(None, &["sh", "{file}"]);
-        let result = run_with(&profile, "sleep 5", "", Duration::from_millis(200)).await;
+        let started = Instant::now();
+        let result = run_with(
+            &profile,
+            "sleep 30 & sleep 30",
+            "",
+            Duration::from_millis(200),
+        )
+        .await;
         assert_eq!(result.ending, Ending::TimedOut);
         assert!(!result.succeeded());
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_starting_still_cancels() {
+        let profile = profile(None, &["sh", "{file}"]);
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("solution.sh");
+        std::fs::write(&file, "sleep 30").unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let result = run(RunRequest {
+            profile: &profile,
+            file: &file,
+            build_dir: &dir.path().join("build"),
+            puzzle: Puzzle::new(2017, 1).unwrap(),
+            input: "",
+            timeout: Duration::from_secs(30),
+            cancel: &cancel,
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.ending, Ending::Cancelled);
     }
 
     #[tokio::test]
@@ -301,7 +347,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("s");
         std::fs::write(&file, "").unwrap();
-        let cancel = Notify::new();
+        let cancel = CancellationToken::new();
         let err = run(RunRequest {
             profile: &profile,
             file: &file,

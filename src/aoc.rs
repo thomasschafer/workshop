@@ -142,6 +142,14 @@ impl AocClient {
         parse_problem(&html)
     }
 
+    /// The puzzle if it's already cached, without making any request.
+    pub fn cached_problem(&self, puzzle: Puzzle) -> Result<Option<Problem>> {
+        let path = self.day_dir(puzzle).join("problem.html");
+        read_cache(&path, false, None)?
+            .map(|html| parse_problem(&html))
+            .transpose()
+    }
+
     pub async fn input(&self, puzzle: Puzzle) -> Result<String> {
         let path = self.day_dir(puzzle).join("input.txt");
         if let Some(input) = read_cache(&path, false, None)? {
