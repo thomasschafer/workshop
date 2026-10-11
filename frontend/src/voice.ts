@@ -18,7 +18,7 @@ interface RecognitionErrorEvent extends Event {
   readonly error: string;
 }
 
-interface Recognition extends EventTarget {
+export interface Recognition extends EventTarget {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
@@ -31,7 +31,7 @@ interface Recognition extends EventTarget {
   onend: (() => void) | null;
 }
 
-type RecognitionConstructor = new () => Recognition;
+export type RecognitionConstructor = new () => Recognition;
 type PhraseConstructor = new (phrase: string, boost: number) => unknown;
 
 function recognitionConstructor(): RecognitionConstructor | null {
@@ -83,79 +83,124 @@ export function speechUnavailableReason(): string {
   return "This browser has no built-in speech recognition. Try Safari on iOS or Chrome on Android.";
 }
 
+/** Stops restarting if the browser keeps ending recognition straight away, such as offline. */
+const MAX_RESTARTS = 30;
+
+/**
+ * Listens while the button is held. Browsers can end recognition by themselves after a pause
+ * (Chrome on Android does, mid-sentence), so it restarts while the button is still held and the
+ * pieces are joined.
+ */
 export class PushToTalk {
   private recognition: Recognition | null = null;
-  private transcript = "";
+  private held = false;
+  /** Transcripts of earlier sessions during this press. */
+  private finished: string[] = [];
+  private current = "";
   private error: string | null = null;
+  private restarts = 0;
   private ended: Promise<void> = Promise.resolve();
+  private onInterim: (text: string) => void = () => {};
+  private vocabulary: readonly string[] = [];
+
+  constructor(private readonly ctor: RecognitionConstructor | null = recognitionConstructor()) {}
 
   /**
    * Starts listening. `vocabulary` biases recognition towards words such as identifiers in the
    * file, where the browser supports it.
    */
   start(onInterim: (text: string) => void, vocabulary: readonly string[] = []): void {
-    const Ctor = recognitionConstructor();
-    if (!Ctor) {
+    if (!this.ctor) {
       throw new Error(speechUnavailableReason());
     }
     this.cancel();
+    this.held = true;
+    this.finished = [];
+    this.current = "";
+    this.error = null;
+    this.restarts = 0;
+    this.onInterim = onInterim;
+    this.vocabulary = vocabulary;
+    this.startSession(this.ctor);
+  }
+
+  /** Stops listening and resolves with everything heard. */
+  async stop(): Promise<string> {
+    this.held = false;
+    const recognition = this.recognition;
+    if (recognition) {
+      recognition.stop();
+      await this.ended;
+    }
+    this.recognition = null;
+    if (this.error) {
+      throw new Error(this.error);
+    }
+    return this.transcript();
+  }
+
+  cancel(): void {
+    this.held = false;
+    this.recognition?.abort();
+    this.recognition = null;
+  }
+
+  private transcript(): string {
+    return [...this.finished, this.current].filter((t) => t !== "").join(" ");
+  }
+
+  private startSession(Ctor: RecognitionConstructor): void {
     const recognition = new Ctor();
     recognition.lang = navigator.language || "en-GB";
     recognition.continuous = true;
     recognition.interimResults = true;
-    const Phrase = (window as unknown as Record<string, unknown>).SpeechRecognitionPhrase;
-    if (typeof Phrase === "function" && "phrases" in recognition && vocabulary.length > 0) {
+    const Phrase = (globalThis as unknown as Record<string, unknown>).SpeechRecognitionPhrase;
+    if (typeof Phrase === "function" && "phrases" in recognition && this.vocabulary.length > 0) {
       try {
-        recognition.phrases = vocabulary
+        recognition.phrases = this.vocabulary
           .slice(0, 100)
           .map((word) => new (Phrase as PhraseConstructor)(word, 5));
       } catch {
         // Biasing is an optional improvement; recognition works without it.
       }
     }
-    this.transcript = "";
-    this.error = null;
     recognition.onresult = (event) => {
       const segments: string[] = [];
       for (let i = 0; i < event.results.length; i++) {
         segments.push(event.results[i]?.[0]?.transcript ?? "");
       }
-      this.transcript = mergeSegments(segments);
-      onInterim(this.transcript);
+      this.current = mergeSegments(segments);
+      this.onInterim(this.transcript());
     };
     this.ended = new Promise((resolve) => {
-      recognition.onend = () => resolve();
+      let failed = false;
       recognition.onerror = (event) => {
-        if (event.error !== "no-speech" && event.error !== "aborted") {
-          this.error =
-            event.error === "not-allowed" || event.error === "service-not-allowed"
-              ? "Microphone access was refused. Allow it in your browser's site settings."
-              : `Speech recognition failed: ${event.error}`;
+        if (event.error === "no-speech" || event.error === "aborted") return;
+        failed = true;
+        this.error =
+          event.error === "not-allowed" || event.error === "service-not-allowed"
+            ? "Microphone access was refused. Allow it in your browser's site settings."
+            : `Speech recognition failed: ${event.error}`;
+      };
+      recognition.onend = () => {
+        if (this.recognition !== recognition) {
+          resolve();
+          return;
+        }
+        if (this.held && !failed && this.restarts < MAX_RESTARTS) {
+          // Ended by the browser while the button is still held: keep listening.
+          this.restarts++;
+          if (this.current !== "") this.finished.push(this.current);
+          this.current = "";
+          this.startSession(Ctor);
+          // Whoever is waiting for the end now waits for the new session instead.
+          void this.ended.then(resolve);
+          return;
         }
         resolve();
       };
     });
     this.recognition = recognition;
     recognition.start();
-  }
-
-  /** Stops listening and resolves with everything heard. */
-  async stop(): Promise<string> {
-    const recognition = this.recognition;
-    if (!recognition) {
-      return "";
-    }
-    recognition.stop();
-    await this.ended;
-    this.recognition = null;
-    if (this.error) {
-      throw new Error(this.error);
-    }
-    return this.transcript;
-  }
-
-  cancel(): void {
-    this.recognition?.abort();
-    this.recognition = null;
   }
 }

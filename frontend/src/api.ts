@@ -13,12 +13,6 @@ export interface UiState {
   discuss_model: string | null;
 }
 
-/** Something to say, and the code it produces. */
-export interface DictationExample {
-  say: string;
-  result: string;
-}
-
 export interface Snippet {
   name: string;
   body: string;
@@ -33,7 +27,6 @@ export interface Bootstrap {
     lsp_language_id: string;
     has_lsp: boolean;
     root_uri: string;
-    examples: DictationExample[];
   };
   snippets: Snippet[];
   discuss_models: string[];
@@ -99,9 +92,15 @@ export type SubmitOutcome =
   | { result: "unknown"; message: string };
 
 export type EditResult = (
-  | { status: "applied"; doc: string; summary: string }
+  | { status: "applied"; doc: string; summary: string; inserted: string }
   | { status: "unsure"; message: string }
 ) & { model: string | null; elapsed_ms: number };
+
+/** An earlier utterance the edit model asked about, which a reply answers. */
+export interface Exchange {
+  said: string;
+  asked: string;
+}
 
 export interface Turn {
   speaker: "user" | "coach";
@@ -180,8 +179,8 @@ export const api = {
       part,
       answer,
     }),
-  edit: (doc: string, utterance: string, recent: string | null) =>
-    request<EditResult>("POST", "/edit", { doc, utterance, recent }),
+  edit: (doc: string, utterance: string, recent: string | null, earlier: Exchange[]) =>
+    request<EditResult>("POST", "/edit", { doc, utterance, recent, earlier }),
   discuss: (body: {
     year: number;
     day: number;

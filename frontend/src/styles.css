@@ -821,3 +821,15 @@ code {
   border-radius: 8px;
   overflow-x: auto;
 }
+
+.question-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.question-actions .text-button {
+  padding: 4px 0;
+  font-size: 13px;
+}

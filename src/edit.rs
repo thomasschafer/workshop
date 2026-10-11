@@ -22,12 +22,38 @@ pub fn system_prompt(profile: &LanguageProfile) -> String {
     )
 }
 
-pub fn user_prompt(doc_with_cursor: &str, utterance: &str, recent: Option<&str>) -> String {
+/// An earlier request the model asked about, which the user is now answering.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Exchange {
+    pub said: String,
+    pub asked: String,
+}
+
+pub fn user_prompt(
+    doc_with_cursor: &str,
+    utterance: &str,
+    recent: Option<&str>,
+    earlier: &[Exchange],
+) -> String {
     let mut prompt = format!("File:\n```\n{doc_with_cursor}\n```\n");
     if let Some(recent) = recent.filter(|r| !r.trim().is_empty()) {
         prompt.push_str(&format!("Most recent insertion: `{recent}`\n"));
     }
-    prompt.push_str(&format!("Utterance: {utterance}"));
+    if earlier.is_empty() {
+        prompt.push_str(&format!("Utterance: {utterance}"));
+    } else {
+        prompt.push_str("You asked about an earlier utterance, and this is the user's reply:\n");
+        for exchange in earlier {
+            prompt.push_str(&format!(
+                "Utterance: {}\nYou asked: {}\n",
+                exchange.said, exchange.asked
+            ));
+        }
+        prompt.push_str(&format!(
+            "Reply: {utterance}\nMake the edit the user meant by the utterance, now that the reply has answered your question."
+        ));
+    }
     prompt
 }
 
@@ -56,6 +82,8 @@ pub enum EditOutcome {
     Applied {
         doc: String,
         summary: String,
+        /// What the edit added, which "that" refers to in the next utterance.
+        inserted: String,
     },
     Unsure {
         message: String,
@@ -127,7 +155,56 @@ pub fn apply(doc_with_cursor: &str, reply: ModelReply) -> Result<EditOutcome> {
             message: "That didn't change anything.".into(),
         });
     }
-    Ok(EditOutcome::Applied { doc, summary })
+    // The edit that moved the cursor is the one the user was working on.
+    let focus = edits
+        .iter()
+        .find(|e| e.replace.contains(CURSOR))
+        .or(edits.last())
+        .expect("edits is non-empty");
+    let inserted = inserted_text(&focus.find, &focus.replace);
+    Ok(EditOutcome::Applied {
+        doc,
+        summary,
+        inserted,
+    })
+}
+
+/// What `replace` adds to `find`: the text between their common start and end, widened to
+/// whole words so a shared prefix such as "par" in "parse" and "part1" doesn't split one.
+fn inserted_text(find: &str, replace: &str) -> String {
+    let find: Vec<char> = find.chars().filter(|&c| c != CURSOR).collect();
+    let replace: Vec<char> = replace.chars().filter(|&c| c != CURSOR).collect();
+    let is_word = |c: char| c.is_alphanumeric() || c == '_' || c == '\'';
+
+    let suffix = find
+        .iter()
+        .rev()
+        .zip(replace.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let max_prefix = find.len().min(replace.len()) - suffix;
+    let mut start = find
+        .iter()
+        .zip(&replace)
+        .take(max_prefix)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut end = replace.len() - suffix;
+    while start > 0
+        && start < replace.len()
+        && is_word(replace[start])
+        && is_word(replace[start - 1])
+    {
+        start -= 1;
+    }
+    while end > 0 && end < replace.len() && is_word(replace[end - 1]) && is_word(replace[end]) {
+        end += 1;
+    }
+    replace[start..end.max(start)]
+        .iter()
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -233,6 +310,48 @@ mod tests {
     fn rejects_bad_input_docs() {
         assert!(apply("no cursor", edit(&[("no", "yes")])).is_err());
         assert!(apply("‸two‸", edit(&[("two", "three")])).is_err());
+    }
+
+    #[test]
+    fn reports_what_was_inserted() {
+        let cases = [
+            (
+                "part1 = undefin‸ed",
+                "part1 = sum . map parse‸",
+                "sum . map parse",
+            ),
+            (
+                "part1 :: String -> Int",
+                "parse :: String -> Int\nparse = ‸\n\npart1 :: String -> Int",
+                "parse :: String -> Int\nparse =",
+            ),
+            ("solve = ‸map read", "solve = ‸sum . map read", "sum ."),
+            ("x = foo‸", "x = foo‸", ""),
+        ];
+        for (find, replace, inserted) in cases {
+            assert_eq!(
+                inserted_text(find, replace),
+                inserted,
+                "{find:?} -> {replace:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_includes_earlier_questions() {
+        let plain = user_prompt("a‸", "add b", None, &[]);
+        assert!(plain.ends_with("Utterance: add b"));
+        let reply = user_prompt(
+            "a‸",
+            "the second one",
+            Some("a"),
+            &[Exchange {
+                said: "add it".into(),
+                asked: "Add b or c?".into(),
+            }],
+        );
+        assert!(reply.contains("Most recent insertion: `a`"));
+        assert!(reply.contains("Utterance: add it\nYou asked: Add b or c?\nReply: the second one"));
     }
 
     #[test]

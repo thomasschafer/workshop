@@ -492,3 +492,109 @@ main = do
   input <- getContents
   print ‸(part1 input)
   print (part2 input)''']
+
+# Longer and conversational requests
+
+[[case]]
+name = "two-steps-in-one-utterance"
+utterance = "create a function above this one called parse p a r s e from string to int and then replace the undefined here in part one with sum dot map parse dot lines"
+before = '''
+part1 :: String -> Int
+part1 = undefined‸'''
+after = '''
+parse :: String -> Int
+parse = 
+
+part1 :: String -> Int
+part1 = sum . map parse . lines‸'''
+also = ['''
+parse :: String -> Int
+parse = ‸
+
+part1 :: String -> Int
+part1 = sum . map parse . lines''']
+
+[[case]]
+name = "reply-to-a-question"
+utterance = "the second one, put it on line two"
+before = '''
+part1 :: String -> Int
+part1 = sum . map read . lines‸'''
+earlier = [{ said = "add a comment saying parse the input", asked = "Should the comment go above the signature on line one, or above the definition on line two?" }]
+after = '''
+part1 :: String -> Int
+-- Parse the input
+part1 = sum . map read . lines‸'''
+also = ['''
+part1 :: String -> Int
+-- parse the input
+part1 = sum . map read . lines‸''', '''
+part1 :: String -> Int
+-- Parse the input‸
+part1 = sum . map read . lines''', '''
+part1 :: String -> Int
+-- parse the input‸
+part1 = sum . map read . lines''']
+
+[[case]]
+name = "uncomment-part-two"
+utterance = "uncomment line eight"
+before = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  -- When you start part 2, uncomment the next line.
+  -- print (part2 input)
+
+part1 :: String -> Int
+part1 = sum . map read . lines‸
+
+part2 :: String -> Int
+part2 = undefined'''
+after = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  -- When you start part 2, uncomment the next line.
+  print (part2 input)‸
+
+part1 :: String -> Int
+part1 = sum . map read . lines
+
+part2 :: String -> Int
+part2 = undefined'''
+also = ['''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  -- When you start part 2, uncomment the next line.
+  print (part2 input)
+
+part1 :: String -> Int
+part1 = sum . map read . lines‸
+
+part2 :: String -> Int
+part2 = undefined''', '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  -- When you start part 2, uncomment the next line.
+  ‸print (part2 input)
+
+part1 :: String -> Int
+part1 = sum . map read . lines
+
+part2 :: String -> Int
+part2 = undefined''']

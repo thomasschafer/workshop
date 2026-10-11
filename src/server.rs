@@ -279,7 +279,6 @@ struct LanguageInfo {
     lsp_language_id: String,
     has_lsp: bool,
     root_uri: String,
-    examples: Vec<crate::language::DictationExample>,
 }
 
 async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
@@ -298,7 +297,6 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
             lsp_language_id: language.lsp_language_id.clone(),
             has_lsp,
             root_uri: file_uri(&app.config.solutions_dir),
-            examples: language.examples.clone(),
         },
         snippets: app.config.snippets.clone(),
         discuss_models: app.config.models.discuss.models.clone(),
@@ -558,6 +556,9 @@ struct EditBody {
     doc: String,
     utterance: String,
     recent: Option<String>,
+    /// Questions the model asked about earlier utterances, which this one answers.
+    #[serde(default)]
+    earlier: Vec<edit::Exchange>,
 }
 
 #[derive(Serialize)]
@@ -569,7 +570,12 @@ struct Edited {
 }
 
 async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> ApiResult<Edited> {
-    let prompt = edit::user_prompt(&body.doc, &body.utterance, body.recent.as_deref());
+    let prompt = edit::user_prompt(
+        &body.doc,
+        &body.utterance,
+        body.recent.as_deref(),
+        &body.earlier,
+    );
     let reply = app
         .edit_model
         .call(&app.edit_spec(), &prompt, EDIT_TIMEOUT)
@@ -578,6 +584,7 @@ async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> Api
     tracing::info!(
         utterance = %body.utterance,
         recent = ?body.recent,
+        earlier = ?body.earlier,
         elapsed_ms = reply.elapsed_ms,
         reply = %reply.text,
         outcome = match &outcome {

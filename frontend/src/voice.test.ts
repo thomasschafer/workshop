@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeSegments } from "./voice";
+import { mergeSegments, PushToTalk } from "./voice";
 
 describe("mergeSegments", () => {
   it("joins consecutive pieces", () => {
@@ -54,5 +54,75 @@ describe("mergeSegments", () => {
 
   it("ignores empty results", () => {
     expect(mergeSegments(["", "  ", "undo"])).toBe("undo");
+  });
+});
+
+describe("PushToTalk", () => {
+  /** Stands in for the browser's recognition, letting tests say what was heard and end it. */
+  class FakeRecognition extends EventTarget {
+    static sessions: FakeRecognition[] = [];
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    onresult: ((event: never) => void) | null = null;
+    onerror: ((event: never) => void) | null = null;
+    onend: (() => void) | null = null;
+    constructor() {
+      super();
+      FakeRecognition.sessions.push(this);
+    }
+    start() {}
+    stop() {
+      this.onend?.();
+    }
+    abort() {
+      this.onend?.();
+    }
+    hear(...segments: string[]) {
+      const results = segments.map((text) =>
+        Object.assign([{ transcript: text }], { isFinal: true }),
+      );
+      this.onresult?.({ results } as never);
+    }
+    fail(error: string) {
+      this.onerror?.({ error } as never);
+      this.onend?.();
+    }
+  }
+
+  const latest = () =>
+    FakeRecognition.sessions[FakeRecognition.sessions.length - 1] as FakeRecognition;
+
+  it("keeps listening when the browser ends recognition while the button is held", async () => {
+    FakeRecognition.sessions = [];
+    const ptt = new PushToTalk(FakeRecognition as never);
+    const interim: string[] = [];
+    ptt.start((t) => interim.push(t));
+    latest().hear("create a function called parse from string to int");
+    // The browser decides the user has finished, but the button is still held.
+    latest().onend?.();
+    expect(FakeRecognition.sessions).toHaveLength(2);
+    latest().hear("and then replace the undefined with sum dot map parse");
+    expect(await ptt.stop()).toBe(
+      "create a function called parse from string to int and then replace the undefined with sum dot map parse",
+    );
+    expect(interim.at(-1)).toContain("and then replace");
+  });
+
+  it("reports errors such as a refused microphone", async () => {
+    FakeRecognition.sessions = [];
+    const ptt = new PushToTalk(FakeRecognition as never);
+    ptt.start(() => {});
+    latest().fail("not-allowed");
+    expect(FakeRecognition.sessions).toHaveLength(1);
+    await expect(ptt.stop()).rejects.toThrow("Microphone access was refused");
+  });
+
+  it("ignores silence", async () => {
+    FakeRecognition.sessions = [];
+    const ptt = new PushToTalk(FakeRecognition as never);
+    ptt.start(() => {});
+    latest().fail("no-speech");
+    expect(await ptt.stop()).toBe("");
   });
 });

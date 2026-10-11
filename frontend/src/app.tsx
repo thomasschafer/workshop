@@ -4,6 +4,7 @@ import {
   api,
   type Bootstrap,
   type DayMeta,
+  type Exchange,
   type Problem,
   type Puzzle,
   type Tab,
@@ -93,6 +94,10 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [thinking, setThinking] = useState(false);
   const [discussError, setDiscussError] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
+  // The edit model's latest question, with the requests that led to it, and whether the user
+  // has chosen to reply to it rather than start afresh.
+  const [question, setQuestion] = useState<Exchange[] | null>(null);
+  const [replying, setReplying] = useState(false);
 
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<CodeEditor | null>(null);
@@ -124,8 +129,8 @@ export function App({ boot }: { boot: Bootstrap }) {
     [hasSpeech],
   );
   // Queued utterances run after later renders, so they read the latest state through refs.
-  const latest = useRef({ tab, notes, turns, run });
-  latest.current = { tab, notes, turns, run };
+  const latest = useRef({ tab, notes, turns, run, question, replying });
+  latest.current = { tab, notes, turns, run, question, replying };
   puzzleRef.current = puzzle;
 
   // One saver per puzzle, so switching puzzles never drops the previous one's unsaved changes.
@@ -427,7 +432,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  const doEdit = async (utterance: string) => {
+  const doEdit = async (utterance: string, earlier: Exchange[]) => {
     const current = editor.current;
     if (!current) {
       setFeedback({ kind: "warn", transcript: utterance, text: "Open a puzzle first." });
@@ -443,7 +448,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     const before = current.text();
     setFeedback({ kind: "pending", transcript: utterance, text: "Editing…" });
     try {
-      const result = await api.edit(marked, utterance, current.recentInsertion);
+      const result = await api.edit(marked, utterance, current.recentInsertion, earlier);
       if (editor.current !== current || current.text() !== before) {
         setFeedback({
           kind: "warn",
@@ -454,9 +459,11 @@ export function App({ boot }: { boot: Bootstrap }) {
       }
       const seconds = `${(result.elapsed_ms / 1000).toFixed(1)}s`;
       if (result.status === "applied") {
-        current.applyMarked(result.doc);
+        current.applyMarked(result.doc, result.inserted);
+        setQuestion(null);
         setFeedback({ kind: "ok", transcript: utterance, text: `${result.summary} · ${seconds}` });
       } else {
+        setQuestion([...earlier, { said: utterance, asked: result.message }]);
         setFeedback({ kind: "warn", transcript: utterance, text: result.message });
       }
     } catch (e) {
@@ -499,7 +506,13 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  const handleUtterance = async (text: string) => {
+  const handleUtterance = async (text: string, earlier: Exchange[] | null) => {
+    if (earlier) {
+      // A reply to the edit model's question, wherever it was spoken from.
+      api.log("speech", `reply: ${text}`);
+      await doEdit(text, earlier);
+      return;
+    }
     const { tab, notes } = latest.current;
     if (tab === "notes") {
       api.log("speech", `notes: ${text}`);
@@ -522,12 +535,16 @@ export function App({ boot }: { boot: Bootstrap }) {
       runCommand(command, text);
       return;
     }
-    await doEdit(text);
+    setQuestion(null);
+    await doEdit(text, []);
   };
 
   // Utterances are handled one at a time, in the order they were spoken.
   const enqueue = (text: string) => {
-    queue.current = queue.current.then(() => handleUtterance(text));
+    const { replying, question } = latest.current;
+    const earlier = replying && question ? question : null;
+    setReplying(false);
+    queue.current = queue.current.then(() => handleUtterance(text, earlier));
   };
 
   const startTalking = (event: PointerEvent) => {
@@ -743,7 +760,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         ) : null}
         {sheet === "help" ? (
           <Modal title="How Workshop works" onClose={() => setSheet(null)}>
-            <Help language={boot.language.name} examples={boot.language.examples} />
+            <Help />
           </Modal>
         ) : null}
         {sheet === "run" || sheet === "settings" ? (
@@ -790,10 +807,28 @@ export function App({ boot }: { boot: Bootstrap }) {
         <div class={`feedback ${feedback?.kind ?? ""}`} aria-live="polite">
           {listening ? (
             <span class="transcript">{interim || "Listening…"}</span>
+          ) : replying && question ? (
+            <>
+              <span class="transcript">Replying to: {question[question.length - 1]?.asked}</span>
+              <span class="question-actions">
+                <span class="muted">Hold the button to answer.</span>
+                <button type="button" class="text-button" onClick={() => setReplying(false)}>
+                  Cancel
+                </button>
+              </span>
+            </>
           ) : feedback ? (
             <>
               {feedback.transcript ? <span class="transcript">“{feedback.transcript}”</span> : null}
               <span class="result">{feedback.text}</span>
+              {question && feedback.kind === "warn" ? (
+                <span class="question-actions">
+                  <button type="button" class="text-button" onClick={() => setReplying(true)}>
+                    Reply
+                  </button>
+                  <span class="muted">or hold the button to start afresh</span>
+                </span>
+              ) : null}
             </>
           ) : (
             <span class="muted">
@@ -837,7 +872,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             onPointerCancel={() => void stopTalking()}
             onContextMenu={(e) => e.preventDefault()}
           >
-            {listening ? "Release to send" : TALK_LABEL}
+            {listening ? "Release to send" : replying ? "Hold to reply" : TALK_LABEL}
           </button>
           <button
             type="button"

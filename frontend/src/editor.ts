@@ -193,8 +193,11 @@ export class CodeEditor {
     return markCursor(this.text(), this.view.state.selection.main.head);
   }
 
-  /** Applies a document with a cursor marker as one undoable change. */
-  applyMarked(marked: string): void {
+  /**
+   * Applies a document with a cursor marker as one undoable change. `inserted` is what the edit
+   * added, which "that" refers to next.
+   */
+  applyMarked(marked: string, inserted: string): void {
     const { text, cursor } = unmarkCursor(marked);
     const change = minimalChange(this.text(), text);
     this.view.dispatch({
@@ -205,7 +208,7 @@ export class CodeEditor {
     });
     if (change) {
       const end = change.from + change.insert.length;
-      this.recentInsertion = change.insert.trim() || null;
+      this.recentInsertion = inserted.trim() || change.insert.trim() || null;
       this.flash(change.from, end);
     }
   }

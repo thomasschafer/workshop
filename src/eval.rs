@@ -28,6 +28,9 @@ struct Case {
     /// The most recent insertion, which "that" refers to.
     #[serde(default)]
     recent: Option<String>,
+    /// Questions the model asked, which this utterance replies to.
+    #[serde(default)]
+    earlier: Vec<edit::Exchange>,
     /// The expected file after the edit, with `‸` marking where the cursor should end up.
     #[serde(default)]
     after: Option<String>,
@@ -134,7 +137,12 @@ pub async fn run(
     let (mut passed, mut cursor, mut failed) = (0, 0, 0);
     let mut total_ms = 0;
     for case in &cases {
-        let prompt = edit::user_prompt(&case.before, &case.utterance, case.recent.as_deref());
+        let prompt = edit::user_prompt(
+            &case.before,
+            &case.utterance,
+            case.recent.as_deref(),
+            &case.earlier,
+        );
         let (outcome, elapsed_ms) = match runner.call(&spec, &prompt, Duration::from_secs(60)).await
         {
             Ok(reply) => (
@@ -192,6 +200,7 @@ mod tests {
             utterance: "u".into(),
             before: "a‸".into(),
             recent: None,
+            earlier: Vec::new(),
             after: after.map(str::to_owned),
             also: vec!["x = ‸y".into()],
             unsure,
@@ -202,6 +211,7 @@ mod tests {
         Ok(EditOutcome::Applied {
             doc: doc.into(),
             summary: String::new(),
+            inserted: String::new(),
         })
     }
 

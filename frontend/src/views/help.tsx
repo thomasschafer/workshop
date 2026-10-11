@@ -1,9 +1,22 @@
-import type { DictationExample } from "../api";
-
 /** The push-to-talk button's label, which the help refers to. */
 export const TALK_LABEL = "Hold to talk";
 
-export function Help({ language, examples }: { language: string; examples: DictationExample[] }) {
+/** Python, as the language most people can read; dictation works the same way in any language. */
+const EXAMPLES: { say: string; result: string }[] = [
+  { say: "def part one of data colon", result: "def part1(data):" },
+  {
+    say: "new line numbers equals data dot split lines",
+    result: "    numbers = data.splitlines()",
+  },
+  { say: "wrap that in sorted", result: "    numbers = sorted(data.splitlines())" },
+  {
+    say: "new line return sum of int of n for n in numbers",
+    result: "    return sum(int(n) for n in numbers)",
+  },
+  { say: "change sum to max", result: "    return max(int(n) for n in numbers)" },
+];
+
+export function Help() {
   return (
     <div class="help">
       <section>
@@ -12,23 +25,21 @@ export function Help({ language, examples }: { language: string; examples: Dicta
           Hold the "{TALK_LABEL}" button, say the code roughly as you'd type it, and let go. Edits
           happen at the cursor, so tap in the code first to put it where you want.
         </p>
-        {examples.length > 0 ? (
-          <>
-            <p>For example, in {language}:</p>
-            <ol class="examples">
-              {examples.map((e) => (
-                <li key={e.say}>
-                  <span class="say">"{e.say}"</span>
-                  <pre class="example-result">{e.result}</pre>
-                </li>
-              ))}
-            </ol>
-          </>
-        ) : null}
+        <p>For example, in Python, one after another:</p>
+        <ol class="examples">
+          {EXAMPLES.map((e) => (
+            <li key={e.say}>
+              <span class="say">"{e.say}"</span>
+              <pre class="example-result">{e.result}</pre>
+            </li>
+          ))}
+        </ol>
+        <p class="muted">It works the same way in any language.</p>
         <p>
           Workshop only writes what you say. Ask it to write the solution for you and it will
-          decline, and if it isn't sure what you meant it asks rather than guessing. The last thing
-          you said and what changed are shown above the button.
+          decline, and if it isn't sure what you meant it asks rather than guessing: tap Reply and
+          hold the button to answer, or just hold it to start afresh. The last thing you said and
+          what changed are shown above the button.
         </p>
       </section>
 

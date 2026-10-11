@@ -25,17 +25,6 @@ pub struct LanguageProfile {
     pub template: String,
     /// How the language is spoken, given to the edit model.
     pub dictation_hints: String,
-    /// Shown in the app's help, to teach people how to dictate this language.
-    #[serde(default)]
-    pub examples: Vec<DictationExample>,
-}
-
-/// Something to say, and the code it produces.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DictationExample {
-    pub say: String,
-    pub result: String,
 }
 
 const BUILTIN: &[(&str, &str)] = &[("haskell", include_str!("../languages/haskell.toml"))];
@@ -144,7 +133,6 @@ mod tests {
         let profile = haskell();
         assert_eq!(profile.name, "Haskell");
         assert!(profile.template.starts_with("module Main where"));
-        assert!(profile.examples.len() >= 3);
         assert_eq!(profile.required_programs(), vec!["ghc"]);
     }
 
