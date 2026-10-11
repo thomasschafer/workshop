@@ -33,6 +33,12 @@ import {
 } from "./views/run";
 import { Settings } from "./views/settings";
 import { PushToTalk, speechSupported, speechUnavailableReason } from "./voice";
+import {
+  keepScreenOnPreference,
+  ScreenWakeLock,
+  setKeepScreenOnPreference,
+  wakeLockSupported,
+} from "./wakelock";
 
 type Sheet = "run" | "settings" | null;
 
@@ -105,6 +111,10 @@ export function App({ boot }: { boot: Bootstrap }) {
   const ptt = useMemo(() => new PushToTalk(), []);
   const listeningRef = useRef(false);
   const hasSpeech = useMemo(speechSupported, []);
+  const [keepScreenOn, setKeepScreenOn] = useState(keepScreenOnPreference);
+  const wakeLock = useMemo(() => new ScreenWakeLock(), []);
+  useEffect(() => () => wakeLock.dispose(), [wakeLock]);
+  useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
   // Typing commands is handy at a desk, and the only option without speech recognition.
   const showTyped = useMemo(
     () => !hasSpeech || window.matchMedia("(pointer: fine)").matches,
@@ -689,6 +699,11 @@ export function App({ boot }: { boot: Bootstrap }) {
                 commitMessage={
                   puzzle ? `Advent of Code ${puzzle.year} day ${puzzle.day}` : "Advent of Code"
                 }
+                keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
+                onKeepScreenOn={(enabled) => {
+                  setKeepScreenOnPreference(enabled);
+                  setKeepScreenOn(enabled);
+                }}
                 onInsertSnippet={(s) => {
                   editor.current?.insertSnippet(s.body);
                   setSheet(null);

@@ -515,6 +515,19 @@ code {
   margin: 8px 0;
 }
 
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.toggle input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
 .checks {
   list-style: none;
   padding: 0;

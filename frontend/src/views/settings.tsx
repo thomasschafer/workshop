@@ -6,9 +6,18 @@ interface Props {
   editModel: string;
   commitMessage: string;
   onInsertSnippet: (snippet: Snippet) => void;
+  keepScreenOn: boolean | null;
+  onKeepScreenOn: (enabled: boolean) => void;
 }
 
-export function Settings({ snippets, editModel, commitMessage, onInsertSnippet }: Props) {
+export function Settings({
+  snippets,
+  editModel,
+  commitMessage,
+  onInsertSnippet,
+  keepScreenOn,
+  onKeepScreenOn,
+}: Props) {
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [sync, setSync] = useState<string | null>(null);
@@ -57,6 +66,22 @@ export function Settings({ snippets, editModel, commitMessage, onInsertSnippet }
               </button>
             ))}
           </div>
+        )}
+      </section>
+
+      <section>
+        <h2>Display</h2>
+        {keepScreenOn === null ? (
+          <p class="muted">This browser can't keep the screen on.</p>
+        ) : (
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={keepScreenOn}
+              onChange={(e) => onKeepScreenOn((e.target as HTMLInputElement).checked)}
+            />
+            Keep the screen on while Workshop is open
+          </label>
         )}
       </section>
 
