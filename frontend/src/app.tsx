@@ -19,6 +19,7 @@ import {
   LanguageServerConnection,
   type LanguageServerStatus,
 } from "./editor";
+import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { CodeSaver, debounced, LatestSaver, type SaveStatus } from "./saver";
 import { DiscussView } from "./views/discuss";
 import { Picker } from "./views/picker";
@@ -41,13 +42,6 @@ interface Feedback {
   text: string;
 }
 
-const EMPTY_META: DayMeta = {
-  sample_block: null,
-  sample_input: null,
-  sample_answers: [null, null],
-  cursor: null,
-};
-
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const discussKey = (p: Puzzle) => `workshop:discuss:${p.year}:${p.day}`;
 
@@ -58,25 +52,6 @@ function loadTurns(p: Puzzle): Turn[] {
   } catch {
     return [];
   }
-}
-
-/** Fills in the sample input and expected answers from the puzzle's likely candidates. */
-function withSuggestions(meta: DayMeta, problem: Problem): DayMeta {
-  let next = meta;
-  const block = problem.suggested_sample_blocks[0];
-  if (next.sample_block === null && block !== null && block !== undefined) {
-    next = { ...next, sample_block: block, sample_input: problem.blocks[block] ?? null };
-  }
-  const answers: [string | null, string | null] = [...next.sample_answers];
-  let changed = false;
-  for (const i of [0, 1] as const) {
-    const suggestion = problem.suggested_sample_answers[i];
-    if (answers[i] === null && suggestion) {
-      answers[i] = suggestion;
-      changed = true;
-    }
-  }
-  return changed ? { ...next, sample_answers: answers } : next;
 }
 
 export function App({ boot }: { boot: Bootstrap }) {
@@ -323,7 +298,8 @@ export function App({ boot }: { boot: Bootstrap }) {
     const p = puzzleRef.current;
     if (!p) return;
     setSheet("run");
-    if (input === "sample" && !metaRef.current.sample_input) {
+    const runPart = part ?? 2;
+    if (input === "sample" && sampleInput(metaRef.current, runPart === 1 ? 0 : 1) === null) {
       setRun((r) => ({
         ...r,
         error: "Choose the sample input first: tap a code block in the puzzle.",
@@ -333,7 +309,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
     try {
       await saver.current?.flush();
-      const result = await api.run(p, input);
+      const result = await api.run(p, input, runPart);
       setRun((r) => ({ ...r, running: null, last: { input, result } }));
     } catch (e) {
       setRun((r) => ({ ...r, running: null, error: message(e) }));

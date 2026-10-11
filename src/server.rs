@@ -417,6 +417,8 @@ enum InputKind {
 #[derive(Deserialize)]
 struct RunBody {
     input: InputKind,
+    /// Which part's sample to use.
+    part: u8,
 }
 
 async fn run(
@@ -426,9 +428,12 @@ async fn run(
 ) -> ApiResult<RunResult> {
     let puzzle = puzzle(year, day)?;
     let input = match body.input {
-        InputKind::Sample => app.workspace.load_day_meta(puzzle)?.sample_input.context(
-            "no sample input is chosen yet; tap a code block in the puzzle to choose one",
-        )?,
+        InputKind::Sample => app
+            .workspace
+            .load_day_meta(puzzle)?
+            .sample_input(Part::from_number(body.part)?)
+            .context("no sample input is chosen yet; tap a code block in the puzzle to choose one")?
+            .to_owned(),
         InputKind::Real => app.aoc.input(puzzle).await?,
     };
     let Ok(_guard) = app.run_lock.try_lock() else {

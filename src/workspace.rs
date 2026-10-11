@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
+use crate::aoc::Part;
 use crate::language::{LanguageProfile, Puzzle};
 use crate::paths::{self, Paths};
 
@@ -44,14 +45,52 @@ pub enum SaveError {
 
 /// Per-puzzle state kept outside the solutions repo, because it can contain puzzle text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "StoredDayMeta")]
 pub struct DayMeta {
-    pub sample_block: Option<usize>,
-    pub sample_input: Option<String>,
+    /// The puzzle code block chosen as each part's sample input. Part 2 uses part 1's sample
+    /// when it has none of its own.
+    pub sample_blocks: [Option<usize>; 2],
+    pub sample_inputs: [Option<String>; 2],
     /// Expected sample answers for parts 1 and 2.
     pub sample_answers: [Option<String>; 2],
     /// Cursor position in the editor's own units, restored when the puzzle is reopened.
     pub cursor: Option<usize>,
+}
+
+impl DayMeta {
+    pub fn sample_input(&self, part: Part) -> Option<&str> {
+        match part {
+            Part::One => self.sample_inputs[0].as_deref(),
+            Part::Two => self.sample_inputs[1]
+                .as_deref()
+                .or(self.sample_inputs[0].as_deref()),
+        }
+    }
+}
+
+/// `DayMeta` as stored, including fields from before each part had its own sample.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct StoredDayMeta {
+    sample_blocks: [Option<usize>; 2],
+    sample_inputs: [Option<String>; 2],
+    sample_answers: [Option<String>; 2],
+    cursor: Option<usize>,
+    sample_block: Option<usize>,
+    sample_input: Option<String>,
+}
+
+impl From<StoredDayMeta> for DayMeta {
+    fn from(stored: StoredDayMeta) -> Self {
+        let [block_one, block_two] = stored.sample_blocks;
+        let [input_one, input_two] = stored.sample_inputs;
+        Self {
+            sample_blocks: [block_one.or(stored.sample_block), block_two],
+            sample_inputs: [input_one.or(stored.sample_input), input_two],
+            sample_answers: stored.sample_answers,
+            cursor: stored.cursor,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -290,9 +329,9 @@ mod tests {
         let puzzle = Puzzle::new(2017, 4).unwrap();
         assert_eq!(workspace.load_day_meta(puzzle).unwrap(), DayMeta::default());
         let meta = DayMeta {
-            sample_block: Some(1),
-            sample_input: Some("1 2".into()),
-            sample_answers: [Some("3".into()), None],
+            sample_blocks: [Some(1), Some(3)],
+            sample_inputs: [Some("1 2".into()), Some("5 6".into())],
+            sample_answers: [Some("3".into()), Some("30".into())],
             cursor: Some(10),
         };
         workspace.save_day_meta(puzzle, &meta).unwrap();
@@ -314,6 +353,27 @@ mod tests {
                 .join("notes/2017/day04.md")
                 .starts_with(&workspace.paths.data_dir)
         );
+    }
+
+    #[test]
+    fn reads_meta_saved_before_parts_had_their_own_samples() {
+        let old =
+            r#"{"sample_block":0,"sample_input":"1\n2\n","sample_answers":["3",null],"cursor":4}"#;
+        let meta: DayMeta = serde_json::from_str(old).unwrap();
+        assert_eq!(meta.sample_blocks, [Some(0), None]);
+        assert_eq!(meta.sample_input(Part::One), Some("1\n2\n"));
+        assert_eq!(meta.sample_input(Part::Two), Some("1\n2\n"));
+        assert_eq!(meta.cursor, Some(4));
+        assert!(serde_json::from_str::<DayMeta>(r#"{"typo":1}"#).is_err());
+    }
+
+    #[test]
+    fn part_two_prefers_its_own_sample() {
+        let meta = DayMeta {
+            sample_inputs: [Some("a".into()), Some("b".into())],
+            ..DayMeta::default()
+        };
+        assert_eq!(meta.sample_input(Part::Two), Some("b"));
     }
 
     #[test]

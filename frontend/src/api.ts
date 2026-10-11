@@ -41,8 +41,8 @@ export interface CodeFile {
 }
 
 export interface DayMeta {
-  sample_block: number | null;
-  sample_input: string | null;
+  sample_blocks: [number | null, number | null];
+  sample_inputs: [string | null, string | null];
   sample_answers: [string | null, string | null];
   cursor: number | null;
 }
@@ -146,8 +146,8 @@ export const api = {
   saveMeta: (p: Puzzle, meta: DayMeta) => request<null>("PUT", `${day(p)}/meta`, meta),
   problem: (p: Puzzle, refresh = false) =>
     request<Problem>("GET", `${day(p)}/problem?refresh=${refresh}`),
-  run: (p: Puzzle, input: "sample" | "real") =>
-    request<RunResult>("POST", `${day(p)}/run`, { input }),
+  run: (p: Puzzle, input: "sample" | "real", part: number) =>
+    request<RunResult>("POST", `${day(p)}/run`, { input, part }),
   cancelRun: () => request<null>("POST", "/run/cancel"),
   submit: (p: Puzzle, part: number, answer: string) =>
     request<{ outcome: SubmitOutcome; problem: Problem | null }>("POST", `${day(p)}/submit`, {

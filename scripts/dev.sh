@@ -17,7 +17,7 @@ touch "$marker"
 watchexec --quiet --postpone \
   --watch src --watch prompts --watch languages --watch providers \
   --watch Cargo.toml --watch Cargo.lock --watch config.example.toml \
-  -- sh -c "cargo build && touch $marker" &
+  -- "cargo build && touch $marker" &
 
 if command -v tailscale >/dev/null 2>&1; then
   tailscale status >/dev/null 2>&1 || tailscale up

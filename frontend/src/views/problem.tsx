@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import type { DayMeta, Problem } from "../api";
+import { type PartIndex, toggleAnswer, toggleSample } from "../samples";
 
 interface Props {
   problem: Problem | null;
@@ -10,6 +11,13 @@ interface Props {
   onRefresh: () => void;
 }
 
+function describeSample(meta: DayMeta, part: PartIndex): string {
+  const block = meta.sample_blocks[part];
+  if (block !== null) return `sample block ${block + 1}`;
+  if (part === 1 && meta.sample_inputs[0] !== null) return "part 1's sample";
+  return "no sample";
+}
+
 export function ProblemView({ problem, error, loading, meta, onMeta, onRefresh }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -17,7 +25,8 @@ export function ProblemView({ problem, error, loading, meta, onMeta, onRefresh }
     const root = ref.current;
     if (!root) return;
     for (const pre of root.querySelectorAll<HTMLElement>("pre[data-block]")) {
-      pre.classList.toggle("is-sample", Number(pre.dataset.block) === meta.sample_block);
+      const block = Number(pre.dataset.block);
+      pre.classList.toggle("is-sample", meta.sample_blocks.includes(block));
     }
     for (const part of root.querySelectorAll<HTMLElement>("[data-part]")) {
       const answer = meta.sample_answers[Number(part.dataset.part)];
@@ -44,36 +53,33 @@ export function ProblemView({ problem, error, loading, meta, onMeta, onRefresh }
   const onClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
     if (target.closest("a")) return;
+    const part: PartIndex | null = (() => {
+      const index = Number(target.closest<HTMLElement>("[data-part]")?.dataset.part);
+      return index === 0 || index === 1 ? index : null;
+    })();
+    if (part === null) return;
     const pre = target.closest<HTMLElement>("pre[data-block]");
     if (pre) {
-      const index = Number(pre.dataset.block);
-      onMeta({ ...meta, sample_block: index, sample_input: problem.blocks[index] ?? null });
+      onMeta(toggleSample(meta, problem, part, Number(pre.dataset.block)));
       return;
     }
-    const code = target.closest<HTMLElement>("code[data-code]");
-    const part = target.closest<HTMLElement>("[data-part]");
-    if (code && part) {
-      const partIndex = Number(part.dataset.part);
-      const answers: [string | null, string | null] = [...meta.sample_answers];
-      const text = code.textContent?.trim() ?? null;
-      answers[partIndex] = answers[partIndex] === text ? null : text;
-      onMeta({ ...meta, sample_answers: answers });
+    const code = target.closest<HTMLElement>("code[data-code]")?.textContent?.trim();
+    if (code) {
+      onMeta(toggleAnswer(meta, part, code));
     }
   };
 
   return (
     <div class="pane problem" ref={ref}>
       <p class="hint">
-        Tap a code block to use it as the sample input, and tap the sample's answer to mark it as
-        expected.
+        Tap a code block to use it as that part's sample input, and tap the sample's answer to mark
+        it as expected.
       </p>
       <div class="sample-summary">
-        <span>
-          Sample: {meta.sample_block === null ? "none" : `block ${meta.sample_block + 1}`}
-        </span>
-        {problem.parts_html.map((_, i) => (
+        {problem.parts_html.slice(0, 2).map((_, i) => (
           <span key={i}>
-            Part {i + 1} expects: {meta.sample_answers[i] ?? "–"}
+            Part {i + 1}: {describeSample(meta, i === 0 ? 0 : 1)}, expects{" "}
+            {meta.sample_answers[i] ?? "–"}
           </span>
         ))}
       </div>

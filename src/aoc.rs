@@ -63,9 +63,12 @@ pub struct Problem {
     pub text: String,
     /// The answers the user has already had accepted, by part.
     pub answers: Vec<String>,
-    /// For each part, the last emphasised inline code, which is usually the sample's answer.
+    /// For each part, the last emphasised inline code that looks like an answer, which is
+    /// usually the sample's answer.
     pub suggested_sample_answers: Vec<Option<String>>,
-    /// For each part, the first code block, which is usually the sample input.
+    /// For each part, the code block that is probably its sample input: the first one introduced
+    /// as an example, or for part 1 the first block. Part 2 often reuses part 1's sample, in
+    /// which case this is `None`.
     pub suggested_sample_blocks: Vec<Option<usize>>,
     pub blocks: Vec<String>,
 }
@@ -301,19 +304,27 @@ pub fn parse_problem(html: &str) -> Result<Problem> {
     let mut text = String::new();
     let mut suggested_sample_answers = Vec::new();
     let mut suggested_sample_blocks = Vec::new();
-    for article in &articles {
+    for (part, article) in articles.iter().enumerate() {
         let first_block = sanitiser.blocks.len();
         let mut html = String::new();
         sanitiser.children(*article, &mut html);
         parts_html.push(html);
-        suggested_sample_blocks.push((sanitiser.blocks.len() > first_block).then_some(first_block));
+
+        let pres: Vec<_> = article.select(&selector("pre")).collect();
+        let example = pres.iter().position(|pre| introduced_as_example(*pre));
+        suggested_sample_blocks.push(match example {
+            Some(i) => Some(first_block + i),
+            None if part == 0 && !pres.is_empty() => Some(first_block),
+            None => None,
+        });
 
         let emphasised_code = selector("code em, em code");
         suggested_sample_answers.push(
             article
                 .select(&emphasised_code)
                 .last()
-                .map(|e| e.text().collect::<String>().trim().to_owned()),
+                .map(|e| e.text().collect::<String>().trim().to_owned())
+                .filter(|a| !a.is_empty() && !a.contains(char::is_whitespace)),
         );
         text.push_str(&article_text(*article));
         text.push_str("\n\n");
@@ -349,6 +360,21 @@ pub fn parse_problem(html: &str) -> Result<Problem> {
         suggested_sample_blocks,
         blocks: sanitiser.blocks,
     })
+}
+
+/// Whether the paragraph before a code block ends "…example:", which is how puzzles usually
+/// introduce their sample input, as opposed to illustrations of intermediate steps.
+fn introduced_as_example(pre: ElementRef) -> bool {
+    pre.prev_siblings()
+        .find_map(ElementRef::wrap)
+        .filter(|el| el.value().name() == "p")
+        .is_some_and(|p| {
+            p.text()
+                .collect::<String>()
+                .trim_end()
+                .to_lowercase()
+                .ends_with("example:")
+        })
 }
 
 fn article_text(article: ElementRef) -> String {
@@ -574,10 +600,43 @@ mod tests {
         assert_eq!(problem.parts_html.len(), 2);
         assert_eq!(problem.answers, vec!["1234"]);
         assert_eq!(problem.blocks, vec!["1", "2 2"]);
-        assert_eq!(problem.suggested_sample_blocks, vec![Some(0), Some(1)]);
+        // Part 2 doesn't introduce its own example, so it reuses part 1's.
+        assert_eq!(problem.suggested_sample_blocks, vec![Some(0), None]);
         assert_eq!(
             problem.suggested_sample_answers,
             vec![Some("1".to_owned()), Some("4".to_owned())]
+        );
+    }
+
+    #[test]
+    fn suggests_blocks_introduced_as_examples() {
+        let page = r#"<html><body><main>
+<article class="day-desc"><h2>--- Day 9: Invented ---</h2>
+<p>A single piece looks like this:</p><pre><code>+</code></pre>
+<p>Here is a bigger example:</p><pre><code>+-+
+| |
++-+</code></pre>
+<p>After one step:</p><pre><code>+-+</code></pre>
+<p>The answer is <code><em>4</em></code>.</p></article>
+<p>Your puzzle answer was <code>17</code>.</p>
+<article class="day-desc"><h2>--- Part Two ---</h2>
+<p>Again considering the example above, it starts like this:</p><pre><code>+</code></pre>
+<p>Now the answer is <code><em>8</em></code>, or <code><em>2 * n</em></code> in general.</p></article>
+<article class="day-desc"><h2>--- Part Three ---</h2>
+<p>For example:</p><pre><code>new</code></pre>
+<p>The answer is <code><em>1</em></code>.</p></article>
+</main></body></html>"#;
+        let problem = parse_problem(page).unwrap();
+        // Part 1's example is the second block, not the illustration before it. Part 2 has no
+        // example of its own, so it reuses part 1's. The third article has its own.
+        assert_eq!(
+            problem.suggested_sample_blocks,
+            vec![Some(1), None, Some(4)]
+        );
+        // "2 * n" isn't an answer.
+        assert_eq!(
+            problem.suggested_sample_answers,
+            vec![Some("4".to_owned()), None, Some("1".to_owned())]
         );
     }
 
