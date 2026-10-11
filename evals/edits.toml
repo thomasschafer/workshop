@@ -1,0 +1,318 @@
+# Edit eval cases: run with `workshop eval` (or `mise run eval`). Each case is one call to the
+# edit model, so this isn't run in CI. `‸` marks the cursor. All code here is invented; never use
+# real Advent of Code puzzles or inputs.
+#
+# `after` is the expected file, with the cursor where the user would naturally continue; `also`
+# lists other results that are just as good. `unsure = true` means the model should make no edit.
+
+# Building expressions right to left
+
+[[case]]
+name = "before-that-operator"
+utterance = "before that dot"
+before = "solve = sum‸"
+recent = "sum"
+after = "solve = ‸. sum"
+also = ["solve = ‸ . sum"]
+
+[[case]]
+name = "before-that-function"
+utterance = "before that map read"
+before = "solve = ‸. sum"
+recent = ". "
+after = "solve = ‸map read . sum"
+
+[[case]]
+name = "before-that-with-operator"
+utterance = "before that sum dot"
+before = "part1 = ‸map read . lines"
+recent = "map read . "
+after = "part1 = ‸sum . map read . lines"
+
+[[case]]
+name = "change-placeholder"
+utterance = "change that to lines"
+before = "part1 = undefined‸"
+after = "part1 = lines‸"
+
+[[case]]
+name = "wrap-in-parens"
+utterance = "wrap that in parens"
+before = "solve = sum . map read‸"
+recent = "map read"
+after = "solve = sum . (map read)‸"
+also = ["solve = sum . (map read‸)"]
+
+[[case]]
+name = "wrap-in-function"
+utterance = "wrap that in show"
+before = "  putStrLn part1 input‸"
+recent = "part1 input"
+after = "  putStrLn (show (part1 input))‸"
+also = ["  putStrLn $ show (part1 input)‸", "  putStrLn (show (part1 input)‸)", "  putStrLn $ show $ part1 input‸"]
+
+[[case]]
+name = "delete-that"
+utterance = "delete that"
+before = "solve = ‸sum . map read . lines"
+recent = "sum . "
+after = "solve = ‸map read . lines"
+
+[[case]]
+name = "insert-before-named-word"
+utterance = "before lines put map read dot"
+before = "solve = sum . lines‸"
+after = "solve = sum . map read . ‸lines"
+also = ["solve = sum . ‸map read . lines", "solve = sum . map read . lines‸", "solve = sum . map read‸ . lines", "solve = sum . map read .‸ lines"]
+
+# Mishearings
+
+[[case]]
+name = "mishearing-foldr"
+utterance = "fold are plus zero"
+before = "total = ‸"
+after = "total = foldr (+) 0‸"
+
+[[case]]
+name = "mishearing-foldl-prime"
+utterance = "fold L prime plus zero"
+before = "total = ‸"
+after = "total = foldl' (+) 0‸"
+
+[[case]]
+name = "mishearing-mapm"
+utterance = "map M underscore print results"
+before = '''
+main = do
+  let results = [1, 2, 3]
+  ‸'''
+after = '''
+main = do
+  let results = [1, 2, 3]
+  mapM_ print results‸'''
+
+[[case]]
+name = "mishearing-input"
+utterance = "in pew"
+before = '''
+main = do
+  input <- getContents
+  print (part1 ‸)'''
+after = '''
+main = do
+  input <- getContents
+  print (part1 input‸)'''
+also = ['''
+main = do
+  input <- getContents
+  print (part1 input)‸''']
+
+# Signatures and definitions
+
+[[case]]
+name = "function-signature"
+utterance = "function solve from string to int"
+before = '''
+module Main where
+
+‸'''
+after = '''
+module Main where
+
+solve :: String -> Int
+solve = ‸'''
+
+[[case]]
+name = "signature-nested-list"
+utterance = "function parse from string to list of list of int"
+before = "‸"
+after = '''
+parse :: String -> [[Int]]
+parse = ‸'''
+
+[[case]]
+name = "signature-tuple"
+utterance = "function both from tuple of int and int to int"
+before = "‸"
+after = '''
+both :: (Int, Int) -> Int
+both = ‸'''
+
+[[case]]
+name = "camel-case-name"
+utterance = "function count trees from string to int"
+before = "‸"
+after = '''
+countTrees :: String -> Int
+countTrees = ‸'''
+
+[[case]]
+name = "where-clause"
+utterance = "where go equals fold are plus zero"
+before = "solve = go‸"
+after = '''
+solve = go
+  where
+    go = foldr (+) 0‸'''
+also = ['''
+solve = go
+  where go = foldr (+) 0‸''']
+
+[[case]]
+name = "guard"
+utterance = "new line pipe n less than zero equals string negative"
+before = '''
+classify :: Int -> String
+classify n‸'''
+after = '''
+classify :: Int -> String
+classify n
+  | n < 0 = "negative"‸'''
+
+[[case]]
+name = "rename"
+utterance = "rename solve to part one"
+before = '''
+solve :: String -> Int
+solve = sum . map read . lines‸'''
+after = '''
+part1 :: String -> Int
+part1 = sum . map read . lines‸'''
+
+[[case]]
+name = "import-qualified"
+utterance = "import qualified data dot map as M"
+before = '''
+module Main where
+
+‸'''
+after = '''
+module Main where
+
+import qualified Data.Map as M‸'''
+
+# Operators and syntax
+
+[[case]]
+name = "dollar"
+utterance = "print dollar part one input"
+before = '''
+main = do
+  input <- getContents
+  ‸
+
+part1 :: String -> Int
+part1 = undefined'''
+after = '''
+main = do
+  input <- getContents
+  print $ part1 input‸
+
+part1 :: String -> Int
+part1 = undefined'''
+
+[[case]]
+name = "fmap-operator"
+utterance = "map read dot lines angle dollar get contents"
+before = '''
+main = do
+  nums <- ‸'''
+after = '''
+main = do
+  nums <- map read . lines <$> getContents‸'''
+
+[[case]]
+name = "lambda-as-argument"
+utterance = "lambda x arrow x times two"
+before = "double = map ‸"
+after = '''double = map (\x -> x * 2)‸'''
+also = ['''double = map (\x -> x * 2‸)''']
+
+[[case]]
+name = "comparison-and-infix"
+utterance = "x mod two double equals zero"
+before = "isEven x = ‸"
+after = "isEven x = x `mod` 2 == 0‸"
+also = ["isEven x = mod x 2 == 0‸"]
+
+[[case]]
+name = "new-line-in-do-block"
+utterance = "new line let xs equals lines input"
+before = '''
+main = do
+  input <- getContents‸'''
+after = '''
+main = do
+  input <- getContents
+  let xs = lines input‸'''
+
+[[case]]
+name = "edit-by-line-number"
+utterance = "replace the brackets on lines six and seven with dollars after print"
+before = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)‸'''
+after = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print $ part1 input
+  print $ part2 input‸'''
+also = ['''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print $ part1 input‸
+  print $ part2 input''']
+
+# Requests the model must refuse, or can't be sure about
+
+[[case]]
+name = "refuse-write-function"
+utterance = "write a function that sorts a list"
+before = "module Main where\n\n‸"
+unsure = true
+
+[[case]]
+name = "refuse-finish"
+utterance = "finish part two for me"
+before = '''
+part2 :: String -> Int
+part2 = ‸'''
+unsure = true
+
+[[case]]
+name = "refuse-algorithm"
+utterance = "implement dijkstra here"
+before = "shortest = ‸"
+unsure = true
+
+[[case]]
+name = "refuse-optimise"
+utterance = "make it faster"
+before = "solve = length . filter isGood . subsequences‸"
+unsure = true
+
+[[case]]
+name = "unsure-garbled"
+utterance = "the the blah of on"
+before = "solve = sum‸"
+unsure = true
+
+[[case]]
+name = "unsure-no-target"
+utterance = "change it"
+before = '''
+part1 = sum . map read . lines
+
+part2 = ‸'''
+unsure = true

@@ -3,6 +3,7 @@ mod config;
 mod discuss;
 mod doctor;
 mod edit;
+mod eval;
 mod language;
 mod lsp;
 mod paths;
@@ -44,6 +45,15 @@ enum Command {
     },
     /// Check that everything Workshop needs is installed and set up.
     Doctor,
+    /// Run the edit model against example utterances, to check changes to the edit prompt or
+    /// dictation hints. Each case is a real model call.
+    Eval {
+        #[arg(default_value = "evals/edits.toml")]
+        cases: std::path::PathBuf,
+        /// Only run cases whose name contains this.
+        #[arg(long)]
+        filter: Option<String>,
+    },
     /// Print the link, including the access token, for opening Workshop.
     Token {
         /// Set up `tailscale serve` and print the link and QR code for your phone.
@@ -71,6 +81,12 @@ async fn main() -> Result<()> {
             let checks = doctor::run(&config, &paths, aoc_session.is_some()).await;
             doctor::print(&checks);
             if checks.iter().any(|c| c.status == doctor::Status::Fail) {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Command::Eval { cases, filter } => {
+            if !eval::run(&config, &paths.cache_dir, &cases, filter.as_deref()).await? {
                 std::process::exit(1);
             }
             Ok(())

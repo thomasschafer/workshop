@@ -31,6 +31,10 @@ else
 fi
 '''
 
+[tasks.eval]
+description = "Check the edit model against evals/edits.toml (makes real model calls)"
+run = "cargo run --quiet -- eval"
+
 [tasks.build]
 description = "Build the release binary with the frontend embedded"
 depends = ["build-frontend"]
