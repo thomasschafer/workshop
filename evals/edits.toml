@@ -457,3 +457,38 @@ part1 = sum . map dist . pairs . parse
 
 part2 :: String -> Int
 part2 = undefined‸''']
+
+[[case]]
+name = "dollars-to-parens-on-lines"
+utterance = "can you replace the dollars online six and seven with open (and add a closed) at the end of both Lines"
+before = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print $ part1 input‸
+  print $ part2 input'''
+after = '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)‸
+  print (part2 input)'''
+also = ['''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)‸''', '''
+module Main where
+
+main :: IO ()
+main = do
+  input <- getContents
+  print ‸(part1 input)
+  print (part2 input)''']
