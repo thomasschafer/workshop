@@ -68,7 +68,10 @@ pub async fn relay(socket: WebSocket, command: &[String], root: &Path) -> Result
     let to_server = async {
         while let Some(message) = ws_rx.next().await {
             heard();
-            match message? {
+            // Phones drop connections without a closing handshake when they sleep or reload,
+            // which is a normal way for the session to end.
+            let Ok(message) = message else { break };
+            match message {
                 Message::Text(text) => {
                     let framed = format!("Content-Length: {}\r\n\r\n{}", text.len(), text.as_str());
                     stdin.write_all(framed.as_bytes()).await?;
