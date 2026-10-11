@@ -119,7 +119,10 @@ async fn serve(
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .with_context(|| format!("listening on {bind}"))?;
-    println!("Workshop is running. Open {}", open_url(bind, &token));
+    println!(
+        "Workshop is running. On this computer, open {}",
+        open_url(bind, &token)
+    );
     if use_tailscale {
         if !(bind.ip().is_loopback() || bind.ip().is_unspecified()) {
             anyhow::bail!("`--tailscale` forwards to 127.0.0.1, so Workshop must listen there");

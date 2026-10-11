@@ -12,9 +12,18 @@ pub async fn serve(port: u16) -> Result<String> {
         bail!("`--tailscale` needs the tailscale CLI, which isn't on your PATH");
     }
     let target = format!("http://127.0.0.1:{port}");
-    run(&["serve", "--bg", &target])
+    println!("Setting up `tailscale serve`…");
+    // Tailscale's output is shown rather than captured, because it can ask the user to do
+    // something first, such as enabling Serve for their tailnet, and waits until they have.
+    let status = Command::new("tailscale")
+        .args(["serve", "--bg", &target])
+        .stdin(Stdio::null())
+        .status()
         .await
-        .context("couldn't start `tailscale serve`; is Tailscale running and logged in?")?;
+        .context("running tailscale")?;
+    if !status.success() {
+        bail!("`tailscale serve` failed ({status}); is Tailscale running and logged in?");
+    }
     let status = run(&["status", "--json"]).await?;
     let name = dns_name(&status)?;
     Ok(format!("https://{name}"))
