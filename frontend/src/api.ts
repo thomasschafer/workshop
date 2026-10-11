@@ -13,6 +13,12 @@ export interface UiState {
   discuss_model: string | null;
 }
 
+/** Something to say, and the code it produces. */
+export interface DictationExample {
+  say: string;
+  result: string;
+}
+
 export interface Snippet {
   name: string;
   body: string;
@@ -27,6 +33,7 @@ export interface Bootstrap {
     lsp_language_id: string;
     has_lsp: boolean;
     root_uri: string;
+    examples: DictationExample[];
   };
   snippets: Snippet[];
   discuss_models: string[];

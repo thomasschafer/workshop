@@ -1,18 +1,30 @@
-export function Help() {
+import type { DictationExample } from "../api";
+
+/** The push-to-talk button's label, which the help refers to. */
+export const TALK_LABEL = "Hold to talk";
+
+export function Help({ language, examples }: { language: string; examples: DictationExample[] }) {
   return (
     <div class="help">
       <section>
         <h2>Editing by voice</h2>
         <p>
-          Hold the big button, say the code roughly as you'd type it, and let go. Edits happen at
-          the cursor, so tap in the code first to put it where you want.
+          Hold the "{TALK_LABEL}" button, say the code roughly as you'd type it, and let go. Edits
+          happen at the cursor, so tap in the code first to put it where you want.
         </p>
-        <ul>
-          <li>"function solve from string to int"</li>
-          <li>"solve equals lines", then "before that map read dot"</li>
-          <li>"wrap that in parens", "delete that"</li>
-          <li>"on line six change int to integer"</li>
-        </ul>
+        {examples.length > 0 ? (
+          <>
+            <p>For example, in {language}:</p>
+            <ol class="examples">
+              {examples.map((e) => (
+                <li key={e.say}>
+                  <span class="say">"{e.say}"</span>
+                  <pre class="example-result">{e.result}</pre>
+                </li>
+              ))}
+            </ol>
+          </>
+        ) : null}
         <p>
           Workshop only writes what you say. Ask it to write the solution for you and it will
           decline, and if it isn't sure what you meant it asks rather than guessing. The last thing

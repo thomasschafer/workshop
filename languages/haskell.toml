@@ -42,3 +42,30 @@ dictation_hints = '''
 - Numbers in names are spoken as words but written as digits: "part one" is `part1`, "day two" is `day2`, unless a name in the file already says otherwise.
 - Common mishearings: "fold are" or "fold R" is `foldr`, "fold L prime" is `foldl'`, "map M underscore" is `mapM_`, "in pew" is `input`, "read MaybeD" is `readMaybe`.
 '''
+
+# Shown in the app's help. Each `result` is the line as it reads after saying `say`.
+[[examples]]
+say = "function solve from string to int"
+result = """
+solve :: String -> Int
+solve = """
+
+[[examples]]
+say = "solve equals lines"
+result = "solve = lines"
+
+[[examples]]
+say = "before that map read dot"
+result = "solve = map read . lines"
+
+[[examples]]
+say = "before that sum dot"
+result = "solve = sum . map read . lines"
+
+[[examples]]
+say = "print dollar solve input"
+result = "print $ solve input"
+
+[[examples]]
+say = "on line one change int to integer"
+result = "solve :: String -> Integer"

@@ -761,3 +761,63 @@ code {
   overflow: auto;
   font-size: 12px;
 }
+
+/* Modal */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.modal-dismiss {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  cursor: default;
+}
+
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 34rem;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.help .examples {
+  padding-left: 22px;
+  margin: 6px 0;
+}
+
+.help .examples li {
+  margin-bottom: 8px;
+}
+
+.help .say {
+  color: var(--fg);
+}
+
+.help .example-result {
+  margin: 2px 0 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}

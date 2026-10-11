@@ -21,7 +21,8 @@ import {
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
 import { DiscussView } from "./views/discuss";
-import { Help } from "./views/help";
+import { Help, TALK_LABEL } from "./views/help";
+import { Modal } from "./views/modal";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
 import {
@@ -740,12 +741,13 @@ export function App({ boot }: { boot: Bootstrap }) {
             }}
           />
         ) : null}
-        {sheet ? (
-          <SheetFrame
-            title={sheet === "run" ? "Run" : sheet === "help" ? "How Workshop works" : "Settings"}
-            onClose={() => setSheet(null)}
-          >
-            {sheet === "help" ? <Help /> : null}
+        {sheet === "help" ? (
+          <Modal title="How Workshop works" onClose={() => setSheet(null)}>
+            <Help language={boot.language.name} examples={boot.language.examples} />
+          </Modal>
+        ) : null}
+        {sheet === "run" || sheet === "settings" ? (
+          <SheetFrame title={sheet === "run" ? "Run" : "Settings"} onClose={() => setSheet(null)}>
             {sheet === "run" ? (
               <RunSheet
                 state={run}
@@ -835,7 +837,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             onPointerCancel={() => void stopTalking()}
             onContextMenu={(e) => e.preventDefault()}
           >
-            {listening ? "Release to send" : "Hold to talk"}
+            {listening ? "Release to send" : TALK_LABEL}
           </button>
           <button
             type="button"

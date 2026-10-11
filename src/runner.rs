@@ -231,6 +231,7 @@ mod tests {
             lsp: None,
             template: String::new(),
             dictation_hints: String::new(),
+            examples: Vec::new(),
         }
     }
 

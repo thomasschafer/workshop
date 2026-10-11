@@ -279,6 +279,7 @@ struct LanguageInfo {
     lsp_language_id: String,
     has_lsp: bool,
     root_uri: String,
+    examples: Vec<crate::language::DictationExample>,
 }
 
 async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
@@ -297,6 +298,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
             lsp_language_id: language.lsp_language_id.clone(),
             has_lsp,
             root_uri: file_uri(&app.config.solutions_dir),
+            examples: language.examples.clone(),
         },
         snippets: app.config.snippets.clone(),
         discuss_models: app.config.models.discuss.models.clone(),
