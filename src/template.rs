@@ -63,13 +63,15 @@ fn render_placeholder(spec: &str, vars: &Vars, template: &str) -> Result<String>
     };
     match format {
         None => Ok(value.clone()),
+        // A quoted TOML string, for passing text through a CLI's `-c key=value` settings.
+        Some("toml") => Ok(toml::Value::String(value.clone()).to_string()),
         Some(format) => {
             let Some(width) = format
                 .strip_prefix('0')
                 .and_then(|w| w.parse::<usize>().ok())
             else {
                 bail!(
-                    "unsupported format {{{spec}}} in {template:?}; only zero padding like {{day:02}} is supported"
+                    "unsupported format {{{spec}}} in {template:?}; use zero padding like {{day:02}}, or {{name:toml}}"
                 );
             };
             Ok(format!("{value:0>width$}"))
@@ -113,6 +115,17 @@ mod tests {
         assert!(render("{day", &vars()).is_err());
         assert!(render("{day:x}", &vars()).is_err());
         assert!(render("day}", &vars()).is_err());
+    }
+
+    #[test]
+    fn quotes_toml_strings() {
+        let vars = Vars::new().set("prompt", "Say \"hi\"\nthen ‸ stop\\");
+        let rendered = render("instructions={prompt:toml}", &vars).unwrap();
+        let parsed: toml::Table = toml::from_str(&rendered).unwrap();
+        assert_eq!(
+            parsed["instructions"].as_str(),
+            Some("Say \"hi\"\nthen ‸ stop\\")
+        );
     }
 
     #[test]

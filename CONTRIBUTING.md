@@ -97,6 +97,7 @@ command = ["acme", "chat", "--model", "{model}", "--system", "{system_prompt}", 
 input = "stdin"
 # "text": all of stdout is the reply.
 # "claude-json" and "claude-stream-json": Claude Code's JSON output formats.
+# "codex-json": Codex's `exec --json` events. The call is stopped if the model uses a tool.
 output = "text"
 # Start the next process ahead of time to hide start-up latency. Only for stdin input, and only
 # if the CLI waits for stdin rather than giving up when no input arrives quickly.
@@ -111,7 +112,7 @@ provider = "acme"
 model = "acme-small"
 ```
 
-Use cheap, fast models for editing, since every utterance is a call. For a new input or output format, add a variant to `InputMode` or `OutputMode` in `src/provider.rs` with tests for its parsing.
+Use cheap, fast models for editing, since every utterance is a call. If the CLI can name its models (as `codex debug models` does), set `model_catalog` to that command, and a family name such as "luna" will always mean the newest model in the family. See `providers/codex.toml` for a preset built this way. For a new input or output format, add a variant to `InputMode` or `OutputMode` in `src/provider.rs` with tests for its parsing.
 
 ## Pull requests
 

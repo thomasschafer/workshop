@@ -47,7 +47,8 @@ export function Help() {
         <p>
           Your program reads the input on stdin and prints part 1's answer on the first line and
           part 2's on the second. Press ▶ to run on the sample. When it matches, run on your real
-          input, then submit the answer it gives.
+          input, then submit the answer it gives. Some older puzzles have no usable example; then
+          run on your real input straight away.
         </p>
       </section>
 

@@ -23,7 +23,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 
 ## Requirements
 
-- A model CLI that you're logged in to. Workshop uses [Claude Code](https://claude.com/claude-code) by default, through your existing subscription. Tools are disabled for every call, so the model can only reply with text.
+- A model CLI that you're logged in to, used through your existing subscription: [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex). Workshop sets itself up for whichever you have.
 - The toolchain for your language. Haskell is supported first: GHC, plus haskell-language-server for errors and types.
 - Your Advent of Code session cookie.
 - A way to reach your laptop from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
@@ -60,12 +60,12 @@ dir = "~/aoc"          # a git repo, created on first use
 language = "haskell"
 
 [models.edit]
-provider = "claude"
-model = "haiku"        # aliases always use the latest version
+provider = "claude"    # or "codex"
+model = "haiku"        # always the latest; for Codex, a family such as "luna"
 
 [models.discuss]
 provider = "claude"
-models = ["sonnet", "opus", "fable"]
+models = ["sonnet", "opus", "fable"]    # for Codex, ["sol", "astra"]
 
 [[snippets]]
 name = "parse ints"
@@ -78,7 +78,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for adding a language or a model CLI.
 
 ## Security
 
-Workshop runs code and spends your model subscription, so it only listens on localhost by default and every request needs the token. Use `workshop serve --tailscale` rather than binding to other interfaces. See [SECURITY.md](SECURITY.md) to report a vulnerability.
+Workshop runs code and spends your model subscription, so it only listens on localhost by default and every request needs the token. Use `workshop serve --tailscale` rather than binding to other interfaces.
+
+The model never gets to run commands or change files. With Claude Code, it's given no tools at all. Codex can't be run entirely without tools, so Workshop turns off every tool it can, runs Codex in its read-only sandbox, and stops it, making no edit, the moment it starts to use one.
+
+See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Advent of Code
 

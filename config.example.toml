@@ -21,14 +21,18 @@ user_agent = "github.com/thomasschafer/workshop"
 [run]
 timeout_secs = 60
 
+# "claude" uses Claude Code and "codex" uses OpenAI's Codex CLI, each with your existing login.
+# Workshop chose whichever you had installed when it wrote this file.
 [models.edit]
 provider = "claude"
-# Model aliases such as "haiku" always resolve to the latest version.
+# Aliases always mean the latest version: "haiku" for Claude, or a family name such as "luna"
+# for Codex.
 model = "haiku"
 
 [models.discuss]
 provider = "claude"
-# The first is the default; you can switch between them in the app.
+# The first is the default; you can switch between them in the app. For Codex, try
+# ["sol", "astra"].
 models = ["sonnet", "opus", "fable"]
 
 # Snippets you can insert by saying "snippet <name>", or from the snippet menu.

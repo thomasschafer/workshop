@@ -29,6 +29,10 @@ pub struct ProviderConfig {
     pub auth_check_command: Option<Vec<String>>,
     #[serde(default)]
     pub install_hint: Option<String>,
+    /// Prints the CLI's model catalog as JSON (`{"models": [{"slug": …}]}`), so a family name
+    /// such as "luna" can be resolved to the newest model in that family.
+    #[serde(default)]
+    pub model_catalog: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -51,9 +55,15 @@ pub enum OutputMode {
     ClaudeJson,
     /// Claude Code `--output-format stream-json`.
     ClaudeStreamJson,
+    /// Codex `exec --json`. Codex can't run without tools, so the process is stopped, and the
+    /// call fails, as soon as it starts using one.
+    CodexJson,
 }
 
-const BUILTIN: &[(&str, &str)] = &[("claude", include_str!("../providers/claude.toml"))];
+const BUILTIN: &[(&str, &str)] = &[
+    ("claude", include_str!("../providers/claude.toml")),
+    ("codex", include_str!("../providers/codex.toml")),
+];
 
 pub fn builtin_providers() -> Result<Vec<(String, ProviderConfig)>> {
     BUILTIN
@@ -116,6 +126,8 @@ pub struct ProviderRunner {
     provider: ProviderConfig,
     working_dir: PathBuf,
     spare: Mutex<Option<Spare>>,
+    /// Family names already resolved to concrete models.
+    resolved: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl ProviderRunner {
@@ -126,7 +138,65 @@ impl ProviderRunner {
             provider,
             working_dir,
             spare: Mutex::new(None),
+            resolved: Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    fn ensure_working_dir(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.working_dir)
+            .with_context(|| format!("creating {}", self.working_dir.display()))
+    }
+
+    /// Resolves a model family name, such as "luna", to the newest model in that family.
+    async fn resolve(&self, spec: &CallSpec) -> CallSpec {
+        let Some(command) = &self.provider.model_catalog else {
+            return spec.clone();
+        };
+        let mut resolved = self.resolved.lock().await;
+        if let Some(model) = resolved.get(&spec.model) {
+            return CallSpec {
+                model: model.clone(),
+                ..spec.clone()
+            };
+        }
+        let model = match self.catalog(command).await {
+            Ok(slugs) => {
+                newest_in_family(&slugs, &spec.model).unwrap_or_else(|| spec.model.clone())
+            }
+            Err(err) => {
+                tracing::warn!("couldn't list models to resolve {:?}: {err:#}", spec.model);
+                return spec.clone();
+            }
+        };
+        if model != spec.model {
+            tracing::info!("using {model} for {:?}", spec.model);
+        }
+        resolved.insert(spec.model.clone(), model.clone());
+        CallSpec {
+            model,
+            ..spec.clone()
+        }
+    }
+
+    async fn catalog(&self, command: &[String]) -> Result<Vec<String>> {
+        let (program, args) = command
+            .split_first()
+            .context("empty model catalog command")?;
+        self.ensure_working_dir()?;
+        let output = tokio::time::timeout(
+            Duration::from_secs(30),
+            process::command(program)
+                .args(args)
+                .current_dir(&self.working_dir)
+                .stdin(Stdio::null())
+                .output(),
+        )
+        .await
+        .context("listing models timed out")??;
+        if !output.status.success() {
+            bail!("`{}` failed", command.join(" "));
+        }
+        parse_model_catalog(&String::from_utf8_lossy(&output.stdout))
     }
 
     /// Starts a process for `spec` so the next `call` with the same spec skips start-up.
@@ -134,6 +204,7 @@ impl ProviderRunner {
         if !self.provider.prespawn {
             return Ok(());
         }
+        let spec = &self.resolve(spec).await;
         let mut spare = self.spare.lock().await;
         if let Some(existing) = spare.as_mut()
             && existing.spec == *spec
@@ -150,6 +221,7 @@ impl ProviderRunner {
 
     pub async fn call(&self, spec: &CallSpec, prompt: &str, timeout: Duration) -> Result<Reply> {
         let started = std::time::Instant::now();
+        let spec = &self.resolve(spec).await;
         let process = match self.take_spare(spec).await? {
             Some(process) => process,
             None => self.spawn(spec, Some(prompt))?,
@@ -167,7 +239,7 @@ impl ProviderRunner {
         };
         Ok(Reply {
             text,
-            model,
+            model: model.or_else(|| Some(spec.model.clone())),
             elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         })
     }
@@ -194,8 +266,7 @@ impl ProviderRunner {
         }
         let args = template::render_all(&self.provider.command, &vars)?;
         let (program, rest) = args.split_first().context("empty provider command")?;
-        std::fs::create_dir_all(&self.working_dir)
-            .with_context(|| format!("creating {}", self.working_dir.display()))?;
+        self.ensure_working_dir()?;
         GroupedChild::spawn(
             process::command(program)
                 .args(rest)
@@ -287,6 +358,44 @@ impl ProviderRunner {
                     None => Err(anyhow::anyhow!("model CLI exited without a result")),
                 }
             }
+            OutputMode::CodexJson => {
+                let mut lines = BufReader::new(stdout).lines();
+                let mut outcome = None;
+                while let Some(line) = lines.next_line().await? {
+                    match parse_codex_event(&line)? {
+                        CodexEvent::Message(text) => {
+                            outcome = Some(Ok(text));
+                            break;
+                        }
+                        CodexEvent::Tool(kind) => {
+                            // Dropping the process kills it along with anything it started.
+                            stderr_task.abort();
+                            drop(process);
+                            tracing::warn!("the model tried to use a tool ({kind}); stopped it");
+                            bail!(
+                                "the model tried to use a tool ({kind}), which Workshop doesn't allow, so it was stopped and nothing changed"
+                            );
+                        }
+                        CodexEvent::Failed(message) => {
+                            outcome = Some(Err(anyhow::anyhow!("the model failed: {message}")));
+                            break;
+                        }
+                        CodexEvent::Notice(message) => {
+                            tracing::debug!("codex: {message}");
+                        }
+                        CodexEvent::Other => {}
+                    }
+                }
+                match outcome {
+                    Some(Ok(text)) => {
+                        stderr_task.abort();
+                        drop(process);
+                        return Ok((text, None));
+                    }
+                    Some(Err(err)) => Err(err),
+                    None => Err(anyhow::anyhow!("model CLI exited without a reply")),
+                }
+            }
         };
 
         let status = child.wait().await?;
@@ -300,6 +409,85 @@ impl ProviderRunner {
             Err(err) => Err(err),
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CodexEvent {
+    /// The model's reply.
+    Message(String),
+    /// The model started using a tool, which must stop the call.
+    Tool(String),
+    Failed(String),
+    Notice(String),
+    Other,
+}
+
+/// Item types that aren't tools. Anything else Codex reports starting is treated as a tool, so
+/// new kinds of tool are refused rather than allowed by default.
+const CODEX_SAFE_ITEMS: &[&str] = &["agent_message", "reasoning", "error"];
+
+fn parse_codex_event(line: &str) -> Result<CodexEvent> {
+    let event: serde_json::Value = serde_json::from_str(line)
+        .with_context(|| format!("model CLI printed a line that isn't JSON: {line}"))?;
+    let string =
+        |v: Option<&serde_json::Value>| v.and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+    let kind = event
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or_default();
+    Ok(match kind {
+        "item.started" | "item.updated" | "item.completed" => {
+            let item = event.get("item");
+            let item_type = string(item.and_then(|i| i.get("type")));
+            match item_type.as_str() {
+                "agent_message" if kind == "item.completed" => {
+                    CodexEvent::Message(string(item.and_then(|i| i.get("text"))))
+                }
+                "error" => CodexEvent::Notice(string(item.and_then(|i| i.get("message")))),
+                t if CODEX_SAFE_ITEMS.contains(&t) => CodexEvent::Other,
+                _ => CodexEvent::Tool(item_type),
+            }
+        }
+        "turn.failed" => {
+            CodexEvent::Failed(string(event.get("error").and_then(|e| e.get("message"))))
+        }
+        "error" => CodexEvent::Failed(string(event.get("message"))),
+        _ => CodexEvent::Other,
+    })
+}
+
+fn parse_model_catalog(json: &str) -> Result<Vec<String>> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).context("the model catalog isn't valid JSON")?;
+    let models = value
+        .get("models")
+        .and_then(|m| m.as_array())
+        .context("the model catalog has no `models` list")?;
+    Ok(models
+        .iter()
+        .filter(|m| m.get("visibility").and_then(|v| v.as_str()) != Some("hide"))
+        .filter_map(|m| m.get("slug").and_then(|s| s.as_str()).map(str::to_owned))
+        .collect())
+}
+
+/// The newest model whose name ends in `-{family}`, comparing the version numbers in the names,
+/// or `family` itself if it's already a model's full name.
+fn newest_in_family(slugs: &[String], family: &str) -> Option<String> {
+    if slugs.iter().any(|s| s == family) {
+        return Some(family.to_owned());
+    }
+    let suffix = format!("-{family}");
+    let version = |slug: &str| -> Vec<u32> {
+        slug.split(|c: char| !c.is_ascii_digit())
+            .filter(|part| !part.is_empty())
+            .filter_map(|part| part.parse().ok())
+            .collect()
+    };
+    slugs
+        .iter()
+        .filter(|s| s.ends_with(&suffix))
+        .max_by_key(|s| version(s))
+        .cloned()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -400,6 +588,7 @@ mod tests {
             version_command: None,
             auth_check_command: None,
             install_hint: None,
+            model_catalog: None,
         };
         provider.validate().unwrap();
         provider.prespawn = true;
@@ -427,6 +616,74 @@ mod tests {
                 .to_string()
                 .contains("Not logged in")
         );
+    }
+
+    #[test]
+    fn stops_codex_at_any_tool() {
+        let event = |t: &str, item: &str| format!(r#"{{"type":"{t}","item":{item}}}"#);
+        assert_eq!(
+            parse_codex_event(&event(
+                "item.completed",
+                r#"{"type":"agent_message","text":"{}"}"#
+            ))
+            .unwrap(),
+            CodexEvent::Message("{}".into())
+        );
+        for tool in [
+            "command_execution",
+            "file_change",
+            "mcp_tool_call",
+            "collab_tool_call",
+            "something_new",
+        ] {
+            assert_eq!(
+                parse_codex_event(&event("item.started", &format!(r#"{{"type":"{tool}"}}"#)))
+                    .unwrap(),
+                CodexEvent::Tool(tool.into()),
+                "{tool}"
+            );
+        }
+        assert_eq!(
+            parse_codex_event(&event("item.started", r#"{"type":"reasoning"}"#)).unwrap(),
+            CodexEvent::Other
+        );
+        assert_eq!(
+            parse_codex_event(&event(
+                "item.completed",
+                r#"{"type":"error","message":"note"}"#
+            ))
+            .unwrap(),
+            CodexEvent::Notice("note".into())
+        );
+        assert_eq!(
+            parse_codex_event(r#"{"type":"turn.failed","error":{"message":"quota"}}"#).unwrap(),
+            CodexEvent::Failed("quota".into())
+        );
+        assert_eq!(
+            parse_codex_event(r#"{"type":"turn.started"}"#).unwrap(),
+            CodexEvent::Other
+        );
+    }
+
+    #[test]
+    fn resolves_model_families_to_the_newest() {
+        let slugs = parse_model_catalog(
+            r#"{"models":[{"slug":"gpt-6-luna","visibility":"list"},{"slug":"gpt-6.1-sol","visibility":"list"},{"slug":"gpt-6-sol","visibility":"list"},{"slug":"gpt-7-luna","visibility":"hide"},{"slug":"gpt-5.6-luna","visibility":"list"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            newest_in_family(&slugs, "luna").as_deref(),
+            Some("gpt-6-luna")
+        );
+        assert_eq!(
+            newest_in_family(&slugs, "sol").as_deref(),
+            Some("gpt-6.1-sol")
+        );
+        assert_eq!(
+            newest_in_family(&slugs, "gpt-6-sol").as_deref(),
+            Some("gpt-6-sol")
+        );
+        assert_eq!(newest_in_family(&slugs, "astra"), None);
     }
 
     #[test]
@@ -478,6 +735,7 @@ mod tests {
             version_command: None,
             auth_check_command: None,
             install_hint: None,
+            model_catalog: None,
         };
         let runner = ProviderRunner::new(provider, dir.path().to_owned()).unwrap();
         let spec = CallSpec {

@@ -153,11 +153,23 @@ async fn check_provider(config: &Config, id: &str) -> Vec<Check> {
     let name = format!("Model CLI ({id})");
     let program = &provider.command[0];
     if find_program(program).is_none() {
+        let alternatives: Vec<&str> = config
+            .providers
+            .iter()
+            .filter(|(other, p)| *other != id && find_program(&p.command[0]).is_some())
+            .map(|(other, _)| other.as_str())
+            .collect();
+        let fix = match alternatives.first() {
+            Some(other) => format!(
+                "{install_hint} Or use `{other}`, which is installed: set `provider = \"{other}\"` under [models.edit] and [models.discuss] in your config."
+            ),
+            None => install_hint,
+        };
         return vec![Check::problem(
             Status::Fail,
             name,
             format!("`{program}` isn't on your PATH"),
-            install_hint,
+            fix,
         )];
     }
     let mut checks = Vec::new();

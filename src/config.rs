@@ -145,7 +145,9 @@ impl Config {
     pub fn load_or_init(paths: &Paths) -> Result<Self> {
         let file = paths.config_file();
         if !file.exists() {
-            paths::write_atomic(&file, EXAMPLE.as_bytes())?;
+            let prefer_codex = crate::doctor::find_program("claude").is_none()
+                && crate::doctor::find_program("codex").is_some();
+            paths::write_atomic(&file, initial_config(prefer_codex).as_bytes())?;
             tracing::info!("wrote an example config to {}", file.display());
         }
         let source = std::fs::read_to_string(&file)
@@ -209,6 +211,31 @@ impl Config {
     }
 }
 
+/// The commented example config, set up for Codex instead of Claude Code if that's what the
+/// user has.
+fn initial_config(prefer_codex: bool) -> String {
+    if !prefer_codex {
+        return EXAMPLE.to_owned();
+    }
+    let replacements = [
+        ("provider = \"claude\"", "provider = \"codex\""),
+        ("model = \"haiku\"", "model = \"luna\""),
+        (
+            "models = [\"sonnet\", \"opus\", \"fable\"]",
+            "models = [\"sol\", \"astra\"]",
+        ),
+    ];
+    let mut config = EXAMPLE.to_owned();
+    for (from, to) in replacements {
+        assert!(
+            config.contains(from),
+            "the example config no longer contains {from}"
+        );
+        config = config.replace(from, to);
+    }
+    config
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,6 +248,17 @@ mod tests {
         assert_eq!(config.models.edit.model, "haiku");
         assert_eq!(config.models.discuss.models.len(), 3);
         assert!(config.providers.contains_key("claude"));
+    }
+
+    #[test]
+    fn initial_config_can_use_codex() {
+        let claude = Config::parse(&initial_config(false)).unwrap();
+        assert_eq!(claude.models.edit.provider, "claude");
+        let codex = Config::parse(&initial_config(true)).unwrap();
+        assert_eq!(codex.models.edit.provider, "codex");
+        assert_eq!(codex.models.edit.model, "luna");
+        assert_eq!(codex.models.discuss.provider, "codex");
+        assert_eq!(codex.models.discuss.models, vec!["sol", "astra"]);
     }
 
     #[test]

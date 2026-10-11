@@ -757,6 +757,7 @@ export function App({ boot }: { boot: Bootstrap }) {
                 onSubmit={(answer) => void doSubmit(answer)}
                 onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}
                 finalStar={problem?.final_star ?? null}
+                hasSample={sampleInput(meta, part === 1 ? 0 : 1) !== null}
                 onClaimFinalStar={() => void doSubmit("0")}
               />
             ) : null}

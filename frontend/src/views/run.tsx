@@ -32,6 +32,8 @@ interface Props {
   onDismissSubmit: () => void;
   finalStar: FinalStar | null;
   onClaimFinalStar: () => void;
+  /** Whether there's a sample input to run against. Older puzzles often have none. */
+  hasSample: boolean;
 }
 
 export function describeEnding(result: RunResult): string {
@@ -71,6 +73,7 @@ export function RunSheet({
   onDismissSubmit,
   finalStar,
   onClaimFinalStar,
+  hasSample,
 }: Props) {
   const last = state.last;
   const partIndex = part === null ? null : part - 1;
@@ -115,7 +118,7 @@ export function RunSheet({
         <button
           type="button"
           class="pill"
-          disabled={state.running !== null}
+          disabled={state.running !== null || !hasSample}
           onClick={() => onRun("sample")}
         >
           {state.running === "sample" ? "Running…" : "Run sample"}
@@ -166,7 +169,11 @@ export function RunSheet({
           {last.result.answers.length > 2 ? <pre class="output">{last.result.stdout}</pre> : null}
         </div>
       ) : (
-        <p class="muted">Line 1 of your program's output is the part 1 answer; line 2 is part 2.</p>
+        <p class="muted">
+          {hasSample
+            ? "Line 1 of your program's output is the part 1 answer; line 2 is part 2."
+            : "No sample input is chosen. Tap code in the puzzle to use it as the sample, or run on your real input."}
+        </p>
       )}
 
       {canSubmit && answer !== null && part !== null ? (
