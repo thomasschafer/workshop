@@ -1,4 +1,3 @@
-import type { LSPClient } from "@codemirror/lsp-client";
 import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
@@ -10,10 +9,17 @@ import {
   type Puzzle,
   type Tab,
   type Turn,
+  type UiState,
 } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
-import { CodeEditor, connectLanguageServer, type Diagnostics, hoverText } from "./editor";
-import { CodeSaver, debounced, type SaveStatus } from "./saver";
+import {
+  CodeEditor,
+  type Diagnostics,
+  hoverText,
+  LanguageServerConnection,
+  type LanguageServerStatus,
+} from "./editor";
+import { CodeSaver, debounced, LatestSaver, type SaveStatus } from "./saver";
 import { DiscussView } from "./views/discuss";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
@@ -108,7 +114,15 @@ export function App({ boot }: { boot: Bootstrap }) {
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<CodeEditor | null>(null);
   const saver = useRef<CodeSaver | null>(null);
-  const lsp = useRef<LSPClient | null>(null);
+  const [lspStatus, setLspStatus] = useState<LanguageServerStatus>("connecting");
+  const lsp = useMemo(
+    () =>
+      boot.language.has_lsp
+        ? new LanguageServerConnection(boot.language.root_uri, setLspStatus)
+        : null,
+    [boot],
+  );
+  useEffect(() => () => lsp?.close(), [lsp]);
   const fileUri = useRef<string | null>(null);
   const metaRef = useRef(meta);
   const puzzleRef = useRef(puzzle);
@@ -126,15 +140,21 @@ export function App({ boot }: { boot: Bootstrap }) {
   latest.current = { tab, notes, turns, run };
   puzzleRef.current = puzzle;
 
-  const saveMetaSoon = useMemo(
-    () =>
-      debounced(({ p, m }: { p: Puzzle; m: DayMeta }) => {
-        api
-          .saveMeta(p, m)
-          .catch((e) => setFeedback({ kind: "error", text: `Couldn't save: ${message(e)}` }));
-      }, 600),
-    [],
-  );
+  // One saver per puzzle, so switching puzzles never drops the previous one's unsaved changes.
+  const metaSavers = useRef(new Map<string, LatestSaver<DayMeta>>());
+  const saveMetaSoon = useCallback(({ p, m }: { p: Puzzle; m: DayMeta }) => {
+    const key = `${p.year}-${p.day}`;
+    let saver = metaSavers.current.get(key);
+    if (!saver) {
+      saver = new LatestSaver<DayMeta>(
+        (meta) => api.saveMeta(p, meta),
+        600,
+        (e) => setFeedback({ kind: "error", text: `Couldn't save, retrying: ${e}` }),
+      );
+      metaSavers.current.set(key, saver);
+    }
+    saver.schedule(m);
+  }, []);
   const updateMeta = useCallback(
     (next: DayMeta) => {
       metaRef.current = next;
@@ -144,15 +164,20 @@ export function App({ boot }: { boot: Bootstrap }) {
     [saveMetaSoon],
   );
 
-  const saveNotesSoon = useMemo(
-    () =>
-      debounced(({ p, text }: { p: Puzzle; text: string }) => {
-        api
-          .saveNotes(p, text)
-          .catch((e) => setFeedback({ kind: "error", text: `Couldn't save notes: ${message(e)}` }));
-      }, 500),
-    [],
-  );
+  const notesSavers = useRef(new Map<string, LatestSaver<string>>());
+  const saveNotesSoon = useCallback(({ p, text }: { p: Puzzle; text: string }) => {
+    const key = `${p.year}-${p.day}`;
+    let saver = notesSavers.current.get(key);
+    if (!saver) {
+      saver = new LatestSaver<string>(
+        (notes) => api.saveNotes(p, notes),
+        500,
+        (e) => setFeedback({ kind: "error", text: `Couldn't save notes, retrying: ${e}` }),
+      );
+      notesSavers.current.set(key, saver);
+    }
+    saver.schedule(text);
+  }, []);
   const updateNotes = (text: string) => {
     latest.current.notes = text;
     setNotes(text);
@@ -160,15 +185,15 @@ export function App({ boot }: { boot: Bootstrap }) {
   };
 
   // Remember where the user is, so a reload reopens the same view.
-  const saveStateSoon = useMemo(() => debounced(api.saveState, 500), []);
+  const stateSaver = useMemo(() => new LatestSaver<UiState>(api.saveState, 500, () => {}), []);
   useEffect(() => {
-    saveStateSoon({ puzzle, tab, discuss_model: discussModel });
-  }, [puzzle, tab, discussModel, saveStateSoon]);
+    stateSaver.schedule({ puzzle, tab, discuss_model: discussModel });
+  }, [puzzle, tab, discussModel, stateSaver]);
 
   const lookUpType = useMemo(
     () =>
       debounced((pos: number) => {
-        const client = lsp.current;
+        const client = lsp?.client;
         const view = editor.current?.view;
         if (!client || !view || !fileUri.current) return;
         hoverText(client, fileUri.current, view, pos)
@@ -219,17 +244,6 @@ export function App({ boot }: { boot: Bootstrap }) {
         setNotes(opened.notes);
         void loadProblem(puzzle, false);
 
-        if (boot.language.has_lsp && !lsp.current) {
-          try {
-            lsp.current = await connectLanguageServer(boot.language.root_uri, () => {
-              lsp.current = null;
-            });
-          } catch (e) {
-            setFeedback({ kind: "warn", text: `Language server unavailable: ${message(e)}` });
-          }
-          if (cancelled) return;
-        }
-
         const host = editorHost.current;
         if (!host) return;
         fileUri.current = opened.file_uri;
@@ -239,9 +253,9 @@ export function App({ boot }: { boot: Bootstrap }) {
           doc: opened.code.text,
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
-          lsp: lsp.current
+          lsp: lsp
             ? {
-                client: lsp.current,
+                client: lsp.client,
                 uri: opened.file_uri,
                 languageId: boot.language.lsp_language_id,
               }
@@ -270,7 +284,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       editor.current?.destroy();
       editor.current = null;
     };
-  }, [puzzle, boot, loadProblem, updateMeta, lookUpType]);
+  }, [puzzle, boot, lsp, loadProblem, updateMeta, lookUpType]);
 
   // Save when the phone is put down, and pick up changes made at a desk when it comes back.
   useEffect(() => {
@@ -550,7 +564,9 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   const stars = problem ? "★".repeat(problem.answers.length) : "";
   const statusParts: string[] = [];
-  if (boot.language.has_lsp) {
+  if (lsp && lspStatus !== "ready") {
+    statusParts.push("starting checks");
+  } else if (lsp) {
     statusParts.push(
       diagnostics.errors || diagnostics.warnings
         ? `${diagnostics.errors} error${diagnostics.errors === 1 ? "" : "s"}${diagnostics.warnings ? `, ${diagnostics.warnings} warning${diagnostics.warnings === 1 ? "" : "s"}` : ""}`

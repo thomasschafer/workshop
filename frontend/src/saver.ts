@@ -8,9 +8,10 @@ export type SaveStatus = "saved" | "pending" | "saving" | "conflict" | "error";
  */
 export class CodeSaver {
   private pending: string | null = null;
-  private timer: number | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   private chain: Promise<void> = Promise.resolve();
   private stopped = false;
+  private retryDelay = MIN_RETRY_MS;
 
   constructor(
     private readonly puzzle: Puzzle,
@@ -23,13 +24,13 @@ export class CodeSaver {
     if (this.stopped) return;
     this.pending = text;
     this.onStatus("pending");
-    window.clearTimeout(this.timer);
-    this.timer = window.setTimeout(() => void this.flush(), 400);
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.flush(), 400);
   }
 
   /** Saves any pending change now, resolving once it is on disk. */
   flush(): Promise<void> {
-    window.clearTimeout(this.timer);
+    clearTimeout(this.timer);
     const text = this.pending;
     if (text === null || this.stopped) {
       return this.chain;
@@ -41,7 +42,7 @@ export class CodeSaver {
 
   /** Best-effort save when the page is being hidden or closed. */
   flushOnExit(): void {
-    window.clearTimeout(this.timer);
+    clearTimeout(this.timer);
     const text = this.pending;
     if (text === null || this.stopped) return;
     this.pending = null;
@@ -61,7 +62,7 @@ export class CodeSaver {
   }
 
   stop(): void {
-    window.clearTimeout(this.timer);
+    clearTimeout(this.timer);
     this.stopped = true;
   }
 
@@ -70,28 +71,91 @@ export class CodeSaver {
     this.onStatus("saving");
     try {
       const saved = await api.saveCode(this.puzzle, text, this.version);
-      this.version = saved.version;
-      this.onStatus(this.pending === null ? "saved" : "pending");
+      this.saved(saved.version);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
+        const body = err.body as { current?: CodeFile } | null;
+        // An earlier attempt may have saved before its response was lost, for example when
+        // the server restarted.
+        if (body?.current?.text === text) {
+          this.saved(body.current.version);
+          return;
+        }
         this.stopped = true;
         this.onStatus("conflict");
-        const body = err.body as { current?: CodeFile } | null;
         if (body?.current) this.onConflict(body.current);
         return;
       }
-      // Keep the text so the next change or flush retries it.
       this.pending ??= text;
       this.onStatus("error", err instanceof Error ? err.message : String(err));
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => void this.flush(), this.retryDelay);
+      this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
     }
+  }
+
+  private saved(version: string): void {
+    this.version = version;
+    this.retryDelay = MIN_RETRY_MS;
+    this.onStatus(this.pending === null ? "saved" : "pending");
+  }
+}
+
+const MIN_RETRY_MS = 1000;
+const MAX_RETRY_MS = 15_000;
+
+/**
+ * Saves the latest value once changes pause, retrying until it succeeds, so nothing is lost
+ * if the server is briefly unreachable. Only the most recent value is ever sent.
+ */
+export class LatestSaver<T> {
+  private latest: { value: T } | null = null;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private saving = false;
+  private retryDelay = MIN_RETRY_MS;
+
+  constructor(
+    private readonly save: (value: T) => Promise<unknown>,
+    private readonly delayMs: number,
+    private readonly onError: (message: string) => void,
+  ) {}
+
+  schedule(value: T): void {
+    this.latest = { value };
+    this.wait(this.delayMs);
+  }
+
+  private wait(ms: number): void {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.run(), ms);
+  }
+
+  private async run(): Promise<void> {
+    if (this.saving || this.latest === null) return;
+    const { value } = this.latest;
+    this.latest = null;
+    this.saving = true;
+    try {
+      await this.save(value);
+      this.retryDelay = MIN_RETRY_MS;
+    } catch (err) {
+      this.latest ??= { value };
+      this.onError(err instanceof Error ? err.message : String(err));
+      this.wait(this.retryDelay);
+      this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
+      return;
+    } finally {
+      this.saving = false;
+    }
+    if (this.latest !== null) this.wait(this.delayMs);
   }
 }
 
 /** Calls `save` with the latest value once changes pause. */
 export function debounced<T>(save: (value: T) => void, ms: number): (value: T) => void {
-  let timer: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return (value: T) => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => save(value), ms);
+    clearTimeout(timer);
+    timer = setTimeout(() => save(value), ms);
   };
 }

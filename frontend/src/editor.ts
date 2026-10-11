@@ -323,34 +323,80 @@ class SocketTransport implements Transport {
   }
 }
 
-/** Connects to the language server through Workshop's websocket relay. */
-export async function connectLanguageServer(
-  rootUri: string,
-  onClose: () => void,
-): Promise<LSPClient> {
-  const scheme = location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${scheme}://${location.host}/api/lsp`);
-  await new Promise<void>((resolve, reject) => {
-    socket.addEventListener("open", () => resolve(), { once: true });
-    socket.addEventListener(
-      "error",
-      () => reject(new Error("Couldn't connect to the language server.")),
-      {
-        once: true,
-      },
-    );
-  });
-  const client = new LSPClient({
-    rootUri,
-    timeout: 30_000,
-    extensions: [serverDiagnostics()],
-  });
-  socket.addEventListener("close", () => {
-    client.disconnect();
-    onClose();
-  });
-  client.connect(new SocketTransport(socket));
-  return client;
+export type LanguageServerStatus = "connecting" | "ready" | "reconnecting";
+
+const MIN_RECONNECT_MS = 1000;
+const MAX_RECONNECT_MS = 30_000;
+
+/**
+ * Keeps one language server client connected through Workshop's websocket relay, reconnecting
+ * whenever the connection drops (for example when the server restarts or the phone sleeps).
+ * Editors keep using the same client, so they pick the server back up without being recreated.
+ */
+export class LanguageServerConnection {
+  readonly client: LSPClient;
+  private socket: WebSocket | null = null;
+  private retryDelay = MIN_RECONNECT_MS;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private closed = false;
+
+  constructor(
+    rootUri: string,
+    private readonly onStatus: (status: LanguageServerStatus) => void,
+  ) {
+    this.client = new LSPClient({
+      rootUri,
+      timeout: 30_000,
+      extensions: [serverDiagnostics()],
+    });
+    document.addEventListener("visibilitychange", this.onVisibility);
+    this.open();
+  }
+
+  private readonly onVisibility = () => {
+    if (document.visibilityState === "visible" && this.socket === null && !this.closed) {
+      clearTimeout(this.retryTimer);
+      this.open();
+    }
+  };
+
+  private open(): void {
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${scheme}://${location.host}/api/lsp`);
+    this.socket = socket;
+    this.onStatus(this.retryDelay === MIN_RECONNECT_MS ? "connecting" : "reconnecting");
+    socket.addEventListener("open", () => {
+      this.retryDelay = MIN_RECONNECT_MS;
+      // Until the server has initialised, the diagnostics on screen may be stale.
+      this.client
+        .connect(new SocketTransport(socket))
+        .initializing.then(() => {
+          if (this.socket === socket) this.onStatus("ready");
+        })
+        .catch(() => {});
+    });
+    // A failed connection attempt also fires `close`, so retrying is handled there alone.
+    socket.addEventListener("close", () => {
+      if (this.client.connected) {
+        this.client.disconnect();
+      }
+      this.socket = null;
+      if (this.closed) return;
+      this.onStatus("reconnecting");
+      // Hidden pages wait for `visibilitychange` instead of retrying in the background.
+      if (document.visibilityState === "visible") {
+        this.retryTimer = setTimeout(() => this.open(), this.retryDelay);
+        this.retryDelay = Math.min(this.retryDelay * 2, MAX_RECONNECT_MS);
+      }
+    });
+  }
+
+  close(): void {
+    this.closed = true;
+    clearTimeout(this.retryTimer);
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    this.socket?.close();
+  }
 }
 
 interface HoverResult {
