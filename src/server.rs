@@ -129,8 +129,11 @@ async fn auth(State(app): State<Shared>, request: Request, next: Next) -> Respon
         if !constant_time_eq(token.as_bytes(), app.token.as_bytes()) {
             return unauthorised();
         }
+        // Lax rather than Strict: links opened from outside the browser, such as a scanned QR
+        // code, count as cross-site, and Strict cookies wouldn't be sent after the redirect.
+        // Requests that change anything are protected by the origin check below.
         let cookie = format!(
-            "{TOKEN_COOKIE}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000",
+            "{TOKEN_COOKIE}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000",
             app.token
         );
         let mut response = Redirect::to(request.uri().path()).into_response();
@@ -646,6 +649,76 @@ pub fn load_or_create_token(paths: &Paths) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn test_app() -> (tempfile::TempDir, Router) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::parse("").unwrap();
+        config.solutions_dir = dir.path().join("aoc");
+        let app = App::new(config, Paths::under(dir.path()), "secret".into(), None).unwrap();
+        (dir, router(Arc::new(app)))
+    }
+
+    async fn send(router: &Router, request: Request) -> Response {
+        use tower::ServiceExt;
+        router.clone().oneshot(request).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn token_link_sets_a_cookie_that_works_after_the_redirect() {
+        let (_dir, router) = test_app().await;
+        let response = send(
+            &router,
+            Request::get("/?token=secret").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers()[header::LOCATION], "/");
+        let cookie = response.headers()[header::SET_COOKIE].to_str().unwrap();
+        assert!(cookie.contains("SameSite=Lax"), "{cookie}");
+        assert!(cookie.contains("HttpOnly"), "{cookie}");
+
+        let pair = cookie.split(';').next().unwrap().to_owned();
+        let response = send(
+            &router,
+            Request::get("/api/bootstrap")
+                .header(header::COOKIE, pair)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_and_wrong_tokens() {
+        let (_dir, router) = test_app().await;
+        for request in [
+            Request::get("/api/bootstrap").body(Body::empty()).unwrap(),
+            Request::get("/?token=wrong").body(Body::empty()).unwrap(),
+            Request::get("/api/bootstrap")
+                .header(header::COOKIE, "workshop_token=wrong")
+                .body(Body::empty())
+                .unwrap(),
+        ] {
+            assert_eq!(
+                send(&router, request).await.status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_cross_origin_writes() {
+        let (_dir, router) = test_app().await;
+        let request = Request::put("/api/state")
+            .header(header::COOKIE, "workshop_token=secret")
+            .header(header::HOST, "laptop.ts.net")
+            .header(header::ORIGIN, "https://evil.example")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        assert_eq!(send(&router, request).await.status(), StatusCode::FORBIDDEN);
+    }
 
     #[test]
     fn compares_tokens() {
