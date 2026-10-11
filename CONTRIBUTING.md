@@ -15,7 +15,14 @@ The Rust server is in `src/` and the TypeScript frontend, built with Vite and Co
 
 Tests must never use real Advent of Code puzzle text or inputs; invent your own.
 
-Tests don't call model CLIs. If you change the edit prompt (`prompts/edit.md`) or a language's dictation hints, try a handful of utterances by hand and include them in your pull request.
+Tests don't call model CLIs. If you change the edit prompt (`prompts/edit.md`) or a language's dictation hints, run the edit evals before and after, and include the summaries in your pull request:
+
+```sh
+mise run eval                             # every case in evals/edits.toml
+cargo run -- eval --filter before-that    # just the cases whose names match
+```
+
+Each case is one call to your edit model, so the evals aren't part of CI. When you find an utterance that goes wrong, add it to `evals/edits.toml` as a new case.
 
 ## Adding a language profile
 
