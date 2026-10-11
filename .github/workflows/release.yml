@@ -1,6 +1,7 @@
 # Builds release binaries for a tag and attaches them to its GitHub release, then publishes the
 # release. Normally called by the release-plz workflow straight after it creates the tag and draft
-# release; run it manually to retry a failed build for an existing tag.
+# release; run it manually to retry a failed build for an existing tag, or as a dry run to build
+# and check every binary from the current commit without publishing anything.
 name: Release
 
 on:
@@ -13,9 +14,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag of the existing GitHub release, e.g. v0.1.0
-        required: true
+        description: Tag of the existing GitHub release, e.g. v0.1.0. Leave empty for a dry run.
+        required: false
         type: string
+      dry_run:
+        description: Build and check the binaries without publishing
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,9 +36,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Check inputs
+        if: ${{ !inputs.dry_run && !inputs.tag }}
+        run: |
+          echo "::error::Give a tag, or choose a dry run"
+          exit 1
+
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.tag || github.sha }}
           persist-credentials: false
 
       # No dependency caching anywhere in this workflow, so release artifacts can't be influenced by
@@ -78,7 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.tag || github.sha }}
           persist-credentials: false
 
       - name: Download frontend
@@ -106,7 +118,7 @@ jobs:
         id: package
         shell: bash
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ inputs.tag || 'dry-run' }}
           TARGET: ${{ matrix.target }}
         run: |
           name="${BINARY_NAME}-${TAG}-${TARGET}"
@@ -146,7 +158,11 @@ jobs:
           fi
           output=$("$bin" --version)
           echo "$output"
-          expected="${TAG#v}"
+          if [ -n "$TAG" ]; then
+            expected="${TAG#v}"
+          else
+            expected=$(sed -n 's/^version = "\(.*\)"$/\1/p' ../Cargo.toml | head -n 1)
+          fi
           if ! grep -qF "$expected" <<< "$output"; then
             echo "::error::Expected version $expected in --version output"
             exit 1
@@ -168,6 +184,7 @@ jobs:
 
   publish:
     name: Publish release
+    if: ${{ !inputs.dry_run }}
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
