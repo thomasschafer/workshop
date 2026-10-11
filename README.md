@@ -89,11 +89,13 @@ Workshop caches puzzles and inputs, spaces out its requests, and identifies itse
 With [mise](https://mise.jdx.dev) installed:
 
 ```sh
-mise run dev     # install dependencies, then run the server with the frontend rebuilding on change
-mise run serve   # a release build, served to your phone over Tailscale, keeping this machine awake
+mise run dev     # rebuild and restart on every change; refresh the page to see it
+mise run serve   # an optimised build, for when you're just using Workshop
 mise run check   # everything CI runs
 mise run build   # a release binary with the frontend embedded
 ```
+
+Both serve to your phone over Tailscale when it's installed, and keep macOS awake while they run.
 
 ## Licence
 

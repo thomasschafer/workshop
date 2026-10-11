@@ -45,7 +45,11 @@ enum Command {
     /// Check that everything Workshop needs is installed and set up.
     Doctor,
     /// Print the link, including the access token, for opening Workshop.
-    Token,
+    Token {
+        /// Set up `tailscale serve` and print the link and QR code for your phone.
+        #[arg(long)]
+        tailscale: bool,
+    },
 }
 
 #[tokio::main]
@@ -71,10 +75,14 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
-        Command::Token => {
+        Command::Token { tailscale } => {
             let token = server::load_or_create_token(&paths)?;
-            println!("{}", open_url(config.server.bind, &token));
-            Ok(())
+            if tailscale {
+                print_phone_link(config.server.bind, &token).await
+            } else {
+                println!("{}", open_url(config.server.bind, &token));
+                Ok(())
+            }
         }
     }
 }
@@ -149,15 +157,7 @@ async fn serve(
         open_url(bind, &token)
     );
     if use_tailscale {
-        if !(bind.ip().is_loopback() || bind.ip().is_unspecified()) {
-            anyhow::bail!("`--tailscale` forwards to 127.0.0.1, so Workshop must listen there");
-        }
-        let base = tailscale::serve(bind.port()).await?;
-        let url = format!("{base}/?token={token}");
-        println!(
-            "\nOn your phone, open {url}\nor scan:\n\n{}",
-            qr_code(&url)?
-        );
+        print_phone_link(bind, &token).await?;
     } else {
         println!(
             "To use it from your phone, run `workshop serve --tailscale`, or see the README for other options."
@@ -165,11 +165,49 @@ async fn serve(
     }
     let warm = app.clone();
     tokio::spawn(async move { warm.warm_up().await });
-    axum::serve(listener, server::router(app))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    // Stop straight away rather than waiting for connections to close: the editor's language
+    // server websocket stays open indefinitely. Returning drops every task, which stops the
+    // language servers and model CLIs they started.
+    tokio::select! {
+        result = axum::serve(listener, server::router(app)) => result?,
+        () = shutdown_signal() => {}
+    }
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(err) => {
+                tracing::warn!("can't listen for SIGTERM: {err}");
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+async fn print_phone_link(bind: SocketAddr, token: &str) -> Result<()> {
+    if !(bind.ip().is_loopback() || bind.ip().is_unspecified()) {
+        anyhow::bail!("`--tailscale` forwards to 127.0.0.1, so Workshop must listen there");
+    }
+    let base = tailscale::serve(bind.port()).await?;
+    let url = format!("{base}/?token={token}");
+    println!(
+        "\nOn your phone, open {url}\nor scan:\n\n{}",
+        qr_code(&url)?
+    );
     Ok(())
 }
 

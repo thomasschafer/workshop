@@ -7,7 +7,7 @@ Thanks for helping. Bug reports, language profiles and model providers are all e
 Install [mise](https://mise.jdx.dev), then:
 
 ```sh
-mise run dev     # install dependencies, then run the server with the frontend rebuilding on change
+mise run dev     # rebuild and restart on every change; refresh the page to see it
 mise run check   # format, lint, typecheck and test everything, as CI does
 ```
 
