@@ -27,7 +27,7 @@ import {
 import { Settings } from "./views/settings";
 import { PushToTalk, speechSupported, speechUnavailableReason } from "./voice";
 
-type Sheet = "run" | "picker" | "settings" | null;
+type Sheet = "run" | "settings" | null;
 
 interface Feedback {
   kind: "pending" | "ok" | "warn" | "error" | "info";
@@ -81,7 +81,8 @@ export function App({ boot }: { boot: Bootstrap }) {
       ? boot.state.discuss_model
       : (boot.discuss_models[0] ?? ""),
   );
-  const [sheet, setSheet] = useState<Sheet>(boot.state.puzzle ? null : "picker");
+  const [sheet, setSheet] = useState<Sheet>(null);
+  const [picking, setPicking] = useState(false);
 
   const [openError, setOpenError] = useState<string | null>(null);
   const [meta, setMeta] = useState<DayMeta>(EMPTY_META);
@@ -559,17 +560,33 @@ export function App({ boot }: { boot: Bootstrap }) {
   if (saveStatus === "error") statusParts.push("not saved");
   else if (saveStatus !== "saved" && saveStatus !== "conflict") statusParts.push("saving");
 
+  // The picker is the home screen until a puzzle is open, and can be reopened from the header.
+  const showPicker = picking || puzzle === null;
+
   return (
     <div class="app">
       <header class="top">
-        <button
-          type="button"
-          class="puzzle-button"
-          onClick={() => setSheet(sheet === "picker" ? null : "picker")}
-        >
-          {puzzle ? `${puzzle.year} · day ${puzzle.day}` : "Choose a puzzle"}
-          {stars ? <span class="stars"> {stars}</span> : null}
-        </button>
+        {showPicker ? (
+          puzzle ? (
+            <button type="button" class="puzzle-button" onClick={() => setPicking(false)}>
+              ‹ Back to {puzzle.year} · day {puzzle.day}
+            </button>
+          ) : (
+            <h1 class="app-title">Workshop</h1>
+          )
+        ) : (
+          <button
+            type="button"
+            class="puzzle-button"
+            onClick={() => {
+              setSheet(null);
+              setPicking(true);
+            }}
+          >
+            {puzzle ? `${puzzle.year} · day ${puzzle.day}` : ""}
+            {stars ? <span class="stars"> {stars}</span> : null}
+          </button>
+        )}
         <button
           type="button"
           class="icon-button"
@@ -580,7 +597,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         </button>
       </header>
 
-      <nav class="tabs">
+      <nav class={`tabs ${showPicker ? "hidden" : ""}`}>
         {(["problem", "code", "notes", "discuss"] as const).map((t) => (
           <button
             type="button"
@@ -594,8 +611,23 @@ export function App({ boot }: { boot: Bootstrap }) {
       </nav>
 
       <main class="content">
-        {openError ? <p class="pane error-text">{openError}</p> : null}
-        {conflict ? (
+        {showPicker ? (
+          <div class="pane">
+            <Picker
+              current={puzzle}
+              hasSession={boot.has_aoc_session}
+              onPick={(p) => {
+                setPicking(false);
+                if (!puzzle || p.year !== puzzle.year || p.day !== puzzle.day) {
+                  setPuzzle(p);
+                  setTab("problem");
+                }
+              }}
+            />
+          </div>
+        ) : null}
+        {openError && !showPicker ? <p class="pane error-text">{openError}</p> : null}
+        {conflict && !showPicker ? (
           <div class="banner">
             This file changed on disk.
             <button type="button" class="text-button" onClick={takeDiskVersion}>
@@ -603,14 +635,14 @@ export function App({ boot }: { boot: Bootstrap }) {
             </button>
           </div>
         ) : null}
-        <div class={`code-pane ${tab === "code" ? "" : "hidden"}`}>
+        <div class={`code-pane ${tab === "code" && !showPicker ? "" : "hidden"}`}>
           <div class="status-line">
             <span>{statusParts.join(" · ")}</span>
             {hover ? <code class="hover">{hover}</code> : null}
           </div>
           <div class="editor" ref={editorHost} />
         </div>
-        {tab === "problem" ? (
+        {!showPicker && tab === "problem" ? (
           <ProblemView
             problem={problem}
             error={problemError}
@@ -620,7 +652,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             onRefresh={() => puzzle && void loadProblem(puzzle, true)}
           />
         ) : null}
-        {tab === "notes" ? (
+        {!showPicker && tab === "notes" ? (
           <div class="pane notes">
             <textarea
               value={notes}
@@ -629,7 +661,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             />
           </div>
         ) : null}
-        {tab === "discuss" ? (
+        {!showPicker && tab === "discuss" ? (
           <DiscussView
             turns={turns}
             models={boot.discuss_models}
@@ -645,10 +677,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           />
         ) : null}
         {sheet ? (
-          <SheetFrame
-            title={sheet === "run" ? "Run" : sheet === "picker" ? "Puzzles" : "Settings"}
-            onClose={() => setSheet(null)}
-          >
+          <SheetFrame title={sheet === "run" ? "Run" : "Settings"} onClose={() => setSheet(null)}>
             {sheet === "run" ? (
               <RunSheet
                 state={run}
@@ -659,19 +688,6 @@ export function App({ boot }: { boot: Bootstrap }) {
                 onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}
                 onSubmit={(answer) => void doSubmit(answer)}
                 onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}
-              />
-            ) : null}
-            {sheet === "picker" ? (
-              <Picker
-                current={puzzle}
-                hasSession={boot.has_aoc_session}
-                onPick={(p) => {
-                  setSheet(null);
-                  if (!puzzle || p.year !== puzzle.year || p.day !== puzzle.day) {
-                    setPuzzle(p);
-                    setTab("problem");
-                  }
-                }}
               />
             ) : null}
             {sheet === "settings" ? (
@@ -692,7 +708,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         ) : null}
       </main>
 
-      <footer class="controls">
+      <footer class={`controls ${showPicker ? "hidden" : ""}`}>
         <div class={`feedback ${feedback?.kind ?? ""}`} aria-live="polite">
           {listening ? (
             <span class="transcript">{interim || "Listening…"}</span>

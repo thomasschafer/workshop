@@ -188,8 +188,16 @@ code {
   color: var(--fg);
 }
 
-.code-pane.hidden {
+.code-pane.hidden,
+.tabs.hidden,
+.controls.hidden {
   display: none;
+}
+
+.app-title {
+  font-size: 15px;
+  margin: 0;
+  padding: 6px 0;
 }
 
 .editor {
@@ -424,7 +432,13 @@ code {
   padding: 12px;
 }
 
-.years,
+.years {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+}
+
 .snippets {
   display: flex;
   gap: 6px;
