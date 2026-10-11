@@ -37,13 +37,13 @@ workshop doctor   # check your setup, with fixes for anything missing
 workshop          # start the server and print the link to open
 ```
 
-To use it from your phone over Tailscale:
+To use it from your phone over Tailscale, start it with:
 
 ```sh
-tailscale serve --bg 7878
+workshop serve --tailscale
 ```
 
-Open the `https://…ts.net` address that prints, adding the `?token=…` part of the link Workshop printed. The token is then remembered by your phone's browser. Keep your laptop awake while you're out, for example with `caffeinate -i` on macOS.
+This runs `tailscale serve` for you, which gives Workshop an HTTPS address on your tailnet, and prints a link and QR code to open on your phone. The token in the link is then remembered by your phone's browser. Keep your laptop awake while you're out, for example with `caffeinate -i` on macOS.
 
 To save your Advent of Code session cookie, log in to the site, copy the `session` cookie from your browser's developer tools, and save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
@@ -78,7 +78,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for adding a language or a model CLI.
 
 ## Security
 
-Workshop runs code and spends your model subscription, so it only listens on localhost by default and every request needs the token. Use `tailscale serve` rather than binding to other interfaces. See [SECURITY.md](SECURITY.md) to report a vulnerability.
+Workshop runs code and spends your model subscription, so it only listens on localhost by default and every request needs the token. Use `workshop serve --tailscale` rather than binding to other interfaces. See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Advent of Code
 
@@ -90,6 +90,7 @@ With [mise](https://mise.jdx.dev) installed:
 
 ```sh
 mise run dev     # install dependencies, then run the server with the frontend rebuilding on change
+mise run serve   # a release build, served to your phone over Tailscale, keeping this machine awake
 mise run check   # everything CI runs
 mise run build   # a release binary with the frontend embedded
 ```

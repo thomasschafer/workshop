@@ -213,9 +213,7 @@ async fn check_network(user_agent: &str) -> Check {
 async fn check_https(config: &Config) -> Check {
     let port = config.server.bind.port();
     let name = "Phone access";
-    let fix = format!(
-        "Browsers only allow the microphone over HTTPS. If you use Tailscale, run `tailscale serve --bg {port}` and open the https://….ts.net address it prints on your phone."
-    );
+    let fix = "Browsers only allow the microphone over HTTPS. If you use Tailscale, start Workshop with `workshop serve --tailscale` and open the link it prints on your phone.";
     if find_program("tailscale").is_none() {
         return Check::problem(Status::Warn, name, "Tailscale isn't installed", fix);
     }

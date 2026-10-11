@@ -9,6 +9,7 @@ mod paths;
 mod provider;
 mod runner;
 mod server;
+mod tailscale;
 mod template;
 mod workspace;
 
@@ -36,6 +37,10 @@ enum Command {
         /// Address to listen on, overriding the config file.
         #[arg(long)]
         bind: Option<SocketAddr>,
+        /// Make Workshop reachable from your other devices with `tailscale serve`, which also
+        /// provides the HTTPS that phones need for the microphone.
+        #[arg(long)]
+        tailscale: bool,
     },
     /// Check that everything Workshop needs is installed and set up.
     Doctor,
@@ -57,8 +62,13 @@ async fn main() -> Result<()> {
     let config = Config::load_or_init(&paths)?;
     let aoc_session = aoc::read_session(&paths)?;
 
-    match cli.command.unwrap_or(Command::Serve { bind: None }) {
-        Command::Serve { bind } => serve(config, paths, aoc_session, bind).await,
+    match cli.command.unwrap_or(Command::Serve {
+        bind: None,
+        tailscale: false,
+    }) {
+        Command::Serve { bind, tailscale } => {
+            serve(config, paths, aoc_session, bind, tailscale).await
+        }
         Command::Doctor => {
             let checks = doctor::run(&config, &paths, aoc_session.is_some()).await;
             doctor::print(&checks);
@@ -75,6 +85,15 @@ async fn main() -> Result<()> {
     }
 }
 
+fn qr_code(text: &str) -> Result<String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).context("making a QR code")?;
+    Ok(code
+        .render::<qrcode::render::unicode::Dense1x2>()
+        .dark_color(qrcode::render::unicode::Dense1x2::Light)
+        .light_color(qrcode::render::unicode::Dense1x2::Dark)
+        .build())
+}
+
 fn open_url(bind: SocketAddr, token: &str) -> String {
     format!("http://{bind}/?token={token}")
 }
@@ -84,6 +103,7 @@ async fn serve(
     paths: Paths,
     aoc_session: Option<String>,
     bind: Option<SocketAddr>,
+    use_tailscale: bool,
 ) -> Result<()> {
     if let Some(bind) = bind {
         config.server.bind = bind;
@@ -100,10 +120,21 @@ async fn serve(
         .await
         .with_context(|| format!("listening on {bind}"))?;
     println!("Workshop is running. Open {}", open_url(bind, &token));
-    println!(
-        "From your phone over Tailscale: run `tailscale serve --bg {}` and open the https address it prints, adding ?token={token}",
-        bind.port()
-    );
+    if use_tailscale {
+        if !(bind.ip().is_loopback() || bind.ip().is_unspecified()) {
+            anyhow::bail!("`--tailscale` forwards to 127.0.0.1, so Workshop must listen there");
+        }
+        let base = tailscale::serve(bind.port()).await?;
+        let url = format!("{base}/?token={token}");
+        println!(
+            "\nOn your phone, open {url}\nor scan:\n\n{}",
+            qr_code(&url)?
+        );
+    } else {
+        println!(
+            "To use it from your phone, run `workshop serve --tailscale`, or see the README for other options."
+        );
+    }
     let warm = app.clone();
     tokio::spawn(async move { warm.warm_up().await });
     axum::serve(listener, server::router(app))
@@ -112,4 +143,15 @@ async fn serve(
         })
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_qr_codes() {
+        let code = qr_code("https://laptop.tail1234.ts.net/?token=abc").unwrap();
+        assert!(code.lines().count() > 10);
+    }
 }
