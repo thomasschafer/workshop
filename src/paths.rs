@@ -62,6 +62,11 @@ impl Paths {
         self.cache_dir.join("build")
     }
 
+    /// A local log of utterances, model replies and errors, for tuning and troubleshooting.
+    pub fn log_file(&self) -> PathBuf {
+        self.data_dir.join("workshop.log")
+    }
+
     pub fn state_file(&self) -> PathBuf {
         self.data_dir.join("state.json")
     }

@@ -108,6 +108,7 @@ pub fn router(app: Shared) -> Router {
         .route("/edit", post(edit_code))
         .route("/discuss", post(discuss))
         .route("/git/sync", post(git_sync))
+        .route("/log", post(client_log))
         .route("/lsp", get(lsp));
     Router::new()
         .nest("/api", api)
@@ -512,13 +513,21 @@ async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> Api
         .edit_model
         .call(&app.edit_spec(), &prompt, EDIT_TIMEOUT)
         .await?;
+    let outcome = edit::parse_reply(&reply.text).and_then(|r| edit::apply(&body.doc, r));
     tracing::info!(
         utterance = %body.utterance,
+        recent = ?body.recent,
         elapsed_ms = reply.elapsed_ms,
         reply = %reply.text,
+        outcome = match &outcome {
+            Ok(EditOutcome::Applied { .. }) => "applied",
+            Ok(EditOutcome::Unsure { .. }) => "unsure",
+            Err(_) => "rejected",
+        },
+        doc = %body.doc,
         "edit"
     );
-    let outcome = edit::parse_reply(&reply.text).and_then(|r| edit::apply(&body.doc, r))?;
+    let outcome = outcome?;
     Ok(Json(Edited {
         outcome,
         model: reply.model,
@@ -597,6 +606,31 @@ async fn git_sync(
     Ok(Json(GitSynced {
         summary: app.workspace.commit_and_push(&body.message).await?,
     }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ClientLogKind {
+    Error,
+    Command,
+    Speech,
+}
+
+#[derive(Deserialize)]
+struct ClientLog {
+    kind: ClientLogKind,
+    message: String,
+}
+
+/// Records what happened on the phone, which the server can't otherwise see, in the log file.
+async fn client_log(Json(body): Json<ClientLog>) -> ApiResult<()> {
+    let message: String = body.message.chars().take(4000).collect();
+    match body.kind {
+        ClientLogKind::Error => tracing::warn!(target: "workshop::client", "{message}"),
+        ClientLogKind::Command => tracing::info!(target: "workshop::client", "command: {message}"),
+        ClientLogKind::Speech => tracing::info!(target: "workshop::client", "speech: {message}"),
+    }
+    Ok(Json(()))
 }
 
 async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {

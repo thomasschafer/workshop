@@ -50,15 +50,9 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "workshop=info".into()),
-        )
-        .init();
-
     let cli = Cli::parse();
     let paths = Paths::from_env()?;
+    init_logging(&paths)?;
     let config = Config::load_or_init(&paths)?;
     let aoc_session = aoc::read_session(&paths)?;
 
@@ -83,6 +77,37 @@ async fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// The log file is started afresh once it grows past this.
+const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
+
+fn init_logging(paths: &Paths) -> Result<()> {
+    use tracing_subscriber::prelude::*;
+
+    let path = paths.log_file();
+    std::fs::create_dir_all(&paths.data_dir)
+        .with_context(|| format!("creating {}", paths.data_dir.display()))?;
+    let too_big = std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_LOG_BYTES);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(!too_big)
+        .write(true)
+        .truncate(too_big)
+        .open(&path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "workshop=info".into());
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(file)),
+        )
+        .init();
+    Ok(())
 }
 
 fn qr_code(text: &str) -> Result<String> {

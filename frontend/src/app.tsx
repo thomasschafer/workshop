@@ -421,6 +421,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         setFeedback({ kind: "warn", transcript: utterance, text: result.message });
       }
     } catch (e) {
+      api.log("error", `edit ${JSON.stringify(utterance)}: ${message(e)}`);
       setFeedback({ kind: "error", transcript: utterance, text: message(e) });
     }
   };
@@ -462,11 +463,13 @@ export function App({ boot }: { boot: Bootstrap }) {
   const handleUtterance = async (text: string) => {
     const { tab, notes } = latest.current;
     if (tab === "notes") {
+      api.log("speech", `notes: ${text}`);
       updateNotes(notes ? `${notes.replace(/\s*$/, "")}\n${text}` : text);
       setFeedback({ kind: "ok", transcript: text, text: "Added to notes" });
       return;
     }
     if (tab === "discuss") {
+      api.log("speech", `discuss: ${text}`);
       setFeedback(null);
       await sendDiscuss(text);
       return;
@@ -476,6 +479,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       boot.snippets.map((s) => s.name),
     );
     if (command) {
+      api.log("command", `${JSON.stringify(text)} -> ${JSON.stringify(command)}`);
       runCommand(command, text);
       return;
     }
@@ -512,9 +516,11 @@ export function App({ boot }: { boot: Bootstrap }) {
       if (text.trim()) {
         enqueue(text.trim());
       } else {
+        api.log("speech", "(nothing heard)");
         setFeedback({ kind: "info", text: "Didn't catch anything." });
       }
     } catch (e) {
+      api.log("error", `speech recognition: ${message(e)}`);
       setFeedback({ kind: "error", text: message(e) });
     }
   };

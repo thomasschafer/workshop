@@ -165,5 +165,9 @@ export const api = {
     errors: string;
     last_run: string;
   }) => request<{ text: string; model: string | null }>("POST", "/discuss", body),
+  /** Fire-and-forget: records phone-side events in the server's log file. */
+  log: (kind: "error" | "command" | "speech", message: string) => {
+    request<null>("POST", "/log", { kind, message }).catch(() => {});
+  },
   gitSync: (message: string) => request<{ summary: string }>("POST", "/git/sync", { message }),
 };
