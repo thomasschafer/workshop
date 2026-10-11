@@ -40,6 +40,28 @@ function recognitionConstructor(): RecognitionConstructor | null {
   return typeof ctor === "function" ? (ctor as RecognitionConstructor) : null;
 }
 
+/**
+ * Joins recognition results into one transcript. Most browsers give consecutive pieces of what
+ * was said, but Chrome on Android gives each result as a growing copy of everything so far
+ * ("can", "can you", "can you replace"), so a piece that extends the text so far replaces it
+ * rather than being appended.
+ */
+export function mergeSegments(segments: readonly string[]): string {
+  let text = "";
+  for (const raw of segments) {
+    const segment = raw.trim().replace(/\s+/g, " ");
+    if (!segment) continue;
+    const lower = text.toLowerCase();
+    const segmentLower = segment.toLowerCase();
+    if (segmentLower.startsWith(lower)) {
+      text = segment;
+    } else if (!lower.endsWith(segmentLower)) {
+      text = `${text} ${segment}`;
+    }
+  }
+  return text.trim();
+}
+
 export function speechSupported(): boolean {
   return recognitionConstructor() !== null;
 }
@@ -84,11 +106,11 @@ export class PushToTalk {
     this.transcript = "";
     this.error = null;
     recognition.onresult = (event) => {
-      let text = "";
+      const segments: string[] = [];
       for (let i = 0; i < event.results.length; i++) {
-        text += event.results[i]?.[0]?.transcript ?? "";
+        segments.push(event.results[i]?.[0]?.transcript ?? "");
       }
-      this.transcript = text.trim();
+      this.transcript = mergeSegments(segments);
       onInterim(this.transcript);
     };
     this.ended = new Promise((resolve) => {
