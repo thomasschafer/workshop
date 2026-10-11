@@ -1,0 +1,685 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use axum::body::Body;
+use axum::extract::{Path, Query, Request, State, WebSocketUpgrade};
+use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::{get, post, put};
+use axum::{Json, Router};
+use rust_embed::RustEmbed;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, Notify};
+
+use crate::aoc::{AocClient, Part, Problem, SubmitOutcome};
+use crate::config::{Config, Snippet};
+use crate::discuss::{self, Turn};
+use crate::doctor;
+use crate::edit::{self, EditOutcome};
+use crate::language::Puzzle;
+use crate::paths::Paths;
+use crate::provider::{CallSpec, ProviderRunner};
+use crate::runner::{self, RunResult};
+use crate::workspace::{CodeFile, DayMeta, SaveError, UiState, Workspace};
+
+const TOKEN_COOKIE: &str = "workshop_token";
+const EDIT_TIMEOUT: Duration = Duration::from_secs(60);
+const DISCUSS_TIMEOUT: Duration = Duration::from_secs(300);
+
+#[derive(RustEmbed)]
+#[folder = "frontend/dist"]
+struct Assets;
+
+pub struct App {
+    config: Config,
+    paths: Paths,
+    token: String,
+    workspace: Workspace,
+    aoc: AocClient,
+    edit_model: ProviderRunner,
+    discuss_model: ProviderRunner,
+    run_lock: Mutex<()>,
+    cancel_run: Notify,
+}
+
+type Shared = Arc<App>;
+
+impl App {
+    pub fn new(
+        config: Config,
+        paths: Paths,
+        token: String,
+        aoc_session: Option<String>,
+    ) -> Result<Self> {
+        let model_dir = paths.cache_dir.join("model-cwd");
+        Ok(Self {
+            workspace: Workspace::new(config.solutions_dir.clone(), paths.clone()),
+            aoc: AocClient::new(aoc_session, &config.aoc.user_agent, paths.aoc_cache_dir())?,
+            edit_model: ProviderRunner::new(
+                config.providers[&config.models.edit.provider].clone(),
+                model_dir.clone(),
+            )?,
+            discuss_model: ProviderRunner::new(
+                config.providers[&config.models.discuss.provider].clone(),
+                model_dir,
+            )?,
+            run_lock: Mutex::new(()),
+            cancel_run: Notify::new(),
+            config,
+            paths,
+            token,
+        })
+    }
+
+    fn edit_spec(&self) -> CallSpec {
+        CallSpec {
+            model: self.config.models.edit.model.clone(),
+            system_prompt: edit::system_prompt(self.config.language()),
+        }
+    }
+
+    pub async fn warm_up(&self) {
+        if let Err(err) = self.workspace.ensure_repo().await {
+            tracing::warn!("couldn't set up the solutions repo: {err:#}");
+        }
+        if let Err(err) = self.edit_model.warm(&self.edit_spec()).await {
+            tracing::warn!("couldn't start the edit model: {err:#}");
+        }
+    }
+}
+
+pub fn router(app: Shared) -> Router {
+    let api = Router::new()
+        .route("/bootstrap", get(bootstrap))
+        .route("/state", put(save_state))
+        .route("/doctor", get(run_doctor))
+        .route("/years/{year}/stars", get(stars))
+        .route("/puzzles/{year}/{day}", get(open_puzzle))
+        .route("/puzzles/{year}/{day}/code", put(save_code))
+        .route("/puzzles/{year}/{day}/notes", put(save_notes))
+        .route("/puzzles/{year}/{day}/meta", put(save_meta))
+        .route("/puzzles/{year}/{day}/problem", get(problem))
+        .route("/puzzles/{year}/{day}/run", post(run))
+        .route("/puzzles/{year}/{day}/submit", post(submit))
+        .route("/run/cancel", post(cancel_run))
+        .route("/edit", post(edit_code))
+        .route("/discuss", post(discuss))
+        .route("/git/sync", post(git_sync))
+        .route("/lsp", get(lsp));
+    Router::new()
+        .nest("/api", api)
+        .fallback(static_asset)
+        .layer(middleware::from_fn_with_state(app.clone(), auth))
+        .with_state(app)
+}
+
+// Authentication: the token arrives once in the URL printed by `workshop serve`, and is then
+// kept in an HttpOnly cookie.
+async fn auth(State(app): State<Shared>, request: Request, next: Next) -> Response {
+    let query_token = request.uri().query().and_then(|q| {
+        q.split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .find(|(k, _)| *k == "token")
+            .map(|(_, v)| v.to_owned())
+    });
+    if let Some(token) = query_token {
+        if !constant_time_eq(token.as_bytes(), app.token.as_bytes()) {
+            return unauthorised();
+        }
+        let cookie = format!(
+            "{TOKEN_COOKIE}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000",
+            app.token
+        );
+        let mut response = Redirect::to(request.uri().path()).into_response();
+        if let Ok(value) = cookie.parse() {
+            response.headers_mut().insert(header::SET_COOKIE, value);
+        }
+        return response;
+    }
+
+    let authorised = cookie_token(request.headers())
+        .is_some_and(|t| constant_time_eq(t.as_bytes(), app.token.as_bytes()));
+    if !authorised {
+        return unauthorised();
+    }
+    let is_websocket = request.headers().contains_key(header::UPGRADE);
+    if (request.method() != Method::GET || is_websocket) && !same_origin(request.headers()) {
+        return (StatusCode::FORBIDDEN, "Cross-origin request refused").into_response();
+    }
+    next.run(request).await
+}
+
+fn cookie_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(name, _)| *name == TOKEN_COOKIE)
+        .map(|(_, value)| value)
+}
+
+fn same_origin(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()) else {
+        // Non-browser clients don't send an Origin, and browsers always do on these requests.
+        return true;
+    };
+    let Some(host) = headers.get(header::HOST).and_then(|h| h.to_str().ok()) else {
+        return false;
+    };
+    let origin_host = origin.split_once("://").map_or(origin, |(_, rest)| rest);
+    origin_host.eq_ignore_ascii_case(host)
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn unauthorised() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        "<!doctype html><meta name=viewport content='width=device-width'><title>Workshop</title>\
+         <body style='font-family:ui-monospace,monospace;padding:2rem;max-width:32rem'>\
+         <p>Workshop needs the link with the access token. It was printed in the terminal \
+         when the server started; run <code>workshop token</code> to see it again.</p>",
+    )
+        .into_response()
+}
+
+async fn static_asset(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+    let (path, asset) = match Assets::get(path) {
+        Some(asset) => (path, asset),
+        None => match Assets::get("index.html") {
+            Some(asset) => ("index.html", asset),
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    "The frontend hasn't been built. Run `mise run build-frontend`.",
+                )
+                    .into_response();
+            }
+        },
+    };
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    let cache = if path == "index.html" {
+        "no-cache"
+    } else {
+        "public, max-age=31536000, immutable"
+    };
+    (
+        [
+            (header::CONTENT_TYPE, mime.as_ref().to_owned()),
+            (header::CACHE_CONTROL, cache.to_owned()),
+        ],
+        Body::from(asset.data.into_owned()),
+    )
+        .into_response()
+}
+
+// Errors are shown to the user, so they carry the full context chain.
+struct ApiError(StatusCode, serde_json::Value);
+
+impl From<anyhow::Error> for ApiError {
+    fn from(err: anyhow::Error) -> Self {
+        tracing::warn!("{err:#}");
+        Self(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            serde_json::json!({ "error": format!("{err:#}") }),
+        )
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.0, Json(self.1)).into_response()
+    }
+}
+
+type ApiResult<T> = Result<Json<T>, ApiError>;
+
+fn puzzle(year: u16, day: u8) -> Result<Puzzle, ApiError> {
+    Puzzle::new(year, day).map_err(|err| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": err.to_string() }),
+        )
+    })
+}
+
+#[derive(Serialize)]
+struct Bootstrap {
+    state: UiState,
+    language: LanguageInfo,
+    snippets: Vec<Snippet>,
+    discuss_models: Vec<String>,
+    edit_model: String,
+    has_aoc_session: bool,
+}
+
+#[derive(Serialize)]
+struct LanguageInfo {
+    id: String,
+    name: String,
+    editor_mode: String,
+    lsp_language_id: String,
+    has_lsp: bool,
+    root_uri: String,
+}
+
+async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
+    let language = app.config.language();
+    let has_lsp = language
+        .lsp
+        .as_ref()
+        .and_then(|c| c.first())
+        .is_some_and(|p| doctor::find_program(p).is_some());
+    Ok(Json(Bootstrap {
+        state: app.workspace.load_ui_state()?,
+        language: LanguageInfo {
+            id: app.config.language_id.clone(),
+            name: language.name.clone(),
+            editor_mode: language.editor_mode.clone(),
+            lsp_language_id: language.lsp_language_id.clone(),
+            has_lsp,
+            root_uri: file_uri(&app.config.solutions_dir),
+        },
+        snippets: app.config.snippets.clone(),
+        discuss_models: app.config.models.discuss.models.clone(),
+        edit_model: app.config.models.edit.model.clone(),
+        has_aoc_session: app.aoc.has_session(),
+    }))
+}
+
+async fn save_state(State(app): State<Shared>, Json(state): Json<UiState>) -> ApiResult<()> {
+    app.workspace.save_ui_state(&state)?;
+    Ok(Json(()))
+}
+
+async fn run_doctor(State(app): State<Shared>) -> ApiResult<Vec<doctor::Check>> {
+    Ok(Json(
+        doctor::run(&app.config, &app.paths, app.aoc.has_session()).await,
+    ))
+}
+
+#[derive(Deserialize)]
+struct RefreshQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+
+async fn stars(
+    State(app): State<Shared>,
+    Path(year): Path<u16>,
+    Query(query): Query<RefreshQuery>,
+) -> ApiResult<BTreeMap<u8, u8>> {
+    Ok(Json(app.aoc.stars(year, query.refresh).await?))
+}
+
+#[derive(Serialize)]
+struct OpenPuzzle {
+    code: CodeFile,
+    file_uri: String,
+    notes: String,
+    meta: DayMeta,
+}
+
+async fn open_puzzle(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+) -> ApiResult<OpenPuzzle> {
+    let puzzle = puzzle(year, day)?;
+    app.workspace.ensure_repo().await?;
+    let code = app.workspace.load_code(app.config.language(), puzzle)?;
+    Ok(Json(OpenPuzzle {
+        file_uri: file_uri(&code.path),
+        code,
+        notes: app.workspace.load_notes(puzzle)?,
+        meta: app.workspace.load_day_meta(puzzle)?,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SaveCode {
+    text: String,
+    version: String,
+}
+
+async fn save_code(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Json(body): Json<SaveCode>,
+) -> ApiResult<CodeFile> {
+    let puzzle = puzzle(year, day)?;
+    match app
+        .workspace
+        .save_code(app.config.language(), puzzle, &body.text, &body.version)
+    {
+        Ok(file) => Ok(Json(file)),
+        Err(SaveError::Conflict { current }) => Err(ApiError(
+            StatusCode::CONFLICT,
+            serde_json::json!({ "error": "The file changed on disk.", "current": current }),
+        )),
+        Err(SaveError::Other(err)) => Err(err.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct SaveNotes {
+    text: String,
+}
+
+async fn save_notes(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Json(body): Json<SaveNotes>,
+) -> ApiResult<()> {
+    app.workspace.save_notes(puzzle(year, day)?, &body.text)?;
+    Ok(Json(()))
+}
+
+async fn save_meta(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Json(meta): Json<DayMeta>,
+) -> ApiResult<()> {
+    app.workspace.save_day_meta(puzzle(year, day)?, &meta)?;
+    Ok(Json(()))
+}
+
+async fn problem(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Query(query): Query<RefreshQuery>,
+) -> ApiResult<Problem> {
+    Ok(Json(
+        app.aoc.problem(puzzle(year, day)?, query.refresh).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum InputKind {
+    Sample,
+    Real,
+}
+
+#[derive(Deserialize)]
+struct RunBody {
+    input: InputKind,
+}
+
+async fn run(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Json(body): Json<RunBody>,
+) -> ApiResult<RunResult> {
+    let puzzle = puzzle(year, day)?;
+    let input = match body.input {
+        InputKind::Sample => app.workspace.load_day_meta(puzzle)?.sample_input.context(
+            "no sample input is chosen yet; tap a code block in the puzzle to choose one",
+        )?,
+        InputKind::Real => app.aoc.input(puzzle).await?,
+    };
+    let Ok(_guard) = app.run_lock.try_lock() else {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            serde_json::json!({ "error": "Something is already running." }),
+        ));
+    };
+    let profile = app.config.language();
+    let file = profile.solution_path(&app.config.solutions_dir, puzzle)?;
+    let build_dir = app
+        .paths
+        .build_dir()
+        .join(puzzle.year.to_string())
+        .join(format!("{:02}", puzzle.day));
+    let result = runner::run(runner::RunRequest {
+        profile,
+        file: &file,
+        build_dir: &build_dir,
+        puzzle,
+        input: &input,
+        timeout: Duration::from_secs(app.config.run.timeout_secs),
+        cancel: &app.cancel_run,
+    })
+    .await?;
+    Ok(Json(result))
+}
+
+async fn cancel_run(State(app): State<Shared>) -> ApiResult<()> {
+    app.cancel_run.notify_waiters();
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+struct SubmitBody {
+    part: u8,
+    answer: String,
+}
+
+#[derive(Serialize)]
+struct Submitted {
+    outcome: SubmitOutcome,
+    /// The refreshed puzzle after a correct answer, which shows the next part.
+    problem: Option<Problem>,
+}
+
+async fn submit(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Json(body): Json<SubmitBody>,
+) -> ApiResult<Submitted> {
+    let puzzle = puzzle(year, day)?;
+    let part = Part::from_number(body.part)?;
+    let outcome = app.aoc.submit(puzzle, part, &body.answer).await?;
+    let problem = if outcome == SubmitOutcome::Correct {
+        Some(app.aoc.problem(puzzle, true).await?)
+    } else {
+        None
+    };
+    Ok(Json(Submitted { outcome, problem }))
+}
+
+#[derive(Deserialize)]
+struct EditBody {
+    /// The document with the cursor marked by `‸`.
+    doc: String,
+    utterance: String,
+    recent: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Edited {
+    #[serde(flatten)]
+    outcome: EditOutcome,
+    model: Option<String>,
+    elapsed_ms: u64,
+}
+
+async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> ApiResult<Edited> {
+    let prompt = edit::user_prompt(&body.doc, &body.utterance, body.recent.as_deref());
+    let reply = app
+        .edit_model
+        .call(&app.edit_spec(), &prompt, EDIT_TIMEOUT)
+        .await?;
+    tracing::info!(
+        utterance = %body.utterance,
+        elapsed_ms = reply.elapsed_ms,
+        reply = %reply.text,
+        "edit"
+    );
+    let outcome = edit::parse_reply(&reply.text).and_then(|r| edit::apply(&body.doc, r))?;
+    Ok(Json(Edited {
+        outcome,
+        model: reply.model,
+        elapsed_ms: reply.elapsed_ms,
+    }))
+}
+
+#[derive(Deserialize)]
+struct DiscussBody {
+    year: u16,
+    day: u8,
+    model: String,
+    turns: Vec<Turn>,
+    code: String,
+    #[serde(default)]
+    errors: String,
+    #[serde(default)]
+    last_run: String,
+}
+
+#[derive(Serialize)]
+struct Discussed {
+    text: String,
+    model: Option<String>,
+}
+
+async fn discuss(State(app): State<Shared>, Json(body): Json<DiscussBody>) -> ApiResult<Discussed> {
+    if !app.config.models.discuss.models.contains(&body.model) {
+        return Err(anyhow::anyhow!(
+            "{:?} isn't one of the configured discussion models",
+            body.model
+        )
+        .into());
+    }
+    let puzzle = puzzle(body.year, body.day)?;
+    // The puzzle is only used if it's already cached; discussing shouldn't trigger a fetch.
+    let problem = app.aoc.problem(puzzle, false).await.ok();
+    let prompt = discuss::prompt(
+        &discuss::Context {
+            language: &app.config.language().name,
+            problem: problem.as_ref().map(|p| p.text.as_str()),
+            code: &body.code,
+            errors: &body.errors,
+            last_run: &body.last_run,
+        },
+        &body.turns,
+    );
+    let spec = CallSpec {
+        model: body.model,
+        system_prompt: discuss::SYSTEM_PROMPT.to_owned(),
+    };
+    let reply = app
+        .discuss_model
+        .call(&spec, &prompt, DISCUSS_TIMEOUT)
+        .await?;
+    Ok(Json(Discussed {
+        text: reply.text,
+        model: reply.model,
+    }))
+}
+
+#[derive(Deserialize)]
+struct GitSyncBody {
+    message: String,
+}
+
+#[derive(Serialize)]
+struct GitSynced {
+    summary: String,
+}
+
+async fn git_sync(
+    State(app): State<Shared>,
+    Json(body): Json<GitSyncBody>,
+) -> ApiResult<GitSynced> {
+    Ok(Json(GitSynced {
+        summary: app.workspace.commit_and_push(&body.message).await?,
+    }))
+}
+
+async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {
+    let Some(command) = app.config.language().lsp.clone() else {
+        return (StatusCode::NOT_FOUND, "No language server is configured").into_response();
+    };
+    upgrade.on_upgrade(move |socket| async move {
+        if let Err(err) = crate::lsp::relay(socket, &command, &app.config.solutions_dir).await {
+            tracing::warn!("language server: {err:#}");
+        }
+    })
+}
+
+fn file_uri(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let encoded: Vec<String> = path
+        .split('/')
+        .map(|segment| urlencoding::encode(segment).into_owned())
+        .collect();
+    let joined = encoded.join("/");
+    if joined.starts_with('/') {
+        format!("file://{joined}")
+    } else {
+        format!("file:///{joined}")
+    }
+}
+
+pub fn load_or_create_token(paths: &Paths) -> Result<String> {
+    let file = paths.token_file();
+    match std::fs::read_to_string(&file) {
+        Ok(token) if !token.trim().is_empty() => return Ok(token.trim().to_owned()),
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err).with_context(|| format!("reading {}", file.display())),
+    }
+    let token = format!(
+        "{:032x}{:032x}",
+        rand::random::<u128>(),
+        rand::random::<u128>()
+    );
+    crate::paths::write_atomic(&file, token.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compares_tokens() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
+    #[test]
+    fn reads_token_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            "a=1; workshop_token=xyz; b=2".parse().unwrap(),
+        );
+        assert_eq!(cookie_token(&headers), Some("xyz"));
+    }
+
+    #[test]
+    fn checks_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "box.tail.ts.net".parse().unwrap());
+        assert!(same_origin(&headers));
+        headers.insert(header::ORIGIN, "https://box.tail.ts.net".parse().unwrap());
+        assert!(same_origin(&headers));
+        headers.insert(header::ORIGIN, "https://evil.example".parse().unwrap());
+        assert!(!same_origin(&headers));
+    }
+
+    #[test]
+    fn makes_file_uris() {
+        assert_eq!(
+            file_uri(std::path::Path::new("/a b/Main.hs")),
+            "file:///a%20b/Main.hs"
+        );
+    }
+}

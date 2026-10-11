@@ -1,0 +1,42 @@
+[tools]
+rust = { version = "stable", components = "rustfmt,clippy" }
+node = "24"
+
+[tasks.install]
+description = "Install frontend dependencies"
+dir = "frontend"
+run = "npm ci"
+
+[tasks.build-frontend]
+description = "Build the frontend into frontend/dist"
+depends = ["install"]
+dir = "frontend"
+run = "npm run build"
+
+[tasks.dev]
+description = "Install dependencies, then run the server with the frontend rebuilding on change"
+depends = ["build-frontend"]
+run = '''
+trap 'kill 0' EXIT
+(cd frontend && npm run dev -- --logLevel warn) &
+cargo run -- serve "$@"
+'''
+
+[tasks.build]
+description = "Build the release binary with the frontend embedded"
+depends = ["build-frontend"]
+run = "cargo build --release"
+
+[tasks.check]
+description = "Run all the checks CI runs"
+depends = ["install"]
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets -- -D warnings",
+  "cargo test",
+  "cd frontend && npm run typecheck && npm run lint && npm test && npm run build",
+]
+
+[tasks.doctor]
+description = "Check your setup"
+run = "cargo run -- doctor"

@@ -1,0 +1,45 @@
+name: Language profile request
+description: Ask for built-in support for another programming language
+labels: ["language profile"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A language profile tells Workshop how to build and run solutions in a language, which starter template to use, and how to get editor support. The built-in profiles live in [`languages/`](https://github.com/thomasschafer/workshop/tree/main/languages). If you've already written a working profile, sharing it here makes it much easier to add.
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      placeholder: e.g. OCaml
+    validations:
+      required: true
+  - type: textarea
+    id: toolchain
+    attributes:
+      label: Toolchain
+      description: The compiler or interpreter to use, and how it's usually installed.
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Build and run commands
+      description: How to build a single-file solution (if it needs building) and run it, reading the puzzle input from stdin.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: lsp
+    attributes:
+      label: Language server
+      description: The language server to use for editor support, if there is one.
+  - type: textarea
+    id: profile
+    attributes:
+      label: Existing profile
+      description: If you've already written a profile, paste it here.
+      render: toml
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?

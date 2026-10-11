@@ -1,0 +1,24 @@
+# Claude Code in headless mode, using the user's existing login. Tools are disabled so the model
+# can only reply with text. Settings, MCP servers and slash commands are skipped so that the
+# user's own Claude Code setup can't change behaviour or add tools.
+command = [
+  "claude", "-p",
+  "--model", "{model}",
+  "--system-prompt", "{system_prompt}",
+  "--tools", "",
+  "--setting-sources", "",
+  "--strict-mcp-config",
+  "--disable-slash-commands",
+  "--no-session-persistence",
+  "--input-format", "stream-json",
+  "--output-format", "stream-json",
+  "--verbose",
+]
+input = "claude-stream-json"
+output = "claude-stream-json"
+# Starting the CLI takes a couple of seconds, so a process is started ahead of time and waits
+# for the next request.
+prespawn = true
+version_command = ["claude", "--version"]
+auth_check_command = ["claude", "auth", "status", "--text"]
+install_hint = "Install Claude Code (https://claude.com/claude-code), then run `claude` once to log in."

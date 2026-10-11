@@ -1,0 +1,48 @@
+# Workshop configuration. Every setting is optional; the values shown are the defaults.
+
+[server]
+# Workshop runs code and spends your model subscription, so it only listens on this machine by
+# default. To reach it from your phone, use `tailscale serve` (see the README), which also gives
+# you the HTTPS that browsers require for microphone access.
+bind = "127.0.0.1:7878"
+
+[solutions]
+# A git repo for your solutions. Created on first use if it doesn't exist.
+dir = "~/aoc"
+language = "haskell"
+
+[aoc]
+# Your session cookie is read from the AOC_SESSION environment variable, or from the
+# `aoc-session` file next to this config file.
+#
+# Sent with every request to Advent of Code so they can contact the maintainers of this tool.
+user_agent = "github.com/thomasschafer/workshop"
+
+[run]
+timeout_secs = 60
+
+[models.edit]
+provider = "claude"
+# Model aliases such as "haiku" always resolve to the latest version.
+model = "haiku"
+
+[models.discuss]
+provider = "claude"
+# The first is the default; you can switch between them in the app.
+models = ["sonnet", "opus", "fable"]
+
+# Snippets you can insert by saying "snippet <name>", or from the snippet menu.
+# [[snippets]]
+# name = "parse ints"
+# body = "map read . lines"
+
+# Override or add model providers. See CONTRIBUTING.md for the full format.
+# [providers.my-cli]
+# command = ["my-cli", "--model", "{model}", "--system", "{system_prompt}"]
+# input = "stdin"
+# output = "text"
+
+# Override or add language profiles. See CONTRIBUTING.md and languages/haskell.toml.
+# [languages.python]
+# name = "Python"
+# ...

@@ -1,0 +1,13 @@
+[workspace]
+# Versions come from git tags rather than crates.io: Workshop is only distributed as GitHub release binaries.
+git_only = true
+publish = false
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+# Release binaries are attached by the release workflow, which publishes the draft once every asset is uploaded.
+git_release_draft = true
+changelog_update = true
+# Only release when the release PR is merged, rather than whenever the version in Cargo.toml has no tag.
+release_always = false
+semver_check = false
+pr_labels = ["release"]

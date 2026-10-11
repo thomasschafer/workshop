@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in Workshop isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please don't include your Advent of Code session cookie, Workshop token, or puzzle inputs, and report security issues privately as described in [SECURITY.md](https://github.com/thomasschafer/workshop/security/policy).
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `workshop serve`
+        2. Open ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include any error messages or relevant server logs.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `workshop doctor`
+      description: Check it for anything you'd rather not share before submitting.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: The machine running the Workshop server.
+      placeholder: e.g. macOS 26.1, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Phone or computer, and browser
+      description: The device and browser you're using Workshop from.
+      placeholder: e.g. iPhone 16 with Safari, Pixel 9 with Chrome, desktop Firefox
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Language profile, relevant parts of your config, screenshots, or anything else that might help.
