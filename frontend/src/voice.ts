@@ -42,24 +42,34 @@ function recognitionConstructor(): RecognitionConstructor | null {
 
 /**
  * Joins recognition results into one transcript. Most browsers give consecutive pieces of what
- * was said, but Chrome on Android gives each result as a growing copy of everything so far
- * ("can", "can you", "can you replace"), so a piece that extends the text so far replaces it
- * rather than being appended.
+ * was said. Chrome on Android instead gives each result as its latest guess at everything said
+ * so far, revisions included ("can you replace … with open", then "… with", then "… with open
+ * (and …"). When every piece restates the same opening, the last piece is the transcript.
  */
 export function mergeSegments(segments: readonly string[]): string {
+  const pieces = segments.map((s) => s.trim().replace(/\s+/g, " ")).filter((s) => s !== "");
+  const [first, ...rest] = pieces;
+  if (first === undefined) return "";
+  const opening = openingWords(first);
+  const restated = rest.length > 0 && rest.every((p) => openingWords(p).startsWith(opening));
+  if (restated) return pieces[pieces.length - 1] ?? "";
+
   let text = "";
-  for (const raw of segments) {
-    const segment = raw.trim().replace(/\s+/g, " ");
-    if (!segment) continue;
+  for (const piece of pieces) {
     const lower = text.toLowerCase();
-    const segmentLower = segment.toLowerCase();
-    if (segmentLower.startsWith(lower)) {
-      text = segment;
-    } else if (!lower.endsWith(segmentLower)) {
-      text = `${text} ${segment}`;
+    const pieceLower = piece.toLowerCase();
+    if (pieceLower.startsWith(lower)) {
+      text = piece;
+    } else if (!lower.endsWith(pieceLower)) {
+      text = `${text} ${piece}`;
     }
   }
   return text.trim();
+}
+
+/** The first two words, lower-cased, to recognise a piece that starts the sentence again. */
+function openingWords(text: string): string {
+  return text.toLowerCase().split(" ").slice(0, 2).join(" ");
 }
 
 export function speechSupported(): boolean {

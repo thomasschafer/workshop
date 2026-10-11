@@ -19,6 +19,29 @@ describe("mergeSegments", () => {
     );
   });
 
+  it("uses Android's latest guess when it revises earlier words", () => {
+    // From a real session: each piece restates the sentence, sometimes shorter than before.
+    const segments = [
+      "can you replace the dollars online six and seven with open",
+      "can you replace the dollars online six and seven with",
+      "can you replace the dollars online six and seven with open",
+      "can you replace the dollars online six and seven with open (and",
+      "can you replace the dollars online six and seven with open bracket and",
+      "can you replace the dollars online six and seven with open bracket and add",
+      "can you replace the dollars online six and seven with open (and add a",
+      "can you replace the dollars online six and seven with (and add a",
+      "can you replace the dollars online six and seven with open (and add a closed)",
+      "can you replace the dollars online six and seven with open (and add a closed) at the end of both Lines",
+    ];
+    expect(mergeSegments(segments)).toBe(
+      "can you replace the dollars online six and seven with open (and add a closed) at the end of both Lines",
+    );
+  });
+
+  it("joins pieces that happen to start with the same word", () => {
+    expect(mergeSegments(["map read", "map show"])).toBe("map read map show");
+  });
+
   it("handles a repeated final copy and casing changes", () => {
     expect(mergeSegments(["Fold are", "fold are plus zero", "fold are plus zero"])).toBe(
       "fold are plus zero",
