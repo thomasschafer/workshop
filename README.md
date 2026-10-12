@@ -30,7 +30,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 
 ## Getting started
 
-Download a binary from the [releases page](https://github.com/thomasschafer/workshop/releases), then:
+Download a binary from the [releases page](https://github.com/thomasschafer/workshop/releases) and put it somewhere on your PATH. On macOS, a binary downloaded in a browser is blocked until you allow it, either in System Settings, Privacy & Security, or with `xattr -d com.apple.quarantine workshop`. Then:
 
 ```sh
 workshop doctor   # check your setup, with fixes for anything missing
