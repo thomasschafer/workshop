@@ -20,11 +20,12 @@ use crate::config::{Config, Snippet};
 use crate::discuss::{self, Turn};
 use crate::doctor;
 use crate::edit::{self, EditOutcome};
-use crate::language::Puzzle;
+use crate::language::{LanguageProfile, Puzzle};
 use crate::models::{self, ModelSettings, ProviderOption};
 use crate::paths::Paths;
 use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::runner::{self, RunResult};
+use crate::settings::AppSettings;
 use crate::workspace::{DayMeta, SaveError, UiState, VersionedFile, Workspace};
 
 const TOKEN_COOKIE: &str = "workshop_token";
@@ -43,7 +44,7 @@ pub struct App {
     aoc: AocClient,
     /// One per provider, each keeping its own process ready.
     runners: BTreeMap<String, ProviderRunner>,
-    models: std::sync::RwLock<ModelSettings>,
+    settings: std::sync::RwLock<AppSettings>,
     run_lock: Mutex<()>,
     /// Cancels the run in progress, if there is one.
     current_run: std::sync::Mutex<Option<CancellationToken>>,
@@ -73,7 +74,7 @@ impl App {
             workspace: Workspace::new(config.solutions_dir.clone(), paths.clone()),
             aoc: AocClient::new(aoc_session, &config.aoc.user_agent, paths.aoc_cache_dir())?,
             runners,
-            models: std::sync::RwLock::new(ModelSettings::load(&config, &paths)),
+            settings: std::sync::RwLock::new(AppSettings::load(&config, &paths)),
             run_lock: Mutex::new(()),
             current_run: std::sync::Mutex::new(None),
             config,
@@ -82,11 +83,33 @@ impl App {
         })
     }
 
-    fn model_settings(&self) -> ModelSettings {
-        self.models
+    fn settings(&self) -> AppSettings {
+        self.settings
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    fn model_settings(&self) -> ModelSettings {
+        self.settings().models
+    }
+
+    /// The language chosen in the app, or the config's.
+    fn language(&self) -> &LanguageProfile {
+        &self.config.languages[&self.settings().language]
+    }
+
+    fn update_settings(&self, change: impl FnOnce(&mut AppSettings)) -> Result<()> {
+        let mut settings = self
+            .settings
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut next = settings.clone();
+        change(&mut next);
+        next.validate(&self.config)?;
+        next.save(&self.paths)?;
+        *settings = next;
+        Ok(())
     }
 
     /// The runner and call for the chosen edit model.
@@ -95,7 +118,7 @@ impl App {
         let spec = self.config.providers[&choice.provider].spec(
             Role::Edit,
             &choice.model,
-            edit::system_prompt(self.config.language()),
+            edit::system_prompt(self.language()),
         );
         (&self.runners[&choice.provider], spec)
     }
@@ -121,6 +144,9 @@ pub fn router(app: Shared) -> Router {
         .route("/state", put(save_state))
         .route("/doctor", get(run_doctor))
         .route("/models", get(get_models).put(set_models))
+        .route("/setup", get(setup_state))
+        .route("/setup/language", put(set_language))
+        .route("/setup/aoc-session", post(set_aoc_session))
         .route("/years/{year}/stars", get(stars))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
@@ -291,6 +317,8 @@ struct Bootstrap {
     snippets: Vec<Snippet>,
     models: ModelsState,
     has_aoc_session: bool,
+    /// Whether to show setup straight away, because something essential is missing.
+    needs_setup: bool,
 }
 
 #[derive(Serialize)]
@@ -304,7 +332,7 @@ struct LanguageInfo {
 }
 
 async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
-    let language = app.config.language();
+    let language = app.language();
     let has_lsp = language
         .lsp
         .as_ref()
@@ -323,6 +351,10 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         snippets: app.config.snippets.clone(),
         models: models_state(&app),
         has_aoc_session: app.aoc.has_session(),
+        needs_setup: !app.aoc.has_session()
+            || models::options(&app.config)
+                .iter()
+                .all(|o| o.unavailable.is_some()),
     }))
 }
 
@@ -365,7 +397,7 @@ async fn open_puzzle(
 ) -> ApiResult<OpenPuzzle> {
     let puzzle = puzzle(year, day)?;
     app.workspace.ensure_repo().await?;
-    let code = app.workspace.load_code(app.config.language(), puzzle)?;
+    let code = app.workspace.load_code(app.language(), puzzle)?;
     Ok(Json(OpenPuzzle {
         file_uri: file_uri(&code.path),
         code,
@@ -388,7 +420,7 @@ async fn save_code(
     let puzzle = puzzle(year, day)?;
     saved(
         app.workspace
-            .save_code(app.config.language(), puzzle, &body.text, &body.version),
+            .save_code(app.language(), puzzle, &body.text, &body.version),
     )
 }
 
@@ -495,7 +527,7 @@ async fn run(
             () = cancel.cancelled() => return Err(anyhow::anyhow!("Cancelled.").into()),
         },
     };
-    let profile = app.config.language();
+    let profile = app.language();
     let file = profile.solution_path(&app.config.solutions_dir, puzzle)?;
     let build_dir = app
         .paths
@@ -661,7 +693,7 @@ async fn discuss(State(app): State<Shared>, Json(body): Json<DiscussBody>) -> Ap
     let problem = app.aoc.cached_problem(puzzle)?;
     let prompt = discuss::prompt(
         &discuss::Context {
-            language: &app.config.language().name,
+            language: &app.language().name,
             problem: problem.as_ref().map(|p| p.text.as_str()),
             code: &body.code,
             errors: &body.errors,
@@ -727,6 +759,154 @@ async fn client_log(Json(body): Json<ClientLog>) -> ApiResult<()> {
     Ok(Json(()))
 }
 
+#[derive(Serialize)]
+struct SetupState {
+    languages: Vec<LanguageOption>,
+    language: String,
+    has_aoc_session: bool,
+    providers: Vec<ProviderStatus>,
+    tailscale_installed: bool,
+    /// The address to open on a phone, with the token, if Tailscale is serving Workshop.
+    phone_url: Option<String>,
+    /// `phone_url` as a QR code, in SVG.
+    phone_qr_svg: Option<String>,
+    port: u16,
+}
+
+#[derive(Serialize)]
+struct LanguageOption {
+    id: String,
+    name: String,
+    /// Programs it needs that aren't installed.
+    missing: Vec<String>,
+    /// The language server, if it isn't installed. Workshop works without it.
+    missing_language_server: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ProviderStatus {
+    id: String,
+    name: String,
+    installed: bool,
+    /// Unknown if the provider has no way to check.
+    logged_in: Option<bool>,
+    install_hint: Option<String>,
+}
+
+async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupState> {
+    let languages = app
+        .config
+        .languages
+        .iter()
+        .map(|(id, profile)| LanguageOption {
+            id: id.clone(),
+            name: profile.name.clone(),
+            missing: profile
+                .required_programs()
+                .into_iter()
+                .filter(|p| doctor::find_program(p).is_none())
+                .map(str::to_owned)
+                .collect(),
+            missing_language_server: profile
+                .lsp
+                .as_ref()
+                .and_then(|c| c.first())
+                .filter(|p| doctor::find_program(p).is_none())
+                .cloned(),
+        })
+        .collect();
+    let providers =
+        futures_util::future::join_all(models::options(&app.config).into_iter().map(|option| {
+            let provider = &app.config.providers[&option.id];
+            async move {
+                let installed = option.unavailable.is_none();
+                let logged_in = match (&provider.auth_check_command, installed) {
+                    (Some(command), true) => doctor::output(command).await.map(|(ok, _)| ok),
+                    _ => None,
+                };
+                ProviderStatus {
+                    id: option.id,
+                    name: option.name,
+                    installed,
+                    logged_in,
+                    install_hint: provider.install_hint.clone(),
+                }
+            }
+        }))
+        .await;
+    let port = app.config.server.bind.port();
+    let phone_url = crate::tailscale::serving_url(port)
+        .await
+        .map(|base| format!("{base}/?token={}", app.token));
+    let phone_qr_svg = phone_url.as_deref().map(qr_svg).transpose()?;
+    Ok(Json(SetupState {
+        languages,
+        language: app.settings().language,
+        has_aoc_session: app.aoc.has_session(),
+        providers,
+        tailscale_installed: doctor::find_program("tailscale").is_some(),
+        phone_url,
+        phone_qr_svg,
+        port,
+    }))
+}
+
+fn qr_svg(text: &str) -> Result<String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).context("making a QR code")?;
+    Ok(code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(220, 220)
+        .quiet_zone(true)
+        .build())
+}
+
+#[derive(Deserialize)]
+struct LanguageBody {
+    language: String,
+}
+
+/// Changes the language. The page reloads afterwards, as the editor and language server depend
+/// on it.
+async fn set_language(State(app): State<Shared>, Json(body): Json<LanguageBody>) -> ApiResult<()> {
+    app.update_settings(|s| s.language = body.language)
+        .map_err(|e| {
+            ApiError(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({ "error": format!("{e:#}") }),
+            )
+        })?;
+    let warm = app.clone();
+    tokio::spawn(async move { warm.warm_edit_model().await });
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+struct SessionBody {
+    session: String,
+}
+
+/// Checks a pasted Advent of Code session cookie, then saves it where only the user can read it.
+async fn set_aoc_session(
+    State(app): State<Shared>,
+    Json(body): Json<SessionBody>,
+) -> ApiResult<()> {
+    let session = body
+        .session
+        .trim()
+        .trim_start_matches("session=")
+        .to_owned();
+    if session.is_empty() || session.contains(char::is_whitespace) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": "Paste just the cookie's value, a long string of letters and numbers." }),
+        ));
+    }
+    app.aoc.check_session(&session).await?;
+    crate::paths::write_private(&app.paths.aoc_session_file(), session.as_bytes())?;
+    app.aoc.set_session(session);
+    Ok(Json(()))
+}
+
 /// The model choices, with what each provider offers.
 #[derive(Serialize)]
 struct ModelsState {
@@ -772,10 +952,7 @@ async fn set_models(
             return Err(invalid(reason));
         }
     }
-    settings.save(&app.paths)?;
-    *app.models
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = settings;
+    app.update_settings(|s| s.models = settings)?;
     // Start the newly chosen edit model now, so the first edit with it is quick.
     let warm = app.clone();
     tokio::spawn(async move { warm.warm_edit_model().await });
@@ -783,7 +960,7 @@ async fn set_models(
 }
 
 async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {
-    let Some(command) = app.config.language().lsp.clone() else {
+    let Some(command) = app.language().lsp.clone() else {
         return (StatusCode::NOT_FOUND, "No language server is configured").into_response();
     };
     upgrade.on_upgrade(move |socket| async move {

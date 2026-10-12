@@ -4,10 +4,12 @@ import { api, type ModelSettings, type ModelsState, type ProviderOption } from "
 interface Props {
   models: ModelsState;
   onModels: (models: ModelsState) => void;
+  /** Whether to show its own heading, which isn't wanted inside another section. */
+  heading?: boolean;
 }
 
 /** Choosing the model CLI and model for editing, and the CLI for discussion. */
-export function ModelsSection({ models, onModels }: Props) {
+export function ModelsSection({ models, onModels, heading = true }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { settings, providers } = models;
@@ -47,8 +49,8 @@ export function ModelsSection({ models, onModels }: Props) {
     ));
 
   return (
-    <section>
-      <h2>Models</h2>
+    <div class="models">
+      {heading ? <h2>Models</h2> : null}
       <p class="label">Editing</p>
       <div class="snippets">
         {providerChips(editing, settings.edit.provider, (p) =>
@@ -89,6 +91,6 @@ export function ModelsSection({ models, onModels }: Props) {
         </p>
       ))}
       {error ? <p class="error-text">{error}</p> : null}
-    </section>
+    </div>
   );
 }

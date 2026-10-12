@@ -1,11 +1,13 @@
-import { useEffect, useState } from "preact/hooks";
-import { api, type Check, type ModelsState, type Snippet } from "../api";
+import { useState } from "preact/hooks";
+import { api, type ModelsState, type Snippet } from "../api";
+import { Checks } from "./checks";
 import { ModelsSection } from "./models";
 
 interface Props {
   snippets: Snippet[];
   models: ModelsState;
   onModels: (models: ModelsState) => void;
+  onSetup: () => void;
   commitMessage: string;
   onInsertSnippet: (snippet: Snippet) => void;
   keepScreenOn: boolean | null;
@@ -16,25 +18,14 @@ export function Settings({
   snippets,
   models,
   onModels,
+  onSetup,
   commitMessage,
   onInsertSnippet,
   keepScreenOn,
   onKeepScreenOn,
 }: Props) {
-  const [checks, setChecks] = useState<Check[] | null>(null);
-  const [checkError, setCheckError] = useState<string | null>(null);
   const [sync, setSync] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
-
-  const runChecks = () => {
-    setChecks(null);
-    setCheckError(null);
-    api
-      .doctor()
-      .then(setChecks)
-      .catch((e: unknown) => setCheckError(e instanceof Error ? e.message : String(e)));
-  };
-  useEffect(runChecks, []);
 
   const commit = async () => {
     setSyncing(true);
@@ -49,7 +40,9 @@ export function Settings({
 
   return (
     <div class="settings">
-      <ModelsSection models={models} onModels={onModels} />
+      <section>
+        <ModelsSection models={models} onModels={onModels} />
+      </section>
 
       <section>
         <h2>Solutions repo</h2>
@@ -92,24 +85,10 @@ export function Settings({
 
       <section>
         <h2>Setup</h2>
-        {checkError ? <p class="error-text">{checkError}</p> : null}
-        {checks === null && !checkError ? <p class="muted">Checking…</p> : null}
-        <ul class="checks">
-          {checks?.map((c) => (
-            <li key={c.name + c.detail} class={`check ${c.status}`}>
-              <span class="mark">{c.status === "ok" ? "✓" : c.status === "warn" ? "!" : "✗"}</span>
-              <div>
-                <div>
-                  {c.name}: <span class="muted">{c.detail}</span>
-                </div>
-                {c.fix ? <div class="fix">{c.fix}</div> : null}
-              </div>
-            </li>
-          ))}
-        </ul>
-        <button type="button" class="text-button" onClick={runChecks}>
-          Check again
+        <button type="button" class="pill" onClick={onSetup}>
+          Run setup again
         </button>
+        <Checks />
       </section>
 
       <p class="muted small">Workshop is unofficial and not affiliated with Advent of Code.</p>

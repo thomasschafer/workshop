@@ -1,12 +1,10 @@
-//! Which model CLIs and models Workshop uses, as chosen in the app. The config file sets the
-//! defaults; choices made in the app are saved separately so the config file is never rewritten.
+//! Which model CLIs and models Workshop uses, and what each provider offers.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::doctor;
-use crate::paths::{self, Paths};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,32 +40,6 @@ impl ModelSettings {
             },
             discuss_provider: config.models.discuss.provider.clone(),
         }
-    }
-
-    /// The saved choice, or the config's defaults if there isn't one or it no longer fits the
-    /// config, for example because a provider was removed.
-    pub fn load(config: &Config, paths: &Paths) -> Self {
-        let file = paths.model_settings_file();
-        let saved = match std::fs::read_to_string(&file) {
-            Ok(json) => serde_json::from_str::<Self>(&json)
-                .context("reading saved model settings")
-                .and_then(|s| s.validate(config).map(|()| s)),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Self::defaults(config);
-            }
-            Err(err) => Err(err).with_context(|| format!("reading {}", file.display())),
-        };
-        saved.unwrap_or_else(|err| {
-            tracing::warn!("using the model settings from the config file: {err:#}");
-            Self::defaults(config)
-        })
-    }
-
-    pub fn save(&self, paths: &Paths) -> Result<()> {
-        paths::write_atomic(
-            &paths.model_settings_file(),
-            &serde_json::to_vec_pretty(self)?,
-        )
     }
 
     pub fn validate(&self, config: &Config) -> Result<()> {
@@ -160,32 +132,6 @@ mod tests {
         assert_eq!(
             discuss_models(&config, "claude"),
             vec!["sonnet", "opus", "fable"]
-        );
-    }
-
-    #[test]
-    fn saves_and_falls_back_to_defaults() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::under(dir.path());
-        let config = config();
-        let chosen = ModelSettings {
-            edit: ModelChoice {
-                provider: "codex".into(),
-                model: "luna".into(),
-            },
-            discuss_provider: "codex".into(),
-        };
-        chosen.save(&paths).unwrap();
-        assert_eq!(ModelSettings::load(&config, &paths), chosen);
-
-        std::fs::write(
-            paths.model_settings_file(),
-            r#"{"edit":{"provider":"gone","model":"x"},"discuss_provider":"claude"}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            ModelSettings::load(&config, &paths),
-            ModelSettings::defaults(&config)
         );
     }
 }

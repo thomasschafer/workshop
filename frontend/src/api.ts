@@ -31,6 +31,29 @@ export interface Bootstrap {
   snippets: Snippet[];
   models: ModelsState;
   has_aoc_session: boolean;
+  needs_setup: boolean;
+}
+
+export interface SetupState {
+  languages: {
+    id: string;
+    name: string;
+    missing: string[];
+    missing_language_server: string | null;
+  }[];
+  language: string;
+  has_aoc_session: boolean;
+  providers: {
+    id: string;
+    name: string;
+    installed: boolean;
+    logged_in: boolean | null;
+    install_hint: string | null;
+  }[];
+  tailscale_installed: boolean;
+  phone_url: string | null;
+  phone_qr_svg: string | null;
+  port: number;
 }
 
 export interface ModelChoice {
@@ -185,6 +208,9 @@ export const api = {
     request<null>("PUT", "/state", state, { keepalive }),
   doctor: () => request<Check[]>("GET", "/doctor"),
   setModels: (settings: ModelSettings) => request<ModelsState>("PUT", "/models", settings),
+  setup: () => request<SetupState>("GET", "/setup"),
+  setLanguage: (language: string) => request<null>("PUT", "/setup/language", { language }),
+  setAocSession: (session: string) => request<null>("POST", "/setup/aoc-session", { session }),
   stars: (year: number, refresh = false) =>
     request<Record<string, number>>("GET", `/years/${year}/stars?refresh=${refresh}`),
   open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),

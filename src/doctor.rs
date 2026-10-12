@@ -60,14 +60,17 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
     ));
 
     // The providers chosen in the app, which may differ from the config's defaults.
-    let models = crate::models::ModelSettings::load(config, paths);
-    let mut provider_ids = vec![models.edit.provider, models.discuss_provider];
+    let settings = crate::settings::AppSettings::load(config, paths);
+    let mut provider_ids = vec![
+        settings.models.edit.provider.clone(),
+        settings.models.discuss_provider.clone(),
+    ];
     provider_ids.dedup();
     for id in &provider_ids {
         checks.extend(check_provider(config, id).await);
     }
 
-    let language = config.language();
+    let language = &config.languages[&settings.language];
     for program in language.required_programs() {
         checks.push(match find_program(program) {
             Some(path) => Check::ok(
@@ -228,15 +231,9 @@ async fn check_https(config: &Config) -> Check {
     if find_program("tailscale").is_none() {
         return Check::problem(Status::Warn, name, "Tailscale isn't installed", fix);
     }
-    match output(&["tailscale".into(), "serve".into(), "status".into()]).await {
-        Some((true, out)) if out.contains(&format!(":{port}")) => Check::ok(
-            name,
-            out.lines()
-                .find(|l| l.contains("https://"))
-                .unwrap_or("Tailscale is serving Workshop")
-                .trim(),
-        ),
-        _ => Check::problem(
+    match crate::tailscale::serving_url(port).await {
+        Some(url) => Check::ok(name, format!("Served at {url}")),
+        None => Check::problem(
             Status::Warn,
             name,
             "Tailscale isn't serving Workshop over HTTPS",
@@ -245,7 +242,7 @@ async fn check_https(config: &Config) -> Check {
     }
 }
 
-async fn output(command: &[String]) -> Option<(bool, String)> {
+pub async fn output(command: &[String]) -> Option<(bool, String)> {
     let (program, args) = command.split_first()?;
     let output = tokio::time::timeout(
         Duration::from_secs(15),

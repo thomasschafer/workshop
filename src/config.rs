@@ -205,10 +205,6 @@ impl Config {
             snippets: raw.snippets,
         })
     }
-
-    pub fn language(&self) -> &LanguageProfile {
-        &self.languages[&self.language_id]
-    }
 }
 
 /// The commented example config, set up for Codex instead of Claude Code if that's what the

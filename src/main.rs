@@ -12,6 +12,7 @@ mod process;
 mod provider;
 mod runner;
 mod server;
+mod settings;
 mod tailscale;
 mod template;
 mod workspace;

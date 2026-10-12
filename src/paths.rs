@@ -67,8 +67,9 @@ impl Paths {
         self.data_dir.join("workshop.log")
     }
 
-    pub fn model_settings_file(&self) -> PathBuf {
-        self.data_dir.join("models.json")
+    /// Choices made in the app, such as models and language.
+    pub fn settings_file(&self) -> PathBuf {
+        self.data_dir.join("settings.json")
     }
 
     pub fn state_file(&self) -> PathBuf {

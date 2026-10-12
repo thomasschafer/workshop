@@ -34,6 +34,7 @@ import {
   type RunState,
 } from "./views/run";
 import { Settings } from "./views/settings";
+import { Setup } from "./views/setup";
 import { PushToTalk, speechSupported, speechUnavailableReason } from "./voice";
 import {
   keepScreenOnPreference,
@@ -42,7 +43,7 @@ import {
   wakeLockSupported,
 } from "./wakelock";
 
-type Sheet = "run" | "settings" | "help" | null;
+type Sheet = "run" | "settings" | "help" | "setup" | null;
 
 interface Feedback {
   kind: "pending" | "ok" | "warn" | "error" | "info";
@@ -72,7 +73,8 @@ export function App({ boot }: { boot: Bootstrap }) {
     chosenDiscussModel && models.discuss_models.includes(chosenDiscussModel)
       ? chosenDiscussModel
       : (models.discuss_models[0] ?? "");
-  const [sheet, setSheet] = useState<Sheet>(null);
+  const [sheet, setSheet] = useState<Sheet>(boot.needs_setup ? "setup" : null);
+  const [hasSession, setHasSession] = useState(boot.has_aoc_session);
   const [picking, setPicking] = useState(false);
 
   const [openError, setOpenError] = useState<string | null>(null);
@@ -705,7 +707,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           <div class="pane">
             <Picker
               current={puzzle}
-              hasSession={boot.has_aoc_session}
+              hasSession={hasSession}
               onPick={(p) => {
                 setPicking(false);
                 if (!puzzle || p.year !== puzzle.year || p.day !== puzzle.day) {
@@ -765,6 +767,16 @@ export function App({ boot }: { boot: Bootstrap }) {
             }}
           />
         ) : null}
+        {sheet === "setup" ? (
+          <Modal title="Set up Workshop" onClose={() => setSheet(null)}>
+            <Setup
+              models={models}
+              onModels={setModels}
+              onLoggedIn={() => setHasSession(true)}
+              onDone={() => setSheet(null)}
+            />
+          </Modal>
+        ) : null}
         {sheet === "help" ? (
           <Modal title="How Workshop works" onClose={() => setSheet(null)}>
             <Help />
@@ -792,6 +804,7 @@ export function App({ boot }: { boot: Bootstrap }) {
                 snippets={boot.snippets}
                 models={models}
                 onModels={setModels}
+                onSetup={() => setSheet("setup")}
                 commitMessage={
                   puzzle ? `Advent of Code ${puzzle.year} day ${puzzle.day}` : "Advent of Code"
                 }

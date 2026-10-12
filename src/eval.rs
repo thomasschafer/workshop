@@ -10,9 +10,10 @@ use serde::Deserialize;
 
 use crate::config::Config;
 use crate::edit::{self, CURSOR, EditOutcome};
-use crate::models::{ModelChoice, ModelSettings};
+use crate::models::ModelChoice;
 use crate::paths::Paths;
 use crate::provider::{CallSpec, ProviderRunner, Role};
+use crate::settings::AppSettings;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,7 +139,7 @@ pub async fn run(
 
     let choice = match model {
         Some(choice) => choice,
-        None => ModelSettings::load(config, paths).edit,
+        None => AppSettings::load(config, paths).models.edit,
     };
     let provider = config
         .providers

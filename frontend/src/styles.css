@@ -523,7 +523,8 @@ code {
   margin-bottom: 20px;
 }
 
-.settings h2 {
+.settings h2,
+.models h2 {
   font-size: 13px;
   color: var(--muted);
   font-weight: 500;
@@ -834,7 +835,8 @@ code {
   font-size: 13px;
 }
 
-.settings .label {
+.settings .label,
+.setup .label {
   font-size: 12px;
   color: var(--muted);
   margin: 10px 0 2px;
@@ -842,4 +844,56 @@ code {
 
 .chip:disabled {
   opacity: 0.4;
+}
+
+/* Setup */
+
+.setup section {
+  margin-bottom: 20px;
+}
+
+.setup h2 {
+  font-size: 14px;
+  margin: 8px 0;
+}
+
+.setup .ok-mark {
+  color: var(--ok);
+}
+
+.setup .todo-mark {
+  color: var(--faint);
+}
+
+.cookie-form {
+  display: flex;
+  gap: 8px;
+}
+
+.cookie-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--mono);
+}
+
+.qr {
+  width: 220px;
+  margin: 8px 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.phone-link code {
+  font-size: 12px;
+  word-break: break-all;
 }

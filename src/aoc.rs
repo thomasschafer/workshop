@@ -22,9 +22,11 @@ const CALENDAR_TTL: Duration = Duration::from_secs(15 * 60);
 
 pub struct AocClient {
     http: reqwest::Client,
-    session: Option<String>,
+    /// Can be set while running, from the app's setup.
+    session: std::sync::RwLock<Option<String>>,
     cache_dir: PathBuf,
     base_url: String,
+    min_request_interval: Duration,
     last_request: Mutex<Option<Instant>>,
 }
 
@@ -123,17 +125,62 @@ impl AocClient {
             .build()?;
         Ok(Self {
             http,
-            session: session
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty()),
+            session: std::sync::RwLock::new(
+                session
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty()),
+            ),
             cache_dir,
+            min_request_interval: if base_url == BASE_URL {
+                MIN_REQUEST_INTERVAL
+            } else {
+                // Only tests use another address, and they don't need to be polite.
+                Duration::ZERO
+            },
             base_url,
             last_request: Mutex::new(None),
         })
     }
 
     pub fn has_session(&self) -> bool {
-        self.session.is_some()
+        self.session().is_some()
+    }
+
+    fn session(&self) -> Option<String> {
+        self.session
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn set_session(&self, session: String) {
+        *self
+            .session
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(session);
+    }
+
+    /// Checks that a session cookie logs in, by fetching a page that shows whether it does.
+    pub async fn check_session(&self, session: &str) -> Result<()> {
+        let url = format!("{}/2015", self.base_url);
+        let response = self
+            .throttled(|| {
+                self.http
+                    .get(&url)
+                    .header(reqwest::header::COOKIE, format!("session={session}"))
+                    .send()
+            })
+            .await
+            .context("couldn't reach Advent of Code to check the cookie")?;
+        // Advent of Code answers a malformed cookie with an error status rather than a page.
+        let logged_in =
+            response.status().is_success() && response.text().await?.contains("[Log Out]");
+        if !logged_in {
+            bail!(
+                "Advent of Code didn't accept that cookie. Check you copied the whole value of the `session` cookie while logged in."
+            );
+        }
+        Ok(())
     }
 
     fn day_dir(&self, puzzle: Puzzle) -> PathBuf {
@@ -229,14 +276,17 @@ impl AocClient {
         Ok(outcome)
     }
 
-    fn require_session(&self) -> Result<&str> {
-        self.session.as_deref().context(
+    fn require_session(&self) -> Result<String> {
+        self.session().context(
             "your Advent of Code session cookie isn't set; run `workshop doctor` for how to add it",
         )
     }
 
     async fn get(&self, url: &str) -> Result<String> {
-        let session = self.require_session()?;
+        self.get_with(url, &self.require_session()?).await
+    }
+
+    async fn get_with(&self, url: &str, session: &str) -> Result<String> {
         let response = self
             .throttled(|| {
                 self.http
@@ -265,7 +315,7 @@ impl AocClient {
     {
         let mut last = self.last_request.lock().await;
         if let Some(previous) = *last {
-            let wait = MIN_REQUEST_INTERVAL.saturating_sub(previous.elapsed());
+            let wait = self.min_request_interval.saturating_sub(previous.elapsed());
             tokio::time::sleep(wait).await;
         }
         let result = request().await;
@@ -822,6 +872,45 @@ mod tests {
         );
         assert_eq!(client.input(puzzle).await.unwrap(), "1 2\n");
         assert!(client.problem(puzzle, true).await.is_err());
+    }
+
+    /// A stand-in for Advent of Code that treats only the cookie "good" as logged in.
+    async fn fake_aoc() -> String {
+        use axum::http::{HeaderMap, StatusCode};
+        let app = axum::Router::new().route(
+            "/2015",
+            axum::routing::get(|headers: HeaderMap| async move {
+                let cookie = headers
+                    .get("cookie")
+                    .and_then(|c| c.to_str().ok())
+                    .unwrap_or_default();
+                match cookie {
+                    "session=good" => (StatusCode::OK, "<a href=\"/auth/logout\">[Log Out]</a>"),
+                    "session=expired" => (StatusCode::OK, "<a href=\"/auth/login\">[Log In]</a>"),
+                    _ => (StatusCode::INTERNAL_SERVER_ERROR, "error"),
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn checks_session_cookies() {
+        let dir = tempfile::tempdir().unwrap();
+        let client =
+            AocClient::with_base_url(None, "test", dir.path().to_owned(), fake_aoc().await)
+                .unwrap();
+        client.check_session("good").await.unwrap();
+        for bad in ["expired", "malformed"] {
+            let err = client.check_session(bad).await.unwrap_err().to_string();
+            assert!(err.contains("didn't accept that cookie"), "{bad}: {err}");
+        }
+        assert!(!client.has_session());
+        client.set_session("good".into());
+        assert!(client.has_session());
     }
 
     #[tokio::test]

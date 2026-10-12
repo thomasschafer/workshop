@@ -45,7 +45,7 @@ workshop serve --tailscale
 
 This runs `tailscale serve` for you, which gives Workshop an HTTPS address on your tailnet, and prints a link and QR code to open on your phone. The token in the link is then remembered by your phone's browser. Keep your laptop awake while you're out, for example with `caffeinate -i` on macOS.
 
-To save your Advent of Code session cookie, log in to the site, copy the `session` cookie from your browser's developer tools, and save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
+The first time you open Workshop, a short setup walks you through choosing your language and model, logging in to Advent of Code with your session cookie, and opening Workshop on your phone. You can run it again from Settings. If you'd rather not paste the cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
 ## Configuration
 

@@ -29,6 +29,29 @@ pub async fn serve(port: u16) -> Result<String> {
     Ok(format!("https://{name}"))
 }
 
+/// The HTTPS address Tailscale is already serving `port` at, without changing anything.
+pub async fn serving_url(port: u16) -> Option<String> {
+    crate::doctor::find_program("tailscale")?;
+    let status = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run(&["serve", "status"]),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    serving_url_from_status(&status, port)
+}
+
+fn serving_url_from_status(status: &str, port: u16) -> Option<String> {
+    if !status.contains(&format!(":{port}")) {
+        return None;
+    }
+    status
+        .split_whitespace()
+        .find(|word| word.starts_with("https://"))
+        .map(|url| url.trim_end_matches('/').to_owned())
+}
+
 async fn run(args: &[&str]) -> Result<String> {
     let output = Command::new("tailscale")
         .args(args)
@@ -63,6 +86,18 @@ fn dns_name(status_json: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_serve_status() {
+        let status =
+            "https://laptop.tail1234.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:7878\n";
+        assert_eq!(
+            serving_url_from_status(status, 7878).as_deref(),
+            Some("https://laptop.tail1234.ts.net")
+        );
+        assert_eq!(serving_url_from_status(status, 9999), None);
+        assert_eq!(serving_url_from_status("No serve config", 7878), None);
+    }
 
     #[test]
     fn reads_dns_name() {
