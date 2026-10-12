@@ -132,7 +132,7 @@ async function say(page: Page, text: string): Promise<void> {
   const words = text.split(" ").length;
   await page.waitForTimeout((words / WORDS_PER_SECOND) * 1000 + 600);
   await page.mouse.up();
-  const editing = page.locator(".feedback").getByText("Editing…");
+  const editing = page.locator(".talk.working");
   await editing.waitFor();
   await editing.waitFor({ state: "detached" });
   const feedback = (await page.locator(".feedback").textContent()) ?? "";

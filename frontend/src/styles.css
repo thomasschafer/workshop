@@ -672,6 +672,60 @@ code {
   box-shadow: 0 0 0 4px var(--selection);
 }
 
+/* A band of light sweeping across the button while the model edits. */
+.talk.working {
+  background:
+    linear-gradient(
+      105deg,
+      transparent 30%,
+      color-mix(in srgb, white 45%, transparent) 50%,
+      transparent 70%
+    )
+    0 0 / 250% 100% no-repeat,
+    var(--accent);
+  animation: talk-sweep 1.4s ease-in-out infinite;
+}
+
+.talk .elapsed {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+@keyframes talk-sweep {
+  from {
+    background-position:
+      100% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      -50% 0,
+      0 0;
+  }
+}
+
+/* A glow that fades out as an edit lands. */
+.talk.landed {
+  animation: talk-landed 0.9s ease-out;
+}
+
+@keyframes talk-landed {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 70%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .talk.working,
+  .talk.landed {
+    animation: none;
+  }
+}
+
 /* Help */
 
 .help section {

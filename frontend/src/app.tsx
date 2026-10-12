@@ -435,7 +435,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       return;
     }
     const before = current.text();
-    setFeedback({ kind: "pending", transcript: utterance, text: "Editing…" });
+    setFeedback({ kind: "pending", transcript: utterance, startedAt: performance.now() });
     try {
       const result = await api.edit(marked, utterance, current.recentInsertion, earlier);
       if (editor.current !== current || current.text() !== before) {

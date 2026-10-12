@@ -14,7 +14,7 @@ const uiState = join(HOME, "data", "state.json");
 async function say(text: string): Promise<void> {
   await page.locator(".typed input").fill(text);
   await page.locator(".typed input").press("Enter");
-  await expect(page.locator(".feedback")).not.toContainText("Editing…", { timeout: 15_000 });
+  await expect(page.locator(".talk.working")).toHaveCount(0, { timeout: 15_000 });
 }
 
 const editor = () => page.locator(".cm-content");
@@ -73,7 +73,9 @@ test("runs on the sample and the real input", async () => {
 test("runs what was said, even when run before the edit is made", async () => {
   await page.locator(".typed input").fill("slowly make it return seven");
   await page.locator(".typed input").press("Enter");
-  await expect(page.locator(".feedback")).toContainText("Editing…");
+  // The button shows the edit is under way, and for how long.
+  await expect(page.locator(".talk")).toHaveText(/^Editing… \d+\.\ds$/);
+  await expect(page.locator(".talk")).toHaveText(/Editing… (0\.[5-9]|[1-9]\.\d)s/);
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await page.getByRole("button", { name: "Run sample" }).click();
   await expect(page.locator(".run-result")).toContainText("Part 1: 7");
