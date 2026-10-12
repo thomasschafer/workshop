@@ -80,6 +80,26 @@ Then:
 
 Commands are lists of arguments, not shell strings. The placeholders are `{file}`, `{dir}` (the solution's directory), `{build_dir}` (a scratch directory outside the solutions repo, for build output), `{year}` and `{day}`; `{day:02}` pads with zeros. An unknown placeholder is an error.
 
+### Helpers
+
+A `[helpers]` table gives solutions a module of the user's own to share. Workshop creates it with the first solution, along with any settings the language server needs to find it, but never replaces files the user already has. Commands can use its directory as `{helpers}`, such as `-i{helpers}` for GHC.
+
+```toml
+[helpers]
+file = "lib/aoc.py"
+environment = { PYTHONPATH = "{helpers}" }
+lsp_config = { file = "pyrightconfig.json", text = """
+{
+  "extraPaths": ["lib"]
+}
+""" }
+template = '''
+"""Helpers your solutions can share."""
+'''
+```
+
+If the packages' environment sets the same variable, the values are joined with `:`.
+
 ### Packages
 
 If solutions in the language commonly need packages beyond its standard library, add a `[packages]` table. Workshop keeps the list in a manifest in the solutions directory, installs it into a directory of its own (`{env}`), and gives building, running and the language server the environment variables you set. When an error says a module is missing, it offers to install the package that provides it.

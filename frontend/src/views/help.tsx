@@ -52,7 +52,20 @@ export function Help() {
           <li>"go to line 12", "next error", "previous error"</li>
           <li>"show the problem", "show code", "show notes"</li>
           <li>"snippet" and a snippet's name</li>
+          <li>
+            "install it", for a package an error says is missing, or "install package" and a name
+          </li>
         </ul>
+      </section>
+
+      <section>
+        <h2>Helpers and packages</h2>
+        <p>
+          Code you use in many puzzles, such as parsing numbers or grid neighbours, can go in your
+          helpers module, in the <code>lib</code> folder of your solutions repo. It starts with a
+          few, and every solution can import it. When an error says a module is missing, Workshop
+          offers to install the package that provides it; Settings lists the packages you have.
+        </p>
       </section>
 
       <section>

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -29,6 +30,82 @@ pub struct LanguageProfile {
     /// Packages solutions can use beyond the standard library, if the language has any.
     #[serde(default)]
     pub packages: Option<PackagesProfile>,
+    /// A module of the user's own that every solution can import.
+    #[serde(default)]
+    pub helpers: Option<HelpersProfile>,
+}
+
+/// A module of the user's own, shared by every solution, such as for parsing input.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HelpersProfile {
+    /// Relative to the solutions directory. Its directory is the `{helpers}` placeholder in
+    /// commands.
+    pub file: String,
+    /// What the module starts with.
+    pub template: String,
+    /// Environment variables for building, running and the language server, with `{helpers}`.
+    #[serde(default)]
+    pub environment: BTreeMap<String, String>,
+    /// Settings that tell the language server where the module is, written to the solutions
+    /// directory unless the file is already there.
+    #[serde(default)]
+    pub lsp_config: Option<ConfigFile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigFile {
+    /// Relative to the solutions directory.
+    pub file: String,
+    pub text: String,
+}
+
+impl HelpersProfile {
+    /// The helpers' directory, which solutions import from.
+    pub fn dir(&self, solutions_dir: &Path) -> Result<PathBuf> {
+        let file = relative_inside(&self.file)?;
+        Ok(solutions_dir.join(file.parent().unwrap_or(Path::new(""))))
+    }
+
+    /// Writes the helpers and the language server's settings, keeping any that already exist.
+    pub fn create(&self, solutions_dir: &Path) -> Result<()> {
+        let files = std::iter::once((&self.file, &self.template))
+            .chain(self.lsp_config.iter().map(|c| (&c.file, &c.text)));
+        for (file, text) in files {
+            let path = solutions_dir.join(relative_inside(file)?);
+            if !path.exists() {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
+                }
+                crate::paths::write_atomic(&path, text.trim_start().as_bytes())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn environment(&self, solutions_dir: &Path) -> Result<Vec<(String, String)>> {
+        let dir = self.dir(solutions_dir)?;
+        let vars = Vars::new().set("helpers", dir.to_string_lossy());
+        self.environment
+            .iter()
+            .map(|(name, value)| Ok((name.clone(), template::render(value, &vars)?)))
+            .collect()
+    }
+}
+
+/// A path that must stay inside the solutions directory.
+fn relative_inside(path: &str) -> Result<&Path> {
+    let relative = Path::new(path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        bail!("{path} must stay inside the solutions directory");
+    }
+    Ok(relative)
 }
 
 const BUILTIN: &[(&str, &str)] = &[
@@ -122,18 +199,7 @@ impl LanguageProfile {
                 .set("year", puzzle.year_label())
                 .set("day", puzzle.day.to_string()),
         )?;
-        let relative = Path::new(&relative);
-        if relative.is_absolute()
-            || relative
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            bail!(
-                "solution path {} must stay inside the solutions directory",
-                relative.display()
-            );
-        }
-        Ok(solutions_dir.join(relative))
+        Ok(solutions_dir.join(relative_inside(&relative)?))
     }
 
     /// The programs this profile needs, for setup checks. Placeholder commands (such as a
@@ -152,6 +218,32 @@ impl LanguageProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creates_helpers_without_replacing_the_users_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let helpers = builtin_profiles()
+            .unwrap()
+            .into_iter()
+            .find(|(id, _)| id == "python")
+            .and_then(|(_, p)| p.helpers)
+            .unwrap();
+        std::fs::write(dir.path().join("pyrightconfig.json"), "{}").unwrap();
+        helpers.create(dir.path()).unwrap();
+        let module = std::fs::read_to_string(dir.path().join("lib/aoc.py")).unwrap();
+        assert!(module.starts_with("\"\"\"Helpers"), "{module}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("pyrightconfig.json")).unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            helpers.environment(dir.path()).unwrap(),
+            [(
+                "PYTHONPATH".to_owned(),
+                dir.path().join("lib").to_string_lossy().into_owned()
+            )]
+        );
+    }
 
     #[test]
     fn builtin_packages_are_valid() {

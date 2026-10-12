@@ -10,7 +10,7 @@ file = "{year}/day{day:02}/Main.hs"
 # directory), {build_dir} (a scratch directory outside the solutions repo), {year}, {day}.
 # The puzzle input is passed on stdin. Each line of stdout is read as the answer to that part:
 # line 1 for part 1, line 2 for part 2.
-build = ["ghc", "-O2", "-v0", "-outputdir", "{build_dir}", "-o", "{build_dir}/main", "{file}"]
+build = ["ghc", "-O2", "-v0", "-i{helpers}", "-outputdir", "{build_dir}", "-o", "{build_dir}/main", "{file}"]
 run = ["{build_dir}/main"]
 
 lsp = ["haskell-language-server-wrapper", "--lsp"]
@@ -42,6 +42,48 @@ dictation_hints = '''
 - "Wrap that in parens" or "bracket that" puts parentheses around the most recent expression. "Wrap that in f" applies f to the whole of it, adding brackets as needed: wrapping `part1 input` in `show` gives `show (part1 input)`.
 - Numbers in names are spoken as words but written as digits: "part one" is `part1`, "day two" is `day2`, unless a name in the file already says otherwise.
 - Common mishearings: "fold are" or "fold R" is `foldr`, "fold L prime" is `foldl'`, "map M underscore" is `mapM_`, "in pew" is `input`, "read MaybeD" is `readMaybe`.
+'''
+
+# A module of your own that every solution can import, created with your first solution unless
+# it's already there.
+[helpers]
+file = "lib/Aoc.hs"
+# Tells haskell-language-server where the module is, unless you have a hie.yaml already.
+lsp_config = { file = "hie.yaml", text = """
+cradle:
+  direct:
+    arguments: ["-ilib"]
+""" }
+template = '''
+-- Helpers your solutions can share: `import Aoc` to use them, and add your own.
+module Aoc
+  ( ints
+  , grid
+  , neighbours4
+  , neighbours8
+  ) where
+
+import Data.Char (isDigit)
+import qualified Data.Map.Strict as M
+
+-- | Every integer in the text, including negative ones: ints "x=-3, y=12" == [-3, 12].
+ints :: String -> [Int]
+ints [] = []
+ints ('-' : c : rest) | isDigit c = let (ds, rest') = span isDigit (c : rest) in negate (read ds) : ints rest'
+ints (c : rest) | isDigit c = let (ds, rest') = span isDigit (c : rest) in read ds : ints rest'
+ints (_ : rest) = ints rest
+
+-- | A grid of characters by (row, column), from lines of text.
+grid :: String -> M.Map (Int, Int) Char
+grid text = M.fromList [((r, c), ch) | (r, line) <- zip [0 ..] (lines text), (c, ch) <- zip [0 ..] line]
+
+-- | The positions above, below, left and right.
+neighbours4 :: (Int, Int) -> [(Int, Int)]
+neighbours4 (r, c) = [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+
+-- | The positions around, diagonals included.
+neighbours8 :: (Int, Int) -> [(Int, Int)]
+neighbours8 (r, c) = [(r + dr, c + dc) | dr <- [-1, 0, 1], dc <- [-1, 0, 1], (dr, dc) /= (0, 0)]
 '''
 
 [packages]

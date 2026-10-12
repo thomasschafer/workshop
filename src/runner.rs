@@ -63,6 +63,8 @@ pub struct RunRequest<'a> {
     pub cancel: &'a CancellationToken,
     /// Extra environment variables, such as where installed packages are.
     pub environment: &'a [(String, String)],
+    /// The directory of the user's shared helpers, for the `{helpers}` placeholder.
+    pub helpers: Option<&'a Path>,
 }
 
 pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
@@ -73,12 +75,15 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
         .file
         .parent()
         .context("solution file has no parent directory")?;
-    let vars = Vars::new()
+    let mut vars = Vars::new()
         .set("file", request.file.to_string_lossy())
         .set("dir", dir.to_string_lossy())
         .set("build_dir", request.build_dir.to_string_lossy())
         .set("year", request.puzzle.year.to_string())
         .set("day", request.puzzle.day.to_string());
+    if let Some(helpers) = request.helpers {
+        vars = vars.set("helpers", helpers.to_string_lossy());
+    }
 
     if let Some(build) = &request.profile.build {
         let args = template::render_all(build, &vars)?;
@@ -246,6 +251,7 @@ mod tests {
             template: String::new(),
             dictation_hints: String::new(),
             packages: None,
+            helpers: None,
         }
     }
 
@@ -271,6 +277,7 @@ mod tests {
                 "WORKSHOP_TEST".to_owned(),
                 "from the environment".to_owned(),
             )],
+            helpers: None,
         })
         .await
         .unwrap()
@@ -362,6 +369,7 @@ mod tests {
             timeout: Duration::from_secs(30),
             cancel: &cancel,
             environment: &[],
+            helpers: None,
         })
         .await
         .unwrap();
@@ -398,6 +406,7 @@ mod tests {
             timeout: Duration::from_secs(1),
             cancel: &cancel,
             environment: &[],
+            helpers: None,
         })
         .await
         .unwrap_err();

@@ -1,11 +1,11 @@
-// Checks installing packages against the real toolchains: a solution imports a module that isn't
-// installed, the language server reports it, Workshop finds its package online and installs it,
-// the error clears and the solution runs. Needs the network, cabal, GHC and
+// Checks packages and helpers against the real toolchains: a solution imports the shared helpers
+// and a module that isn't installed, the language server reports the missing one, Workshop finds
+// its package online and installs it, the error clears and the solution runs. Needs the network, cabal, GHC and
 // haskell-language-server, and Python with pyright, so it isn't part of CI.
 //
 // Run with `mise run check-packages`, after building the server and frontend.
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, devices, type Page } from "@playwright/test";
@@ -27,11 +27,13 @@ const CASES: Case[] = [
     language: "python",
     file: "main.py",
     code: `import sys
+
 import more_itertools
+from aoc import ints
 
 
 def part1(data: str) -> int:
-    return more_itertools.ilen(data.splitlines())
+    return more_itertools.ilen(data.splitlines()) + len(ints(""))
 
 
 if __name__ == "__main__":
@@ -44,10 +46,11 @@ if __name__ == "__main__":
     file: "Main.hs",
     code: `module Main where
 
+import Aoc (ints)
 import Data.List.Extra (trim)
 
 main :: IO ()
-main = getContents >>= print . length . lines . trim
+main = getContents >>= print . (+ length (ints "")) . length . lines . trim
 `,
     package: "extra",
   },
@@ -59,11 +62,24 @@ const PUZZLE = `<html><body><main><article class="day-desc"><h2>--- Day 4: Lines
 b
 </code></pre></article></main></body></html>`;
 
-async function check(page: Page, test: Case, log: (message: string) => void): Promise<void> {
+async function check(
+  page: Page,
+  test: Case,
+  solution: string,
+  log: (message: string) => void,
+): Promise<void> {
   const banner = page.locator(".banner");
-  await page.getByRole("button", { name: "2017" }).click();
-  await page.locator(".day", { hasText: /^4$/ }).click();
-  await page.getByRole("button", { name: "Code", exact: true }).click();
+  const open = async () => {
+    await page.getByRole("button", { name: "2017" }).click();
+    await page.locator(".day", { hasText: /^4$/ }).click();
+    await page.getByRole("button", { name: "Code", exact: true }).click();
+    await page.locator(".cm-line").first().waitFor();
+  };
+  await open();
+  // Opening the puzzle created the solution and the helpers; now it's written, as if dictated.
+  writeFileSync(solution, test.code);
+  await page.reload();
+  await open();
   // A language with default packages offers to install them first.
   if (test.language === "haskell") {
     await banner.getByText("aren't installed yet").waitFor({ timeout: 30_000 });
@@ -108,9 +124,7 @@ async function run(test: Case): Promise<void> {
       .slice(0, text.indexOf("[languages.python]"))
       .replace('language = "python"', `language = "${test.language}"`),
   );
-  const dir = join(home, "solutions", "2017", "day04");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, test.file), test.code);
+  const solution = join(home, "solutions", "2017", "day04", test.file);
 
   const server = spawn(join(ROOT, "target", "debug", "workshop"), ["serve"], {
     env: { ...process.env, WORKSHOP_HOME: home, RUST_LOG: "workshop=warn" },
@@ -127,7 +141,7 @@ async function run(test: Case): Promise<void> {
     const page = await browser.newPage({ ...devices["Pixel 7"] });
     await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`);
     try {
-      await check(page, test, log);
+      await check(page, test, solution, log);
     } catch (err) {
       const screenshot = join(home, "failure.png");
       await page.screenshot({ path: screenshot });

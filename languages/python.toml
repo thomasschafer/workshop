@@ -43,6 +43,43 @@ dictation_hints = '''
 - Common mishearings: "in put" is `input`, "split lines" is `splitlines`, "enumerate" may be heard as "e numerate", "deck" or "deque" is `deque`.
 '''
 
+# A module of your own that every solution can import, created with your first solution unless
+# it's already there.
+[helpers]
+file = "lib/aoc.py"
+environment = { PYTHONPATH = "{helpers}" }
+# Tells Pyright where the module is, unless you have a pyrightconfig.json already.
+lsp_config = { file = "pyrightconfig.json", text = """
+{
+  "extraPaths": ["lib"]
+}
+""" }
+template = '''
+"""Helpers your solutions can share: `from aoc import ints` to use them, and add your own."""
+
+import re
+
+
+def ints(text: str) -> list[int]:
+    """Every integer in the text, including negative ones: ints("x=-3, y=12") == [-3, 12]."""
+    return [int(n) for n in re.findall(r"-?\d+", text)]
+
+
+def grid(text: str) -> dict[tuple[int, int], str]:
+    """A grid of characters by (row, column), from lines of text."""
+    return {(r, c): ch for r, line in enumerate(text.splitlines()) for c, ch in enumerate(line)}
+
+
+def neighbours4(r: int, c: int) -> list[tuple[int, int]]:
+    """The positions above, below, left and right."""
+    return [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+
+
+def neighbours8(r: int, c: int) -> list[tuple[int, int]]:
+    """The positions around, diagonals included."""
+    return [(r + dr, c + dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
+'''
+
 [packages]
 # Relative to the solutions directory. One package per line; edit it by hand or in the app.
 manifest = "python-packages.txt"

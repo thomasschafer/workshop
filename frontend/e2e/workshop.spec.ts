@@ -37,6 +37,9 @@ test("opens a puzzle from the picker", async () => {
   await expect(page.locator(".sample-summary")).toContainText(
     "Part 1 sample: code block 1 · expects 3",
   );
+  // The first solution comes with helpers to share, and settings for the language server.
+  expect(readFileSync(join(HOME, "solutions", "lib", "aoc.py"), "utf8")).toContain("def ints(");
+  expect(readFileSync(join(HOME, "solutions", "pyrightconfig.json"), "utf8")).toContain("lib");
 });
 
 test("edits by voice, and undoes without the model", async () => {
@@ -193,9 +196,11 @@ test("plays the practice puzzle through, with no Advent of Code login needed", a
     join(dir, "main.py"),
     `import sys
 
+from aoc import ints
+
 
 def sleds(data: str) -> list[list[int]]:
-    return [[int(w) for w in line.split()] for line in data.splitlines()]
+    return [ints(line) for line in data.splitlines()]
 
 
 def part1(data: str) -> int:

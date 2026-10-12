@@ -146,6 +146,10 @@ impl Workspace {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
         if !path.exists() {
             paths::write_atomic(&path, profile.template.as_bytes())?;
+            // Along with the first solution, unless the user has them already.
+            if let Some(helpers) = &profile.helpers {
+                helpers.create(&self.solutions_dir)?;
+            }
         }
         read_versioned(&path)
     }

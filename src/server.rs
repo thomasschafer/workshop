@@ -139,10 +139,37 @@ impl App {
         })
     }
 
-    /// Environment variables that make installed packages available.
-    fn package_environment(&self) -> Result<Vec<(String, String)>> {
-        self.packages()
-            .map_or_else(|| Ok(Vec::new()), |packages| packages.environment())
+    /// Environment variables for building, running and the language server: where the user's
+    /// helpers and installed packages are. A variable both set, such as a search path, gets
+    /// both values.
+    fn solution_environment(&self) -> Result<Vec<(String, String)>> {
+        let mut environment: Vec<(String, String)> = Vec::new();
+        let helpers = match &self.language().helpers {
+            Some(helpers) => helpers.environment(&self.config.solutions_dir)?,
+            None => Vec::new(),
+        };
+        let packages = match self.packages() {
+            Some(packages) => packages.environment()?,
+            None => Vec::new(),
+        };
+        for (name, value) in helpers.into_iter().chain(packages) {
+            match environment.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, existing)) => {
+                    existing.push(':');
+                    existing.push_str(&value);
+                }
+                None => environment.push((name, value)),
+            }
+        }
+        Ok(environment)
+    }
+
+    fn helpers_dir(&self) -> Result<Option<std::path::PathBuf>> {
+        self.language()
+            .helpers
+            .as_ref()
+            .map(|h| h.dir(&self.config.solutions_dir))
+            .transpose()
     }
 
     fn update_settings(&self, change: impl FnOnce(&mut AppSettings)) -> Result<()> {
@@ -615,7 +642,8 @@ async fn run(
         input: &input,
         timeout: Duration::from_secs(app.config.run.timeout_secs),
         cancel: &cancel,
-        environment: &app.package_environment()?,
+        environment: &app.solution_environment()?,
+        helpers: app.helpers_dir()?.as_deref(),
     })
     .await?;
     Ok(Json(result))
@@ -1067,7 +1095,7 @@ async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {
         return (StatusCode::NOT_FOUND, "No language server is configured").into_response();
     };
     upgrade.on_upgrade(move |socket| async move {
-        let environment = match app.package_environment() {
+        let environment = match app.solution_environment() {
             Ok(environment) => environment,
             Err(err) => {
                 tracing::warn!("language server: {err:#}");
