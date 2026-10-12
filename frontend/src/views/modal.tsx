@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect } from "preact/hooks";
+import { useLayoutEffect } from "preact/hooks";
 
 /** A centred card over a dimmed, blurred background, closed by tapping outside or Escape. */
 export function Modal({
@@ -11,7 +11,8 @@ export function Modal({
   onClose: () => void;
   children: ComponentChildren;
 }) {
-  useEffect(() => {
+  // Before the dialog is shown, so Escape works as soon as it can be seen.
+  useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };

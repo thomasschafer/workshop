@@ -267,7 +267,7 @@ export class VersionedSaver {
 export class LatestSaver<T> {
   private latest: { value: T } | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private saving = false;
+  private saving: Promise<void> | null = null;
   private retryDelay = MIN_RETRY_MS;
 
   constructor(
@@ -279,6 +279,14 @@ export class LatestSaver<T> {
   schedule(value: T): void {
     this.latest = { value };
     this.wait(this.delayMs);
+  }
+
+  /** Saves any pending value now, resolving once it's saved and rejecting if it couldn't be. */
+  async flush(): Promise<void> {
+    clearTimeout(this.timer);
+    if (this.saving) await this.saving;
+    if (this.latest !== null) await this.run();
+    if (this.latest !== null) throw new Error("Couldn't save; check the connection and try again.");
   }
 
   /** Sends any pending value while the page is being hidden, in a request that outlives it. */
@@ -298,24 +306,26 @@ export class LatestSaver<T> {
     this.timer = setTimeout(() => void this.run(), ms);
   }
 
-  private async run(): Promise<void> {
-    if (this.saving || this.latest === null) return;
+  private run(): Promise<void> {
+    if (this.saving) return this.saving;
+    if (this.latest === null) return Promise.resolve();
     const { value } = this.latest;
     this.latest = null;
-    this.saving = true;
-    try {
-      await this.save(value, false);
-      this.retryDelay = MIN_RETRY_MS;
-    } catch (err) {
-      this.latest ??= { value };
-      this.onError(err instanceof Error ? err.message : String(err));
-      this.wait(this.retryDelay);
-      this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
-      return;
-    } finally {
-      this.saving = false;
-    }
-    if (this.latest !== null) this.wait(this.delayMs);
+    this.saving = this.save(value, false)
+      .then(() => {
+        this.retryDelay = MIN_RETRY_MS;
+        if (this.latest !== null) this.wait(this.delayMs);
+      })
+      .catch((err: unknown) => {
+        this.latest ??= { value };
+        this.onError(err instanceof Error ? err.message : String(err));
+        this.wait(this.retryDelay);
+        this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
+      })
+      .finally(() => {
+        this.saving = null;
+      });
+    return this.saving;
   }
 }
 

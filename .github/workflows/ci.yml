@@ -19,7 +19,7 @@ jobs:
   rust:
     name: Rust
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -56,6 +56,19 @@ jobs:
 
       - name: Test
         run: cargo test --locked
+
+      # End-to-end tests drive the real server and app in a browser, with a stand-in model and an
+      # invented puzzle, so they need no network, model access or language toolchain beyond Python.
+      - name: Build server
+        run: cargo build --locked
+
+      - name: Install browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        working-directory: frontend
+        run: npm run e2e
 
   frontend:
     name: Frontend

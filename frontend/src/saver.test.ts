@@ -248,6 +248,16 @@ describe("LatestSaver", () => {
     expect(errors).toEqual(["offline", "offline"]);
   });
 
+  it("flushes a pending value on request, and reports failure", async () => {
+    const save = vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error("offline"));
+    const saver = new LatestSaver<string>(save, 500, () => {});
+    saver.schedule("sample");
+    await saver.flush();
+    expect(save).toHaveBeenCalledExactlyOnceWith("sample", false);
+    saver.schedule("other");
+    await expect(saver.flush()).rejects.toThrow("Couldn't save");
+  });
+
   it("sends a pending value straight away as the page is hidden", async () => {
     const save = vi.fn().mockResolvedValue(null);
     const saver = new LatestSaver<string>(save, 500, () => {});

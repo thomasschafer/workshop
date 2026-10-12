@@ -361,7 +361,9 @@ export function App({ boot }: { boot: Bootstrap }) {
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
     try {
       try {
+        // The run reads the code and the chosen sample from the server.
         await saver.current?.flush();
+        await metaSavers.current.get(`${p.year}-${p.day}`)?.flush();
       } catch (e) {
         setRun((r) => ({ ...r, running: null, error: `Not run: ${message(e)}` }));
         return;
