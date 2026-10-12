@@ -8,6 +8,7 @@ test.describe.configure({ mode: "serial" });
 
 let page: Page;
 const solution = join(HOME, "solutions", "2017", "day04", "main.py");
+const uiState = join(HOME, "data", "state.json");
 
 /** Says something, by typing it in place of speech, and waits for the reply. */
 async function say(text: string): Promise<void> {
@@ -30,6 +31,7 @@ test.afterAll(async () => {
 
 test("opens a puzzle from the picker", async () => {
   await page.getByRole("button", { name: "2017" }).click();
+  await expect(page.locator(".picker")).toContainText("5 stars in 2017");
   await page.locator(".day", { hasText: /^4$/ }).click();
   await expect(page.locator(".problem")).toContainText("Day 4: Counting Lines");
   await expect(page.locator(".sample-summary")).toContainText(
@@ -68,6 +70,18 @@ test("runs on the sample and the real input", async () => {
   await page.getByRole("button", { name: "Close" }).click();
 });
 
+test("runs what was said, even when run before the edit is made", async () => {
+  await page.locator(".typed input").fill("slowly make it return seven");
+  await page.locator(".typed input").press("Enter");
+  await expect(page.locator(".feedback")).toContainText("Editing…");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByRole("button", { name: "Run sample" }).click();
+  await expect(page.locator(".run-result")).toContainText("Part 1: 7");
+  await page.getByRole("button", { name: "Close" }).click();
+  await say("undo");
+  await expect(editor()).toContainText("return len(data.splitlines())");
+});
+
 test("discusses the puzzle, keeping the conversation", async () => {
   await page.getByRole("button", { name: "Discuss", exact: true }).click();
   await say("why is part one wrong");
@@ -82,6 +96,7 @@ test("discusses the puzzle, keeping the conversation", async () => {
 
 test("keeps everything across a reload", async () => {
   await expect.poll(() => readFileSync(solution, "utf8")).toContain("return 0");
+  await expect.poll(() => readFileSync(uiState, "utf8")).toMatch(/"tab": *"discuss"/);
   await page.reload();
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
   await expect(page.locator(".turn")).toHaveCount(4);
@@ -113,4 +128,15 @@ test("closes settings when going back, staying in the app", async () => {
   await page.goBack();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
+});
+
+test("wraps long lines only when chosen", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(editor()).not.toHaveClass(/cm-lineWrapping/);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByLabel("Wrap long lines of code").check();
+  await page.keyboard.press("Escape");
+  await expect(editor()).toHaveClass(/cm-lineWrapping/);
+  await page.reload();
+  await expect(editor()).toHaveClass(/cm-lineWrapping/);
 });

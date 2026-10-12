@@ -20,6 +20,7 @@ import {
 import type { Feedback } from "./feedback";
 import { useDiscussion } from "./hooks/useDiscussion";
 import { usePushToTalk } from "./hooks/usePushToTalk";
+import * as preferences from "./preferences";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
 import { Controls } from "./views/controls";
@@ -38,12 +39,7 @@ import {
 } from "./views/run";
 import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
-import {
-  keepScreenOnPreference,
-  ScreenWakeLock,
-  setKeepScreenOnPreference,
-  wakeLockSupported,
-} from "./wakelock";
+import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
 type Sheet = "run" | "settings" | "help" | "setup" | null;
 
@@ -110,7 +106,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   const metaRef = useRef(meta);
   const puzzleRef = useRef(puzzle);
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const [keepScreenOn, setKeepScreenOn] = useState(keepScreenOnPreference);
+  const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
+  const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const wakeLock = useMemo(() => new ScreenWakeLock(), []);
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
   useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
@@ -249,6 +246,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           doc: codeSaver.recover(),
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
+          lineWrapping: preferences.lineWrapping.get(),
           lsp: lsp
             ? {
                 client: lsp.client,
@@ -326,7 +324,11 @@ export function App({ boot }: { boot: Bootstrap }) {
   const part = problem ? (problem.stars >= 2 ? null : problem.stars + 1) : 1;
   const expected = part === null ? null : (meta.sample_answers[part - 1] ?? null);
 
-  const doRun = async (input: InputKind) => {
+  /**
+   * Runs the solution. From the Run sheet it first waits for edits still being made from
+   * earlier utterances, so it runs what was said; a spoken "run" is already queued after them.
+   */
+  const doRun = async (input: InputKind, waitForEdits: boolean) => {
     const p = puzzleRef.current;
     if (!p) return;
     setSheet("run");
@@ -340,6 +342,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
     try {
+      if (waitForEdits) await queue.current;
       try {
         // The run reads the code and the chosen sample from the server.
         await saver.current?.flush();
@@ -382,7 +385,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         current?.redo();
         return done("Redone");
       case "run":
-        void doRun(command.input);
+        void doRun(command.input, false);
         return done(command.input === "sample" ? "Running the sample" : "Running the real input");
       case "submit":
         setSheet("run");
@@ -501,7 +504,14 @@ export function App({ boot }: { boot: Bootstrap }) {
     const { replying, question } = latest.current;
     const earlier = replying && question ? question : null;
     setReplying(false);
-    queue.current = queue.current.then(() => handleUtterance(text, earlier));
+    // Each utterance handles its own errors; this catches any it misses, so one failure can't
+    // stop every later utterance, or a run waiting for them.
+    queue.current = queue.current
+      .then(() => handleUtterance(text, earlier))
+      .catch((e: unknown) => {
+        api.log("error", `utterance ${JSON.stringify(text)}: ${message(e)}`);
+        setFeedback({ kind: "error", transcript: text, text: message(e) });
+      });
   };
 
   const talk = usePushToTalk({
@@ -703,7 +713,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               state={run}
               part={part}
               expected={expected}
-              onRun={(input) => void doRun(input)}
+              onRun={(input) => void doRun(input, true)}
               onCancel={() => void api.cancelRun()}
               onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}
               onSubmit={(answer) => void doSubmit(answer)}
@@ -726,8 +736,14 @@ export function App({ boot }: { boot: Bootstrap }) {
               }
               keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
               onKeepScreenOn={(enabled) => {
-                setKeepScreenOnPreference(enabled);
+                preferences.keepScreenOn.set(enabled);
                 setKeepScreenOn(enabled);
+              }}
+              lineWrapping={lineWrapping}
+              onLineWrapping={(enabled) => {
+                preferences.lineWrapping.set(enabled);
+                setLineWrapping(enabled);
+                editor.current?.setLineWrapping(enabled);
               }}
               onInsertSnippet={(s) => {
                 editor.current?.insertSnippet(s.body);

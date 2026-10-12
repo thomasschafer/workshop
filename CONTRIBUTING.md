@@ -24,6 +24,8 @@ cargo run -- eval --filter before-that    # just the cases whose names match
 
 Each case is one call to your edit model, so the evals aren't part of CI. When you find an utterance that goes wrong, add it as a new case to the file for its language in `evals/`. A new language profile should come with its own eval file.
 
+When a change alters what the demo shows, re-record `docs/demo.gif` with `mise run demo`. It plays an invented puzzle on an emulated phone, with simulated speech, and makes a few calls to your edit model.
+
 ## Adding a language profile
 
 A language profile tells Workshop how to lay out, build and run solutions, which language server to start, and how the language is spoken. Built-in profiles live in `languages/` and are registered in `src/language.rs`. You can also add one in your own config file under `[languages.<id>]` without changing Workshop.

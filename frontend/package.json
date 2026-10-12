@@ -6,7 +6,7 @@
     "dev": "vite build --watch",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src e2e playwright.config.ts",
+    "lint": "biome check src e2e demo playwright.config.ts",
     "format": "biome format --write src",
     "test": "vitest run",
     "e2e": "playwright test"

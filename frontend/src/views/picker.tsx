@@ -39,7 +39,11 @@ export function Picker({ current, hasSession, onPick }: Props) {
         starsByYear.set(year, s);
         if (!cancelled) setLoaded({ year, stars: s });
       })
-      .catch((e: unknown) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
+      .catch(
+        (e: unknown) =>
+          !cancelled &&
+          setError(`Couldn't load your stars: ${e instanceof Error ? e.message : String(e)}`),
+      );
     return () => {
       cancelled = true;
     };

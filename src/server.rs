@@ -874,7 +874,7 @@ fn qr_svg(text: &str) -> Result<String> {
 /// loading, so it falls back to Workshop's colours.
 fn theme_css(app: &App) -> Option<String> {
     crate::theme::stylesheet(&app.paths, &app.settings().theme).unwrap_or_else(|err| {
-        tracing::warn!("using Workshop's colours: {err:#}");
+        tracing::warn!("using the default colours: {err:#}");
         None
     })
 }

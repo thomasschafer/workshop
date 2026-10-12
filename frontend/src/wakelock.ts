@@ -9,16 +9,6 @@ interface WakeLockApi {
   request(type: "screen"): Promise<WakeLockSentinel>;
 }
 
-const STORAGE_KEY = "workshop:keep-screen-on";
-
-export function keepScreenOnPreference(): boolean {
-  return localStorage.getItem(STORAGE_KEY) !== "false";
-}
-
-export function setKeepScreenOnPreference(enabled: boolean): void {
-  localStorage.setItem(STORAGE_KEY, String(enabled));
-}
-
 export function wakeLockSupported(): boolean {
   return "wakeLock" in navigator;
 }

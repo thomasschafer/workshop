@@ -120,6 +120,7 @@ export interface EditorOptions {
   doc: string;
   cursor: number | null;
   mode: string;
+  lineWrapping: boolean;
   lsp: { client: LSPClient; uri: string; languageId: string } | null;
   onChange: (text: string) => void;
   onCursor: (pos: number) => void;
@@ -129,6 +130,7 @@ export interface EditorOptions {
 export class CodeEditor {
   readonly view: EditorView;
   private readonly inputMode = new Compartment();
+  private readonly wrapping = new Compartment();
   private flashTimer: number | undefined;
   /** The text most recently inserted by voice, which "that" refers to. */
   recentInsertion: string | null = null;
@@ -150,6 +152,7 @@ export class CodeEditor {
         syntaxHighlighting(highlightStyle),
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         theme,
+        this.wrapping.of(options.lineWrapping ? EditorView.lineWrapping : []),
         changedField,
         language ? language() : [],
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],
@@ -185,6 +188,12 @@ export class CodeEditor {
     if (enabled) {
       this.view.focus();
     }
+  }
+
+  setLineWrapping(enabled: boolean): void {
+    this.view.dispatch({
+      effects: this.wrapping.reconfigure(enabled ? EditorView.lineWrapping : []),
+    });
   }
 
   text(): string {

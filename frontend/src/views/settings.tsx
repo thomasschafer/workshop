@@ -13,6 +13,8 @@ interface Props {
   onInsertSnippet: (snippet: Snippet) => void;
   keepScreenOn: boolean | null;
   onKeepScreenOn: (enabled: boolean) => void;
+  lineWrapping: boolean;
+  onLineWrapping: (enabled: boolean) => void;
 }
 
 export function Settings({
@@ -24,6 +26,8 @@ export function Settings({
   onInsertSnippet,
   keepScreenOn,
   onKeepScreenOn,
+  lineWrapping,
+  onLineWrapping,
 }: Props) {
   const [sync, setSync] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -73,6 +77,14 @@ export function Settings({
       <section>
         <h2>Display</h2>
         <ThemeSection />
+        <label class="toggle">
+          <input
+            type="checkbox"
+            checked={lineWrapping}
+            onChange={(e) => onLineWrapping((e.target as HTMLInputElement).checked)}
+          />
+          Wrap long lines of code
+        </label>
         {keepScreenOn === null ? (
           <p class="muted">This browser can't keep the screen on.</p>
         ) : (

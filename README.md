@@ -4,7 +4,9 @@ Solve [Advent of Code](https://adventofcode.com) puzzles by voice, from your pho
 
 Workshop runs on your laptop and you open it on your phone. The phone shows the puzzle and your code; you hold a button and say the code you want, roughly as you'd type it, and a model turns what you said into a precise edit. It's built for working one-handed, away from a desk.
 
-<!-- A short demo GIF of fixing code by voice goes here. -->
+<p align="center">
+  <img src="docs/demo.gif" width="300" alt="Workshop on a phone: holding the talk button to dictate two lines of Python, then running them on the sample and the real input">
+</p>
 
 Workshop is voice editing, not code generation. "Write a function to sort a list" won't do anything. "Function solve from String to Int", then "solve equals lines", "before that map read dot" and "before that sum dot" gives you `solve = sum . map read . lines`. If Workshop isn't sure what you meant, it makes no edit and tells you why.
 

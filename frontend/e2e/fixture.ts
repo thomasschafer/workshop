@@ -27,13 +27,15 @@ export interface HomeOptions {
   /** The puzzle page, as Advent of Code would serve it. Never a real puzzle. */
   puzzle: string;
   input: string;
+  /** Stars per day for the year's calendar. */
+  stars: Record<number, 0 | 1 | 2>;
   /** The stand-in model, or the default model provider for real model calls. */
   model: "fake" | "default";
 }
 
 /** Writes a Workshop home for Python, with the puzzle and input already in the cache. */
 export function writeHome(options: HomeOptions): void {
-  const { home, port, year, day, puzzle, input, model } = options;
+  const { home, port, year, day, puzzle, input, stars, model } = options;
   rmSync(home, { recursive: true, force: true });
   mkdirSync(join(home, "config"), { recursive: true });
   const fakeModel = resolve(import.meta.dirname, "fake-model.mjs");
@@ -75,6 +77,16 @@ ${models}`,
   mkdirSync(cached, { recursive: true });
   writeFileSync(join(cached, "problem.html"), puzzle);
   writeFileSync(join(cached, "input.txt"), input);
+  writeFileSync(join(home, "cache", "aoc", String(year), "calendar.html"), calendar(year, stars));
+}
+
+/** A calendar page in the form Advent of Code uses, for the stars in the picker. */
+function calendar(year: number, stars: Record<number, 0 | 1 | 2>): string {
+  const days = Object.entries(stars).map(([day, count]) => {
+    const label = ["", ", one star", ", two stars"][count];
+    return `<a aria-label="Day ${day}${label}" href="/${year}/day/${day}">${day}</a>`;
+  });
+  return `<html><body><main><pre class="calendar">\n${days.join("\n")}\n</pre></main></body></html>`;
 }
 
 export function createHome(): void {
@@ -85,6 +97,7 @@ export function createHome(): void {
     day: 4,
     puzzle: PUZZLE,
     input: "a\nb\nc\nd\ne\n",
+    stars: { 1: 2, 2: 2, 3: 1, 4: 0 },
     model: "fake",
   });
 }

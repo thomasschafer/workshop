@@ -283,7 +283,7 @@ impl AocClient {
     }
 
     async fn get_with(&self, url: &str, session: &str) -> Result<String> {
-        let response = self
+        let response = match self
             .throttled(|| {
                 self.http
                     .get(url)
@@ -291,7 +291,13 @@ impl AocClient {
                     .send()
             })
             .await
-            .with_context(|| format!("fetching {url}"))?;
+        {
+            Ok(response) => response,
+            Err(err) => {
+                tracing::warn!("fetching {url}: {err:#}");
+                bail!("couldn't reach Advent of Code; check your internet connection");
+            }
+        };
         let status = response.status();
         let body = response.text().await?;
         match status.as_u16() {

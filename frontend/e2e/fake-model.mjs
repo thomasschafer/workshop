@@ -19,6 +19,11 @@ const utterance = said[said.length - 1] ?? "";
 
 const PLACEHOLDER = "def part1(data: str) -> int:\n    raise NotImplementedError";
 const replies = {
+  "slowly make it return seven": {
+    status: "edit",
+    edits: [{ find: "return len(data.splitlines())", replace: "return 7‸" }],
+    summary: "made it return seven",
+  },
   "return the number of lines": {
     status: "edit",
     edits: [
@@ -46,4 +51,6 @@ const reply = replies[utterance] ?? {
   status: "unsure",
   message: `The fake model has no reply for "${utterance}".`,
 };
+// Slow enough for a test to act while the edit is still being made.
+if (utterance.startsWith("slowly")) await new Promise((r) => setTimeout(r, 1500));
 process.stdout.write(JSON.stringify(reply));
