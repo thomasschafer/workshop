@@ -94,10 +94,12 @@ command = ["acme", "chat", "--model", "{model}", "--system", "{system_prompt}", 
 # "stdin": the prompt is written to stdin, which is then closed.
 # "argument": the prompt replaces a {prompt} placeholder in `command`.
 # "claude-stream-json": a Claude Code stream-json user message on stdin.
+# "ollama-chat": an Ollama /api/chat request body on stdin, for a command such as curl.
 input = "stdin"
 # "text": all of stdout is the reply.
 # "claude-json" and "claude-stream-json": Claude Code's JSON output formats.
 # "codex-json": Codex's `exec --json` events. The call is stopped if the model uses a tool.
+# "ollama-chat": an Ollama /api/chat response.
 output = "text"
 # Start the next process ahead of time to hide start-up latency. Only for stdin input, and only
 # if the CLI waits for stdin rather than giving up when no input arrives quickly.
@@ -111,6 +113,17 @@ install_hint = "Install acme from https://example.com, then run `acme login`."
 provider = "acme"
 model = "acme-small"
 ```
+
+A local model through [Ollama](https://ollama.com) works the same way, with no subscription and no network:
+
+```toml
+[providers.ollama]
+command = ["curl", "-sS", "--fail-with-body", "http://127.0.0.1:11434/api/chat", "-d", "@-"]
+input = "ollama-chat"
+output = "ollama-chat"
+```
+
+Check one with `workshop eval` before relying on it. On a 16 GB M2 Pro, Qwen2.5-Coder 7B and 14B made far more wrong edits than Haiku, and the 14B was also slower, so larger models on bigger machines are the ones worth trying.
 
 Use cheap, fast models for editing, since every utterance is a call. If the CLI can name its models (as `codex debug models` does), set `model_catalog` to that command, and a family name such as "luna" will always mean the newest model in the family. See `providers/codex.toml` for a preset built this way. For a new input or output format, add a variant to `InputMode` or `OutputMode` in `src/provider.rs` with tests for its parsing.
 

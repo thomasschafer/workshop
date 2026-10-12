@@ -44,6 +44,8 @@ pub enum InputMode {
     Stdin,
     /// One Claude Code `stream-json` user message is written to stdin.
     ClaudeStreamJson,
+    /// An Ollama `/api/chat` request body is written to stdin, for a command such as `curl`.
+    OllamaChat,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -58,6 +60,8 @@ pub enum OutputMode {
     /// Codex `exec --json`. Codex can't run without tools, so the process is stopped, and the
     /// call fails, as soon as it starts using one.
     CodexJson,
+    /// An Ollama `/api/chat` response.
+    OllamaChat,
 }
 
 const BUILTIN: &[(&str, &str)] = &[
@@ -94,7 +98,9 @@ impl ProviderConfig {
                     "`prespawn` needs the prompt on stdin, so it can't be used with `input = \"argument\"`"
                 )
             }
-            InputMode::Stdin | InputMode::ClaudeStreamJson if mentions_prompt => {
+            InputMode::Stdin | InputMode::ClaudeStreamJson | InputMode::OllamaChat
+                if mentions_prompt =>
+            {
                 bail!("{{prompt}} is only available with `input = \"argument\"`")
             }
             _ => Ok(()),
@@ -232,7 +238,7 @@ impl ProviderRunner {
                 tracing::warn!("could not start a spare model process: {err:#}");
             }
         }
-        let result = tokio::time::timeout(timeout, self.communicate(process, prompt)).await;
+        let result = tokio::time::timeout(timeout, self.communicate(process, spec, prompt)).await;
         let (text, model) = match result {
             Ok(reply) => reply?,
             Err(_) => bail!("the model took longer than {}s to reply", timeout.as_secs()),
@@ -273,7 +279,9 @@ impl ProviderRunner {
                 .current_dir(&self.working_dir)
                 .stdin(match self.provider.input {
                     InputMode::Argument => Stdio::null(),
-                    InputMode::Stdin | InputMode::ClaudeStreamJson => Stdio::piped(),
+                    InputMode::Stdin | InputMode::ClaudeStreamJson | InputMode::OllamaChat => {
+                        Stdio::piped()
+                    }
                 })
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped()),
@@ -284,6 +292,7 @@ impl ProviderRunner {
     async fn communicate(
         &self,
         mut process: GroupedChild,
+        spec: &CallSpec,
         prompt: &str,
     ) -> Result<(String, Option<String>)> {
         let child = &mut process.child;
@@ -298,6 +307,18 @@ impl ProviderRunner {
                     });
                     format!("{message}\n")
                 }
+                // Deterministic, and constrained to JSON, which is what Workshop's prompts ask for.
+                InputMode::OllamaChat => serde_json::json!({
+                    "model": spec.model,
+                    "messages": [
+                        {"role": "system", "content": spec.system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": false,
+                    "format": "json",
+                    "options": {"temperature": 0},
+                })
+                .to_string(),
             };
             stdin.write_all(payload.as_bytes()).await?;
             stdin.shutdown().await?;
@@ -357,6 +378,11 @@ impl ProviderRunner {
                     Some(Err(err)) => Err(err),
                     None => Err(anyhow::anyhow!("model CLI exited without a result")),
                 }
+            }
+            OutputMode::OllamaChat => {
+                let mut out = String::new();
+                BufReader::new(stdout).read_to_string(&mut out).await?;
+                parse_ollama_reply(&out).map(|text| (text, Some(spec.model.clone())))
             }
             OutputMode::CodexJson => {
                 let mut lines = BufReader::new(stdout).lines();
@@ -454,6 +480,19 @@ fn parse_codex_event(line: &str) -> Result<CodexEvent> {
         "error" => CodexEvent::Failed(string(event.get("message"))),
         _ => CodexEvent::Other,
     })
+}
+
+fn parse_ollama_reply(json: &str) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(json.trim())
+        .with_context(|| format!("Ollama's reply isn't valid JSON: {json}"))?;
+    if let Some(error) = value.get("error").and_then(|e| e.as_str()) {
+        bail!("Ollama reported an error: {error}");
+    }
+    value
+        .pointer("/message/content")
+        .and_then(|c| c.as_str())
+        .map(str::to_owned)
+        .context("Ollama's reply has no message")
 }
 
 fn parse_model_catalog(json: &str) -> Result<Vec<String>> {
@@ -662,6 +701,21 @@ mod tests {
         assert_eq!(
             parse_codex_event(r#"{"type":"turn.started"}"#).unwrap(),
             CodexEvent::Other
+        );
+    }
+
+    #[test]
+    fn parses_ollama_replies() {
+        assert_eq!(
+            parse_ollama_reply(r#"{"message":{"role":"assistant","content":"{}"},"done":true}"#)
+                .unwrap(),
+            "{}"
+        );
+        assert!(
+            parse_ollama_reply(r#"{"error":"model not found"}"#)
+                .unwrap_err()
+                .to_string()
+                .contains("model not found")
         );
     }
 

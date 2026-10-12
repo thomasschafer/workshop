@@ -134,8 +134,6 @@ pub enum ReplyError {
     Malformed(String),
     #[error("the reply's status was \"edit\" but it gave no edits")]
     NoEdits,
-    #[error("an edit had an empty `find`")]
-    EmptyFind,
     #[error("this `find` doesn't occur in the file: {0:?}")]
     NotFound(String),
     #[error("this `find` occurs more than once in the file, so it doesn't say where: {0:?}")]
@@ -252,10 +250,12 @@ pub fn apply(doc_with_cursor: &str, reply: ModelReply) -> Result<EditOutcome> {
     let mut doc = doc_with_cursor.replace(CURSOR, &OLD_CURSOR.to_string());
     let mut end_of_last_replacement = 0;
     for edit in &edits {
-        if edit.find.is_empty() {
-            return Err(ReplyError::EmptyFind.into());
-        }
-        let find = edit.find.replace(CURSOR, &OLD_CURSOR.to_string());
+        // An empty `find` can only sensibly mean "at the cursor", so it's read that way.
+        let find = if edit.find.is_empty() {
+            OLD_CURSOR.to_string()
+        } else {
+            edit.find.replace(CURSOR, &OLD_CURSOR.to_string())
+        };
         let mut matches = doc.match_indices(&find);
         let Some((start, _)) = matches.next() else {
             return Err(ReplyError::NotFound(edit.find.clone()).into());
@@ -424,8 +424,19 @@ mod tests {
     fn rejects_ambiguous_missing_and_empty_finds() {
         assert!(apply("a a‸", edit(&[("a", "b")])).is_err());
         assert!(apply("a‸", edit(&[("zzz", "b")])).is_err());
-        assert!(apply("a‸", edit(&[("", "b")])).is_err());
         assert!(apply("a‸", edit(&[])).is_err());
+    }
+
+    #[test]
+    fn empty_find_inserts_at_the_cursor() {
+        assert_eq!(
+            applied(apply("x = ‸", edit(&[("", "sum‸")])).unwrap()),
+            "x = sum‸"
+        );
+        assert_eq!(
+            applied(apply("x = ‸", edit(&[("", "sum")])).unwrap()),
+            "x = sum‸"
+        );
     }
 
     #[test]
