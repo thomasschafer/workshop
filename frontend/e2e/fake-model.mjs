@@ -1,8 +1,17 @@
-// A stand-in for the edit model, so end-to-end tests make no real model calls. It reads the
-// prompt on stdin and replies to the utterances the tests use.
+// A stand-in for the edit and discussion models, so end-to-end tests make no real model calls.
+// It reads the prompt on stdin and replies to the utterances the tests use.
 import { readFileSync } from "node:fs";
 
 const prompt = readFileSync(0, "utf8");
+
+// A discussion prompt lists the conversation, with the user's turns as "Them: ...".
+const asked = prompt.match(/^Them: .*$/gm);
+if (asked) {
+  const question = asked[asked.length - 1].replace(/^Them: /, "");
+  process.stdout.write(`You asked "${question}", after ${asked.length} question(s).`);
+  process.exit(0);
+}
+
 const said = (prompt.match(/^(?:Utterance|Reply): (.*)$/gm) ?? []).map((line) =>
   line.replace(/^\w+: /, ""),
 );

@@ -1,0 +1,120 @@
+import { useState } from "preact/hooks";
+import type { Exchange } from "../api";
+import type { Feedback } from "../feedback";
+import { speechUnavailableReason } from "../voice";
+import { TALK_LABEL } from "./help";
+
+interface Props {
+  hidden: boolean;
+  feedback: Feedback | null;
+  listening: boolean;
+  interim: string;
+  hasSpeech: boolean;
+  /** Whether to show a box for typing what you'd say, in place of or as well as speech. */
+  showTyped: boolean;
+  /** The edit model's latest question, if it asked one. */
+  question: Exchange[] | null;
+  replying: boolean;
+  onReplying: (replying: boolean) => void;
+  onSay: (text: string) => void;
+  onTalkStart: (event: PointerEvent) => void;
+  onTalkEnd: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  onRun: () => void;
+  keyboard: boolean;
+  onToggleKeyboard: () => void;
+}
+
+/** The thumb-zone controls: what happened, and the buttons for talking, undoing and running. */
+export function Controls(props: Props) {
+  const { feedback, listening, question, replying } = props;
+  const [typed, setTyped] = useState("");
+
+  const submitTyped = (event: Event) => {
+    event.preventDefault();
+    const text = typed.trim();
+    if (!text) return;
+    setTyped("");
+    props.onSay(text);
+  };
+
+  return (
+    <footer class={`controls ${props.hidden ? "hidden" : ""}`}>
+      <div class={`feedback ${feedback?.kind ?? ""}`} aria-live="polite">
+        {listening ? (
+          <span class="transcript">{props.interim || "Listening…"}</span>
+        ) : replying && question ? (
+          <>
+            <span class="transcript">Replying to: {question[question.length - 1]?.asked}</span>
+            <span class="question-actions">
+              <span class="muted">Hold the button to answer.</span>
+              <button type="button" class="text-button" onClick={() => props.onReplying(false)}>
+                Cancel
+              </button>
+            </span>
+          </>
+        ) : feedback ? (
+          <>
+            {feedback.transcript ? <span class="transcript">“{feedback.transcript}”</span> : null}
+            <span class="result">{feedback.text}</span>
+            {question && feedback.kind === "warn" ? (
+              <span class="question-actions">
+                <button type="button" class="text-button" onClick={() => props.onReplying(true)}>
+                  Reply
+                </button>
+                <span class="muted">or hold the button to start afresh</span>
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <span class="muted">
+            {props.hasSpeech
+              ? "Hold to talk. Edits apply at the cursor."
+              : speechUnavailableReason()}
+          </span>
+        )}
+      </div>
+      {props.showTyped ? (
+        <form class="typed" onSubmit={submitTyped}>
+          <input
+            value={typed}
+            onInput={(e) => setTyped((e.target as HTMLInputElement).value)}
+            placeholder="Type what you'd say"
+            enterKeyHint="send"
+          />
+        </form>
+      ) : null}
+      <div class="buttons">
+        <button type="button" class="round" aria-label="Undo" onClick={props.onUndo}>
+          ↶
+        </button>
+        <button type="button" class="round" aria-label="Redo" onClick={props.onRedo}>
+          ↷
+        </button>
+        <button
+          type="button"
+          class={`talk ${listening ? "listening" : ""}`}
+          disabled={!props.hasSpeech}
+          onPointerDown={props.onTalkStart}
+          onPointerUp={props.onTalkEnd}
+          onPointerCancel={props.onTalkEnd}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {listening ? "Release to send" : replying ? "Hold to reply" : TALK_LABEL}
+        </button>
+        <button type="button" class="round" aria-label="Run" onClick={props.onRun}>
+          ▶
+        </button>
+        <button
+          type="button"
+          class={`round ${props.keyboard ? "selected" : ""}`}
+          aria-label={props.keyboard ? "Hide keyboard" : "Type"}
+          onClick={props.onToggleKeyboard}
+        >
+          ⌨
+        </button>
+      </div>
+    </footer>
+  );
+}

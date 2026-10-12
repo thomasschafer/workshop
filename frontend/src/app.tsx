@@ -1,4 +1,3 @@
-import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   api,
@@ -8,7 +7,6 @@ import {
   type Problem,
   type Puzzle,
   type Tab,
-  type Turn,
   type UiState,
 } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
@@ -19,10 +17,15 @@ import {
   LanguageServerConnection,
   type LanguageServerStatus,
 } from "./editor";
+import type { Feedback } from "./feedback";
+import { useDiscussion } from "./hooks/useDiscussion";
+import { usePushToTalk } from "./hooks/usePushToTalk";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
+import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
-import { Help, TALK_LABEL } from "./views/help";
+import { ConflictBanner, SheetFrame } from "./views/frame";
+import { Help } from "./views/help";
 import { Modal } from "./views/modal";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
@@ -35,7 +38,6 @@ import {
 } from "./views/run";
 import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
-import { PushToTalk, speechSupported, speechUnavailableReason } from "./voice";
 import {
   keepScreenOnPreference,
   ScreenWakeLock,
@@ -45,23 +47,7 @@ import {
 
 type Sheet = "run" | "settings" | "help" | "setup" | null;
 
-interface Feedback {
-  kind: "pending" | "ok" | "warn" | "error" | "info";
-  transcript?: string;
-  text: string;
-}
-
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const discussKey = (p: Puzzle) => `workshop:discuss:${p.year}:${p.day}`;
-
-function loadTurns(p: Puzzle): Turn[] {
-  try {
-    const raw = localStorage.getItem(discussKey(p));
-    return raw ? (JSON.parse(raw) as Turn[]) : [];
-  } catch {
-    return [];
-  }
-}
 
 export function App({ boot }: { boot: Bootstrap }) {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(boot.state.puzzle);
@@ -85,8 +71,6 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [problemLoading, setProblemLoading] = useState(false);
 
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [listening, setListening] = useState(false);
-  const [interim, setInterim] = useState("");
   const [diagnostics, setDiagnostics] = useState<Diagnostics>({ errors: 0, warnings: 0 });
   const [hover, setHover] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -94,10 +78,16 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [notesConflict, setNotesConflict] = useState<FileVersion | null>(null);
   const [keyboard, setKeyboard] = useState(false);
   const [run, setRun] = useState<RunState>(initialRunState);
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [thinking, setThinking] = useState(false);
-  const [discussError, setDiscussError] = useState<string | null>(null);
-  const [typed, setTyped] = useState("");
+  const discussion = useDiscussion(puzzle, discussModel, () => {
+    const last = latest.current.run.last;
+    return {
+      code: editor.current?.text() ?? "",
+      errors: editor.current?.diagnosticsText() ?? "",
+      lastRun: last
+        ? `${last.input} input: ${describeEnding(last.result)}\nstdout:\n${last.result.stdout}\nstderr:\n${last.result.stderr}`
+        : "",
+    };
+  });
   // The edit model's latest question, with the requests that led to it, and whether the user
   // has chosen to reply to it rather than start afresh.
   const [question, setQuestion] = useState<Exchange[] | null>(null);
@@ -120,21 +110,13 @@ export function App({ boot }: { boot: Bootstrap }) {
   const metaRef = useRef(meta);
   const puzzleRef = useRef(puzzle);
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const ptt = useMemo(() => new PushToTalk(), []);
-  const listeningRef = useRef(false);
-  const hasSpeech = useMemo(speechSupported, []);
   const [keepScreenOn, setKeepScreenOn] = useState(keepScreenOnPreference);
   const wakeLock = useMemo(() => new ScreenWakeLock(), []);
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
   useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
-  // Typing commands is handy at a desk, and the only option without speech recognition.
-  const showTyped = useMemo(
-    () => !hasSpeech || window.matchMedia("(pointer: fine)").matches,
-    [hasSpeech],
-  );
   // Queued utterances run after later renders, so they read the latest state through refs.
-  const latest = useRef({ tab, notes, turns, run, question, replying });
-  latest.current = { tab, notes, turns, run, question, replying };
+  const latest = useRef({ tab, notes, run, question, replying });
+  latest.current = { tab, notes, run, question, replying };
   puzzleRef.current = puzzle;
 
   // One saver per puzzle, so switching puzzles never drops the previous one's unsaved changes.
@@ -225,8 +207,6 @@ export function App({ boot }: { boot: Bootstrap }) {
     setSaveStatus("saved");
     setDiagnostics({ errors: 0, warnings: 0 });
     setHover(null);
-    setTurns(loadTurns(puzzle));
-    setDiscussError(null);
 
     (async () => {
       try {
@@ -483,40 +463,6 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  const sendDiscuss = async (text: string) => {
-    const p = puzzleRef.current;
-    if (!p) return;
-    const next: Turn[] = [...latest.current.turns, { speaker: "user", text }];
-    latest.current.turns = next;
-    setTurns(next);
-    localStorage.setItem(discussKey(p), JSON.stringify(next));
-    setThinking(true);
-    setDiscussError(null);
-    const last = latest.current.run.last;
-    try {
-      const reply = await api.discuss({
-        year: p.year,
-        day: p.day,
-        model: discussModel,
-        turns: next,
-        code: editor.current?.text() ?? "",
-        errors: editor.current?.diagnosticsText() ?? "",
-        last_run: last
-          ? `${last.input} input: ${describeEnding(last.result)}\nstdout:\n${last.result.stdout}\nstderr:\n${last.result.stderr}`
-          : "",
-      });
-      if (puzzleRef.current !== p) return;
-      const withReply: Turn[] = [...next, { speaker: "coach", text: reply.text }];
-      latest.current.turns = withReply;
-      setTurns(withReply);
-      localStorage.setItem(discussKey(p), JSON.stringify(withReply));
-    } catch (e) {
-      setDiscussError(message(e));
-    } finally {
-      setThinking(false);
-    }
-  };
-
   const handleUtterance = async (text: string, earlier: Exchange[] | null) => {
     if (earlier) {
       // A reply to the edit model's question, wherever it was spoken from.
@@ -534,7 +480,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     if (tab === "discuss") {
       api.log("speech", `discuss: ${text}`);
       setFeedback(null);
-      await sendDiscuss(text);
+      await discussion.send(text);
       return;
     }
     const command = matchCommand(
@@ -558,47 +504,17 @@ export function App({ boot }: { boot: Bootstrap }) {
     queue.current = queue.current.then(() => handleUtterance(text, earlier));
   };
 
-  const startTalking = (event: PointerEvent) => {
-    event.preventDefault();
-    if (listeningRef.current) return;
-    try {
-      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-      ptt.start(setInterim, editor.current?.identifiers() ?? []);
-      listeningRef.current = true;
-      setListening(true);
-      setInterim("");
-      navigator.vibrate?.(10);
-    } catch (e) {
-      setFeedback({ kind: "error", text: message(e) });
-    }
-  };
-
-  const stopTalking = async () => {
-    if (!listeningRef.current) return;
-    listeningRef.current = false;
-    setListening(false);
-    try {
-      const text = await ptt.stop();
-      setInterim("");
-      if (text.trim()) {
-        enqueue(text.trim());
-      } else {
-        api.log("speech", "(nothing heard)");
-        setFeedback({ kind: "info", text: "Didn't catch anything." });
-      }
-    } catch (e) {
-      api.log("error", `speech recognition: ${message(e)}`);
-      setFeedback({ kind: "error", text: message(e) });
-    }
-  };
-
-  const submitTyped = (event: Event) => {
-    event.preventDefault();
-    const text = typed.trim();
-    if (!text) return;
-    setTyped("");
-    enqueue(text);
-  };
+  const talk = usePushToTalk({
+    vocabulary: () => editor.current?.identifiers() ?? [],
+    onUtterance: enqueue,
+    onFeedback: setFeedback,
+  });
+  const { hasSpeech, listening, interim } = talk;
+  // Typing commands is handy at a desk, and the only option without speech recognition.
+  const showTyped = useMemo(
+    () => !hasSpeech || window.matchMedia("(pointer: fine)").matches,
+    [hasSpeech],
+  );
 
   const toggleKeyboard = () => {
     const next = !keyboard;
@@ -756,17 +672,14 @@ export function App({ boot }: { boot: Bootstrap }) {
         ) : null}
         {!showPicker && tab === "discuss" ? (
           <DiscussView
-            turns={turns}
+            turns={discussion.turns}
             models={models.discuss_models}
             model={discussModel}
-            thinking={thinking}
-            error={discussError}
+            thinking={discussion.thinking}
+            error={discussion.error}
             onModel={setDiscussModel}
             onSend={(text) => enqueue(text)}
-            onClear={() => {
-              setTurns([]);
-              if (puzzle) localStorage.removeItem(discussKey(puzzle));
-            }}
+            onClear={discussion.clear}
           />
         ) : null}
         {sheet === "setup" ? (
@@ -826,139 +739,25 @@ export function App({ boot }: { boot: Bootstrap }) {
         ) : null}
       </main>
 
-      <footer class={`controls ${showPicker ? "hidden" : ""}`}>
-        <div class={`feedback ${feedback?.kind ?? ""}`} aria-live="polite">
-          {listening ? (
-            <span class="transcript">{interim || "Listening…"}</span>
-          ) : replying && question ? (
-            <>
-              <span class="transcript">Replying to: {question[question.length - 1]?.asked}</span>
-              <span class="question-actions">
-                <span class="muted">Hold the button to answer.</span>
-                <button type="button" class="text-button" onClick={() => setReplying(false)}>
-                  Cancel
-                </button>
-              </span>
-            </>
-          ) : feedback ? (
-            <>
-              {feedback.transcript ? <span class="transcript">“{feedback.transcript}”</span> : null}
-              <span class="result">{feedback.text}</span>
-              {question && feedback.kind === "warn" ? (
-                <span class="question-actions">
-                  <button type="button" class="text-button" onClick={() => setReplying(true)}>
-                    Reply
-                  </button>
-                  <span class="muted">or hold the button to start afresh</span>
-                </span>
-              ) : null}
-            </>
-          ) : (
-            <span class="muted">
-              {hasSpeech ? "Hold to talk. Edits apply at the cursor." : speechUnavailableReason()}
-            </span>
-          )}
-        </div>
-        {showTyped ? (
-          <form class="typed" onSubmit={submitTyped}>
-            <input
-              value={typed}
-              onInput={(e) => setTyped((e.target as HTMLInputElement).value)}
-              placeholder="Type what you'd say"
-              enterKeyHint="send"
-            />
-          </form>
-        ) : null}
-        <div class="buttons">
-          <button
-            type="button"
-            class="round"
-            aria-label="Undo"
-            onClick={() => editor.current?.undo()}
-          >
-            ↶
-          </button>
-          <button
-            type="button"
-            class="round"
-            aria-label="Redo"
-            onClick={() => editor.current?.redo()}
-          >
-            ↷
-          </button>
-          <button
-            type="button"
-            class={`talk ${listening ? "listening" : ""}`}
-            disabled={!hasSpeech}
-            onPointerDown={startTalking}
-            onPointerUp={() => void stopTalking()}
-            onPointerCancel={() => void stopTalking()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            {listening ? "Release to send" : replying ? "Hold to reply" : TALK_LABEL}
-          </button>
-          <button
-            type="button"
-            class="round"
-            aria-label="Run"
-            onClick={() => setSheet(sheet === "run" ? null : "run")}
-          >
-            ▶
-          </button>
-          <button
-            type="button"
-            class={`round ${keyboard ? "selected" : ""}`}
-            aria-label={keyboard ? "Hide keyboard" : "Type"}
-            onClick={toggleKeyboard}
-          >
-            ⌨
-          </button>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-function ConflictBanner({
-  what,
-  onResolve,
-}: {
-  what: string;
-  onResolve: (keep: "mine" | "theirs") => void;
-}) {
-  return (
-    <div class="banner">
-      <span>The {what} changed elsewhere.</span>
-      <span class="banner-actions">
-        <button type="button" class="text-button" onClick={() => onResolve("mine")}>
-          Keep mine
-        </button>
-        <button type="button" class="text-button" onClick={() => onResolve("theirs")}>
-          Load theirs
-        </button>
-      </span>
-    </div>
-  );
-}
-
-function SheetFrame({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: ComponentChildren;
-}) {
-  return (
-    <div class="sheet">
-      <div class="sheet-header">
-        <h1>{title}</h1>
-        <button type="button" class="icon-button" aria-label="Close" onClick={onClose}>
-          ✕
-        </button>
-      </div>
-      <div class="sheet-body">{children}</div>
+      <Controls
+        hidden={showPicker}
+        feedback={feedback}
+        listening={listening}
+        interim={interim}
+        hasSpeech={hasSpeech}
+        showTyped={showTyped}
+        question={question}
+        replying={replying}
+        onReplying={setReplying}
+        onSay={enqueue}
+        onTalkStart={talk.start}
+        onTalkEnd={() => void talk.stop()}
+        onUndo={() => editor.current?.undo()}
+        onRedo={() => editor.current?.redo()}
+        onRun={() => setSheet(sheet === "run" ? null : "run")}
+        keyboard={keyboard}
+        onToggleKeyboard={toggleKeyboard}
+      />
     </div>
   );
 }

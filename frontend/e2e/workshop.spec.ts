@@ -68,10 +68,25 @@ test("runs on the sample and the real input", async () => {
   await page.getByRole("button", { name: "Close" }).click();
 });
 
+test("discusses the puzzle, keeping the conversation", async () => {
+  await page.getByRole("button", { name: "Discuss", exact: true }).click();
+  await say("why is part one wrong");
+  await expect(page.locator(".turn.coach")).toHaveText(
+    'You asked "why is part one wrong", after 1 question(s).',
+  );
+  await say("and part two");
+  await expect(page.locator(".turn.coach").last()).toHaveText(
+    'You asked "and part two", after 2 question(s).',
+  );
+});
+
 test("keeps everything across a reload", async () => {
   await expect.poll(() => readFileSync(solution, "utf8")).toContain("return 0");
   await page.reload();
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
+  await expect(page.locator(".turn")).toHaveCount(4);
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect(page.locator(".turn")).toHaveCount(0);
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await expect(editor()).toContainText("return len(data.splitlines())");
 });
