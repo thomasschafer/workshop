@@ -576,30 +576,40 @@ async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> Api
         body.recent.as_deref(),
         &body.earlier,
     );
-    let reply = app
-        .edit_model
-        .call(&app.edit_spec(), &prompt, EDIT_TIMEOUT)
-        .await?;
-    let outcome = edit::parse_reply(&reply.text).and_then(|r| edit::apply(&body.doc, r));
+    let result = edit::request(
+        &app.edit_model,
+        &app.edit_spec(),
+        &body.doc,
+        &prompt,
+        EDIT_TIMEOUT,
+    )
+    .await;
+    let (outcome, replies, elapsed_ms) = match &result {
+        Ok(r) => (
+            match r.outcome {
+                EditOutcome::Applied { .. } => "applied",
+                EditOutcome::Unsure { .. } => "unsure",
+            },
+            &r.replies,
+            r.elapsed_ms,
+        ),
+        Err(failed) => ("rejected", &failed.replies, 0),
+    };
     tracing::info!(
         utterance = %body.utterance,
         recent = ?body.recent,
         earlier = ?body.earlier,
-        elapsed_ms = reply.elapsed_ms,
-        reply = %reply.text,
-        outcome = match &outcome {
-            Ok(EditOutcome::Applied { .. }) => "applied",
-            Ok(EditOutcome::Unsure { .. }) => "unsure",
-            Err(_) => "rejected",
-        },
+        elapsed_ms,
+        reply = %replies.join("\n--- retry ---\n"),
+        outcome,
         doc = %body.doc,
         "edit"
     );
-    let outcome = outcome?;
+    let response = result.map_err(|e| anyhow::anyhow!(e.message))?;
     Ok(Json(Edited {
-        outcome,
-        model: reply.model,
-        elapsed_ms: reply.elapsed_ms,
+        outcome: response.outcome,
+        model: response.model,
+        elapsed_ms: response.elapsed_ms,
     }))
 }
 

@@ -134,7 +134,7 @@ pub async fn run(
     };
     runner.warm(&spec).await?;
 
-    let (mut passed, mut cursor, mut failed) = (0, 0, 0);
+    let (mut passed, mut cursor, mut failed, mut retries) = (0, 0, 0, 0);
     let mut total_ms = 0;
     for case in &cases {
         let prompt = edit::user_prompt(
@@ -143,14 +143,33 @@ pub async fn run(
             case.recent.as_deref(),
             &case.earlier,
         );
-        let (outcome, elapsed_ms) = match runner.call(&spec, &prompt, Duration::from_secs(60)).await
+        let (outcome, elapsed_ms, retried) = match edit::request(
+            &runner,
+            &spec,
+            &case.before,
+            &prompt,
+            Duration::from_secs(60),
+        )
+        .await
         {
-            Ok(reply) => (
-                edit::parse_reply(&reply.text).and_then(|r| edit::apply(&case.before, r)),
-                reply.elapsed_ms,
+            Ok(response) => (
+                Ok(response.outcome),
+                response.elapsed_ms,
+                response.replies.len() > 1,
             ),
-            Err(err) => (Err(err), 0),
+            Err(failed) => (
+                Err(anyhow::anyhow!(
+                    "{}\nreplies:\n{}",
+                    failed.message,
+                    failed.replies.join("\n")
+                )),
+                0,
+                true,
+            ),
         };
+        if retried {
+            retries += 1;
+        }
         total_ms += elapsed_ms;
         let seconds = elapsed_ms as f64 / 1000.0;
         match case.judge(&outcome) {
@@ -176,7 +195,7 @@ pub async fn run(
         }
     }
     println!(
-        "\n{passed} passed, {cursor} with the cursor elsewhere, {failed} failed, of {}. Average {:.1}s per edit.",
+        "\n{passed} passed, {cursor} with the cursor elsewhere, {failed} failed, of {}; {retries} needed a retry. Average {:.1}s per edit.",
         cases.len(),
         total_ms as f64 / 1000.0 / cases.len() as f64
     );

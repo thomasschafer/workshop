@@ -598,3 +598,150 @@ part1 = sum . map read . lines
 
 part2 :: String -> Int
 part2 = undefined''']
+
+[[case]]
+name = "remove-signature-and-import"
+utterance = "please can you remove this line and then I guess we can remove the set import at the top so we still need the S import but I think we can remove set"
+before = '''
+module Main where
+
+import qualified Data.Set as S
+import Data.Set (Set)
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> Int
+parse (sign:num) = (if sign == '-' then -1 else 1) * read num
+
+part1 :: String -> Int
+part1 = sum . map parse . lines
+
+part2 :: String -> Int
+part2 = solve 0 S.empty . cycle . map parse . lines
+  where
+    solve :: Int -> Set Int -‸> [Int] -> Int
+    solve freq seen (nxt:rest)
+      | freq `elem` seen = freq
+      | otherwise = solve (freq+nxt) (S.insert freq seen) rest
+'''
+after = '''
+module Main where
+
+import qualified Data.Set as S
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> Int
+parse (sign:num) = (if sign == '-' then -1 else 1) * read num
+
+part1 :: String -> Int
+part1 = sum . map parse . lines
+
+part2 :: String -> Int
+part2 = solve 0 S.empty . cycle . map parse . lines
+  where
+‸    solve freq seen (nxt:rest)
+      | freq `elem` seen = freq
+      | otherwise = solve (freq+nxt) (S.insert freq seen) rest
+'''
+also = ['''
+module Main where
+
+import qualified Data.Set as S
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> Int
+parse (sign:num) = (if sign == '-' then -1 else 1) * read num
+
+part1 :: String -> Int
+part1 = sum . map parse . lines
+
+part2 :: String -> Int
+part2 = solve 0 S.empty . cycle . map parse . lines
+  where
+    ‸solve freq seen (nxt:rest)
+      | freq `elem` seen = freq
+      | otherwise = solve (freq+nxt) (S.insert freq seen) rest
+''', '''
+module Main where
+
+import qualified Data.Set as S
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> Int
+parse (sign:num) = (if sign == '-' then -1 else 1) * read num
+
+part1 :: String -> Int
+part1 = sum . map parse . lines
+
+part2 :: String -> Int
+part2 = solve 0 S.empty . cycle . map parse . lines
+  where‸
+    solve freq seen (nxt:rest)
+      | freq `elem` seen = freq
+      | otherwise = solve (freq+nxt) (S.insert freq seen) rest
+''', '''
+module Main where
+
+‸import qualified Data.Set as S
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> Int
+parse (sign:num) = (if sign == '-' then -1 else 1) * read num
+
+part1 :: String -> Int
+part1 = sum . map parse . lines
+
+part2 :: String -> Int
+part2 = solve 0 S.empty . cycle . map parse . lines
+  where
+    solve freq seen (nxt:rest)
+      | freq `elem` seen = freq
+      | otherwise = solve (freq+nxt) (S.insert freq seen) rest
+''', '''
+module Main where
+
+import qualified Data.Set as S‸
+
+main :: IO ()
+main = do
+  input <- getContents
+  print (part1 input)
+  print (part2 input)
+
+parse :: String -> Int
+parse (sign:num) = (if sign == '-' then -1 else 1) * read num
+
+part1 :: String -> Int
+part1 = sum . map parse . lines
+
+part2 :: String -> Int
+part2 = solve 0 S.empty . cycle . map parse . lines
+  where
+    solve freq seen (nxt:rest)
+      | freq `elem` seen = freq
+      | otherwise = solve (freq+nxt) (S.insert freq seen) rest
+''']
