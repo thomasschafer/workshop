@@ -1,6 +1,6 @@
 // Builds a self-contained Workshop home for end-to-end tests: Python, a stand-in model, and an
 // invented puzzle already in the cache, so tests need no network, toolchain or model access.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -18,6 +18,29 @@ plum
 <p>This list has <code><em>3</em></code> items.</p>
 </article>
 </main></body></html>`;
+
+/**
+ * The built-in Python profile, with packages installed by a stand-in for pip, so installing
+ * needs no network. Everything else, such as how missing modules are recognised, is as built.
+ */
+function pythonProfile(): string {
+  const builtin = readFileSync(resolve(import.meta.dirname, "../../languages/python.toml"), "utf8");
+  const fakeInstall = resolve(import.meta.dirname, "fake-install.mjs");
+  const replacements: [RegExp, string][] = [
+    [
+      /^install = \[\n[\s\S]*?^\]\n/m,
+      `install = [["node", ${JSON.stringify(fakeInstall)}, "{env}", "{packages}"]]\n`,
+    ],
+    [/^environment = .*$/m, 'environment = { PYTHONPATH = "{env}/site" }'],
+    [/^\[packages/gm, "[languages.python.packages"],
+  ];
+  let profile = builtin;
+  for (const [pattern, replacement] of replacements) {
+    if (!pattern.test(profile)) throw new Error(`python.toml no longer matches ${pattern}`);
+    profile = profile.replace(pattern, replacement);
+  }
+  return `[languages.python]\n${profile}`;
+}
 
 export interface HomeOptions {
   home: string;
@@ -70,7 +93,8 @@ language = "python"
 # Nothing listens here, so no request ever reaches Advent of Code.
 [aoc]
 base_url = "http://127.0.0.1:9"
-${models}`,
+${models}
+${pythonProfile()}`,
   );
   writeFileSync(join(home, "config", "aoc-session"), "not-a-real-session");
   const cached = join(home, "cache", "aoc", String(year), String(day).padStart(2, "0"));

@@ -23,12 +23,21 @@ const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(75);
 
-pub async fn relay(socket: WebSocket, command: &[String], root: &Path) -> Result<()> {
+/// Relays until either side closes, or until `restart` changes, which ends the session so the
+/// editor reconnects to a fresh language server.
+pub async fn relay(
+    socket: WebSocket,
+    command: &[String],
+    root: &Path,
+    environment: &[(String, String)],
+    mut restart: tokio::sync::watch::Receiver<u64>,
+) -> Result<()> {
     let (program, args) = command
         .split_first()
         .context("empty language server command")?;
     let mut child = process::command(program)
         .args(args)
+        .envs(environment.iter().map(|(k, v)| (k, v)))
         .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -111,6 +120,10 @@ pub async fn relay(socket: WebSocket, command: &[String], root: &Path) -> Result
         r = to_server => r,
         r = to_client => r,
         r = keep_alive => r,
+        _ = restart.changed() => {
+            tracing::info!("restarting the language server");
+            Ok(())
+        }
         status = child.wait() => {
             let status = status?;
             if status.success() { Ok(()) } else { Err(anyhow::anyhow!("language server exited with {status}")) }

@@ -42,3 +42,31 @@ dictation_hints = '''
 - "Wrap that in f" applies f to the whole of the most recent expression: wrapping `data.split()` in `sorted` gives `sorted(data.split())`.
 - Common mishearings: "in put" is `input`, "split lines" is `splitlines`, "enumerate" may be heard as "e numerate", "deck" or "deque" is `deque`.
 '''
+
+[packages]
+# Relative to the solutions directory. One package per line; edit it by hand or in the app.
+manifest = "python-packages.txt"
+# The standard library covers most puzzles, so nothing is installed until you add something.
+defaults = []
+# A virtual environment, which `python3` runs in once it's first on PATH. Pyright finds it the
+# same way.
+install = [
+  ["python3", "-m", "venv", "{env}/venv"],
+  ["{env}/venv/bin/python", "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "{packages}"],
+]
+environment = { PATH = "{env}/venv/bin:{PATH}", VIRTUAL_ENV = "{env}/venv" }
+missing_module = [
+  "No module named '([A-Za-z0-9_.]+)'",
+  "Import \"([A-Za-z0-9_.]+)\" could not be resolved",
+]
+# Most packages are named after the module they provide.
+package_named_after_module = true
+
+# The exceptions, by module prefix.
+[packages.providers]
+"PIL" = "pillow"
+"bs4" = "beautifulsoup4"
+"cv2" = "opencv-python"
+"dateutil" = "python-dateutil"
+"sklearn" = "scikit-learn"
+"yaml" = "pyyaml"

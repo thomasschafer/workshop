@@ -19,7 +19,9 @@ import {
 } from "./editor";
 import type { Feedback } from "./feedback";
 import { useDiscussion } from "./hooks/useDiscussion";
+import { usePackages } from "./hooks/usePackages";
 import { usePushToTalk } from "./hooks/usePushToTalk";
+import { findMissingPackage } from "./packages";
 import * as preferences from "./preferences";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
@@ -28,6 +30,7 @@ import { DiscussView } from "./views/discuss";
 import { ConflictBanner, SheetFrame } from "./views/frame";
 import { Help } from "./views/help";
 import { Modal } from "./views/modal";
+import { MissingPackageBanner } from "./views/packages";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
 import {
@@ -74,6 +77,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [notesConflict, setNotesConflict] = useState<FileVersion | null>(null);
   const [keyboard, setKeyboard] = useState(false);
   const [run, setRun] = useState<RunState>(initialRunState);
+  const packages = usePackages(boot.language.packages !== null);
   const discussion = useDiscussion(puzzle, discussModel, () => {
     const last = latest.current.run.last;
     return {
@@ -102,6 +106,9 @@ export function App({ boot }: { boot: Bootstrap }) {
     [boot],
   );
   useEffect(() => () => lsp?.close(), [lsp]);
+  useEffect(() => {
+    if (lspStatus === "reconnecting") editor.current?.clearDiagnostics();
+  }, [lspStatus]);
   const fileUri = useRef<string | null>(null);
   const metaRef = useRef(meta);
   const puzzleRef = useRef(puzzle);
@@ -374,6 +381,28 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
+  // A package the language server or the last run says is missing. Errors about one that's since
+  // been installed are left over from before, and go once checked or run again.
+  const missing = useMemo(() => {
+    const hints = boot.language.packages;
+    if (hints === null) return null;
+    const errors = [editor.current?.diagnosticsText() ?? "", run.last?.result.stderr ?? ""];
+    const found = findMissingPackage(errors.join("\n"), hints);
+    if (found?.package && packages.state?.installed?.includes(found.package)) return null;
+    return found;
+  }, [diagnostics, run.last, packages.state, boot.language.packages]);
+
+  const installPackage = async (pkg: string, transcript?: string) => {
+    const said = transcript === undefined ? {} : { transcript };
+    setFeedback({ kind: "info", ...said, text: `Installing ${pkg}…` });
+    const installed = await packages.add(pkg);
+    setFeedback(
+      installed
+        ? { kind: "ok", ...said, text: `Installed ${pkg}` }
+        : { kind: "error", ...said, text: `Couldn't install ${pkg}; see Settings, Packages.` },
+    );
+  };
+
   const runCommand = (command: LocalCommand, transcript: string) => {
     const current = editor.current;
     const done = (text: string) => setFeedback({ kind: "ok", transcript, text });
@@ -418,6 +447,25 @@ export function App({ boot }: { boot: Bootstrap }) {
       case "tab":
         setTab(command.tab);
         return done(`Showing ${command.tab}`);
+      case "install": {
+        if (boot.language.packages === null) {
+          return setFeedback({
+            kind: "warn",
+            transcript,
+            text: `${boot.language.name} has no packages to install.`,
+          });
+        }
+        const pkg = command.package ?? missing?.package ?? null;
+        if (pkg === null) {
+          return setFeedback({
+            kind: "warn",
+            transcript,
+            text: "Say which package, like “install package split”.",
+          });
+        }
+        void installPackage(pkg, transcript);
+        return;
+      }
     }
   };
 
@@ -653,6 +701,14 @@ export function App({ boot }: { boot: Bootstrap }) {
         {notesConflict && !showPicker ? (
           <ConflictBanner what="notes" onResolve={resolveNotesConflict} />
         ) : null}
+        {missing && !showPicker ? (
+          <MissingPackageBanner
+            missing={missing}
+            packages={packages}
+            onInstall={(pkg) => void installPackage(pkg)}
+            onOpenSettings={() => setSheet("settings")}
+          />
+        ) : null}
         <div class={`code-pane ${tab === "code" && !showPicker ? "" : "hidden"}`}>
           <div class="status-line">
             <span>{statusParts.join(" · ")}</span>
@@ -697,6 +753,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             <Setup
               models={models}
               onModels={setModels}
+              packages={packages}
               onLoggedIn={() => setHasSession(true)}
               onDone={() => setSheet(null)}
             />
@@ -739,6 +796,7 @@ export function App({ boot }: { boot: Bootstrap }) {
                 preferences.keepScreenOn.set(enabled);
                 setKeepScreenOn(enabled);
               }}
+              packages={packages}
               lineWrapping={lineWrapping}
               onLineWrapping={(enabled) => {
                 preferences.lineWrapping.set(enabled);

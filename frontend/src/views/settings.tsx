@@ -1,7 +1,9 @@
 import { useState } from "preact/hooks";
 import { api, type ModelsState, type Snippet } from "../api";
+import type { Packages } from "../hooks/usePackages";
 import { Checks } from "./checks";
 import { ModelsSection } from "./models";
+import { PackagesSection } from "./packages";
 import { ThemeSection } from "./theme";
 
 interface Props {
@@ -13,6 +15,7 @@ interface Props {
   onInsertSnippet: (snippet: Snippet) => void;
   keepScreenOn: boolean | null;
   onKeepScreenOn: (enabled: boolean) => void;
+  packages: Packages;
   lineWrapping: boolean;
   onLineWrapping: (enabled: boolean) => void;
 }
@@ -26,6 +29,7 @@ export function Settings({
   onInsertSnippet,
   keepScreenOn,
   onKeepScreenOn,
+  packages,
   lineWrapping,
   onLineWrapping,
 }: Props) {
@@ -48,6 +52,12 @@ export function Settings({
       <section>
         <ModelsSection models={models} onModels={onModels} />
       </section>
+
+      {packages.state ? (
+        <section>
+          <PackagesSection packages={packages} />
+        </section>
+      ) : null}
 
       <section>
         <h2>Solutions repo</h2>

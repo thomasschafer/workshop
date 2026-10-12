@@ -15,7 +15,12 @@ import {
 } from "@codemirror/language";
 import { haskell } from "@codemirror/legacy-modes/mode/haskell";
 import { python } from "@codemirror/legacy-modes/mode/python";
-import { forEachDiagnostic, nextDiagnostic, previousDiagnostic } from "@codemirror/lint";
+import {
+  forEachDiagnostic,
+  nextDiagnostic,
+  previousDiagnostic,
+  setDiagnostics,
+} from "@codemirror/lint";
 import { LSPClient, serverDiagnostics, type Transport } from "@codemirror/lsp-client";
 import {
   Compartment,
@@ -279,6 +284,14 @@ export class CodeEditor {
 
   previousError(): void {
     previousDiagnostic(this.view);
+  }
+
+  /**
+   * Forgets the language server's errors, such as when it restarts: a new server that finds no
+   * errors says nothing, so the old ones would otherwise stay.
+   */
+  clearDiagnostics(): void {
+    this.view.dispatch(setDiagnostics(this.view.state, []));
   }
 
   diagnosticsText(): string {

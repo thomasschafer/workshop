@@ -61,6 +61,8 @@ pub struct RunRequest<'a> {
     pub input: &'a str,
     pub timeout: Duration,
     pub cancel: &'a CancellationToken,
+    /// Extra environment variables, such as where installed packages are.
+    pub environment: &'a [(String, String)],
 }
 
 pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
@@ -80,7 +82,15 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
 
     if let Some(build) = &request.profile.build {
         let args = template::render_all(build, &vars)?;
-        let output = execute(&args, dir, None, request.timeout, request.cancel).await?;
+        let output = execute(
+            &args,
+            dir,
+            request.environment,
+            None,
+            request.timeout,
+            request.cancel,
+        )
+        .await?;
         if output.ending != (Ending::Exited { code: Some(0) }) {
             return Ok(RunResult {
                 phase: Phase::Build,
@@ -97,6 +107,7 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
     let output = execute(
         &args,
         dir,
+        request.environment,
         Some(request.input),
         request.timeout,
         request.cancel,
@@ -119,15 +130,17 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
     })
 }
 
-struct Output {
-    ending: Ending,
-    stdout: String,
-    stderr: String,
+pub struct Output {
+    pub ending: Ending,
+    pub stdout: String,
+    pub stderr: String,
 }
 
-async fn execute(
+/// Runs a command in its own process group, with a time limit, keeping the start of its output.
+pub async fn execute(
     args: &[String],
     dir: &Path,
+    environment: &[(String, String)],
     stdin: Option<&str>,
     timeout: Duration,
     cancel: &CancellationToken,
@@ -135,6 +148,7 @@ async fn execute(
     let (program, rest) = args.split_first().context("empty command")?;
     let mut child = process::command(program)
         .args(rest)
+        .envs(environment.iter().map(|(k, v)| (k, v)))
         .current_dir(dir)
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -231,6 +245,7 @@ mod tests {
             lsp: None,
             template: String::new(),
             dictation_hints: String::new(),
+            packages: None,
         }
     }
 
@@ -252,6 +267,10 @@ mod tests {
             input,
             timeout,
             cancel: &cancel,
+            environment: &[(
+                "WORKSHOP_TEST".to_owned(),
+                "from the environment".to_owned(),
+            )],
         })
         .await
         .unwrap()
@@ -270,6 +289,27 @@ mod tests {
         assert!(result.succeeded());
         assert_eq!(result.answers, vec!["7", "42"]);
         assert_eq!(result.stderr.trim(), "oops");
+    }
+
+    #[tokio::test]
+    async fn builds_and_runs_with_the_given_environment() {
+        let profile = profile(
+            Some(&[
+                "sh",
+                "-c",
+                "test \"$WORKSHOP_TEST\" = 'from the environment'",
+            ]),
+            &["sh", "{file}"],
+        );
+        let result = run_with(
+            &profile,
+            "echo \"$WORKSHOP_TEST\"",
+            "",
+            Duration::from_secs(10),
+        )
+        .await;
+        assert!(result.succeeded(), "{result:?}");
+        assert_eq!(result.answers, vec!["from the environment"]);
     }
 
     #[tokio::test]
@@ -321,6 +361,7 @@ mod tests {
             input: "",
             timeout: Duration::from_secs(30),
             cancel: &cancel,
+            environment: &[],
         })
         .await
         .unwrap();
@@ -356,6 +397,7 @@ mod tests {
             input: "",
             timeout: Duration::from_secs(1),
             cancel: &cancel,
+            environment: &[],
         })
         .await
         .unwrap_err();

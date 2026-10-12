@@ -7,6 +7,7 @@ mod eval;
 mod language;
 mod lsp;
 mod models;
+mod packages;
 mod paths;
 mod process;
 mod provider;

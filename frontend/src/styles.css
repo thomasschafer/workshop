@@ -992,3 +992,38 @@ code {
       env(safe-area-inset-left);
   }
 }
+
+/* Packages */
+
+.chip.static {
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+.installing .elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.install-error {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: var(--error);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.manifest-editor textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}

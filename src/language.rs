@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::packages::PackagesProfile;
 use crate::template::{self, Vars};
 
 /// Everything Workshop needs to know to work with one programming language.
@@ -25,6 +26,9 @@ pub struct LanguageProfile {
     pub template: String,
     /// How the language is spoken, given to the edit model.
     pub dictation_hints: String,
+    /// Packages solutions can use beyond the standard library, if the language has any.
+    #[serde(default)]
+    pub packages: Option<PackagesProfile>,
 }
 
 const BUILTIN: &[(&str, &str)] = &[
@@ -121,6 +125,17 @@ impl LanguageProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_packages_are_valid() {
+        for (id, profile) in builtin_profiles().unwrap() {
+            if let Some(packages) = profile.packages {
+                packages
+                    .validate()
+                    .unwrap_or_else(|e| panic!("{id}: {e:#}"));
+            }
+        }
+    }
 
     fn haskell() -> LanguageProfile {
         builtin_profiles()

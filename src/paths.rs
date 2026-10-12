@@ -62,6 +62,12 @@ impl Paths {
         self.cache_dir.join("build")
     }
 
+    /// Where a language's packages are installed. They can always be installed again from the
+    /// manifest in the solutions directory.
+    pub fn packages_dir(&self, language: &str) -> PathBuf {
+        self.cache_dir.join("packages").join(language)
+    }
+
     /// A local log of utterances, model replies and errors, for tuning and troubleshooting.
     pub fn log_file(&self) -> PathBuf {
         self.data_dir.join("workshop.log")

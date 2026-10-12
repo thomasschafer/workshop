@@ -27,12 +27,39 @@ export interface Bootstrap {
     lsp_language_id: string;
     has_lsp: boolean;
     root_uri: string;
+    /** For recognising a missing package in errors, if the language has packages. */
+    packages: PackageHints | null;
   };
   snippets: Snippet[];
   models: ModelsState;
   has_aoc_session: boolean;
   needs_setup: boolean;
   theme_css: string | null;
+}
+
+export interface PackageHints {
+  /** Patterns finding a missing module in an error, with the module as their only group. */
+  missing_module: string[];
+  /** The package that provides a module, by module prefix. */
+  providers: Record<string, string>;
+  package_named_after_module: boolean;
+}
+
+export interface PackagesState {
+  /** The manifest's path, relative to the solutions directory. */
+  manifest: string;
+  text: string;
+  packages: string[];
+  /** What's wrong with the manifest, if anything. */
+  problem: string | null;
+  /** What's installed now, or null if nothing has been yet. */
+  installed: string[] | null;
+}
+
+export interface PackagesResponse {
+  /** Null when the language has no packages beyond its standard library. */
+  state: PackagesState | null;
+  installing: boolean;
 }
 
 /** What to use for light or dark mode. */
@@ -266,5 +293,9 @@ export const api = {
   log: (kind: "error" | "command" | "speech", message: string) => {
     request<null>("POST", "/log", { kind, message }).catch(() => {});
   },
+  packages: () => request<PackagesResponse>("GET", "/packages"),
+  savePackages: (text: string) => request<PackagesResponse>("PUT", "/packages", { text }),
+  installPackages: () => request<PackagesResponse>("POST", "/packages/install"),
+  addPackage: (pkg: string) => request<PackagesResponse>("POST", "/packages/add", { package: pkg }),
   gitSync: (message: string) => request<{ summary: string }>("POST", "/git/sync", { message }),
 };

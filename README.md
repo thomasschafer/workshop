@@ -20,6 +20,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 - Inline errors and types from your language server, when you have one.
 - Run on the sample, run on your input, and submit, with a check against the sample's expected answer first.
 - Discuss mode: a coach that can see the puzzle and your code, won't edit anything, and won't give the answer away unless you ask.
+- Packages: a standard set for Haskell, and a one-tap install when an error says a module is missing. The list is a file in your solutions repo, so you can edit it by hand too.
 - Notes, snippets, and a commit-and-push button for your solutions repo.
 - Colours follow your system's light or dark mode, and can use any [Ghostty](https://ghostty.org) theme, matching your terminal if you like, or a base16 theme file placed in Workshop's `themes` folder.
 - Everything is saved as you go, so you can put the phone down and pick up where you left off, on the phone or at your desk.
@@ -27,7 +28,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 ## Requirements
 
 - A model CLI that you're logged in to, used through your existing subscription: [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex). Workshop sets itself up for whichever you have.
-- The toolchain for your language. Haskell and Python are built in: GHC with haskell-language-server, or Python 3 with pyright. The language server is optional and adds error underlines and types. Other languages can be added in your config.
+- The toolchain for your language. Haskell and Python are built in: GHC and cabal with haskell-language-server, or Python 3 with pyright. The language server is optional and adds error underlines and types. Other languages can be added in your config.
 - Your Advent of Code session cookie.
 - A way to reach your laptop from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
 

@@ -142,3 +142,29 @@ test("wraps long lines only when chosen", async () => {
   await page.reload();
   await expect(editor()).toHaveClass(/cm-lineWrapping/);
 });
+
+test("offers to install a missing package, and uses it", async () => {
+  await say("use the lanterns package");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByRole("button", { name: "Run sample" }).click();
+  await expect(page.locator(".run-result")).toContainText("No module named 'lanterns'");
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await expect(page.locator(".banner")).toContainText("lanterns isn't installed.");
+  await page.getByRole("button", { name: "Install lanterns" }).click();
+  await expect(page.locator(".feedback")).toContainText("Installed lanterns");
+  await expect(page.locator(".banner")).toHaveCount(0);
+  expect(readFileSync(join(HOME, "solutions", "python-packages.txt"), "utf8")).toMatch(
+    /^lanterns$/m,
+  );
+
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByRole("button", { name: "Run sample" }).click();
+  await expect(page.locator(".run-result")).toContainText("Part 1: 3 ✓");
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator(".packages")).toContainText("lanterns");
+  await expect(page.locator(".packages")).toContainText("Installed.");
+  await page.keyboard.press("Escape");
+});

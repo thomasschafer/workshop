@@ -19,6 +19,14 @@ const utterance = said[said.length - 1] ?? "";
 
 const PLACEHOLDER = "def part1(data: str) -> int:\n    raise NotImplementedError";
 const replies = {
+  "use the lanterns package": {
+    status: "edit",
+    edits: [
+      { find: "import sys", replace: "import sys\nimport lanterns" },
+      { find: "return len(data.splitlines())", replace: "return lanterns.count(data)‸" },
+    ],
+    summary: "used lanterns",
+  },
   "slowly make it return seven": {
     status: "edit",
     edits: [{ find: "return len(data.splitlines())", replace: "return 7‸" }],

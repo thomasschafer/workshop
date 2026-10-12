@@ -105,6 +105,16 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         });
     }
 
+    if let Some(profile) = &language.packages {
+        let packages = crate::packages::Packages {
+            profile,
+            language_name: &language.name,
+            solutions_dir: &config.solutions_dir,
+            dir: paths.packages_dir(&settings.language),
+        };
+        checks.push(check_packages(&packages));
+    }
+
     checks.push(match find_program("git") {
         Some(_) => Check::ok("Git", "Found git"),
         None => Check::problem(
@@ -144,6 +154,51 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
     checks.push(check_network(&config.aoc).await);
     checks.push(check_https(config).await);
     checks
+}
+
+fn check_packages(packages: &crate::packages::Packages) -> Check {
+    let state = match packages.state() {
+        Ok(state) => state,
+        Err(err) => {
+            return Check::problem(
+                Status::Fail,
+                "Packages",
+                format!("{err:#}"),
+                "Check the file can be read.",
+            );
+        }
+    };
+    let fix = "Install them in Settings, under Packages.";
+    if let Some(problem) = &state.problem {
+        return Check::problem(
+            Status::Fail,
+            "Packages",
+            format!("{} has a problem: {problem}", state.manifest),
+            format!("Fix {} in Settings, under Packages.", state.manifest),
+        );
+    }
+    match (&state.packages, &state.installed) {
+        (listed, _) if listed.is_empty() => Check::ok("Packages", "None listed"),
+        (listed, Some(installed)) if listed == installed => Check::ok(
+            "Packages",
+            format!("{} installed, from {}", listed.join(", "), state.manifest),
+        ),
+        (_, Some(_)) => Check::problem(
+            Status::Warn,
+            "Packages",
+            format!(
+                "{} changed since the packages were installed",
+                state.manifest
+            ),
+            fix,
+        ),
+        (listed, None) => Check::problem(
+            Status::Warn,
+            "Packages",
+            format!("Not installed yet: {}", listed.join(", ")),
+            fix,
+        ),
+    }
 }
 
 async fn check_provider(config: &Config, id: &str) -> Vec<Check> {

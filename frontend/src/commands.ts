@@ -1,3 +1,4 @@
+import { spokenPackageName } from "./packages";
 /** Voice commands that are handled instantly in the app, without the model. */
 export type LocalCommand =
   | { kind: "undo" }
@@ -8,6 +9,8 @@ export type LocalCommand =
   | { kind: "nextError" }
   | { kind: "previousError" }
   | { kind: "snippet"; name: string }
+  /** Installs a package; with no name, the one an error says is missing. */
+  | { kind: "install"; package: string | null }
   | { kind: "tab"; tab: "problem" | "code" | "notes" | "discuss" };
 
 const SMALL: Record<string, number> = {
@@ -117,6 +120,14 @@ export function matchCommand(
   if (line?.[2]) {
     const number = parseNumber(line[2]);
     if (number !== null && number > 0) return { kind: "gotoLine", line: number };
+  }
+  if (/^install (it|that|this|the package|the missing package)$/.test(text)) {
+    return { kind: "install", package: null };
+  }
+  const install = text.match(/^install (the )?(package )?(.+)$/);
+  if (install?.[3]) {
+    const name = spokenPackageName(install[3]);
+    if (name !== null) return { kind: "install", package: name };
   }
   const snippet = text.match(/^(insert )?snippet (.+)$/);
   if (snippet?.[2]) {

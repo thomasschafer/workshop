@@ -22,6 +22,7 @@ use crate::doctor;
 use crate::edit::{self, EditOutcome};
 use crate::language::{LanguageProfile, Puzzle};
 use crate::models::{self, ModelSettings, ProviderOption};
+use crate::packages::{Packages, PackagesState};
 use crate::paths::Paths;
 use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::runner::{self, RunResult};
@@ -48,6 +49,10 @@ pub struct App {
     run_lock: Mutex<()>,
     /// Cancels the run in progress, if there is one.
     current_run: std::sync::Mutex<Option<CancellationToken>>,
+    /// Held while packages are being installed.
+    install_lock: Arc<Mutex<()>>,
+    /// Changed to restart language servers, such as after installing packages.
+    lsp_restarts: tokio::sync::watch::Sender<u64>,
 }
 
 type Shared = Arc<App>;
@@ -82,6 +87,8 @@ impl App {
             settings: std::sync::RwLock::new(AppSettings::load(&config, &paths)),
             run_lock: Mutex::new(()),
             current_run: std::sync::Mutex::new(None),
+            install_lock: Arc::new(Mutex::new(())),
+            lsp_restarts: tokio::sync::watch::Sender::new(0),
             config,
             paths,
             token,
@@ -102,6 +109,24 @@ impl App {
     /// The language chosen in the app, or the config's.
     fn language(&self) -> &LanguageProfile {
         &self.config.languages[&self.settings().language]
+    }
+
+    /// The chosen language's packages, if it has any.
+    fn packages(&self) -> Option<Packages<'_>> {
+        let id = self.settings().language;
+        let language = &self.config.languages[&id];
+        language.packages.as_ref().map(|profile| Packages {
+            profile,
+            language_name: &language.name,
+            solutions_dir: &self.config.solutions_dir,
+            dir: self.paths.packages_dir(&id),
+        })
+    }
+
+    /// Environment variables that make installed packages available.
+    fn package_environment(&self) -> Result<Vec<(String, String)>> {
+        self.packages()
+            .map_or_else(|| Ok(Vec::new()), |packages| packages.environment())
     }
 
     fn update_settings(&self, change: impl FnOnce(&mut AppSettings)) -> Result<()> {
@@ -154,6 +179,9 @@ pub fn router(app: Shared) -> Router {
         .route("/theme", put(set_theme))
         .route("/setup/language", put(set_language))
         .route("/setup/aoc-session", post(set_aoc_session))
+        .route("/packages", get(get_packages).put(save_packages))
+        .route("/packages/install", post(install_packages))
+        .route("/packages/add", post(add_package))
         .route("/years/{year}/stars", get(stars))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
@@ -308,13 +336,16 @@ impl IntoResponse for ApiError {
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
+/// A request that can't be carried out as asked, with a reason to show the user.
+fn bad_request(message: impl Into<String>) -> ApiError {
+    ApiError(
+        StatusCode::BAD_REQUEST,
+        serde_json::json!({ "error": message.into() }),
+    )
+}
+
 fn puzzle(year: u16, day: u8) -> Result<Puzzle, ApiError> {
-    Puzzle::new(year, day).map_err(|err| {
-        ApiError(
-            StatusCode::BAD_REQUEST,
-            serde_json::json!({ "error": err.to_string() }),
-        )
-    })
+    Puzzle::new(year, day).map_err(|err| bad_request(err.to_string()))
 }
 
 #[derive(Serialize)]
@@ -338,6 +369,15 @@ struct LanguageInfo {
     lsp_language_id: String,
     has_lsp: bool,
     root_uri: String,
+    /// For recognising a missing package in errors, if the language has packages.
+    packages: Option<PackageHints>,
+}
+
+#[derive(Serialize)]
+struct PackageHints {
+    missing_module: Vec<String>,
+    providers: BTreeMap<String, String>,
+    package_named_after_module: bool,
 }
 
 async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
@@ -350,12 +390,17 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
     Ok(Json(Bootstrap {
         state: app.workspace.load_ui_state()?,
         language: LanguageInfo {
-            id: app.config.language_id.clone(),
+            id: app.settings().language,
             name: language.name.clone(),
             editor_mode: language.editor_mode.clone(),
             lsp_language_id: language.lsp_language_id.clone(),
             has_lsp,
             root_uri: file_uri(&app.config.solutions_dir),
+            packages: language.packages.as_ref().map(|p| PackageHints {
+                missing_module: p.missing_module.clone(),
+                providers: p.providers.clone(),
+                package_named_after_module: p.package_named_after_module,
+            }),
         },
         snippets: app.config.snippets.clone(),
         models: models_state(&app),
@@ -552,6 +597,7 @@ async fn run(
         input: &input,
         timeout: Duration::from_secs(app.config.run.timeout_secs),
         cancel: &cancel,
+        environment: &app.package_environment()?,
     })
     .await?;
     Ok(Json(result))
@@ -905,12 +951,8 @@ async fn set_theme(
     Json(theme): Json<crate::theme::ThemeSettings>,
 ) -> ApiResult<ThemeApplied> {
     // Checks the themes can be loaded before saving the choice.
-    let css = crate::theme::stylesheet(&app.paths, &theme).map_err(|e| {
-        ApiError(
-            StatusCode::BAD_REQUEST,
-            serde_json::json!({ "error": format!("{e:#}") }),
-        )
-    })?;
+    let css =
+        crate::theme::stylesheet(&app.paths, &theme).map_err(|e| bad_request(format!("{e:#}")))?;
     app.update_settings(|s| s.theme = theme)?;
     Ok(Json(ThemeApplied { css }))
 }
@@ -924,12 +966,7 @@ struct LanguageBody {
 /// on it.
 async fn set_language(State(app): State<Shared>, Json(body): Json<LanguageBody>) -> ApiResult<()> {
     app.update_settings(|s| s.language = body.language)
-        .map_err(|e| {
-            ApiError(
-                StatusCode::BAD_REQUEST,
-                serde_json::json!({ "error": format!("{e:#}") }),
-            )
-        })?;
+        .map_err(|e| bad_request(format!("{e:#}")))?;
     let warm = app.clone();
     tokio::spawn(async move { warm.warm_edit_model().await });
     Ok(Json(()))
@@ -951,9 +988,8 @@ async fn set_aoc_session(
         .trim_start_matches("session=")
         .to_owned();
     if session.is_empty() || session.contains(char::is_whitespace) {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            serde_json::json!({ "error": "Paste just the cookie's value, a long string of letters and numbers." }),
+        return Err(bad_request(
+            "Paste just the cookie's value, a long string of letters and numbers.",
         ));
     }
     app.aoc.check_session(&session).await?;
@@ -988,15 +1024,9 @@ async fn set_models(
     State(app): State<Shared>,
     Json(settings): Json<ModelSettings>,
 ) -> ApiResult<ModelsState> {
-    let invalid = |message: String| {
-        ApiError(
-            StatusCode::BAD_REQUEST,
-            serde_json::json!({ "error": message }),
-        )
-    };
     settings
         .validate(&app.config)
-        .map_err(|e| invalid(format!("{e:#}")))?;
+        .map_err(|e| bad_request(format!("{e:#}")))?;
     let options = models::options(&app.config);
     for provider in [&settings.edit.provider, &settings.discuss_provider] {
         if let Some(reason) = options
@@ -1004,7 +1034,7 @@ async fn set_models(
             .find(|o| &o.id == provider)
             .and_then(|o| o.unavailable.clone())
         {
-            return Err(invalid(reason));
+            return Err(bad_request(reason));
         }
     }
     app.update_settings(|s| s.models = settings)?;
@@ -1019,7 +1049,23 @@ async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {
         return (StatusCode::NOT_FOUND, "No language server is configured").into_response();
     };
     upgrade.on_upgrade(move |socket| async move {
-        if let Err(err) = crate::lsp::relay(socket, &command, &app.config.solutions_dir).await {
+        let environment = match app.package_environment() {
+            Ok(environment) => environment,
+            Err(err) => {
+                tracing::warn!("language server: {err:#}");
+                Vec::new()
+            }
+        };
+        let restart = app.lsp_restarts.subscribe();
+        if let Err(err) = crate::lsp::relay(
+            socket,
+            &command,
+            &app.config.solutions_dir,
+            &environment,
+            restart,
+        )
+        .await
+        {
             tracing::warn!("language server: {err:#}");
         }
     })
@@ -1165,4 +1211,94 @@ mod tests {
             "file:///a%20b/Main.hs"
         );
     }
+}
+
+#[derive(Serialize)]
+struct PackagesResponse {
+    /// None when the language has no packages beyond its standard library.
+    state: Option<PackagesState>,
+    installing: bool,
+}
+
+fn packages_response(app: &App) -> Result<PackagesResponse> {
+    Ok(PackagesResponse {
+        state: app.packages().map(|p| p.state()).transpose()?,
+        installing: app.install_lock.try_lock().is_err(),
+    })
+}
+
+fn require_packages(app: &App) -> Result<Packages<'_>, ApiError> {
+    app.packages().ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            serde_json::json!({ "error": format!("{} has no packages to install.", app.language().name) }),
+        )
+    })
+}
+
+async fn get_packages(State(app): State<Shared>) -> ApiResult<PackagesResponse> {
+    Ok(Json(packages_response(&app)?))
+}
+
+#[derive(Deserialize)]
+struct ManifestBody {
+    text: String,
+}
+
+async fn save_packages(
+    State(app): State<Shared>,
+    Json(body): Json<ManifestBody>,
+) -> ApiResult<PackagesResponse> {
+    require_packages(&app)?
+        .save_manifest(&body.text)
+        .map_err(|e| bad_request(format!("{e:#}")))?;
+    Ok(Json(packages_response(&app)?))
+}
+
+#[derive(Deserialize)]
+struct AddPackageBody {
+    package: String,
+}
+
+async fn add_package(
+    State(app): State<Shared>,
+    Json(body): Json<AddPackageBody>,
+) -> ApiResult<PackagesResponse> {
+    require_packages(&app)?
+        .add(&body.package)
+        .map_err(|e| bad_request(format!("{e:#}")))?;
+    install_packages(State(app)).await
+}
+
+/// Installs the manifest's packages, then restarts language servers so they see them.
+async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesResponse> {
+    require_packages(&app)?;
+    let Ok(guard) = app.install_lock.clone().try_lock_owned() else {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            serde_json::json!({ "error": "Packages are already being installed." }),
+        ));
+    };
+    // Its own task, so the install finishes even if the phone disconnects while waiting.
+    let task = {
+        let app = app.clone();
+        tokio::spawn(async move {
+            let _guard = guard;
+            let packages = app.packages().context("the language has no packages")?;
+            let installed = packages.install(&CancellationToken::new()).await;
+            if installed.is_ok() {
+                app.lsp_restarts.send_modify(|n| *n += 1);
+            }
+            installed
+        })
+    };
+    let installed = task.await.context("the install stopped unexpectedly")?;
+    match installed {
+        Ok(packages) => tracing::info!("installed packages: {}", packages.join(" ")),
+        Err(err) => {
+            tracing::warn!("installing packages: {err:#}");
+            return Err(err.into());
+        }
+    }
+    Ok(Json(packages_response(&app)?))
 }

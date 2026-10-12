@@ -1,18 +1,22 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type ModelsState, type SetupState } from "../api";
+import type { Packages } from "../hooks/usePackages";
+import { isUpToDate } from "../packages";
 import { Checks } from "./checks";
 import { ModelsSection } from "./models";
+import { PackagesSection } from "./packages";
 
 interface Props {
   models: ModelsState;
   onModels: (models: ModelsState) => void;
+  packages: Packages;
   /** Called once a session cookie has been saved. */
   onLoggedIn: () => void;
   onDone: () => void;
 }
 
 /** Getting Workshop ready: language, model, Advent of Code login and phone access. */
-export function Setup({ models, onModels, onLoggedIn, onDone }: Props) {
+export function Setup({ models, onModels, packages, onLoggedIn, onDone }: Props) {
   const [state, setState] = useState<SetupState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,25 +35,39 @@ export function Setup({ models, onModels, onLoggedIn, onDone }: Props) {
   return (
     <div class="setup">
       <p>A few things to set up before you start. Each step can be changed later in Settings.</p>
-      <LanguageStep state={state} />
-      <ModelStep state={state} models={models} onModels={onModels} />
-      <LoginStep
-        hasSession={state.has_aoc_session}
-        onSaved={() => {
-          onLoggedIn();
-          load();
-        }}
-      />
-      <PhoneStep state={state} onRefresh={load} />
-      <section>
-        <h2>5. Check everything</h2>
-        <Checks />
-      </section>
+      {numbered([
+        (n) => <LanguageStep key="language" n={n} state={state} />,
+        (n) => <ModelStep key="model" n={n} state={state} models={models} onModels={onModels} />,
+        packages.state ? (n) => <PackagesStep key="packages" n={n} packages={packages} /> : null,
+        (n) => (
+          <LoginStep
+            key="login"
+            n={n}
+            hasSession={state.has_aoc_session}
+            onSaved={() => {
+              onLoggedIn();
+              load();
+            }}
+          />
+        ),
+        (n) => <PhoneStep key="phone" n={n} state={state} onRefresh={load} />,
+        (n) => (
+          <section key="checks">
+            <h2>{n}. Check everything</h2>
+            <Checks />
+          </section>
+        ),
+      ])}
       <button type="button" class="pill primary wide" onClick={onDone}>
         Done
       </button>
     </div>
   );
+}
+
+/** Renders the steps that apply, numbering them in order. */
+function numbered(steps: (((n: number) => preact.JSX.Element) | null)[]) {
+  return steps.filter((s) => s !== null).map((step, i) => step(i + 1));
 }
 
 function Step({
@@ -71,7 +89,7 @@ function Step({
   );
 }
 
-function LanguageStep({ state }: { state: SetupState }) {
+function LanguageStep({ n, state }: { n: number; state: SetupState }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = state.languages.find((l) => l.id === state.language);
@@ -89,7 +107,7 @@ function LanguageStep({ state }: { state: SetupState }) {
   };
 
   return (
-    <Step title="1. Language" done={current !== undefined && current.missing.length === 0}>
+    <Step title={`${n}. Language`} done={current !== undefined && current.missing.length === 0}>
       <div class="snippets">
         {state.languages.map((l) => (
           <button
@@ -119,17 +137,19 @@ function LanguageStep({ state }: { state: SetupState }) {
 }
 
 function ModelStep({
+  n,
   state,
   models,
   onModels,
 }: {
+  n: number;
   state: SetupState;
   models: ModelsState;
   onModels: (models: ModelsState) => void;
 }) {
   const chosen = state.providers.find((p) => p.id === models.settings.edit.provider);
   return (
-    <Step title="2. Model" done={chosen?.installed === true && chosen.logged_in !== false}>
+    <Step title={`${n}. Model`} done={chosen?.installed === true && chosen.logged_in !== false}>
       <ul class="checks">
         {state.providers.map((p) => (
           <li key={p.id} class={`check ${p.installed && p.logged_in !== false ? "ok" : "warn"}`}>
@@ -153,7 +173,15 @@ function ModelStep({
   );
 }
 
-function LoginStep({ hasSession, onSaved }: { hasSession: boolean; onSaved: () => void }) {
+function LoginStep({
+  n,
+  hasSession,
+  onSaved,
+}: {
+  n: number;
+  hasSession: boolean;
+  onSaved: () => void;
+}) {
   const [editing, setEditing] = useState(!hasSession);
   const [cookie, setCookie] = useState("");
   const [saving, setSaving] = useState(false);
@@ -176,7 +204,7 @@ function LoginStep({ hasSession, onSaved }: { hasSession: boolean; onSaved: () =
   };
 
   return (
-    <Step title="3. Advent of Code login" done={hasSession && !editing}>
+    <Step title={`${n}. Advent of Code login`} done={hasSession && !editing}>
       {!editing ? (
         <p class="muted">
           Logged in.{" "}
@@ -212,9 +240,25 @@ function LoginStep({ hasSession, onSaved }: { hasSession: boolean; onSaved: () =
   );
 }
 
-function PhoneStep({ state, onRefresh }: { state: SetupState; onRefresh: () => void }) {
+function PackagesStep({ n, packages }: { n: number; packages: Packages }) {
   return (
-    <Step title="4. Your phone" done={state.phone_url !== null}>
+    <Step title={`${n}. Packages`} done={packages.state !== null && isUpToDate(packages.state)}>
+      <PackagesSection packages={packages} heading={false} />
+    </Step>
+  );
+}
+
+function PhoneStep({
+  n,
+  state,
+  onRefresh,
+}: {
+  n: number;
+  state: SetupState;
+  onRefresh: () => void;
+}) {
+  return (
+    <Step title={`${n}. Your phone`} done={state.phone_url !== null}>
       {state.phone_url !== null ? (
         <>
           <p class="small">Scan this with your phone's camera, or open the link on it:</p>

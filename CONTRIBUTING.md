@@ -80,6 +80,33 @@ Then:
 
 Commands are lists of arguments, not shell strings. The placeholders are `{file}`, `{dir}` (the solution's directory), `{build_dir}` (a scratch directory outside the solutions repo, for build output), `{year}` and `{day}`; `{day:02}` pads with zeros. An unknown placeholder is an error.
 
+### Packages
+
+If solutions in the language commonly need packages beyond its standard library, add a `[packages]` table. Workshop keeps the list in a manifest in the solutions directory, installs it into a directory of its own (`{env}`), and gives building, running and the language server the environment variables you set. When an error says a module is missing, it offers to install the package that provides it.
+
+```toml
+[packages]
+manifest = "python-packages.txt"
+defaults = []
+# Install every package in the manifest into an empty {env}. An argument that is exactly
+# {packages} becomes one argument per package.
+install = [
+  ["python3", "-m", "venv", "{env}/venv"],
+  ["{env}/venv/bin/python", "-m", "pip", "install", "{packages}"],
+]
+# {PATH} is Workshop's own PATH.
+environment = { PATH = "{env}/venv/bin:{PATH}", VIRTUAL_ENV = "{env}/venv" }
+# Each pattern has one group: the missing module.
+missing_module = ["No module named '([A-Za-z0-9_.]+)'"]
+# Whether `numpy.linalg` comes from the package `numpy` when no provider below says otherwise.
+package_named_after_module = true
+
+[packages.providers]
+"yaml" = "pyyaml"
+```
+
+The patterns are matched in the browser too, so keep to regex syntax that Rust and JavaScript share. Make sure the language server picks up the environment, and that a failed install leaves a clear message: the last lines of the installer's output are shown to the user.
+
 Dictation hints matter most. They're given to the edit model with every request, so keep them short, and focus on how the language's operators, chaining and idioms are spoken, and which words speech recognition commonly gets wrong.
 
 ## Adding a model provider

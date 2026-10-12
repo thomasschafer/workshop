@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { Exchange } from "../api";
 import type { Feedback } from "../feedback";
+import { useElapsed } from "../hooks/useElapsed";
 import { speechUnavailableReason } from "../voice";
 import { TALK_LABEL } from "./help";
 
@@ -24,18 +25,6 @@ interface Props {
   onRun: () => void;
   keyboard: boolean;
   onToggleKeyboard: () => void;
-}
-
-/** Seconds since `startedAt`, updated while it's running, or null when it isn't. */
-function useElapsed(startedAt: number | null): number | null {
-  const [now, setNow] = useState(() => performance.now());
-  useEffect(() => {
-    if (startedAt === null) return;
-    setNow(performance.now());
-    const timer = setInterval(() => setNow(performance.now()), 100);
-    return () => clearInterval(timer);
-  }, [startedAt]);
-  return startedAt === null ? null : Math.max(0, now - startedAt) / 1000;
 }
 
 /** Whether an edit has just landed, for a moment after it does. */
