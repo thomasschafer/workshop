@@ -98,14 +98,24 @@ install = [
 environment = { PATH = "{env}/venv/bin:{PATH}", VIRTUAL_ENV = "{env}/venv" }
 # Each pattern has one group: the missing module.
 missing_module = ["No module named '([A-Za-z0-9_.]+)'"]
+# Patterns for compilers that name the package itself, with the package as their only group.
+missing_package = []
 # Whether `numpy.linalg` comes from the package `numpy` when no provider below says otherwise.
 package_named_after_module = true
+# Where to look up a package for a module with no provider listed: "pypi" checks the package
+# named after the module exists, and "hoogle" searches Hackage for the module.
+lookup = { service = "pypi" }
+# Optional: refreshes the installer's package index when it's older than this, or when an
+# install fails without it.
+# update = { command = ["cabal", "update"], every_hours = 24 }
 
 [packages.providers]
 "yaml" = "pyyaml"
 ```
 
-The patterns are matched in the browser too, so keep to regex syntax that Rust and JavaScript share. Make sure the language server picks up the environment, and that a failed install leaves a clear message: the last lines of the installer's output are shown to the user.
+The patterns are matched in the browser too, so keep to regex syntax that Rust and JavaScript share. Make sure the language server picks up the environment. Installer output is shown as it happens and kept for the user to read, so a failure should explain itself there.
+
+`mise run check-packages` checks the built-in profiles against the real toolchains: a missing module is found, looked up, installed, and then seen by the language server and the solution. It needs the network, so it isn't part of CI; run it when you change how packages work.
 
 Dictation hints matter most. They're given to the edit model with every request, so keep them short, and focus on how the language's operators, chaining and idioms are spoken, and which words speech recognition commonly gets wrong.
 
