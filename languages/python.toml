@@ -40,6 +40,7 @@ dictation_hints = '''
 - "lambda x colon x times two" is `lambda x: x * 2`.
 - "return" starts a return statement; "pass" and "None", "True" and "False" are keywords.
 - "Wrap that in f" applies f to the whole of the most recent expression: wrapping `data.split()` in `sorted` gives `sorted(data.split())`.
+- The user's own helpers module is `aoc`: "from AOC import ints" is `from aoc import ints`. Imports go with the others at the top, wherever the cursor is. Package names with hyphens are imported with underscores: "import more itertools" is `import more_itertools`.
 - Common mishearings: "in put" is `input`, "split lines" is `splitlines`, "enumerate" may be heard as "e numerate", "deck" or "deque" is `deque`.
 '''
 

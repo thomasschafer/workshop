@@ -41,6 +41,7 @@ dictation_hints = '''
 - Users often build pipelines right to left. "Before that X" inserts X to the left of the most recent insertion and leaves the cursor just before X. Starting from `solve = sum‸`, "before that dot" gives `solve = ‸. sum`, and then "before that map read" gives `solve = ‸map read . sum`.
 - "Wrap that in parens" or "bracket that" puts parentheses around the most recent expression. "Wrap that in f" applies f to the whole of it, adding brackets as needed: wrapping `part1 input` in `show` gives `show (part1 input)`.
 - Numbers in names are spoken as words but written as digits: "part one" is `part1`, "day two" is `day2`, unless a name in the file already says otherwise.
+- The user's own helpers module is `Aoc`: "import AOC" or "import the helpers" is `import Aoc`. Imports go with the others at the top, wherever the cursor is.
 - Common mishearings: "fold are" or "fold R" is `foldr`, "fold L prime" is `foldl'`, "map M underscore" is `mapM_`, "in pew" is `input`, "read MaybeD" is `readMaybe`.
 '''
 

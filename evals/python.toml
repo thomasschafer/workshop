@@ -266,3 +266,85 @@ before = '''
 def part1(data: str) -> int:
     ‸'''
 unsure = true
+
+[[case]]
+name = "import-helpers-from-the-body"
+utterance = "from AOC import ints"
+before = '''
+import sys
+
+
+def part1(data: str) -> int:
+    return sum(‸)'''
+after = '''
+import sys
+
+from aoc import ints‸
+
+
+def part1(data: str) -> int:
+    return sum()'''
+also = ['''
+import sys
+
+from aoc import ints
+
+
+def part1(data: str) -> int:
+    return sum(‸)''', '''
+import sys
+from aoc import ints‸
+
+
+def part1(data: str) -> int:
+    return sum()''', '''
+import sys
+from aoc import ints
+
+
+def part1(data: str) -> int:
+    return sum(‸)''']
+
+[[case]]
+name = "import-hyphenated-package"
+utterance = "import more itertools at the top"
+before = '''
+import sys
+
+
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+import sys
+
+import more_itertools‸
+
+
+def part1(data: str) -> int:
+    '''
+also = ['''
+import sys
+
+import more_itertools
+
+
+def part1(data: str) -> int:
+    ‸''', '''
+import sys
+import more_itertools‸
+
+
+def part1(data: str) -> int:
+    ''', '''
+import sys
+import more_itertools
+
+
+def part1(data: str) -> int:
+    ‸''', '''
+import more_itertools
+import sys
+
+
+def part1(data: str) -> int:
+    ‸''']

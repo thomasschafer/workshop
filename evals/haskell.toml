@@ -747,3 +747,101 @@ part2 = solve 0 S.empty . cycle . map parse . lines
       | freq `elem` seen = freq
       | otherwise = solve (freq+nxt) (S.insert freq seen) rest
 ''']
+
+# Imports, from wherever the cursor is
+
+[[case]]
+name = "import-from-the-body"
+utterance = "add import qualified data dot hash map dot strict as HM at the top"
+before = '''
+module Main where
+
+import Data.List (sort)
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = ‸'''
+after = '''
+module Main where
+
+import Data.List (sort)
+import qualified Data.HashMap.Strict as HM‸
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = '''
+also = ['''
+module Main where
+
+import Data.List (sort)
+import qualified Data.HashMap.Strict as HM
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = ‸''', '''
+module Main where
+
+import qualified Data.HashMap.Strict as HM
+import Data.List (sort)
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = ‸''', '''
+module Main where
+
+import qualified Data.HashMap.Strict as HM‸
+import Data.List (sort)
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = ''']
+
+[[case]]
+name = "import-helpers"
+utterance = "import AOC"
+before = '''
+module Main where
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = sum . ‸'''
+after = '''
+module Main where
+
+import Aoc‸
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = sum . '''
+also = ['''
+module Main where
+
+import Aoc
+
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = sum . ‸''', '''
+module Main where
+
+import Aoc
+main :: IO ()
+main = getContents >>= print . part1
+
+part1 :: String -> Int
+part1 = sum . ‸''']
