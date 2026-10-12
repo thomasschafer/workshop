@@ -40,10 +40,16 @@ export interface Bootstrap {
 export interface PackageHints {
   /** Patterns finding a missing module in an error, with the module as their only group. */
   missing_module: string[];
-  /** The package that provides a module, by module prefix. */
-  providers: Record<string, string>;
-  package_named_after_module: boolean;
+  /** Patterns finding the package itself, for compilers that name it. */
+  missing_package: string[];
 }
+
+/** The package that would provide a missing module. */
+export type Resolution =
+  | { kind: "known"; package: string }
+  | { kind: "found"; package: string; summary: string | null }
+  | { kind: "guessed"; package: string }
+  | { kind: "not_found" };
 
 export interface PackagesState {
   /** The manifest's path, relative to the solutions directory. */
@@ -54,12 +60,17 @@ export interface PackagesState {
   problem: string | null;
   /** What's installed now, or null if nothing has been yet. */
   installed: string[] | null;
+  /** Programs installing needs that aren't on the PATH. */
+  missing_programs: string[];
 }
 
 export interface PackagesResponse {
   /** Null when the language has no packages beyond its standard library. */
   state: PackagesState | null;
   installing: boolean;
+  /** The installer's latest line of output, while installing. */
+  progress: string | null;
+  last_install: { succeeded: boolean; log: string[] } | null;
 }
 
 /** What to use for light or dark mode. */
@@ -297,5 +308,9 @@ export const api = {
   savePackages: (text: string) => request<PackagesResponse>("PUT", "/packages", { text }),
   installPackages: () => request<PackagesResponse>("POST", "/packages/install"),
   addPackage: (pkg: string) => request<PackagesResponse>("POST", "/packages/add", { package: pkg }),
+  removePackage: (pkg: string) =>
+    request<PackagesResponse>("POST", "/packages/remove", { package: pkg }),
+  cancelInstall: () => request<null>("POST", "/packages/cancel"),
+  resolvePackage: (module: string) => request<Resolution>("POST", "/packages/resolve", { module }),
   gitSync: (message: string) => request<{ summary: string }>("POST", "/git/sync", { message }),
 };

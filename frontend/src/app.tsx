@@ -21,7 +21,7 @@ import type { Feedback } from "./feedback";
 import { useDiscussion } from "./hooks/useDiscussion";
 import { usePackages } from "./hooks/usePackages";
 import { usePushToTalk } from "./hooks/usePushToTalk";
-import { findMissingPackage } from "./packages";
+import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
@@ -30,7 +30,7 @@ import { DiscussView } from "./views/discuss";
 import { ConflictBanner, SheetFrame } from "./views/frame";
 import { Help } from "./views/help";
 import { Modal } from "./views/modal";
-import { MissingPackageBanner } from "./views/packages";
+import { MissingPackageBanner, OutdatedPackagesBanner } from "./views/packages";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
 import {
@@ -381,16 +381,28 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  // A package the language server or the last run says is missing. Errors about one that's since
-  // been installed are left over from before, and go once checked or run again.
+  // A module the language server or the last run says is missing.
   const missing = useMemo(() => {
     const hints = boot.language.packages;
     if (hints === null) return null;
     const errors = [editor.current?.diagnosticsText() ?? "", run.last?.result.stderr ?? ""];
-    const found = findMissingPackage(errors.join("\n"), hints);
-    if (found?.package && packages.state?.installed?.includes(found.package)) return null;
-    return found;
-  }, [diagnostics, run.last, packages.state, boot.language.packages]);
+    return findMissingModule(errors.join("\n"), hints);
+  }, [diagnostics, run.last, boot.language.packages]);
+  const [outdatedDismissed, setOutdatedDismissed] = useState(false);
+  const outdated =
+    packages.state !== null &&
+    packages.state.problem === null &&
+    packages.state.packages.length > 0 &&
+    !isUpToDate(packages.state);
+
+  const packageFor = async (module: string): Promise<string | null> => {
+    try {
+      const found = await packages.resolve(module);
+      return "package" in found ? found.package : null;
+    } catch {
+      return null;
+    }
+  };
 
   const installPackage = async (pkg: string, transcript?: string) => {
     const said = transcript === undefined ? {} : { transcript };
@@ -455,15 +467,29 @@ export function App({ boot }: { boot: Bootstrap }) {
             text: `${boot.language.name} has no packages to install.`,
           });
         }
-        const pkg = command.package ?? missing?.package ?? null;
-        if (pkg === null) {
+        if (command.package !== null) {
+          void installPackage(command.package, transcript);
+          return;
+        }
+        if (missing === null) {
           return setFeedback({
             kind: "warn",
             transcript,
             text: "Say which package, like “install package split”.",
           });
         }
-        void installPackage(pkg, transcript);
+        void (async () => {
+          const found = missing.package ?? (await packageFor(missing.module));
+          if (found === null) {
+            setFeedback({
+              kind: "warn",
+              transcript,
+              text: `Couldn't find a package for ${missing.module}; add it in Settings, under Packages.`,
+            });
+          } else {
+            await installPackage(found, transcript);
+          }
+        })();
         return;
       }
     }
@@ -707,6 +733,11 @@ export function App({ boot }: { boot: Bootstrap }) {
             packages={packages}
             onInstall={(pkg) => void installPackage(pkg)}
             onOpenSettings={() => setSheet("settings")}
+          />
+        ) : outdated && !outdatedDismissed && !showPicker ? (
+          <OutdatedPackagesBanner
+            packages={packages}
+            onDismiss={() => setOutdatedDismissed(true)}
           />
         ) : null}
         <div class={`code-pane ${tab === "code" && !showPicker ? "" : "hidden"}`}>

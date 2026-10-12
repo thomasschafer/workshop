@@ -64,11 +64,15 @@ defaults = [
 ]
 # A GHC package environment, which ghc and haskell-language-server both read.
 install = [
-  ["cabal", "update"],
   ["cabal", "install", "--lib", "--package-env", "{env}/ghc-environment", "{packages}"],
 ]
+update = { command = ["cabal", "update"], every_hours = 24 }
 environment = { GHC_ENVIRONMENT = "{env}/ghc-environment" }
 missing_module = ["Could not (?:find|load) module [‘'`]([A-Za-z0-9_.]+)[’'`]"]
+# A package that's installed but not listed, such as one that comes with GHC.
+missing_package = ["member of the hidden package [‘'`]([A-Za-z0-9_.-]+?)-[0-9][0-9.]*[’'`]"]
+# For modules that aren't in the list below.
+lookup = { service = "hoogle" }
 
 # Which package provides a module, by module prefix; the longest match wins.
 [packages.providers]

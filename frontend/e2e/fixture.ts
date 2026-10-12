@@ -20,8 +20,9 @@ plum
 </main></body></html>`;
 
 /**
- * The built-in Python profile, with packages installed by a stand-in for pip, so installing
- * needs no network. Everything else, such as how missing modules are recognised, is as built.
+ * The built-in Python profile, with packages installed by a stand-in for pip and no lookups on
+ * PyPI, so nothing needs the network. Everything else, such as how missing modules are
+ * recognised, is as built.
  */
 function pythonProfile(): string {
   const builtin = readFileSync(resolve(import.meta.dirname, "../../languages/python.toml"), "utf8");
@@ -32,6 +33,7 @@ function pythonProfile(): string {
       `install = [["node", ${JSON.stringify(fakeInstall)}, "{env}", "{packages}"]]\n`,
     ],
     [/^environment = .*$/m, 'environment = { PYTHONPATH = "{env}/site" }'],
+    [/^lookup = .*\n/m, ""],
     [/^\[packages/gm, "[languages.python.packages"],
   ];
   let profile = builtin;

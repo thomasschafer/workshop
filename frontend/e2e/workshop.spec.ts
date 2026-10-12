@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { HOME, PORT } from "./fixture";
@@ -166,5 +166,22 @@ test("offers to install a missing package, and uses it", async () => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator(".packages")).toContainText("lanterns");
   await expect(page.locator(".packages")).toContainText("Installed.");
+  await page.keyboard.press("Escape");
+});
+
+test("installs what's listed after the list is edited elsewhere", async () => {
+  const manifest = join(HOME, "solutions", "python-packages.txt");
+  writeFileSync(manifest, `${readFileSync(manifest, "utf8")}lanterns_extra\n`);
+  await page.reload();
+  await expect(page.locator(".banner")).toContainText("changed since the packages were installed");
+  await page.locator(".banner").getByRole("button", { name: "Install" }).click();
+  await expect(page.locator(".banner")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator(".packages")).toContainText("lanterns_extra");
+  await page.getByRole("button", { name: "Remove lanterns_extra" }).click();
+  await expect(page.locator(".packages")).not.toContainText("lanterns_extra");
+  await expect(page.locator(".packages")).toContainText("Installed.");
+  expect(readFileSync(manifest, "utf8")).not.toContain("lanterns_extra");
   await page.keyboard.press("Escape");
 });

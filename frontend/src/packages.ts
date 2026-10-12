@@ -12,32 +12,24 @@ export function isUpToDate(state: PackagesState): boolean {
   );
 }
 
-export interface MissingPackage {
+export interface MissingModule {
   module: string;
-  /** The package that provides the module, if it's known. */
+  /** The package, when the error names it. */
   package: string | null;
 }
 
-/** Finds a module that errors say is missing, and the package that would provide it. */
-export function findMissingPackage(text: string, hints: PackageHints): MissingPackage | null {
-  for (const pattern of hints.missing_module) {
-    const module = new RegExp(pattern).exec(text)?.[1];
-    if (module) return { module, package: providerOf(module, hints) };
-  }
-  return null;
+/** Finds a module that errors say is missing, and its package if they name that too. */
+export function findMissingModule(text: string, hints: PackageHints): MissingModule | null {
+  const module = firstMatch(text, hints.missing_module);
+  return module === null ? null : { module, package: firstMatch(text, hints.missing_package) };
 }
 
-function providerOf(module: string, hints: PackageHints): string | null {
-  // The longest prefix wins, so `Data.Graph.Inductive` isn't taken for `Data.Graph`.
-  let best: { prefix: string; package: string } | null = null;
-  for (const [prefix, pkg] of Object.entries(hints.providers)) {
-    const matches = module === prefix || module.startsWith(`${prefix}.`);
-    if (matches && (best === null || prefix.length > best.prefix.length)) {
-      best = { prefix, package: pkg };
-    }
+function firstMatch(text: string, patterns: readonly string[]): string | null {
+  for (const pattern of patterns) {
+    const found = new RegExp(pattern).exec(text)?.[1];
+    if (found) return found;
   }
-  if (best) return best.package;
-  return hints.package_named_after_module ? (module.split(".")[0] ?? null) : null;
+  return null;
 }
 
 /** A package name as spoken, such as "unordered containers" for `unordered-containers`. */

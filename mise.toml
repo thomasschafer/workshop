@@ -51,6 +51,11 @@ run = [
   "cargo build && cd frontend && npm run e2e",
 ]
 
+[tasks.check-packages]
+description = "Check installing packages with the real toolchains (needs the network)"
+depends = ["build-frontend"]
+run = "cargo build && cd frontend && node scripts/check-packages.ts"
+
 [tasks.demo]
 description = "Record docs/demo.gif on an emulated phone (makes real calls to your edit model)"
 depends = ["build-frontend"]

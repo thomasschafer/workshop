@@ -177,6 +177,17 @@ fn check_packages(packages: &crate::packages::Packages) -> Check {
             format!("Fix {} in Settings, under Packages.", state.manifest),
         );
     }
+    if !state.packages.is_empty() && !state.missing_programs.is_empty() {
+        return Check::problem(
+            Status::Fail,
+            "Packages",
+            format!(
+                "Installing packages needs {}, which isn't on your PATH",
+                state.missing_programs.join(" and ")
+            ),
+            "Install it, then install the packages in Settings, under Packages.",
+        );
+    }
     match (&state.packages, &state.installed) {
         (listed, _) if listed.is_empty() => Check::ok("Packages", "None listed"),
         (listed, Some(installed)) if listed == installed => Check::ok(

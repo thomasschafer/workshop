@@ -22,7 +22,7 @@ use crate::doctor;
 use crate::edit::{self, EditOutcome};
 use crate::language::{LanguageProfile, Puzzle};
 use crate::models::{self, ModelSettings, ProviderOption};
-use crate::packages::{Packages, PackagesState};
+use crate::packages::{InstallLog, Packages, PackagesState, Resolution};
 use crate::paths::Paths;
 use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::runner::{self, RunResult};
@@ -51,6 +51,13 @@ pub struct App {
     current_run: std::sync::Mutex<Option<CancellationToken>>,
     /// Held while packages are being installed.
     install_lock: Arc<Mutex<()>>,
+    /// The install under way, to follow or cancel.
+    install: std::sync::Mutex<Option<Arc<RunningInstall>>>,
+    /// How the last install ended, and its output.
+    last_install: std::sync::Mutex<Option<LastInstall>>,
+    /// Packages already found for missing modules, by language and module.
+    resolutions: std::sync::Mutex<BTreeMap<(String, String), Resolution>>,
+    http: reqwest::Client,
     /// Changed to restart language servers, such as after installing packages.
     lsp_restarts: tokio::sync::watch::Sender<u64>,
 }
@@ -88,6 +95,13 @@ impl App {
             run_lock: Mutex::new(()),
             current_run: std::sync::Mutex::new(None),
             install_lock: Arc::new(Mutex::new(())),
+            install: std::sync::Mutex::new(None),
+            last_install: std::sync::Mutex::new(None),
+            resolutions: std::sync::Mutex::new(BTreeMap::new()),
+            http: reqwest::Client::builder()
+                .user_agent(&config.aoc.user_agent)
+                .timeout(Duration::from_secs(15))
+                .build()?,
             lsp_restarts: tokio::sync::watch::Sender::new(0),
             config,
             paths,
@@ -182,6 +196,9 @@ pub fn router(app: Shared) -> Router {
         .route("/packages", get(get_packages).put(save_packages))
         .route("/packages/install", post(install_packages))
         .route("/packages/add", post(add_package))
+        .route("/packages/remove", post(remove_package))
+        .route("/packages/cancel", post(cancel_install))
+        .route("/packages/resolve", post(resolve_package))
         .route("/years/{year}/stars", get(stars))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
@@ -376,8 +393,7 @@ struct LanguageInfo {
 #[derive(Serialize)]
 struct PackageHints {
     missing_module: Vec<String>,
-    providers: BTreeMap<String, String>,
-    package_named_after_module: bool,
+    missing_package: Vec<String>,
 }
 
 async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
@@ -398,8 +414,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
             root_uri: file_uri(&app.config.solutions_dir),
             packages: language.packages.as_ref().map(|p| PackageHints {
                 missing_module: p.missing_module.clone(),
-                providers: p.providers.clone(),
-                package_named_after_module: p.package_named_after_module,
+                missing_package: p.missing_package.clone(),
             }),
         },
         snippets: app.config.snippets.clone(),
@@ -1213,26 +1228,43 @@ mod tests {
     }
 }
 
+struct RunningInstall {
+    cancel: CancellationToken,
+    log: InstallLog,
+}
+
+#[derive(Clone, Serialize)]
+struct LastInstall {
+    succeeded: bool,
+    log: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct PackagesResponse {
     /// None when the language has no packages beyond its standard library.
     state: Option<PackagesState>,
     installing: bool,
+    /// The installer's latest line of output, while installing.
+    progress: Option<String>,
+    last_install: Option<LastInstall>,
 }
 
 fn packages_response(app: &App) -> Result<PackagesResponse> {
+    let running = lock(&app.install).clone();
     Ok(PackagesResponse {
         state: app.packages().map(|p| p.state()).transpose()?,
-        installing: app.install_lock.try_lock().is_err(),
+        installing: running.is_some(),
+        progress: running.and_then(|r| r.log.last()),
+        last_install: lock(&app.last_install).clone(),
     })
 }
 
 fn require_packages(app: &App) -> Result<Packages<'_>, ApiError> {
     app.packages().ok_or_else(|| {
-        ApiError(
-            StatusCode::NOT_FOUND,
-            serde_json::json!({ "error": format!("{} has no packages to install.", app.language().name) }),
-        )
+        bad_request(format!(
+            "{} has no packages to install.",
+            app.language().name
+        ))
     })
 }
 
@@ -1256,18 +1288,56 @@ async fn save_packages(
 }
 
 #[derive(Deserialize)]
-struct AddPackageBody {
+struct PackageBody {
     package: String,
 }
 
 async fn add_package(
     State(app): State<Shared>,
-    Json(body): Json<AddPackageBody>,
+    Json(body): Json<PackageBody>,
 ) -> ApiResult<PackagesResponse> {
     require_packages(&app)?
         .add(&body.package)
         .map_err(|e| bad_request(format!("{e:#}")))?;
     install_packages(State(app)).await
+}
+
+async fn remove_package(
+    State(app): State<Shared>,
+    Json(body): Json<PackageBody>,
+) -> ApiResult<PackagesResponse> {
+    require_packages(&app)?
+        .remove(&body.package)
+        .map_err(|e| bad_request(format!("{e:#}")))?;
+    install_packages(State(app)).await
+}
+
+async fn cancel_install(State(app): State<Shared>) -> ApiResult<()> {
+    if let Some(running) = lock(&app.install).as_ref() {
+        running.cancel.cancel();
+    }
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+struct ResolveBody {
+    module: String,
+}
+
+/// Finds the package for a missing module, looking it up online if the language says how.
+async fn resolve_package(
+    State(app): State<Shared>,
+    Json(body): Json<ResolveBody>,
+) -> ApiResult<Resolution> {
+    let key = (app.settings().language, body.module.clone());
+    if let Some(found) = lock(&app.resolutions).get(&key) {
+        return Ok(Json(found.clone()));
+    }
+    let resolution = require_packages(&app)?
+        .resolve(&body.module, &app.http)
+        .await?;
+    lock(&app.resolutions).insert(key, resolution.clone());
+    Ok(Json(resolution))
 }
 
 /// Installs the manifest's packages, then restarts language servers so they see them.
@@ -1279,13 +1349,31 @@ async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesRespon
             serde_json::json!({ "error": "Packages are already being installed." }),
         ));
     };
+    let running = Arc::new(RunningInstall {
+        cancel: CancellationToken::new(),
+        log: InstallLog::default(),
+    });
+    *lock(&app.install) = Some(running.clone());
     // Its own task, so the install finishes even if the phone disconnects while waiting.
     let task = {
         let app = app.clone();
         tokio::spawn(async move {
             let _guard = guard;
-            let packages = app.packages().context("the language has no packages")?;
-            let installed = packages.install(&CancellationToken::new()).await;
+            let installed = match app.packages() {
+                Some(packages) => packages.install(&running.cancel, &running.log).await,
+                None => Err(anyhow::anyhow!("the language has no packages")),
+            };
+            // The error itself already quotes the end of the output.
+            if let Err(err) = &installed {
+                running
+                    .log
+                    .push(err.to_string().lines().next().unwrap_or_default());
+            }
+            *lock(&app.last_install) = Some(LastInstall {
+                succeeded: installed.is_ok(),
+                log: running.log.lines(),
+            });
+            *lock(&app.install) = None;
             if installed.is_ok() {
                 app.lsp_restarts.send_modify(|n| *n += 1);
             }

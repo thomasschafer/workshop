@@ -59,8 +59,10 @@ missing_module = [
   "No module named '([A-Za-z0-9_.]+)'",
   "Import \"([A-Za-z0-9_.]+)\" could not be resolved",
 ]
-# Most packages are named after the module they provide.
+# Most packages are named after the module they provide. PyPI is checked first, so a module
+# of your own isn't mistaken for a package.
 package_named_after_module = true
+lookup = { service = "pypi" }
 
 # The exceptions, by module prefix.
 [packages.providers]
