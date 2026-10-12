@@ -9,34 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0](https://github.com/thomasschafer/workshop/releases/tag/v0.1.0) - 2026-10-12
 
-### Other
+The first release.
 
-- Read an empty find as "at the cursor", and support local models through Ollama
-- Retry edits that don't fit the file, and show the model the cursor's line
-- Keep listening through pauses, let users reply to the model's questions, and more
-- Show dictation examples in the contributing guide's Python profile
-- Show help as a modal, with dictation examples from the language profile
-- Add a Codex preset, and explain runs for puzzles without an example
-- Treat a dropped language server connection as a normal end, not a warning
-- Add help, show the puzzle input, and handle older puzzles and the final day
-- Treat symbols spoken as words, like "open (", as the symbols they name
-- Use Android's latest speech guess instead of joining its restatements
-- Fix data-loss, hang and leak issues found in review
-- Add eval cases for chatty phrasing and edits by line number
-- Document the edit evals in the contributing guide
-- Keep the phone screen on while Workshop is open, with a setting to turn it off
-- Give each part its own sample, guess samples from how puzzles introduce them, and fix dev rebuilds
-- Add an edit eval set, and Haskell hints for wrapping and numbered names
-- Retry failed saves, and reconnect to the language server after it drops
-- Add a dry-run mode to the release workflow
-- Add a hot-reloading dev mode, and stop promptly on Ctrl-C
-- Merge Android Chrome's cumulative speech results instead of repeating them
-- Start on the puzzle picker, and open it full screen from the header
-- Log utterances, model replies and phone-side errors to a local file
-- Use a SameSite=Lax cookie so token links opened from a QR code work
-- Show tailscale serve's output so prompts to enable Serve aren't hidden
-- Add serve --tailscale with a QR code, and a mise serve task
-- Add README and contributing guide, and identify doctor's network check
-- Add phone-first frontend with voice editing, problem view, runs and discussion
-- Add backend, providers, Haskell profile and repo automation
-- Add readme
+### Added
+
+- Solve Advent of Code puzzles by voice from your phone: hold the button, say the code roughly as you'd type it, and a model turns it into a precise edit at the cursor. It won't write logic for you, and asks when it isn't sure; you can reply to its questions.
+- Edit models through Claude Code or Codex, using your existing subscription, with the model kept away from running commands.
+- Instant voice commands that don't need the model, such as "undo", "run the sample" and "go to line 12".
+- Haskell support, with error underlines and types from haskell-language-server.
+- Puzzle and input fetching with caching, sample checks per part, running and submitting, and star tracking.
+- Discuss mode, a coach that won't give the answer away unless asked, plus notes, snippets and committing your solutions repo.
+- Saving as you go, so nothing is lost when you put the phone down, with conflict detection for edits made elsewhere.
+- `workshop serve --tailscale` to reach Workshop from your phone over HTTPS, and `workshop doctor` to check your setup.
