@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/thomasschafer/workshop/compare/v0.1.0...v0.2.0) - 2026-10-12
+
+### Other
+
+- Re-record the demo
+- Prepare version 0.2.0
+- Teach the edit model about the helpers module and imports from anywhere, with evals
+- Stream discussion replies as they're written, and tell the coach about helpers and packages
+- Add a helpers module that every solution can import
+- Add a practice puzzle that needs no Advent of Code login
+- Document the new package profile fields
+- Round out packages: look up unknown modules, follow and cancel installs, and add or remove packages
+- Install packages for solutions, with a standard set for Haskell and a prompt when a module is missing
+- Re-record the demo with the new editing indicator
+- Show edits in progress on the talk button, with a timer, and a glow when they land
+- Wait for pending edits before running, add a line wrapping setting, and add the demo GIF
+- Make settings full screen on phones, close overlays on back, and keep tests off Advent of Code
+- Split the app component into views and hooks, and test discussion end to end
+- Add terminal colour themes
+- Add end-to-end tests, and save the chosen sample before a run
+- Add first-run setup in the app
+- Add a Python language profile, and run evals for each language
+- Switch between Claude Code and Codex, and their models, from the app
+- Explain allowing the downloaded binary on macOS
+
 ## [0.1.0](https://github.com/thomasschafer/workshop/releases/tag/v0.1.0) - 2026-10-12
 
 The first release.
