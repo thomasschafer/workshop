@@ -18,11 +18,11 @@ Tests must never use real Advent of Code puzzle text or inputs; invent your own.
 Tests don't call model CLIs. If you change the edit prompt (`prompts/edit.md`) or a language's dictation hints, run the edit evals before and after, and include the summaries in your pull request:
 
 ```sh
-mise run eval                             # every case in evals/edits.toml
+mise run eval                             # every case in evals/
 cargo run -- eval --filter before-that    # just the cases whose names match
 ```
 
-Each case is one call to your edit model, so the evals aren't part of CI. When you find an utterance that goes wrong, add it to `evals/edits.toml` as a new case.
+Each case is one call to your edit model, so the evals aren't part of CI. When you find an utterance that goes wrong, add it as a new case to the file for its language in `evals/`. A new language profile should come with its own eval file.
 
 ## Adding a language profile
 

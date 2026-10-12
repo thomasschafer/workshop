@@ -24,7 +24,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 ## Requirements
 
 - A model CLI that you're logged in to, used through your existing subscription: [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex). Workshop sets itself up for whichever you have.
-- The toolchain for your language. Haskell is supported first: GHC, plus haskell-language-server for errors and types.
+- The toolchain for your language. Haskell and Python are built in: GHC with haskell-language-server, or Python 3 with pyright. The language server is optional and adds error underlines and types. Other languages can be added in your config.
 - Your Advent of Code session cookie.
 - A way to reach your laptop from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
 
@@ -57,7 +57,7 @@ bind = "127.0.0.1:7878"
 
 [solutions]
 dir = "~/aoc"          # a git repo, created on first use
-language = "haskell"
+language = "haskell"   # or "python"
 
 [models.edit]
 provider = "claude"    # or "codex"

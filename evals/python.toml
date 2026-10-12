@@ -1,0 +1,268 @@
+# Edit eval cases for Python: see haskell.toml for the format. All code here is invented.
+
+language = "python"
+
+[[case]]
+name = "def-function"
+utterance = "def part one of data colon"
+before = '''
+‸'''
+after = '''
+def part1(data):
+    ‸'''
+
+[[case]]
+name = "return-generator"
+utterance = "return sum of int of x for x in data dot split lines"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    return sum(int(x) for x in data.splitlines())‸'''
+
+[[case]]
+name = "assign-map"
+utterance = "numbers equals list of map of int comma data dot split"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    numbers = list(map(int, data.split()))‸'''
+
+[[case]]
+name = "wrap-in-call"
+utterance = "wrap that in sorted"
+before = '''
+def part1(data: str) -> int:
+    words = data.split()‸'''
+recent = "data.split()"
+after = '''
+def part1(data: str) -> int:
+    words = sorted(data.split())‸'''
+
+[[case]]
+name = "for-loop-opens-block"
+utterance = "for line in data dot split lines colon"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    for line in data.splitlines():
+        ‸'''
+
+[[case]]
+name = "plus-equals"
+utterance = "total plus equals int of line"
+before = '''
+def part1(data: str) -> int:
+    total = 0
+    for line in data.splitlines():
+        ‸'''
+after = '''
+def part1(data: str) -> int:
+    total = 0
+    for line in data.splitlines():
+        total += int(line)‸'''
+
+[[case]]
+name = "dedent-and-return"
+utterance = "new line dedent return total"
+before = '''
+def part1(data: str) -> int:
+    total = 0
+    for line in data.splitlines():
+        total += int(line)‸'''
+after = '''
+def part1(data: str) -> int:
+    total = 0
+    for line in data.splitlines():
+        total += int(line)
+    return total‸'''
+
+[[case]]
+name = "if-double-equals"
+utterance = "if x double equals zero colon continue"
+before = '''
+def part1(data: str) -> int:
+    for x in numbers:
+        ‸'''
+after = '''
+def part1(data: str) -> int:
+    for x in numbers:
+        if x == 0:
+            continue‸'''
+also = ['''
+def part1(data: str) -> int:
+    for x in numbers:
+        if x == 0: continue‸''']
+
+[[case]]
+name = "snake-case-name"
+utterance = "count trees equals zero"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    count_trees = 0‸'''
+
+[[case]]
+name = "mishearing-enumerate"
+utterance = "for i comma line in e numerate of lines colon"
+before = '''
+def part1(data: str) -> int:
+    lines = data.splitlines()
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    lines = data.splitlines()
+    for i, line in enumerate(lines):
+        ‸'''
+
+[[case]]
+name = "f-string"
+utterance = "print f string total is curly total"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    print(f"total is {total}")‸'''
+also = ['''
+def part1(data: str) -> int:
+    print(f'total is {total}')‸''']
+
+[[case]]
+name = "lambda-index"
+utterance = "key equals lambda pair colon pair index one"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    key = lambda pair: pair[1]‸'''
+
+[[case]]
+name = "list-comprehension"
+utterance = "squares equals list comp x times x for x in numbers"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+after = '''
+def part1(data: str) -> int:
+    squares = [x * x for x in numbers]‸'''
+
+[[case]]
+name = "import-at-top"
+utterance = "from collections import counter"
+before = '''
+‸import sys'''
+after = '''
+from collections import Counter‸
+import sys'''
+also = ['''
+from collections import Counter
+‸import sys''', '''
+from collections import Counter
+import sys‸''', '''
+import sys
+from collections import Counter‸''']
+
+[[case]]
+name = "replace-placeholder"
+utterance = "replace this line with return len of data dot split lines"
+before = '''
+def part1(data: str) -> int:
+    raise NotImplementedError‸'''
+after = '''
+def part1(data: str) -> int:
+    return len(data.splitlines())‸'''
+
+[[case]]
+name = "uncomment-part-two"
+utterance = "uncomment the last line"
+before = '''
+import sys
+
+
+def part1(data: str) -> int:
+    raise NotImplementedError
+
+
+def part2(data: str) -> int:
+    raise NotImplementedError
+
+
+if __name__ == "__main__":
+    data = sys.stdin.read()
+    print(part1(data))‸
+    # When you start part 2, uncomment the next line.
+    # print(part2(data))'''
+after = '''
+import sys
+
+
+def part1(data: str) -> int:
+    raise NotImplementedError
+
+
+def part2(data: str) -> int:
+    raise NotImplementedError
+
+
+if __name__ == "__main__":
+    data = sys.stdin.read()
+    print(part1(data))
+    # When you start part 2, uncomment the next line.
+    print(part2(data))‸'''
+also = ['''
+import sys
+
+
+def part1(data: str) -> int:
+    raise NotImplementedError
+
+
+def part2(data: str) -> int:
+    raise NotImplementedError
+
+
+if __name__ == "__main__":
+    data = sys.stdin.read()
+    print(part1(data))‸
+    # When you start part 2, uncomment the next line.
+    print(part2(data))''', '''
+import sys
+
+
+def part1(data: str) -> int:
+    raise NotImplementedError
+
+
+def part2(data: str) -> int:
+    raise NotImplementedError
+
+
+if __name__ == "__main__":
+    data = sys.stdin.read()
+    print(part1(data))
+    # When you start part 2, uncomment the next line.
+    ‸print(part2(data))''']
+
+[[case]]
+name = "refuse-write-function"
+utterance = "write a function that finds the shortest path through the grid"
+before = '''
+‸'''
+unsure = true
+
+[[case]]
+name = "refuse-finish"
+utterance = "finish part two for me"
+before = '''
+def part1(data: str) -> int:
+    ‸'''
+unsure = true

@@ -32,7 +32,7 @@ fi
 '''
 
 [tasks.eval]
-description = "Check the edit model against evals/edits.toml (makes real model calls)"
+description = "Check the edit model against the cases in evals/ (makes real model calls)"
 run = "cargo run --quiet -- eval"
 
 [tasks.build]

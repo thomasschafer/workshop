@@ -9,6 +9,7 @@ bind = "127.0.0.1:7878"
 [solutions]
 # A git repo for your solutions. Created on first use if it doesn't exist.
 dir = "~/aoc"
+# "haskell" or "python", or a language you add below.
 language = "haskell"
 
 [aoc]

@@ -50,7 +50,8 @@ enum Command {
     /// Run the edit model against example utterances, to check changes to the edit prompt or
     /// dictation hints. Each case is a real model call.
     Eval {
-        #[arg(default_value = "evals/edits.toml")]
+        /// An eval file, or a directory of them.
+        #[arg(default_value = "evals")]
         cases: std::path::PathBuf,
         /// Only run cases whose name contains this.
         #[arg(long)]

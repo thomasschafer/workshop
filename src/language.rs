@@ -27,7 +27,10 @@ pub struct LanguageProfile {
     pub dictation_hints: String,
 }
 
-const BUILTIN: &[(&str, &str)] = &[("haskell", include_str!("../languages/haskell.toml"))];
+const BUILTIN: &[(&str, &str)] = &[
+    ("haskell", include_str!("../languages/haskell.toml")),
+    ("python", include_str!("../languages/python.toml")),
+];
 
 pub fn builtin_profiles() -> Result<Vec<(String, LanguageProfile)>> {
     BUILTIN
@@ -134,6 +137,17 @@ mod tests {
         assert_eq!(profile.name, "Haskell");
         assert!(profile.template.starts_with("module Main where"));
         assert_eq!(profile.required_programs(), vec!["ghc"]);
+    }
+
+    #[test]
+    fn python_profile_parses() {
+        let (_, python) = builtin_profiles()
+            .unwrap()
+            .into_iter()
+            .find(|(id, _)| id == "python")
+            .unwrap();
+        assert_eq!(python.required_programs(), vec!["python3"]);
+        assert!(python.template.contains("def part1(data: str) -> int:"));
     }
 
     #[test]

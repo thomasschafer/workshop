@@ -14,6 +14,7 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { haskell } from "@codemirror/legacy-modes/mode/haskell";
+import { python } from "@codemirror/legacy-modes/mode/python";
 import { forEachDiagnostic, nextDiagnostic, previousDiagnostic } from "@codemirror/lint";
 import { LSPClient, serverDiagnostics, type Transport } from "@codemirror/lsp-client";
 import {
@@ -37,6 +38,7 @@ import { markCursor, minimalChange, unmarkCursor } from "./diff";
 
 const LANGUAGES: Record<string, () => Extension> = {
   haskell: () => StreamLanguage.define(haskell),
+  python: () => StreamLanguage.define(python),
 };
 
 const highlightStyle = HighlightStyle.define([

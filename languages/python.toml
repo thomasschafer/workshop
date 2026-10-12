@@ -1,0 +1,44 @@
+name = "Python"
+# Selects syntax highlighting in the editor.
+editor_mode = "python"
+lsp_language_id = "python"
+
+# Relative to the solutions directory.
+file = "{year}/day{day:02}/main.py"
+
+# The puzzle input is passed on stdin. Each line of stdout is read as the answer to that part:
+# line 1 for part 1, line 2 for part 2.
+run = ["python3", "{file}"]
+
+lsp = ["pyright-langserver", "--stdio"]
+
+template = '''
+import sys
+
+
+def part1(data: str) -> int:
+    raise NotImplementedError
+
+
+def part2(data: str) -> int:
+    raise NotImplementedError
+
+
+if __name__ == "__main__":
+    data = sys.stdin.read()
+    print(part1(data))
+    # When you start part 2, uncomment the next line.
+    # print(part2(data))
+'''
+
+dictation_hints = '''
+- Indentation is significant. A line ending in a colon (def, for, if, while, with, else) opens a block, and the next line is indented one level (four spaces) further. "New line" continues at the current indentation; "dedent" or "back out" goes out one level.
+- Names are snake_case: "count trees" is `count_trees`. Numbers in names are spoken as words but written as digits: "part one" is `part1`, unless a name in the file already says otherwise.
+- "dot" between names is attribute access, `data.splitlines()`, never composition. "of" or "call" means a call: "len of lines" is `len(lines)`, and "sorted of nums" is `sorted(nums)`.
+- "equals" is `=`, "double equals" is `==`, "not equals" is `!=`, "plus equals" is `+=`; "colon" at the end of a line is `:`.
+- "list of x for x in xs" or "list comp x for x in xs" is `[x for x in xs]`; "set of" and "dict of" work the same way with `{...}`. "f string" starts an f-string.
+- "lambda x colon x times two" is `lambda x: x * 2`.
+- "return" starts a return statement; "pass" and "None", "True" and "False" are keywords.
+- "Wrap that in f" applies f to the whole of the most recent expression: wrapping `data.split()` in `sorted` gives `sorted(data.split())`.
+- Common mishearings: "in put" is `input`, "split lines" is `splitlines`, "enumerate" may be heard as "e numerate", "deck" or "deque" is `deque`.
+'''

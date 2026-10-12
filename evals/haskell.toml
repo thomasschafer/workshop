@@ -1,6 +1,8 @@
 # Edit eval cases: run with `workshop eval` (or `mise run eval`). Each case is one call to the
 # edit model, so this isn't run in CI. `‸` marks the cursor. All code here is invented; never use
 # real Advent of Code puzzles or inputs.
+
+language = "haskell"
 #
 # `after` is the expected file, with the cursor where the user would naturally continue; `also`
 # lists other results that are just as good. `unsure = true` means the model should make no edit.

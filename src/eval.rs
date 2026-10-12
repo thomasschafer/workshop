@@ -12,11 +12,13 @@ use crate::config::Config;
 use crate::edit::{self, CURSOR, EditOutcome};
 use crate::models::{ModelChoice, ModelSettings};
 use crate::paths::Paths;
-use crate::provider::{ProviderRunner, Role};
+use crate::provider::{CallSpec, ProviderRunner, Role};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EvalFile {
+    /// The language profile whose dictation hints the cases use.
+    language: String,
     case: Vec<Case>,
 }
 
@@ -105,6 +107,7 @@ fn normalise(text: &str) -> String {
         .join("\n")
 }
 
+/// Runs the cases in `path`, a file or a directory of files, returning whether all passed.
 pub async fn run(
     config: &Config,
     paths: &Paths,
@@ -112,21 +115,25 @@ pub async fn run(
     filter: Option<&str>,
     model: Option<ModelChoice>,
 ) -> Result<bool> {
-    let source =
-        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let file: EvalFile =
-        toml::from_str(&source).with_context(|| format!("parsing {}", path.display()))?;
-    for case in &file.case {
-        case.validate()
-            .with_context(|| format!("in case {:?}", case.name))?;
-    }
-    let cases: Vec<&Case> = file
-        .case
-        .iter()
-        .filter(|c| filter.is_none_or(|f| c.name.contains(f)))
-        .collect();
-    if cases.is_empty() {
-        bail!("no cases match");
+    let files = eval_files(path)?;
+    let mut suites = Vec::new();
+    for file in &files {
+        let source =
+            std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+        let suite: EvalFile =
+            toml::from_str(&source).with_context(|| format!("parsing {}", file.display()))?;
+        let profile = config.languages.get(&suite.language).with_context(|| {
+            format!(
+                "{} is for {:?}, which has no language profile",
+                file.display(),
+                suite.language
+            )
+        })?;
+        for case in &suite.case {
+            case.validate()
+                .with_context(|| format!("in case {:?} in {}", case.name, file.display()))?;
+        }
+        suites.push((suite.case, profile));
     }
 
     let choice = match model {
@@ -138,36 +145,78 @@ pub async fn run(
         .get(&choice.provider)
         .with_context(|| format!("there's no provider called {:?}", choice.provider))?;
     let runner = ProviderRunner::new(provider.clone(), paths.cache_dir.join("model-cwd"))?;
-    let spec = provider.spec(
-        Role::Edit,
-        &choice.model,
-        edit::system_prompt(config.language()),
-    );
     println!(
-        "Using {} through {}.\n",
+        "Using {} through {}.",
         choice.model,
         provider.display_name(&choice.provider)
     );
-    runner.warm(&spec).await?;
 
-    let (mut passed, mut cursor, mut failed, mut retries) = (0, 0, 0, 0);
-    let mut total_ms = 0;
-    for case in &cases {
-        let prompt = edit::user_prompt(
-            &case.before,
-            &case.utterance,
-            case.recent.as_deref(),
-            &case.earlier,
-        );
-        let (outcome, elapsed_ms, retried) = match edit::request(
-            &runner,
-            &spec,
-            &case.before,
-            &prompt,
-            Duration::from_secs(60),
-        )
-        .await
-        {
+    let mut totals = Totals::default();
+    for (cases, profile) in &suites {
+        let cases: Vec<&Case> = cases
+            .iter()
+            .filter(|c| filter.is_none_or(|f| c.name.contains(f)))
+            .collect();
+        if cases.is_empty() {
+            continue;
+        }
+        println!("\n{}:", profile.name);
+        let spec = provider.spec(Role::Edit, &choice.model, edit::system_prompt(profile));
+        runner.warm(&spec).await?;
+        for case in cases {
+            run_case(&runner, &spec, case, &mut totals).await;
+        }
+    }
+    if totals.cases == 0 {
+        bail!("no cases match");
+    }
+    println!(
+        "\n{} passed, {} with the cursor elsewhere, {} failed, of {}; {} needed a retry. Average {:.1}s per edit.",
+        totals.passed,
+        totals.cursor,
+        totals.failed,
+        totals.cases,
+        totals.retries,
+        totals.ms as f64 / 1000.0 / totals.cases as f64
+    );
+    Ok(totals.failed == 0)
+}
+
+#[derive(Default)]
+struct Totals {
+    cases: usize,
+    passed: usize,
+    cursor: usize,
+    failed: usize,
+    retries: usize,
+    ms: u64,
+}
+
+fn eval_files(path: &Path) -> Result<Vec<std::path::PathBuf>> {
+    if !path.is_dir() {
+        return Ok(vec![path.to_owned()]);
+    }
+    let mut files: Vec<_> = std::fs::read_dir(path)
+        .with_context(|| format!("reading {}", path.display()))?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<std::io::Result<_>>()?;
+    files.retain(|f| f.extension().is_some_and(|e| e == "toml"));
+    files.sort();
+    if files.is_empty() {
+        bail!("{} has no eval files", path.display());
+    }
+    Ok(files)
+}
+
+async fn run_case(runner: &ProviderRunner, spec: &CallSpec, case: &Case, totals: &mut Totals) {
+    let prompt = edit::user_prompt(
+        &case.before,
+        &case.utterance,
+        case.recent.as_deref(),
+        &case.earlier,
+    );
+    let (outcome, elapsed_ms, retried) =
+        match edit::request(runner, spec, &case.before, &prompt, Duration::from_secs(60)).await {
             Ok(response) => (
                 Ok(response.outcome),
                 response.elapsed_ms,
@@ -183,39 +232,31 @@ pub async fn run(
                 true,
             ),
         };
-        if retried {
-            retries += 1;
+    totals.cases += 1;
+    totals.retries += usize::from(retried);
+    totals.ms += elapsed_ms;
+    let seconds = elapsed_ms as f64 / 1000.0;
+    match case.judge(&outcome) {
+        Verdict::Pass => {
+            totals.passed += 1;
+            println!("✓ {} ({seconds:.1}s)", case.name);
         }
-        total_ms += elapsed_ms;
-        let seconds = elapsed_ms as f64 / 1000.0;
-        match case.judge(&outcome) {
-            Verdict::Pass => {
-                passed += 1;
-                println!("✓ {} ({seconds:.1}s)", case.name);
+        Verdict::CursorElsewhere => {
+            totals.cursor += 1;
+            println!(
+                "~ {} ({seconds:.1}s): right text, cursor elsewhere",
+                case.name
+            );
+            if let Ok(EditOutcome::Applied { doc, .. }) = &outcome {
+                println!("{}", indent(doc));
             }
-            Verdict::CursorElsewhere => {
-                cursor += 1;
-                println!(
-                    "~ {} ({seconds:.1}s): right text, cursor elsewhere",
-                    case.name
-                );
-                if let Ok(EditOutcome::Applied { doc, .. }) = &outcome {
-                    println!("{}", indent(doc));
-                }
-            }
-            Verdict::Fail(detail) => {
-                failed += 1;
-                println!("✗ {} ({seconds:.1}s): {:?}", case.name, case.utterance);
-                println!("{}", indent(&detail));
-            }
+        }
+        Verdict::Fail(detail) => {
+            totals.failed += 1;
+            println!("✗ {} ({seconds:.1}s): {:?}", case.name, case.utterance);
+            println!("{}", indent(&detail));
         }
     }
-    println!(
-        "\n{passed} passed, {cursor} with the cursor elsewhere, {failed} failed, of {}; {retries} needed a retry. Average {:.1}s per edit.",
-        cases.len(),
-        total_ms as f64 / 1000.0 / cases.len() as f64
-    );
-    Ok(failed == 0)
 }
 
 fn indent(text: &str) -> String {
@@ -276,9 +317,18 @@ mod tests {
 
     #[test]
     fn bundled_cases_are_valid() {
-        let source = include_str!("../evals/edits.toml");
+        for (language, source) in [
+            ("haskell", include_str!("../evals/haskell.toml")),
+            ("python", include_str!("../evals/python.toml")),
+        ] {
+            check_bundled(language, source);
+        }
+    }
+
+    fn check_bundled(language: &str, source: &str) {
         let file: EvalFile = toml::from_str(source).unwrap();
-        assert!(file.case.len() >= 20);
+        assert_eq!(file.language, language);
+        assert!(file.case.len() >= 10);
         let mut names = std::collections::HashSet::new();
         for case in &file.case {
             case.validate()
