@@ -56,7 +56,9 @@ export function Settings({
       <section>
         <h2>Snippets</h2>
         {snippets.length === 0 ? (
-          <p class="muted">Add snippets to your config file, then say "snippet" and the name.</p>
+          <p class="muted small">
+            Add snippets to your config file, then say "snippet" and the name.
+          </p>
         ) : (
           <div class="snippets">
             {snippets.map((s) => (

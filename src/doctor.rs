@@ -141,7 +141,7 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
             ),
         )
     });
-    checks.push(check_network(&config.aoc.user_agent).await);
+    checks.push(check_network(&config.aoc).await);
     checks.push(check_https(config).await);
     checks
 }
@@ -203,13 +203,13 @@ async fn check_provider(config: &Config, id: &str) -> Vec<Check> {
     checks
 }
 
-async fn check_network(user_agent: &str) -> Check {
+async fn check_network(aoc: &crate::config::AocConfig) -> Check {
     let client = reqwest::Client::builder()
-        .user_agent(user_agent)
+        .user_agent(&aoc.user_agent)
         .timeout(Duration::from_secs(10))
         .build();
     let reachable = match client {
-        Ok(client) => client.head("https://adventofcode.com").send().await.is_ok(),
+        Ok(client) => client.head(&aoc.base_url).send().await.is_ok(),
         Err(_) => false,
     };
     if reachable {

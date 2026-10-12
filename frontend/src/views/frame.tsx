@@ -1,6 +1,7 @@
 import type { ComponentChildren } from "preact";
+import { useCloseOnBack } from "../hooks/useCloseOnBack";
 
-/** A panel that slides up over the content, such as Run and Settings. */
+/** A panel that slides up over the content, closed by its button or going back. */
 export function SheetFrame({
   title,
   onClose,
@@ -10,6 +11,7 @@ export function SheetFrame({
   onClose: () => void;
   children: ComponentChildren;
 }) {
+  useCloseOnBack(onClose);
   return (
     <div class="sheet">
       <div class="sheet-header">

@@ -97,3 +97,20 @@ test("shows help as a modal", async () => {
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+test("closes settings when going back, staying in the app", async () => {
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
+
+  // Closed with its button, it leaves no history entry behind to go back through.
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("dialog").locator(".sheet-header").getByRole("button").click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Help" }).click();
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
+});

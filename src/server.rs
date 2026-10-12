@@ -72,7 +72,12 @@ impl App {
             .collect::<Result<_>>()?;
         Ok(Self {
             workspace: Workspace::new(config.solutions_dir.clone(), paths.clone()),
-            aoc: AocClient::new(aoc_session, &config.aoc.user_agent, paths.aoc_cache_dir())?,
+            aoc: AocClient::with_base_url(
+                aoc_session,
+                &config.aoc.user_agent,
+                paths.aoc_cache_dir(),
+                config.aoc.base_url.clone(),
+            )?,
             runners,
             settings: std::sync::RwLock::new(AppSettings::load(&config, &paths)),
             run_lock: Mutex::new(()),

@@ -683,7 +683,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           />
         ) : null}
         {sheet === "setup" ? (
-          <Modal title="Set up Workshop" onClose={() => setSheet(null)}>
+          <Modal title="Set up Workshop" onClose={() => setSheet(null)} full>
             <Setup
               models={models}
               onModels={setModels}
@@ -693,49 +693,49 @@ export function App({ boot }: { boot: Bootstrap }) {
           </Modal>
         ) : null}
         {sheet === "help" ? (
-          <Modal title="How Workshop works" onClose={() => setSheet(null)}>
+          <Modal title="How Workshop works" onClose={() => setSheet(null)} full>
             <Help />
           </Modal>
         ) : null}
-        {sheet === "run" || sheet === "settings" ? (
-          <SheetFrame title={sheet === "run" ? "Run" : "Settings"} onClose={() => setSheet(null)}>
-            {sheet === "run" ? (
-              <RunSheet
-                state={run}
-                part={part}
-                expected={expected}
-                onRun={(input) => void doRun(input)}
-                onCancel={() => void api.cancelRun()}
-                onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}
-                onSubmit={(answer) => void doSubmit(answer)}
-                onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}
-                finalStar={problem?.final_star ?? null}
-                hasSample={sampleInput(meta, part === 1 ? 0 : 1) !== null}
-                onClaimFinalStar={() => void doSubmit("0")}
-              />
-            ) : null}
-            {sheet === "settings" ? (
-              <Settings
-                snippets={boot.snippets}
-                models={models}
-                onModels={setModels}
-                onSetup={() => setSheet("setup")}
-                commitMessage={
-                  puzzle ? `Advent of Code ${puzzle.year} day ${puzzle.day}` : "Advent of Code"
-                }
-                keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
-                onKeepScreenOn={(enabled) => {
-                  setKeepScreenOnPreference(enabled);
-                  setKeepScreenOn(enabled);
-                }}
-                onInsertSnippet={(s) => {
-                  editor.current?.insertSnippet(s.body);
-                  setSheet(null);
-                  setTab("code");
-                }}
-              />
-            ) : null}
+        {sheet === "run" ? (
+          <SheetFrame title="Run" onClose={() => setSheet(null)}>
+            <RunSheet
+              state={run}
+              part={part}
+              expected={expected}
+              onRun={(input) => void doRun(input)}
+              onCancel={() => void api.cancelRun()}
+              onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}
+              onSubmit={(answer) => void doSubmit(answer)}
+              onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}
+              finalStar={problem?.final_star ?? null}
+              hasSample={sampleInput(meta, part === 1 ? 0 : 1) !== null}
+              onClaimFinalStar={() => void doSubmit("0")}
+            />
           </SheetFrame>
+        ) : null}
+        {sheet === "settings" ? (
+          <Modal title="Settings" onClose={() => setSheet(null)} full>
+            <Settings
+              snippets={boot.snippets}
+              models={models}
+              onModels={setModels}
+              onSetup={() => setSheet("setup")}
+              commitMessage={
+                puzzle ? `Advent of Code ${puzzle.year} day ${puzzle.day}` : "Advent of Code"
+              }
+              keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
+              onKeepScreenOn={(enabled) => {
+                setKeepScreenOnPreference(enabled);
+                setKeepScreenOn(enabled);
+              }}
+              onInsertSnippet={(s) => {
+                editor.current?.insertSnippet(s.body);
+                setSheet(null);
+                setTab("code");
+              }}
+            />
+          </Modal>
         ) : null}
       </main>
 

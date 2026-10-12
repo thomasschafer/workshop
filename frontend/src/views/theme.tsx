@@ -45,7 +45,7 @@ export function ThemeSection() {
           void choose({ ...themes.settings, [mode]: decode((e.target as HTMLSelectElement).value) })
         }
       >
-        <option value="default">Workshop's colours</option>
+        <option value="default">Default</option>
         {themes.ghostty ? (
           <option value="ghostty">
             Match Ghostty ({mode === "light" ? themes.ghostty[0] : themes.ghostty[1]})

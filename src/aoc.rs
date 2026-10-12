@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 use crate::language::Puzzle;
 use crate::paths;
 
-const BASE_URL: &str = "https://adventofcode.com";
+pub const BASE_URL: &str = "https://adventofcode.com";
 const MIN_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const CALENDAR_TTL: Duration = Duration::from_secs(15 * 60);
 
@@ -109,11 +109,7 @@ pub enum SubmitOutcome {
 }
 
 impl AocClient {
-    pub fn new(session: Option<String>, user_agent: &str, cache_dir: PathBuf) -> Result<Self> {
-        Self::with_base_url(session, user_agent, cache_dir, BASE_URL.into())
-    }
-
-    fn with_base_url(
+    pub fn with_base_url(
         session: Option<String>,
         user_agent: &str,
         cache_dir: PathBuf,
@@ -134,7 +130,7 @@ impl AocClient {
             min_request_interval: if base_url == BASE_URL {
                 MIN_REQUEST_INTERVAL
             } else {
-                // Only tests use another address, and they don't need to be polite.
+                // Only tests and demos use another address, and they don't need to be polite.
                 Duration::ZERO
             },
             base_url,

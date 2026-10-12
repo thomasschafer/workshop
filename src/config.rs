@@ -41,6 +41,9 @@ struct RawSolutionsConfig {
 #[serde(deny_unknown_fields, default)]
 pub struct AocConfig {
     pub user_agent: String,
+    /// Where Advent of Code is. Only tests and demos point this elsewhere, so they never make
+    /// requests to the real site.
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -98,6 +101,7 @@ impl Default for AocConfig {
     fn default() -> Self {
         Self {
             user_agent: "github.com/thomasschafer/workshop".into(),
+            base_url: crate::aoc::BASE_URL.into(),
         }
     }
 }
