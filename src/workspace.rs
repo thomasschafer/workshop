@@ -190,7 +190,7 @@ impl Workspace {
     fn notes_path(&self, puzzle: Puzzle) -> PathBuf {
         self.solutions_dir
             .join("notes")
-            .join(puzzle.year.to_string())
+            .join(puzzle.year_label())
             .join(format!("day{:02}.md", puzzle.day))
     }
 

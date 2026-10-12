@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 
 use crate::language::Puzzle;
 use crate::paths;
+use crate::practice::Practice;
 
 pub const BASE_URL: &str = "https://adventofcode.com";
 const MIN_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
@@ -28,6 +29,8 @@ pub struct AocClient {
     base_url: String,
     min_request_interval: Duration,
     last_request: Mutex<Option<Instant>>,
+    /// Serves the practice puzzle, which never touches Advent of Code.
+    practice: Option<Practice>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -135,7 +138,24 @@ impl AocClient {
             },
             base_url,
             last_request: Mutex::new(None),
+            practice: None,
         })
+    }
+
+    pub fn with_practice(mut self, practice: Practice) -> Self {
+        self.practice = Some(practice);
+        self
+    }
+
+    /// Clears progress on the practice puzzle, for another go.
+    pub fn reset_practice(&self) -> Result<()> {
+        self.practice()?.reset()
+    }
+
+    fn practice(&self) -> Result<&Practice> {
+        self.practice
+            .as_ref()
+            .context("the practice puzzle isn't available here")
     }
 
     pub fn has_session(&self) -> bool {
@@ -186,6 +206,9 @@ impl AocClient {
     }
 
     pub async fn problem(&self, puzzle: Puzzle, refresh: bool) -> Result<Problem> {
+        if puzzle.is_practice() {
+            return parse_problem(&self.practice()?.page()?);
+        }
         let path = self.day_dir(puzzle).join("problem.html");
         let html = match read_cache(&path, refresh, None)? {
             Some(html) => html,
@@ -201,6 +224,9 @@ impl AocClient {
 
     /// The puzzle if it's already cached, without making any request.
     pub fn cached_problem(&self, puzzle: Puzzle) -> Result<Option<Problem>> {
+        if puzzle.is_practice() {
+            return parse_problem(&self.practice()?.page()?).map(Some);
+        }
         let path = self.day_dir(puzzle).join("problem.html");
         read_cache(&path, false, None)?
             .map(|html| parse_problem(&html))
@@ -208,6 +234,9 @@ impl AocClient {
     }
 
     pub async fn input(&self, puzzle: Puzzle) -> Result<String> {
+        if puzzle.is_practice() {
+            return Ok(crate::practice::INPUT.clone());
+        }
         let path = self.day_dir(puzzle).join("input.txt");
         if let Some(input) = read_cache(&path, false, None)? {
             return Ok(input);
@@ -236,6 +265,9 @@ impl AocClient {
         let answer = answer.trim();
         if answer.is_empty() || answer.contains('\n') {
             bail!("the answer must be a single non-empty line");
+        }
+        if puzzle.is_practice() {
+            return self.practice()?.submit(part, answer);
         }
         let url = format!(
             "{}/{}/day/{}/answer",

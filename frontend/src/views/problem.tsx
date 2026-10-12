@@ -10,6 +10,8 @@ interface Props {
   meta: DayMeta;
   onMeta: (meta: DayMeta) => void;
   onRefresh: () => void;
+  /** Clears progress, for puzzles that can be played again, such as the practice puzzle. */
+  onStartAgain: (() => void) | null;
 }
 
 /** Code the user tapped in the puzzle, waiting for them to say what it is. */
@@ -31,7 +33,16 @@ function describeSample(meta: DayMeta, part: PartIndex): string {
   return "none chosen";
 }
 
-export function ProblemView({ puzzle, problem, error, loading, meta, onMeta, onRefresh }: Props) {
+export function ProblemView({
+  puzzle,
+  problem,
+  error,
+  loading,
+  meta,
+  onMeta,
+  onRefresh,
+  onStartAgain,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [editing, setEditing] = useState<PartIndex | null>(null);
@@ -137,9 +148,15 @@ export function ProblemView({ puzzle, problem, error, loading, meta, onMeta, onR
 
       <PuzzleInput puzzle={puzzle} />
 
-      <button type="button" class="text-button" onClick={onRefresh} disabled={loading}>
-        {loading ? "Refreshing…" : "Refresh puzzle"}
-      </button>
+      {onStartAgain === null ? (
+        <button type="button" class="text-button" onClick={onRefresh} disabled={loading}>
+          {loading ? "Refreshing…" : "Refresh puzzle"}
+        </button>
+      ) : problem.stars > 0 ? (
+        <button type="button" class="text-button" onClick={onStartAgain}>
+          Start again
+        </button>
+      ) : null}
 
       {picked ? (
         <div class="chooser">

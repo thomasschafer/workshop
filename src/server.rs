@@ -24,6 +24,7 @@ use crate::language::{LanguageProfile, Puzzle};
 use crate::models::{self, ModelSettings, ProviderOption};
 use crate::packages::{InstallLog, Packages, PackagesState, Resolution};
 use crate::paths::Paths;
+use crate::practice::Practice;
 use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::runner::{self, RunResult};
 use crate::settings::AppSettings;
@@ -89,7 +90,8 @@ impl App {
                 &config.aoc.user_agent,
                 paths.aoc_cache_dir(),
                 config.aoc.base_url.clone(),
-            )?,
+            )?
+            .with_practice(Practice::new(paths.data_dir.join("practice.json"))),
             runners,
             settings: std::sync::RwLock::new(AppSettings::load(&config, &paths)),
             run_lock: Mutex::new(()),
@@ -199,6 +201,7 @@ pub fn router(app: Shared) -> Router {
         .route("/packages/remove", post(remove_package))
         .route("/packages/cancel", post(cancel_install))
         .route("/packages/resolve", post(resolve_package))
+        .route("/practice/reset", post(reset_practice))
         .route("/years/{year}/stars", get(stars))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
@@ -602,7 +605,7 @@ async fn run(
     let build_dir = app
         .paths
         .build_dir()
-        .join(puzzle.year.to_string())
+        .join(puzzle.year_label())
         .join(format!("{:02}", puzzle.day));
     let result = runner::run(runner::RunRequest {
         profile,
@@ -1389,4 +1392,9 @@ async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesRespon
         }
     }
     Ok(Json(packages_response(&app)?))
+}
+
+async fn reset_practice(State(app): State<Shared>) -> ApiResult<Problem> {
+    app.aoc.reset_practice()?;
+    Ok(Json(app.aoc.problem(Puzzle::PRACTICE, false).await?))
 }

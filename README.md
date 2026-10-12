@@ -51,6 +51,8 @@ This runs `tailscale serve` for you, which gives Workshop an HTTPS address on yo
 
 The first time you open Workshop, a short setup walks you through choosing your language and model, logging in to Advent of Code with your session cookie, and opening Workshop on your phone. You can run it again from Settings. If you'd rather not paste the cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
+To try Workshop before logging in, or outside December, open the practice puzzle from the bottom of the puzzle list. It's made up for Workshop and works like a real puzzle, including submitting answers, which it checks itself.
+
 ## Configuration
 
 Workshop writes a commented config file on first run; `workshop doctor` shows where it is. The defaults:

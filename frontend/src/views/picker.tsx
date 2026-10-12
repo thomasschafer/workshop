@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type Puzzle } from "../api";
+import { isPractice, PRACTICE } from "../puzzle";
 
 /** The most recent year with puzzles: the current year from December, otherwise the last. */
 export function latestYear(now = new Date()): number {
@@ -21,7 +22,7 @@ interface Props {
 const starsByYear = new Map<number, Record<string, number>>();
 
 export function Picker({ current, hasSession, onPick }: Props) {
-  const [year, setYear] = useState(current?.year ?? latestYear());
+  const [year, setYear] = useState(current && !isPractice(current) ? current.year : latestYear());
   // Tagged with their year, so another year's stars are never shown while loading.
   const [loaded, setLoaded] = useState<{ year: number; stars: Record<string, number> } | null>(
     null,
@@ -87,6 +88,20 @@ export function Picker({ current, hasSession, onPick }: Props) {
             </button>
           );
         })}
+      </div>
+      <div class="practice">
+        <button
+          type="button"
+          class={`chip ${current && isPractice(current) ? "selected" : ""}`}
+          onClick={() => onPick(PRACTICE)}
+        >
+          Practice puzzle
+        </button>
+        <span class="muted small">
+          {hasSession
+            ? "A made-up puzzle, for trying things out."
+            : "A made-up puzzle to try Workshop on, with no Advent of Code login needed."}
+        </span>
       </div>
     </div>
   );

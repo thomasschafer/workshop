@@ -70,7 +70,14 @@ impl TryFrom<UncheckedPuzzle> for Puzzle {
 }
 
 impl Puzzle {
+    /// The invented puzzle to practise on, which needs no Advent of Code account. No real
+    /// puzzle has year 0.
+    pub const PRACTICE: Puzzle = Puzzle { year: 0, day: 1 };
+
     pub fn new(year: u16, day: u8) -> Result<Self> {
+        if (year, day) == (Self::PRACTICE.year, Self::PRACTICE.day) {
+            return Ok(Self::PRACTICE);
+        }
         if year < 2015 {
             bail!("Advent of Code started in 2015, so there is no {year} puzzle");
         }
@@ -81,9 +88,29 @@ impl Puzzle {
     }
 }
 
+impl Puzzle {
+    pub fn is_practice(self) -> bool {
+        self == Self::PRACTICE
+    }
+
+    /// The year as it appears in paths: `practice` for the practice puzzle, which keeps its
+    /// files apart from real years.
+    pub fn year_label(self) -> String {
+        if self.is_practice() {
+            "practice".to_owned()
+        } else {
+            self.year.to_string()
+        }
+    }
+}
+
 impl std::fmt::Display for Puzzle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} day {}", self.year, self.day)
+        if self.is_practice() {
+            write!(f, "the practice puzzle")
+        } else {
+            write!(f, "{} day {}", self.year, self.day)
+        }
     }
 }
 
@@ -92,7 +119,7 @@ impl LanguageProfile {
         let relative = template::render(
             &self.file,
             &Vars::new()
-                .set("year", puzzle.year.to_string())
+                .set("year", puzzle.year_label())
                 .set("day", puzzle.day.to_string()),
         )?;
         let relative = Path::new(&relative);

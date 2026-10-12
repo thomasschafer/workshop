@@ -9,6 +9,7 @@ mod lsp;
 mod models;
 mod packages;
 mod paths;
+mod practice;
 mod process;
 mod provider;
 mod runner;

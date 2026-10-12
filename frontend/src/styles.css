@@ -1090,3 +1090,17 @@ code {
   font-size: 12px;
   color: var(--muted);
 }
+
+.picker .practice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.center {
+  text-align: center;
+}

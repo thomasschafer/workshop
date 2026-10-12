@@ -312,5 +312,6 @@ export const api = {
     request<PackagesResponse>("POST", "/packages/remove", { package: pkg }),
   cancelInstall: () => request<null>("POST", "/packages/cancel"),
   resolvePackage: (module: string) => request<Resolution>("POST", "/packages/resolve", { module }),
+  resetPractice: () => request<Problem>("POST", "/practice/reset"),
   gitSync: (message: string) => request<{ summary: string }>("POST", "/git/sync", { message }),
 };

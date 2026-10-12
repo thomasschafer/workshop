@@ -23,6 +23,7 @@ import { usePackages } from "./hooks/usePackages";
 import { usePushToTalk } from "./hooks/usePushToTalk";
 import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
+import { isPractice, PRACTICE, puzzleLabel, puzzleTitle } from "./puzzle";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
 import { Controls } from "./views/controls";
@@ -395,6 +396,14 @@ export function App({ boot }: { boot: Bootstrap }) {
     packages.state.packages.length > 0 &&
     !isUpToDate(packages.state);
 
+  const openPuzzle = (p: Puzzle) => {
+    setPicking(false);
+    if (!puzzle || p.year !== puzzle.year || p.day !== puzzle.day) {
+      setPuzzle(p);
+      setTab("problem");
+    }
+  };
+
   const packageFor = async (module: string): Promise<string | null> => {
     try {
       const found = await packages.resolve(module);
@@ -653,7 +662,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         {showPicker ? (
           puzzle ? (
             <button type="button" class="puzzle-button" onClick={() => setPicking(false)}>
-              ‹ Back to {puzzle.year} · day {puzzle.day}
+              ‹ Back to {puzzleLabel(puzzle)}
             </button>
           ) : (
             <h1 class="app-title">Workshop</h1>
@@ -667,7 +676,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               setPicking(true);
             }}
           >
-            {puzzle ? `${puzzle.year} · day ${puzzle.day}` : ""}
+            {puzzle ? puzzleLabel(puzzle) : ""}
             {stars ? <span class="stars"> {stars}</span> : null}
           </button>
         )}
@@ -707,17 +716,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       <main class="content">
         {showPicker ? (
           <div class="pane">
-            <Picker
-              current={puzzle}
-              hasSession={hasSession}
-              onPick={(p) => {
-                setPicking(false);
-                if (!puzzle || p.year !== puzzle.year || p.day !== puzzle.day) {
-                  setPuzzle(p);
-                  setTab("problem");
-                }
-              }}
-            />
+            <Picker current={puzzle} hasSession={hasSession} onPick={openPuzzle} />
           </div>
         ) : null}
         {openError && !showPicker ? <p class="pane error-text">{openError}</p> : null}
@@ -756,6 +755,16 @@ export function App({ boot }: { boot: Bootstrap }) {
             meta={meta}
             onMeta={updateMeta}
             onRefresh={() => puzzle && void loadProblem(puzzle, true)}
+            onStartAgain={
+              puzzle && isPractice(puzzle)
+                ? () => {
+                    api
+                      .resetPractice()
+                      .then(setProblem)
+                      .catch((e: unknown) => setProblemError(message(e)));
+                  }
+                : null
+            }
           />
         ) : null}
         {!showPicker && tab === "notes" ? (
@@ -785,6 +794,10 @@ export function App({ boot }: { boot: Bootstrap }) {
               models={models}
               onModels={setModels}
               packages={packages}
+              onPractice={() => {
+                setSheet(null);
+                openPuzzle(PRACTICE);
+              }}
               onLoggedIn={() => setHasSession(true)}
               onDone={() => setSheet(null)}
             />
@@ -819,9 +832,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               models={models}
               onModels={setModels}
               onSetup={() => setSheet("setup")}
-              commitMessage={
-                puzzle ? `Advent of Code ${puzzle.year} day ${puzzle.day}` : "Advent of Code"
-              }
+              commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
               keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
               onKeepScreenOn={(enabled) => {
                 preferences.keepScreenOn.set(enabled);

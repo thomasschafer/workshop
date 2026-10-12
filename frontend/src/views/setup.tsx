@@ -10,13 +10,15 @@ interface Props {
   models: ModelsState;
   onModels: (models: ModelsState) => void;
   packages: Packages;
+  /** Opens the practice puzzle, to try Workshop out. */
+  onPractice: () => void;
   /** Called once a session cookie has been saved. */
   onLoggedIn: () => void;
   onDone: () => void;
 }
 
 /** Getting Workshop ready: language, model, Advent of Code login and phone access. */
-export function Setup({ models, onModels, packages, onLoggedIn, onDone }: Props) {
+export function Setup({ models, onModels, packages, onPractice, onLoggedIn, onDone }: Props) {
   const [state, setState] = useState<SetupState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +63,13 @@ export function Setup({ models, onModels, packages, onLoggedIn, onDone }: Props)
       <button type="button" class="pill primary wide" onClick={onDone}>
         Done
       </button>
+      <p class="muted small center">
+        New to Workshop?{" "}
+        <button type="button" class="text-button" onClick={onPractice}>
+          Try the practice puzzle
+        </button>
+        , which needs no Advent of Code login.
+      </p>
     </div>
   );
 }

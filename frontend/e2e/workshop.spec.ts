@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { HOME, PORT } from "./fixture";
@@ -184,4 +184,56 @@ test("installs what's listed after the list is edited elsewhere", async () => {
   await expect(page.locator(".packages")).toContainText("Installed.");
   expect(readFileSync(manifest, "utf8")).not.toContain("lanterns_extra");
   await page.keyboard.press("Escape");
+});
+
+test("plays the practice puzzle through, with no Advent of Code login needed", async () => {
+  const dir = join(HOME, "solutions", "practice", "day01");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "main.py"),
+    `import sys
+
+
+def sleds(data: str) -> list[list[int]]:
+    return [[int(w) for w in line.split()] for line in data.splitlines()]
+
+
+def part1(data: str) -> int:
+    return sum(1 for s in sleds(data) if sum(s) > 100)
+
+
+def part2(data: str) -> int:
+    return sum(max(s) for s in sleds(data) if sum(s) <= 100)
+
+
+if __name__ == "__main__":
+    data = sys.stdin.read()
+    print(part1(data))
+    print(part2(data))
+`,
+  );
+  await page.locator(".puzzle-button").click();
+  await page.getByRole("button", { name: "Practice puzzle" }).click();
+  await expect(page.locator(".puzzle-button")).toContainText("Practice puzzle");
+  await expect(page.locator(".problem")).toContainText("Practice: Sled Parcels");
+  await expect(page.locator(".sample-summary")).toContainText("expects 2");
+
+  for (const part of [1, 2]) {
+    await page.getByRole("button", { name: "Run", exact: true }).click();
+    await page.getByRole("button", { name: "Run sample" }).click();
+    await expect(page.locator(".run-result")).toContainText(
+      `Part ${part}: ${part === 1 ? 2 : 45} ✓`,
+    );
+    await page.getByRole("button", { name: "Run real input" }).click();
+    await page.getByRole("button", { name: new RegExp(`^Submit part ${part}: \\d+$`) }).click();
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
+    await expect(page.locator(".submitted").first()).toContainText("Correct!");
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.locator(".top")).toContainText("★".repeat(part));
+  }
+
+  await page.getByRole("button", { name: "Problem", exact: true }).click();
+  await expect(page.locator(".problem")).toContainText("Part Two");
+  await page.getByRole("button", { name: "Start again" }).click();
+  await expect(page.locator(".problem")).not.toContainText("Part Two");
 });
