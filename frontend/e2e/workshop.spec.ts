@@ -90,6 +90,10 @@ test("runs what was said, even when run before the edit is made", async () => {
 test("discusses the puzzle, keeping the conversation", async () => {
   await page.getByRole("button", { name: "Discuss", exact: true }).click();
   await say("why is part one wrong");
+  // The reply appears as it's written.
+  await expect(page.locator(".turn.coach.writing")).toHaveText(
+    'You asked "why is part one wrong", ',
+  );
   await expect(page.locator(".turn.coach")).toHaveText(
     'You asked "why is part one wrong", after 1 question(s).',
   );

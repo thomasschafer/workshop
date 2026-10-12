@@ -782,6 +782,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             models={models.discuss_models}
             model={discussModel}
             thinking={discussion.thinking}
+            partial={discussion.partial}
             error={discussion.error}
             onModel={setDiscussModel}
             onSend={(text) => enqueue(text)}

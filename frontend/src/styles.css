@@ -1104,3 +1104,23 @@ code {
 .center {
   text-align: center;
 }
+
+/* A reply still being written ends in a blinking caret. */
+.turn.writing::after {
+  content: "▍";
+  margin-left: 1px;
+  color: var(--accent);
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn.writing::after {
+    animation: none;
+  }
+}

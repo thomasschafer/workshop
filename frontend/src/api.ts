@@ -229,32 +229,71 @@ export class ApiError extends Error {
 }
 
 /**
- * `keepalive` lets a request finish after the page is hidden or closed, which is when the
- * phone is put down.
+ * Sends a request, rejecting with an `ApiError` if the server says it failed. `keepalive` lets
+ * a request finish after the page is hidden or closed, which is when the phone is put down.
  */
-async function request<T>(
+async function send(
   method: string,
   path: string,
   body?: unknown,
   { keepalive = false }: { keepalive?: boolean } = {},
-): Promise<T> {
+): Promise<Response> {
   const init: RequestInit = { method, headers: {}, keepalive };
   if (body !== undefined) {
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);
   }
   const response = await fetch(`/api${path}`, init);
-  const text = await response.text();
-  const json: unknown = text ? JSON.parse(text) : null;
   if (!response.ok) {
+    const text = await response.text();
+    const json: unknown = text ? JSON.parse(text) : null;
     const message =
       json && typeof json === "object" && "error" in json && typeof json.error === "string"
         ? json.error
         : `Request failed with ${response.status}`;
     throw new ApiError(message, response.status, json);
   }
-  return json as T;
+  return response;
 }
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options: { keepalive?: boolean } = {},
+): Promise<T> {
+  const text = await (await send(method, path, body, options)).text();
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+/** Reads a reply of newline-delimited JSON, handing over each line as it arrives. */
+async function streamLines(
+  method: string,
+  path: string,
+  body: unknown,
+  onLine: (value: unknown) => void,
+): Promise<void> {
+  const response = await send(method, path, body);
+  if (!response.body) throw new Error("The server's reply couldn't be read as it arrived.");
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffered = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffered += value;
+    for (let end = buffered.indexOf("\n"); end !== -1; end = buffered.indexOf("\n")) {
+      const line = buffered.slice(0, end);
+      buffered = buffered.slice(end + 1);
+      if (line.trim()) onLine(JSON.parse(line));
+    }
+  }
+  if (buffered.trim()) onLine(JSON.parse(buffered));
+}
+
+type DiscussEvent =
+  | { delta: string }
+  | { done: { text: string; model: string | null } }
+  | { error: string };
 
 const day = (p: Puzzle) => `/puzzles/${p.year}/${p.day}`;
 
@@ -291,15 +330,28 @@ export const api = {
     }),
   edit: (doc: string, utterance: string, recent: string | null, earlier: Exchange[]) =>
     request<EditResult>("POST", "/edit", { doc, utterance, recent, earlier }),
-  discuss: (body: {
-    year: number;
-    day: number;
-    model: string;
-    turns: Turn[];
-    code: string;
-    errors: string;
-    last_run: string;
-  }) => request<{ text: string; model: string | null }>("POST", "/discuss", body),
+  discuss: async (
+    body: {
+      year: number;
+      day: number;
+      model: string;
+      turns: Turn[];
+      code: string;
+      errors: string;
+      last_run: string;
+    },
+    onDelta: (text: string) => void,
+  ): Promise<{ text: string; model: string | null }> => {
+    const reply: { value: { text: string; model: string | null } | null } = { value: null };
+    await streamLines("POST", "/discuss", body, (line) => {
+      const event = line as DiscussEvent;
+      if ("delta" in event) onDelta(event.delta);
+      else if ("done" in event) reply.value = event.done;
+      else throw new Error(event.error);
+    });
+    if (reply.value === null) throw new Error("The reply stopped before it was finished.");
+    return reply.value;
+  },
   /** Fire-and-forget: records phone-side events in the server's log file. */
   log: (kind: "error" | "command" | "speech", message: string) => {
     request<null>("POST", "/log", { kind, message }).catch(() => {});

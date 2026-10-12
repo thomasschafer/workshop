@@ -24,6 +24,10 @@ pub struct Context<'a> {
     pub code: &'a str,
     pub errors: &'a str,
     pub last_run: &'a str,
+    /// The user's helpers module, with its path, if they have one.
+    pub helpers: Option<(&'a str, &'a str)>,
+    /// Packages installed for solutions to use.
+    pub packages: &'a [String],
 }
 
 /// Builds a single prompt containing the context and the conversation so far. Each call is
@@ -38,6 +42,18 @@ pub fn prompt(context: &Context, turns: &[Turn]) -> String {
         "<code language=\"{}\">\n{}\n</code>\n\n",
         context.language, context.code
     ));
+    if let Some((path, text)) = context.helpers {
+        out.push_str(&format!(
+            "<helpers path=\"{path}\">\n{}\n</helpers>\n\n",
+            text.trim_end()
+        ));
+    }
+    if !context.packages.is_empty() {
+        out.push_str(&format!(
+            "Installed packages: {}\n\n",
+            context.packages.join(", ")
+        ));
+    }
     if !context.errors.trim().is_empty() {
         out.push_str(&format!(
             "<errors>\n{}\n</errors>\n\n",
@@ -75,6 +91,8 @@ mod tests {
                 code: "main = pure ()",
                 errors: "",
                 last_run: "exit 1",
+                helpers: Some(("lib/Aoc.hs", "module Aoc where\n")),
+                packages: &["split".to_owned()],
             },
             &[
                 Turn {
@@ -91,5 +109,7 @@ mod tests {
         assert!(!prompt.contains("<errors>"));
         assert!(prompt.contains("<last_run>\nexit 1\n</last_run>"));
         assert!(prompt.contains("Them: why?\nYou: look at main\n"));
+        assert!(prompt.contains("<helpers path=\"lib/Aoc.hs\">\nmodule Aoc where\n</helpers>"));
+        assert!(prompt.contains("Installed packages: split\n"));
     }
 }

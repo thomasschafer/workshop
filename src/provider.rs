@@ -6,7 +6,7 @@ use crate::process::{self, GroupedChild};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 
 use crate::template::{self, Vars};
 
@@ -302,6 +302,18 @@ impl ProviderRunner {
     }
 
     pub async fn call(&self, spec: &CallSpec, prompt: &str, timeout: Duration) -> Result<Reply> {
+        self.call_streaming(spec, prompt, timeout, None).await
+    }
+
+    /// Like `call`, also sending the reply's text to `partial` as it arrives, for providers
+    /// whose output includes it. The whole reply is still returned at the end.
+    pub async fn call_streaming(
+        &self,
+        spec: &CallSpec,
+        prompt: &str,
+        timeout: Duration,
+        partial: Option<&mpsc::UnboundedSender<String>>,
+    ) -> Result<Reply> {
         let started = std::time::Instant::now();
         let spec = &self.resolve(spec).await;
         let process = match self.take_spare(spec).await? {
@@ -314,7 +326,8 @@ impl ProviderRunner {
                 tracing::warn!("could not start a spare model process: {err:#}");
             }
         }
-        let result = tokio::time::timeout(timeout, self.communicate(process, spec, prompt)).await;
+        let result =
+            tokio::time::timeout(timeout, self.communicate(process, spec, prompt, partial)).await;
         let (text, model) = match result {
             Ok(reply) => reply?,
             Err(_) => bail!("the model took longer than {}s to reply", timeout.as_secs()),
@@ -381,6 +394,7 @@ impl ProviderRunner {
         mut process: GroupedChild,
         spec: &CallSpec,
         prompt: &str,
+        partial: Option<&mpsc::UnboundedSender<String>>,
     ) -> Result<(String, Option<String>)> {
         let child = &mut process.child;
         if let Some(mut stdin) = child.stdin.take() {
@@ -442,6 +456,12 @@ impl ProviderRunner {
                 while let Some(line) = lines.next_line().await? {
                     match parse_stream_event(&line)? {
                         StreamEvent::Init { model: m } => model = m.or(model),
+                        StreamEvent::Delta(text) => {
+                            // Nobody listening any more only means the reply isn't shown early.
+                            if let Some(partial) = partial {
+                                let _ = partial.send(text);
+                            }
+                        }
                         StreamEvent::Text { text, model: m } => {
                             reply = Some(Ok((text, m.or(model.take()))));
                             break;
@@ -626,6 +646,8 @@ enum StreamEvent {
         text: String,
         model: Option<String>,
     },
+    /// Part of the reply's text, as it's written.
+    Delta(String),
     Result(Result<(String, Option<String>), String>),
     Other,
 }
@@ -662,6 +684,15 @@ fn parse_stream_event(line: &str) -> Result<StreamEvent> {
         }
         Some("result") => {
             StreamEvent::Result(parse_claude_result(line).map_err(|e| format!("{e:#}")))
+        }
+        Some("stream_event") => {
+            let delta = event.get("event").and_then(|e| e.get("delta"));
+            match delta {
+                Some(delta) if delta.get("type").and_then(|t| t.as_str()) == Some("text_delta") => {
+                    string(delta.get("text")).map_or(StreamEvent::Other, StreamEvent::Delta)
+                }
+                _ => StreamEvent::Other,
+            }
         }
         _ => StreamEvent::Other,
     })
@@ -855,6 +886,52 @@ mod tests {
             StreamEvent::Result(Err(_))
         ));
         assert!(parse_stream_event("not json").is_err());
+        assert_eq!(
+            parse_stream_event(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"one two"}}}"#).unwrap(),
+            StreamEvent::Delta("one two".into())
+        );
+        assert_eq!(
+            parse_stream_event(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}}"#).unwrap(),
+            StreamEvent::Other
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn streams_partial_text_as_it_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        // A stand-in for Claude Code's stream-json output with partial messages.
+        let script = r#"cat > /dev/null
+delta() { printf '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"%s"}}}\n' "$1"; }
+delta "Try "
+delta "a map."
+printf '{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"Try a map."}]}}\n'"#;
+        // In a file, as command arguments are templates, where braces mean placeholders.
+        let script_file = dir.path().join("fake-claude.sh");
+        std::fs::write(&script_file, script).unwrap();
+        let provider = ProviderConfig::for_test(
+            vec!["sh".into(), script_file.to_string_lossy().into_owned()],
+            InputMode::ClaudeStreamJson,
+            OutputMode::ClaudeStreamJson,
+        );
+        let runner = ProviderRunner::new(provider, dir.path().to_owned()).unwrap();
+        let spec = CallSpec {
+            model: "m".into(),
+            system_prompt: "s".into(),
+            effort: None,
+        };
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let reply = runner
+            .call_streaming(&spec, "hi", Duration::from_secs(10), Some(&sender))
+            .await
+            .unwrap();
+        assert_eq!(reply.text, "Try a map.");
+        drop(sender);
+        let mut parts = Vec::new();
+        while let Some(part) = receiver.recv().await {
+            parts.push(part);
+        }
+        assert_eq!(parts, ["Try ", "a map."]);
     }
 
     #[cfg(unix)]

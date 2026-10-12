@@ -6,6 +6,8 @@ interface Props {
   models: string[];
   model: string;
   thinking: boolean;
+  /** The reply so far, while it's being written. */
+  partial: string;
   error: string | null;
   onModel: (model: string) => void;
   onSend: (text: string) => void;
@@ -17,6 +19,7 @@ export function DiscussView({
   models,
   model,
   thinking,
+  partial,
   error,
   onModel,
   onSend,
@@ -27,7 +30,7 @@ export function DiscussView({
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [turns.length, thinking]);
+  }, [turns.length, thinking, partial]);
 
   const send = (event: Event) => {
     event.preventDefault();
@@ -70,7 +73,13 @@ export function DiscussView({
             {t.text}
           </div>
         ))}
-        {thinking ? <div class="turn coach muted">Thinking…</div> : null}
+        {thinking ? (
+          partial ? (
+            <div class="turn coach writing">{partial}</div>
+          ) : (
+            <div class="turn coach muted">Thinking…</div>
+          )
+        ) : null}
         {error ? <div class="error-text">{error}</div> : null}
         <div ref={end} />
       </div>

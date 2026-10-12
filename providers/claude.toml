@@ -13,6 +13,8 @@ command = [
   "--input-format", "stream-json",
   "--output-format", "stream-json",
   "--verbose",
+  # Text as it's written, so discussion replies appear as they come.
+  "--include-partial-messages",
 ]
 input = "claude-stream-json"
 output = "claude-stream-json"

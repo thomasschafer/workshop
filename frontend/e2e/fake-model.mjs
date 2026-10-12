@@ -1,14 +1,30 @@
 // A stand-in for the edit and discussion models, so end-to-end tests make no real model calls.
-// It reads the prompt on stdin and replies to the utterances the tests use.
+// It reads the prompt on stdin and replies to the utterances the tests use, in the shape of
+// Claude Code's stream-json output.
 import { readFileSync } from "node:fs";
 
 const prompt = readFileSync(0, "utf8");
+
+/** Replies as Claude Code's stream-json output does: the text in parts, then the message. */
+async function reply(parts, pauseMs = 0) {
+  for (const [i, text] of parts.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, pauseMs));
+    const delta = { type: "text_delta", text };
+    const event = { type: "content_block_delta", index: 0, delta };
+    process.stdout.write(`${JSON.stringify({ type: "stream_event", event })}\n`);
+  }
+  const content = [{ type: "text", text: parts.join("") }];
+  process.stdout.write(
+    `${JSON.stringify({ type: "assistant", message: { model: "fake", content } })}\n`,
+  );
+}
 
 // A discussion prompt lists the conversation, with the user's turns as "Them: ...".
 const asked = prompt.match(/^Them: .*$/gm);
 if (asked) {
   const question = asked[asked.length - 1].replace(/^Them: /, "");
-  process.stdout.write(`You asked "${question}", after ${asked.length} question(s).`);
+  // In two parts, with time to see the first before the second.
+  await reply([`You asked "${question}", `, `after ${asked.length} question(s).`], 700);
   process.exit(0);
 }
 
@@ -55,10 +71,10 @@ const replies = {
   },
 };
 
-const reply = replies[utterance] ?? {
+const edit = replies[utterance] ?? {
   status: "unsure",
   message: `The fake model has no reply for "${utterance}".`,
 };
 // Slow enough for a test to act while the edit is still being made.
 if (utterance.startsWith("slowly")) await new Promise((r) => setTimeout(r, 1500));
-process.stdout.write(JSON.stringify(reply));
+await reply([JSON.stringify(edit)]);

@@ -70,7 +70,7 @@ export function writeHome(options: HomeOptions): void {
 [providers.fake]
 command = ["node", ${JSON.stringify(fakeModel)}]
 input = "stdin"
-output = "text"
+output = "claude-stream-json"
 edit_models = ["fake"]
 discuss_models = ["fake"]
 

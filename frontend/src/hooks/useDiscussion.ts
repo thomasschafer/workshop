@@ -32,6 +32,8 @@ export interface DiscussContext {
 export function useDiscussion(puzzle: Puzzle | null, model: string, context: () => DiscussContext) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [thinking, setThinking] = useState(false);
+  /** The reply so far, while it's being written. */
+  const [partial, setPartial] = useState("");
   const [error, setError] = useState<string | null>(null);
   // Utterances are queued, so a send can start before a re-render; these always hold the latest.
   const turnsRef = useRef(turns);
@@ -60,24 +62,31 @@ export function useDiscussion(puzzle: Puzzle | null, model: string, context: () 
     const next: Turn[] = [...turnsRef.current, { speaker: "user", text }];
     update(p, next);
     setThinking(true);
+    setPartial("");
     setError(null);
     const { code, errors, lastRun } = context();
     try {
-      const reply = await api.discuss({
-        year: p.year,
-        day: p.day,
-        model,
-        turns: next,
-        code,
-        errors,
-        last_run: lastRun,
-      });
+      const reply = await api.discuss(
+        {
+          year: p.year,
+          day: p.day,
+          model,
+          turns: next,
+          code,
+          errors,
+          last_run: lastRun,
+        },
+        (text) => {
+          if (puzzleRef.current === p) setPartial((sofar) => sofar + text);
+        },
+      );
       if (puzzleRef.current !== p) return;
       update(p, [...next, { speaker: "coach", text: reply.text }]);
     } catch (e) {
       if (puzzleRef.current === p) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setThinking(false);
+      setPartial("");
     }
   };
 
@@ -86,5 +95,5 @@ export function useDiscussion(puzzle: Puzzle | null, model: string, context: () 
     if (p) update(p, []);
   };
 
-  return { turns, thinking, error, send, clear };
+  return { turns, thinking, partial, error, send, clear };
 }
