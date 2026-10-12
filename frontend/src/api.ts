@@ -29,9 +29,34 @@ export interface Bootstrap {
     root_uri: string;
   };
   snippets: Snippet[];
-  discuss_models: string[];
-  edit_model: string;
+  models: ModelsState;
   has_aoc_session: boolean;
+}
+
+export interface ModelChoice {
+  provider: string;
+  model: string;
+}
+
+export interface ModelSettings {
+  edit: ModelChoice;
+  discuss_provider: string;
+}
+
+/** A model CLI as offered in the app. */
+export interface ProviderOption {
+  id: string;
+  name: string;
+  /** Why it can't be chosen, such as its CLI not being installed. */
+  unavailable: string | null;
+  edit_models: string[];
+  discuss_models: string[];
+}
+
+export interface ModelsState {
+  providers: ProviderOption[];
+  settings: ModelSettings;
+  discuss_models: string[];
 }
 
 /** A file the user edits, here or elsewhere. */
@@ -159,6 +184,7 @@ export const api = {
   saveState: (state: UiState, keepalive = false) =>
     request<null>("PUT", "/state", state, { keepalive }),
   doctor: () => request<Check[]>("GET", "/doctor"),
+  setModels: (settings: ModelSettings) => request<ModelsState>("PUT", "/models", settings),
   stars: (year: number, refresh = false) =>
     request<Record<string, number>>("GET", `/years/${year}/stars?refresh=${refresh}`),
   open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),

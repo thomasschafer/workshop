@@ -3,7 +3,8 @@
 # Codex has no way to run without tools, so every tool that can be is switched off, it runs in
 # its read-only sandbox in an empty directory with approvals turned off, and Workshop stops it
 # (and makes no edit) the moment it starts using any tool. Its own instruction files and user
-# config are skipped so they can't change its behaviour.
+# config are skipped so they can't change its behaviour, and Workshop's own instructions replace
+# Codex's, which are written for an autonomous coding agent.
 command = [
   "codex", "exec",
   "--json",
@@ -14,8 +15,8 @@ command = [
   "--sandbox", "read-only",
   "--model", "{model}",
   "-c", "approval_policy=\"never\"",
-  "-c", "developer_instructions={system_prompt:toml}",
-  "-c", "model_reasoning_effort=\"low\"",
+  "-c", "model_instructions_file={system_prompt_file:toml}",
+  "-c", "model_reasoning_effort={effort:toml}",
   "-c", "project_doc_max_bytes=0",
   "-c", "web_search=\"disabled\"",
   "-c", "features.shell_tool=false",
@@ -38,6 +39,11 @@ command = [
 input = "stdin"
 output = "codex-json"
 prespawn = true
+name = "Codex"
+edit_models = ["luna", "sol"]
+discuss_models = ["sol", "astra"]
+# Edits are mechanical, and reasoning didn't make them more accurate in Workshop's evals.
+effort = { edit = "none", discuss = "medium" }
 version_command = ["codex", "--version"]
 auth_check_command = ["codex", "login", "status"]
 install_hint = "Install Codex (https://developers.openai.com/codex), then run `codex login`."

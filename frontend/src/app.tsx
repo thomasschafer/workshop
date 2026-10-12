@@ -65,11 +65,13 @@ function loadTurns(p: Puzzle): Turn[] {
 export function App({ boot }: { boot: Bootstrap }) {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(boot.state.puzzle);
   const [tab, setTab] = useState<Tab>(boot.state.tab);
-  const [discussModel, setDiscussModel] = useState(
-    boot.state.discuss_model && boot.discuss_models.includes(boot.state.discuss_model)
-      ? boot.state.discuss_model
-      : (boot.discuss_models[0] ?? ""),
-  );
+  const [models, setModels] = useState(boot.models);
+  const [chosenDiscussModel, setDiscussModel] = useState(boot.state.discuss_model);
+  // The chosen discussion model, if the current provider offers it, or its first model.
+  const discussModel =
+    chosenDiscussModel && models.discuss_models.includes(chosenDiscussModel)
+      ? chosenDiscussModel
+      : (models.discuss_models[0] ?? "");
   const [sheet, setSheet] = useState<Sheet>(null);
   const [picking, setPicking] = useState(false);
 
@@ -461,7 +463,12 @@ export function App({ boot }: { boot: Bootstrap }) {
       if (result.status === "applied") {
         current.applyMarked(result.doc, result.inserted);
         setQuestion(null);
-        setFeedback({ kind: "ok", transcript: utterance, text: `${result.summary} · ${seconds}` });
+        const model = result.model ? ` · ${result.model.replace(/^claude-/, "")}` : "";
+        setFeedback({
+          kind: "ok",
+          transcript: utterance,
+          text: `${result.summary} · ${seconds}${model}`,
+        });
       } else {
         setQuestion([...earlier, { said: utterance, asked: result.message }]);
         setFeedback({ kind: "warn", transcript: utterance, text: result.message });
@@ -746,7 +753,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         {!showPicker && tab === "discuss" ? (
           <DiscussView
             turns={turns}
-            models={boot.discuss_models}
+            models={models.discuss_models}
             model={discussModel}
             thinking={thinking}
             error={discussError}
@@ -783,7 +790,8 @@ export function App({ boot }: { boot: Bootstrap }) {
             {sheet === "settings" ? (
               <Settings
                 snippets={boot.snippets}
-                editModel={boot.edit_model}
+                models={models}
+                onModels={setModels}
                 commitMessage={
                   puzzle ? `Advent of Code ${puzzle.year} day ${puzzle.day}` : "Advent of Code"
                 }

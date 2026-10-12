@@ -59,12 +59,11 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         format!("Using {}", paths.config_file().display()),
     ));
 
-    let mut provider_ids = vec![
-        &config.models.edit.provider,
-        &config.models.discuss.provider,
-    ];
+    // The providers chosen in the app, which may differ from the config's defaults.
+    let models = crate::models::ModelSettings::load(config, paths);
+    let mut provider_ids = vec![models.edit.provider, models.discuss_provider];
     provider_ids.dedup();
-    for id in provider_ids {
+    for id in &provider_ids {
         checks.extend(check_provider(config, id).await);
     }
 

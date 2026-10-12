@@ -19,6 +19,9 @@ output = "claude-stream-json"
 # Starting the CLI takes a couple of seconds, so a process is started ahead of time and waits
 # for the next request.
 prespawn = true
+name = "Claude Code"
+edit_models = ["haiku", "sonnet"]
+discuss_models = ["sonnet", "opus", "fable"]
 version_command = ["claude", "--version"]
 auth_check_command = ["claude", "auth", "status", "--text"]
 install_hint = "Install Claude Code (https://claude.com/claude-code), then run `claude` once to log in."

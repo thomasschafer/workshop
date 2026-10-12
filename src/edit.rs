@@ -457,16 +457,11 @@ mod tests {
             std::fs::write(dir.join(format!("reply{i}")), reply).unwrap();
         }
         let script = r#"n=$(cat count 2>/dev/null || echo 0); echo $((n + 1)) > count; cat >/dev/null; cat "reply$n""#;
-        let provider = crate::provider::ProviderConfig {
-            command: vec!["sh".into(), "-c".into(), script.into()],
-            input: crate::provider::InputMode::Stdin,
-            output: crate::provider::OutputMode::Text,
-            prespawn: false,
-            version_command: None,
-            auth_check_command: None,
-            install_hint: None,
-            model_catalog: None,
-        };
+        let provider = crate::provider::ProviderConfig::for_test(
+            vec!["sh".into(), "-c".into(), script.into()],
+            crate::provider::InputMode::Stdin,
+            crate::provider::OutputMode::Text,
+        );
         ProviderRunner::new(provider, dir.to_owned()).unwrap()
     }
 
@@ -481,6 +476,7 @@ mod tests {
         let spec = CallSpec {
             model: "m".into(),
             system_prompt: String::new(),
+            effort: None,
         };
         let response = request(
             &model,
@@ -504,6 +500,7 @@ mod tests {
         let spec = CallSpec {
             model: "m".into(),
             system_prompt: String::new(),
+            effort: None,
         };
         let Err(failed) = request(&model, &spec, "a‸", "p", Duration::from_secs(10)).await else {
             panic!("expected a failure");

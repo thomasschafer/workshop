@@ -1,9 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, type Check, type Snippet } from "../api";
+import { api, type Check, type ModelsState, type Snippet } from "../api";
+import { ModelsSection } from "./models";
 
 interface Props {
   snippets: Snippet[];
-  editModel: string;
+  models: ModelsState;
+  onModels: (models: ModelsState) => void;
   commitMessage: string;
   onInsertSnippet: (snippet: Snippet) => void;
   keepScreenOn: boolean | null;
@@ -12,7 +14,8 @@ interface Props {
 
 export function Settings({
   snippets,
-  editModel,
+  models,
+  onModels,
   commitMessage,
   onInsertSnippet,
   keepScreenOn,
@@ -46,6 +49,8 @@ export function Settings({
 
   return (
     <div class="settings">
+      <ModelsSection models={models} onModels={onModels} />
+
       <section>
         <h2>Solutions repo</h2>
         <button type="button" class="pill" onClick={commit} disabled={syncing}>
@@ -87,7 +92,6 @@ export function Settings({
 
       <section>
         <h2>Setup</h2>
-        <p class="muted">Edits use {editModel}.</p>
         {checkError ? <p class="error-text">{checkError}</p> : null}
         {checks === null && !checkError ? <p class="muted">Checking…</p> : null}
         <ul class="checks">

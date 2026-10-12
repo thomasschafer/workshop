@@ -72,6 +72,8 @@ name = "parse ints"
 body = "map read . lines"
 ```
 
+You can switch between Claude Code and Codex, and between models, in the app under Settings, Models. After each edit, the model that made it and how long it took are shown, which makes comparing them easy. To check models against the same set of example utterances, use `workshop eval --model codex:luna`, for example.
+
 Your program reads the puzzle input on stdin and prints the part 1 answer on the first line and the part 2 answer on the second.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for adding a language or a model CLI.

@@ -21,8 +21,9 @@ use crate::discuss::{self, Turn};
 use crate::doctor;
 use crate::edit::{self, EditOutcome};
 use crate::language::Puzzle;
+use crate::models::{self, ModelSettings, ProviderOption};
 use crate::paths::Paths;
-use crate::provider::{CallSpec, ProviderRunner};
+use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::runner::{self, RunResult};
 use crate::workspace::{DayMeta, SaveError, UiState, VersionedFile, Workspace};
 
@@ -40,8 +41,9 @@ pub struct App {
     token: String,
     workspace: Workspace,
     aoc: AocClient,
-    edit_model: ProviderRunner,
-    discuss_model: ProviderRunner,
+    /// One per provider, each keeping its own process ready.
+    runners: BTreeMap<String, ProviderRunner>,
+    models: std::sync::RwLock<ModelSettings>,
     run_lock: Mutex<()>,
     /// Cancels the run in progress, if there is one.
     current_run: std::sync::Mutex<Option<CancellationToken>>,
@@ -57,17 +59,21 @@ impl App {
         aoc_session: Option<String>,
     ) -> Result<Self> {
         let model_dir = paths.cache_dir.join("model-cwd");
+        let runners = config
+            .providers
+            .iter()
+            .map(|(id, provider)| {
+                Ok((
+                    id.clone(),
+                    ProviderRunner::new(provider.clone(), model_dir.clone())?,
+                ))
+            })
+            .collect::<Result<_>>()?;
         Ok(Self {
             workspace: Workspace::new(config.solutions_dir.clone(), paths.clone()),
             aoc: AocClient::new(aoc_session, &config.aoc.user_agent, paths.aoc_cache_dir())?,
-            edit_model: ProviderRunner::new(
-                config.providers[&config.models.edit.provider].clone(),
-                model_dir.clone(),
-            )?,
-            discuss_model: ProviderRunner::new(
-                config.providers[&config.models.discuss.provider].clone(),
-                model_dir,
-            )?,
+            runners,
+            models: std::sync::RwLock::new(ModelSettings::load(&config, &paths)),
             run_lock: Mutex::new(()),
             current_run: std::sync::Mutex::new(None),
             config,
@@ -76,10 +82,28 @@ impl App {
         })
     }
 
-    fn edit_spec(&self) -> CallSpec {
-        CallSpec {
-            model: self.config.models.edit.model.clone(),
-            system_prompt: edit::system_prompt(self.config.language()),
+    fn model_settings(&self) -> ModelSettings {
+        self.models
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The runner and call for the chosen edit model.
+    fn edit_target(&self) -> (&ProviderRunner, CallSpec) {
+        let choice = self.model_settings().edit;
+        let spec = self.config.providers[&choice.provider].spec(
+            Role::Edit,
+            &choice.model,
+            edit::system_prompt(self.config.language()),
+        );
+        (&self.runners[&choice.provider], spec)
+    }
+
+    async fn warm_edit_model(&self) {
+        let (runner, spec) = self.edit_target();
+        if let Err(err) = runner.warm(&spec).await {
+            tracing::warn!("couldn't start the edit model: {err:#}");
         }
     }
 
@@ -87,9 +111,7 @@ impl App {
         if let Err(err) = self.workspace.ensure_repo().await {
             tracing::warn!("couldn't set up the solutions repo: {err:#}");
         }
-        if let Err(err) = self.edit_model.warm(&self.edit_spec()).await {
-            tracing::warn!("couldn't start the edit model: {err:#}");
-        }
+        self.warm_edit_model().await;
     }
 }
 
@@ -98,6 +120,7 @@ pub fn router(app: Shared) -> Router {
         .route("/bootstrap", get(bootstrap))
         .route("/state", put(save_state))
         .route("/doctor", get(run_doctor))
+        .route("/models", get(get_models).put(set_models))
         .route("/years/{year}/stars", get(stars))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
@@ -266,8 +289,7 @@ struct Bootstrap {
     state: UiState,
     language: LanguageInfo,
     snippets: Vec<Snippet>,
-    discuss_models: Vec<String>,
-    edit_model: String,
+    models: ModelsState,
     has_aoc_session: bool,
 }
 
@@ -299,8 +321,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
             root_uri: file_uri(&app.config.solutions_dir),
         },
         snippets: app.config.snippets.clone(),
-        discuss_models: app.config.models.discuss.models.clone(),
-        edit_model: app.config.models.edit.model.clone(),
+        models: models_state(&app),
         has_aoc_session: app.aoc.has_session(),
     }))
 }
@@ -576,14 +597,8 @@ async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> Api
         body.recent.as_deref(),
         &body.earlier,
     );
-    let result = edit::request(
-        &app.edit_model,
-        &app.edit_spec(),
-        &body.doc,
-        &prompt,
-        EDIT_TIMEOUT,
-    )
-    .await;
+    let (runner, spec) = app.edit_target();
+    let result = edit::request(runner, &spec, &body.doc, &prompt, EDIT_TIMEOUT).await;
     let (outcome, replies, elapsed_ms) = match &result {
         Ok(r) => (
             match r.outcome {
@@ -633,9 +648,10 @@ struct Discussed {
 }
 
 async fn discuss(State(app): State<Shared>, Json(body): Json<DiscussBody>) -> ApiResult<Discussed> {
-    if !app.config.models.discuss.models.contains(&body.model) {
+    let provider = app.model_settings().discuss_provider;
+    if !models::discuss_models(&app.config, &provider).contains(&body.model) {
         return Err(anyhow::anyhow!(
-            "{:?} isn't one of the configured discussion models",
+            "{:?} isn't one of the discussion models for {provider}",
             body.model
         )
         .into());
@@ -653,12 +669,12 @@ async fn discuss(State(app): State<Shared>, Json(body): Json<DiscussBody>) -> Ap
         },
         &body.turns,
     );
-    let spec = CallSpec {
-        model: body.model,
-        system_prompt: discuss::SYSTEM_PROMPT.to_owned(),
-    };
-    let reply = app
-        .discuss_model
+    let spec = app.config.providers[&provider].spec(
+        Role::Discuss,
+        &body.model,
+        discuss::SYSTEM_PROMPT.to_owned(),
+    );
+    let reply = app.runners[&provider]
         .call(&spec, &prompt, DISCUSS_TIMEOUT)
         .await?;
     Ok(Json(Discussed {
@@ -709,6 +725,61 @@ async fn client_log(Json(body): Json<ClientLog>) -> ApiResult<()> {
         ClientLogKind::Speech => tracing::info!(target: "workshop::client", "speech: {message}"),
     }
     Ok(Json(()))
+}
+
+/// The model choices, with what each provider offers.
+#[derive(Serialize)]
+struct ModelsState {
+    providers: Vec<ProviderOption>,
+    settings: ModelSettings,
+    /// The models to choose between in the Discuss tab.
+    discuss_models: Vec<String>,
+}
+
+fn models_state(app: &App) -> ModelsState {
+    let settings = app.model_settings();
+    ModelsState {
+        providers: models::options(&app.config),
+        discuss_models: models::discuss_models(&app.config, &settings.discuss_provider),
+        settings,
+    }
+}
+
+async fn get_models(State(app): State<Shared>) -> ApiResult<ModelsState> {
+    Ok(Json(models_state(&app)))
+}
+
+async fn set_models(
+    State(app): State<Shared>,
+    Json(settings): Json<ModelSettings>,
+) -> ApiResult<ModelsState> {
+    let invalid = |message: String| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": message }),
+        )
+    };
+    settings
+        .validate(&app.config)
+        .map_err(|e| invalid(format!("{e:#}")))?;
+    let options = models::options(&app.config);
+    for provider in [&settings.edit.provider, &settings.discuss_provider] {
+        if let Some(reason) = options
+            .iter()
+            .find(|o| &o.id == provider)
+            .and_then(|o| o.unavailable.clone())
+        {
+            return Err(invalid(reason));
+        }
+    }
+    settings.save(&app.paths)?;
+    *app.models
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = settings;
+    // Start the newly chosen edit model now, so the first edit with it is quick.
+    let warm = app.clone();
+    tokio::spawn(async move { warm.warm_edit_model().await });
+    Ok(Json(models_state(&app)))
 }
 
 async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {

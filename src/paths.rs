@@ -67,6 +67,10 @@ impl Paths {
         self.data_dir.join("workshop.log")
     }
 
+    pub fn model_settings_file(&self) -> PathBuf {
+        self.data_dir.join("models.json")
+    }
+
     pub fn state_file(&self) -> PathBuf {
         self.data_dir.join("state.json")
     }

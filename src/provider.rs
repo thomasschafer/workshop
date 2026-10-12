@@ -33,6 +33,30 @@ pub struct ProviderConfig {
     /// such as "luna" can be resolved to the newest model in that family.
     #[serde(default)]
     pub model_catalog: Option<Vec<String>>,
+    /// Shown when choosing a provider in the app.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Models offered in the app for editing and for discussion, best first.
+    #[serde(default)]
+    pub edit_models: Vec<String>,
+    #[serde(default)]
+    pub discuss_models: Vec<String>,
+    /// Fills an `{effort}` placeholder: how hard the model thinks for each kind of request.
+    #[serde(default)]
+    pub effort: Option<Effort>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Effort {
+    pub edit: String,
+    pub discuss: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Edit,
+    Discuss,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -84,9 +108,46 @@ pub fn builtin_providers() -> Result<Vec<(String, ProviderConfig)>> {
 }
 
 impl ProviderConfig {
+    /// A provider with just a command, for tests.
+    #[cfg(test)]
+    pub fn for_test(command: Vec<String>, input: InputMode, output: OutputMode) -> Self {
+        Self {
+            command,
+            input,
+            output,
+            prespawn: false,
+            version_command: None,
+            auth_check_command: None,
+            install_hint: None,
+            model_catalog: None,
+            name: None,
+            edit_models: Vec::new(),
+            discuss_models: Vec::new(),
+            effort: None,
+        }
+    }
+
+    pub fn spec(&self, role: Role, model: &str, system_prompt: String) -> CallSpec {
+        CallSpec {
+            model: model.to_owned(),
+            system_prompt,
+            effort: self.effort.as_ref().map(|e| match role {
+                Role::Edit => e.edit.clone(),
+                Role::Discuss => e.discuss.clone(),
+            }),
+        }
+    }
+
+    pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
+        self.name.as_deref().unwrap_or(id)
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.command.is_empty() {
             bail!("`command` must not be empty");
+        }
+        if self.command.iter().any(|arg| arg.contains("{effort")) && self.effort.is_none() {
+            bail!("`command` uses {{effort}}, so `effort` needs setting for edit and discuss");
         }
         let mentions_prompt = self.command.iter().any(|arg| arg.contains("{prompt}"));
         match self.input {
@@ -112,6 +173,7 @@ impl ProviderConfig {
 pub struct CallSpec {
     pub model: String,
     pub system_prompt: String,
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -146,6 +208,20 @@ impl ProviderRunner {
             spare: Mutex::new(None),
             resolved: Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// Writes the system prompt to a file, for CLIs that read their instructions from one. The
+    /// name is derived from the contents, so concurrent calls never see a half-written file.
+    fn system_prompt_file(&self, spec: &CallSpec) -> Result<String> {
+        let name = format!(
+            "system-prompt-{}.md",
+            crate::workspace::version_of(&spec.system_prompt)
+        );
+        let path = self.working_dir.join(name);
+        if !path.exists() {
+            crate::paths::write_atomic(&path, spec.system_prompt.as_bytes())?;
+        }
+        Ok(path.to_string_lossy().into_owned())
     }
 
     fn ensure_working_dir(&self) -> Result<()> {
@@ -263,16 +339,27 @@ impl ProviderRunner {
     }
 
     fn spawn(&self, spec: &CallSpec, prompt: Option<&str>) -> Result<GroupedChild> {
+        self.ensure_working_dir()?;
         let mut vars = Vars::new()
             .set("model", spec.model.clone())
             .set("system_prompt", spec.system_prompt.clone());
+        if self
+            .provider
+            .command
+            .iter()
+            .any(|arg| arg.contains("{system_prompt_file"))
+        {
+            vars = vars.set("system_prompt_file", self.system_prompt_file(spec)?);
+        }
+        if let Some(effort) = &spec.effort {
+            vars = vars.set("effort", effort.clone());
+        }
         if self.provider.input == InputMode::Argument {
             let prompt = prompt.context("argument input needs the prompt at spawn time")?;
             vars = vars.set("prompt", prompt);
         }
         let args = template::render_all(&self.provider.command, &vars)?;
         let (program, rest) = args.split_first().context("empty provider command")?;
-        self.ensure_working_dir()?;
         GroupedChild::spawn(
             process::command(program)
                 .args(rest)
@@ -620,14 +707,12 @@ mod tests {
     #[test]
     fn validation_catches_inconsistent_input() {
         let mut provider = ProviderConfig {
-            command: vec!["cli".into(), "{prompt}".into()],
-            input: InputMode::Argument,
-            output: OutputMode::Text,
             prespawn: false,
-            version_command: None,
-            auth_check_command: None,
-            install_hint: None,
-            model_catalog: None,
+            ..ProviderConfig::for_test(
+                vec!["cli".into(), "{prompt}".into()],
+                InputMode::Argument,
+                OutputMode::Text,
+            )
         };
         provider.validate().unwrap();
         provider.prespawn = true;
@@ -777,24 +862,23 @@ mod tests {
     async fn runs_stdin_text_provider_with_prespawn() {
         let dir = tempfile::tempdir().unwrap();
         let provider = ProviderConfig {
-            command: vec![
-                "sh".into(),
-                "-c".into(),
-                "printf '%s|' \"$0\"; cat".into(),
-                "{model}".into(),
-            ],
-            input: InputMode::Stdin,
-            output: OutputMode::Text,
             prespawn: true,
-            version_command: None,
-            auth_check_command: None,
-            install_hint: None,
-            model_catalog: None,
+            ..ProviderConfig::for_test(
+                vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "printf '%s|' \"$0\"; cat".into(),
+                    "{model}".into(),
+                ],
+                InputMode::Stdin,
+                OutputMode::Text,
+            )
         };
         let runner = ProviderRunner::new(provider, dir.path().to_owned()).unwrap();
         let spec = CallSpec {
             model: "m1".into(),
             system_prompt: "s".into(),
+            effort: None,
         };
         runner.warm(&spec).await.unwrap();
         for prompt in ["first", "second"] {
@@ -807,6 +891,7 @@ mod tests {
         let other = CallSpec {
             model: "m2".into(),
             system_prompt: "s".into(),
+            effort: None,
         };
         let reply = runner
             .call(&other, "third", Duration::from_secs(10))

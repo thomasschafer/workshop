@@ -833,3 +833,13 @@ code {
   padding: 4px 0;
   font-size: 13px;
 }
+
+.settings .label {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 10px 0 2px;
+}
+
+.chip:disabled {
+  opacity: 0.4;
+}

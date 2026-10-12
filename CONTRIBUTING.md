@@ -84,6 +84,8 @@ Dictation hints matter most. They're given to the edit model with every request,
 
 A provider describes a model CLI: the command to start it, how to send it the prompt, and how to read its reply. Built-in providers live in `providers/` and are registered in `src/provider.rs`; users can add their own under `[providers.<id>]` in their config.
 
+Besides `{model}` and `{system_prompt}`, `command` can use `{system_prompt_file}`, the path of a file holding the system prompt, for CLIs that read their instructions from a file, and `{effort}`.
+
 Every provider must run the model with tools disabled. The edit model must never be able to run commands or change files; it can only reply with text.
 
 Here is a provider for a hypothetical `acme` CLI that reads the prompt on stdin and prints its reply:
@@ -108,6 +110,12 @@ version_command = ["acme", "--version"]
 # Exits successfully only when logged in; used by `workshop doctor`.
 auth_check_command = ["acme", "whoami"]
 install_hint = "Install acme from https://example.com, then run `acme login`."
+# How the provider appears in the app's Settings, Models, and the models it offers there.
+name = "Acme"
+edit_models = ["acme-small", "acme-large"]
+discuss_models = ["acme-large"]
+# Optional: fills an {effort} placeholder in `command`, separately for edits and discussion.
+# effort = { edit = "low", discuss = "high" }
 
 [models.edit]
 provider = "acme"

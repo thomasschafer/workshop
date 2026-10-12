@@ -10,7 +10,9 @@ use serde::Deserialize;
 
 use crate::config::Config;
 use crate::edit::{self, CURSOR, EditOutcome};
-use crate::provider::{CallSpec, ProviderRunner};
+use crate::models::{ModelChoice, ModelSettings};
+use crate::paths::Paths;
+use crate::provider::{ProviderRunner, Role};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -105,9 +107,10 @@ fn normalise(text: &str) -> String {
 
 pub async fn run(
     config: &Config,
-    cache_dir: &Path,
+    paths: &Paths,
     path: &Path,
     filter: Option<&str>,
+    model: Option<ModelChoice>,
 ) -> Result<bool> {
     let source =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -126,12 +129,25 @@ pub async fn run(
         bail!("no cases match");
     }
 
-    let provider = config.providers[&config.models.edit.provider].clone();
-    let runner = ProviderRunner::new(provider, cache_dir.join("model-cwd"))?;
-    let spec = CallSpec {
-        model: config.models.edit.model.clone(),
-        system_prompt: edit::system_prompt(config.language()),
+    let choice = match model {
+        Some(choice) => choice,
+        None => ModelSettings::load(config, paths).edit,
     };
+    let provider = config
+        .providers
+        .get(&choice.provider)
+        .with_context(|| format!("there's no provider called {:?}", choice.provider))?;
+    let runner = ProviderRunner::new(provider.clone(), paths.cache_dir.join("model-cwd"))?;
+    let spec = provider.spec(
+        Role::Edit,
+        &choice.model,
+        edit::system_prompt(config.language()),
+    );
+    println!(
+        "Using {} through {}.\n",
+        choice.model,
+        provider.display_name(&choice.provider)
+    );
     runner.warm(&spec).await?;
 
     let (mut passed, mut cursor, mut failed, mut retries) = (0, 0, 0, 0);

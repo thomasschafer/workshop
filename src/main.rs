@@ -6,6 +6,7 @@ mod edit;
 mod eval;
 mod language;
 mod lsp;
+mod models;
 mod paths;
 mod process;
 mod provider;
@@ -54,6 +55,10 @@ enum Command {
         /// Only run cases whose name contains this.
         #[arg(long)]
         filter: Option<String>,
+        /// The model to check, as `provider:model` (such as `codex:luna`), instead of the one
+        /// chosen in the app.
+        #[arg(long)]
+        model: Option<String>,
     },
     /// Print the link, including the access token, for opening Workshop.
     Token {
@@ -86,8 +91,23 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
-        Command::Eval { cases, filter } => {
-            if !eval::run(&config, &paths.cache_dir, &cases, filter.as_deref()).await? {
+        Command::Eval {
+            cases,
+            filter,
+            model,
+        } => {
+            let model = model
+                .map(|m| {
+                    let (provider, model) = m
+                        .split_once(':')
+                        .context("give the model as `provider:model`, such as `codex:luna`")?;
+                    anyhow::Ok(models::ModelChoice {
+                        provider: provider.to_owned(),
+                        model: model.to_owned(),
+                    })
+                })
+                .transpose()?;
+            if !eval::run(&config, &paths, &cases, filter.as_deref(), model).await? {
                 std::process::exit(1);
             }
             Ok(())
