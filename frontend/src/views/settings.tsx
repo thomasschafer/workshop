@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import { api, type ModelsState, type Snippet } from "../api";
 import { Checks } from "./checks";
 import { ModelsSection } from "./models";
+import { ThemeSection } from "./theme";
 
 interface Props {
   snippets: Snippet[];
@@ -69,6 +70,7 @@ export function Settings({
 
       <section>
         <h2>Display</h2>
+        <ThemeSection />
         {keepScreenOn === null ? (
           <p class="muted">This browser can't keep the screen on.</p>
         ) : (

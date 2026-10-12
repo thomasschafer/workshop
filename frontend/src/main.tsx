@@ -2,6 +2,7 @@ import { render } from "preact";
 import { api } from "./api";
 import { App } from "./app";
 import "./styles.css";
+import { applyThemeCss } from "./theme";
 
 const root = document.getElementById("root");
 if (!root) {
@@ -21,7 +22,10 @@ window.addEventListener("unhandledrejection", (event) => {
 
 api
   .bootstrap()
-  .then((boot) => render(<App boot={boot} />, root))
+  .then((boot) => {
+    applyThemeCss(boot.theme_css);
+    render(<App boot={boot} />, root);
+  })
   .catch((error: unknown) => {
     root.innerHTML = "";
     const p = document.createElement("p");

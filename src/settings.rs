@@ -7,12 +7,15 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::models::ModelSettings;
 use crate::paths::{self, Paths};
+use crate::theme::ThemeSettings;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
     pub models: ModelSettings,
     pub language: String,
+    #[serde(default)]
+    pub theme: ThemeSettings,
 }
 
 impl AppSettings {
@@ -20,6 +23,7 @@ impl AppSettings {
         Self {
             models: ModelSettings::defaults(config),
             language: config.language_id.clone(),
+            theme: ThemeSettings::default(),
         }
     }
 
@@ -79,6 +83,7 @@ mod tests {
                 discuss_provider: "codex".into(),
             },
             language: "python".into(),
+            theme: ThemeSettings::default(),
         };
         chosen.save(&paths).unwrap();
         assert_eq!(AppSettings::load(&config, &paths), chosen);

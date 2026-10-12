@@ -15,6 +15,7 @@ mod server;
 mod settings;
 mod tailscale;
 mod template;
+mod theme;
 mod workspace;
 
 use std::net::SocketAddr;

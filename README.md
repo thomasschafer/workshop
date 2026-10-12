@@ -19,6 +19,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 - Run on the sample, run on your input, and submit, with a check against the sample's expected answer first.
 - Discuss mode: a coach that can see the puzzle and your code, won't edit anything, and won't give the answer away unless you ask.
 - Notes, snippets, and a commit-and-push button for your solutions repo.
+- Colours follow your system's light or dark mode, and can use any [Ghostty](https://ghostty.org) theme, matching your terminal if you like, or a base16 theme file placed in Workshop's `themes` folder.
 - Everything is saved as you go, so you can put the phone down and pick up where you left off, on the phone or at your desk.
 
 ## Requirements

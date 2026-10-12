@@ -897,3 +897,22 @@ code {
   font-size: 12px;
   word-break: break-all;
 }
+
+.theme-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.theme-picker select {
+  max-width: 60%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--mono);
+}

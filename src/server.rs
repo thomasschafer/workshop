@@ -145,6 +145,8 @@ pub fn router(app: Shared) -> Router {
         .route("/doctor", get(run_doctor))
         .route("/models", get(get_models).put(set_models))
         .route("/setup", get(setup_state))
+        .route("/themes", get(themes))
+        .route("/theme", put(set_theme))
         .route("/setup/language", put(set_language))
         .route("/setup/aoc-session", post(set_aoc_session))
         .route("/years/{year}/stars", get(stars))
@@ -319,6 +321,8 @@ struct Bootstrap {
     has_aoc_session: bool,
     /// Whether to show setup straight away, because something essential is missing.
     needs_setup: bool,
+    /// Overrides Workshop's colours with the chosen terminal themes.
+    theme_css: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -351,6 +355,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         snippets: app.config.snippets.clone(),
         models: models_state(&app),
         has_aoc_session: app.aoc.has_session(),
+        theme_css: theme_css(&app),
         needs_setup: !app.aoc.has_session()
             || models::options(&app.config)
                 .iter()
@@ -858,6 +863,51 @@ fn qr_svg(text: &str) -> Result<String> {
         .min_dimensions(220, 220)
         .quiet_zone(true)
         .build())
+}
+
+/// The stylesheet for the chosen themes. A theme that's gone missing shouldn't stop the app
+/// loading, so it falls back to Workshop's colours.
+fn theme_css(app: &App) -> Option<String> {
+    crate::theme::stylesheet(&app.paths, &app.settings().theme).unwrap_or_else(|err| {
+        tracing::warn!("using Workshop's colours: {err:#}");
+        None
+    })
+}
+
+#[derive(Serialize)]
+struct ThemesState {
+    names: Vec<String>,
+    /// The light and dark themes Ghostty uses, if its config sets one.
+    ghostty: Option<(String, String)>,
+    settings: crate::theme::ThemeSettings,
+}
+
+async fn themes(State(app): State<Shared>) -> ApiResult<ThemesState> {
+    Ok(Json(ThemesState {
+        names: crate::theme::available(&app.paths),
+        ghostty: crate::theme::ghostty_themes(),
+        settings: app.settings().theme,
+    }))
+}
+
+#[derive(Serialize)]
+struct ThemeApplied {
+    css: Option<String>,
+}
+
+async fn set_theme(
+    State(app): State<Shared>,
+    Json(theme): Json<crate::theme::ThemeSettings>,
+) -> ApiResult<ThemeApplied> {
+    // Checks the themes can be loaded before saving the choice.
+    let css = crate::theme::stylesheet(&app.paths, &theme).map_err(|e| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": format!("{e:#}") }),
+        )
+    })?;
+    app.update_settings(|s| s.theme = theme)?;
+    Ok(Json(ThemeApplied { css }))
 }
 
 #[derive(Deserialize)]

@@ -32,6 +32,24 @@ export interface Bootstrap {
   models: ModelsState;
   has_aoc_session: boolean;
   needs_setup: boolean;
+  theme_css: string | null;
+}
+
+/** What to use for light or dark mode. */
+export type ThemeChoice =
+  | { kind: "default" }
+  | { kind: "ghostty" }
+  | { kind: "named"; name: string };
+
+export interface ThemeSettings {
+  light: ThemeChoice;
+  dark: ThemeChoice;
+}
+
+export interface ThemesState {
+  names: string[];
+  ghostty: [string, string] | null;
+  settings: ThemeSettings;
 }
 
 export interface SetupState {
@@ -209,6 +227,8 @@ export const api = {
   doctor: () => request<Check[]>("GET", "/doctor"),
   setModels: (settings: ModelSettings) => request<ModelsState>("PUT", "/models", settings),
   setup: () => request<SetupState>("GET", "/setup"),
+  themes: () => request<ThemesState>("GET", "/themes"),
+  setTheme: (settings: ThemeSettings) => request<{ css: string | null }>("PUT", "/theme", settings),
   setLanguage: (language: string) => request<null>("PUT", "/setup/language", { language }),
   setAocSession: (session: string) => request<null>("POST", "/setup/aoc-session", { session }),
   stars: (year: number, refresh = false) =>
