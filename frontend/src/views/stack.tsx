@@ -18,8 +18,6 @@ interface Props {
 
 /** More than this many cards, and the middle ones fold into a count. */
 const MAX_SHOWN = 4;
-/** How far a card is swiped before letting go dismisses it. */
-const SWIPE_PX = 80;
 
 /**
  * Utterances as cards stacked above the controls: oldest at the top, leaving once done, and the
@@ -100,7 +98,17 @@ function CardView({
   onCancelReply: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const swipe = useSwipe(onDismiss, () => setExpanded((e) => !e));
+  // Long transcripts are cut short; tapping one shows the whole of what was said.
+  const transcript = (text: string) => (
+    <button
+      type="button"
+      class="card-transcript"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((x) => !x)}
+    >
+      “{text}”
+    </button>
+  );
   const { status } = card;
   const pill = status.kind === "waiting" || status.kind === "working";
   const tone =
@@ -116,8 +124,6 @@ function CardView({
     <div
       data-flip={String(card.id)}
       class={`card ${status.kind} ${tone} ${card.leaving ? "leaving" : ""} ${expanded ? "expanded" : ""}`}
-      style={swipe.style}
-      {...swipe.handlers}
     >
       {/* Keyed by status, so a change of status fades in rather than jumping. */}
       <div key={status.kind} class="card-body">
@@ -148,11 +154,11 @@ function CardView({
                   "Waiting"
                 )}
               </span>
-              {card.transcript ? <span class="card-transcript">“{card.transcript}”</span> : null}
+              {card.transcript ? transcript(card.transcript) : null}
             </>
           ) : (
             <>
-              {card.transcript ? <span class="card-transcript">“{card.transcript}”</span> : null}
+              {card.transcript ? transcript(card.transcript) : null}
               <span class="card-result">
                 {status.kind === "asked"
                   ? status.question
@@ -182,16 +188,12 @@ function CardView({
             </>
           )}
         </div>
-        {status.kind === "done" ? null : (
-          <button
-            type="button"
-            class="card-dismiss"
-            aria-label={pill ? "Cancel" : "Dismiss"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDismiss();
-            }}
-          >
+        {pill ? (
+          <button type="button" class="card-cancel" onClick={onDismiss}>
+            Cancel
+          </button>
+        ) : status.kind === "done" ? null : (
+          <button type="button" class="card-dismiss" aria-label="Dismiss" onClick={onDismiss}>
             ✕
           </button>
         )}
@@ -207,47 +209,4 @@ function Working({ label, since }: { label: string; since: number }) {
       {label} <span class="elapsed">· {(elapsed ?? 0).toFixed(1)}s</span>
     </>
   );
-}
-
-/** Dragging a card sideways to dismiss it; a tap without dragging does `onTap`. */
-function useSwipe(onDismiss: () => void, onTap: () => void) {
-  const start = useRef<{ x: number; y: number; pointer: number } | null>(null);
-  const [dx, setDx] = useState(0);
-  return {
-    style:
-      dx === 0
-        ? undefined
-        : { transform: `translateX(${dx}px)`, opacity: Math.max(0.2, 1 - Math.abs(dx) / 200) },
-    handlers: {
-      onPointerDown: (e: PointerEvent) => {
-        if ((e.target as HTMLElement).closest("button")) return;
-        start.current = { x: e.clientX, y: e.clientY, pointer: e.pointerId };
-      },
-      onPointerMove: (e: PointerEvent) => {
-        const from = start.current;
-        if (!from || from.pointer !== e.pointerId) return;
-        const moved = e.clientX - from.x;
-        // Mostly sideways: a vertical drag is someone scrolling.
-        if (Math.abs(moved) > 8 && Math.abs(moved) > Math.abs(e.clientY - from.y)) {
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          setDx(moved);
-        }
-      },
-      onPointerUp: () => {
-        if (!start.current) return;
-        start.current = null;
-        if (Math.abs(dx) > SWIPE_PX) {
-          // Stays where it was swiped to while it fades away.
-          onDismiss();
-          return;
-        }
-        if (Math.abs(dx) < 4) onTap();
-        setDx(0);
-      },
-      onPointerCancel: () => {
-        start.current = null;
-        setDx(0);
-      },
-    },
-  };
 }

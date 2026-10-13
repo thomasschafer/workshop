@@ -43,7 +43,7 @@ export function Help() {
         <p>
           Each thing you say gets a card above the button, showing what was heard and then what
           changed. You don't have to wait: keep talking, and later edits queue up behind earlier
-          ones. Swipe a card away, or tap its ✕, to cancel it.
+          ones. Tap Cancel on a card to drop it before it changes anything.
         </p>
       </section>
 

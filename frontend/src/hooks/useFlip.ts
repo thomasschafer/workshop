@@ -25,7 +25,8 @@ export function useFlip(container: RefObject<HTMLElement | null>): void {
       const top = child.offsetTop;
       next.set(child.dataset.flip, top);
       const before = previous.current.get(child.dataset.flip);
-      if (!before) {
+      // Explicitly undefined: the top child's position is 0.
+      if (before === undefined) {
         child.animate(
           reduceMotion
             ? [{ opacity: 0 }, { opacity: 1 }]

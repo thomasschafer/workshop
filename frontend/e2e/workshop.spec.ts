@@ -34,6 +34,17 @@ const editor = () => page.locator(".cm-content");
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ baseURL: `http://127.0.0.1:${PORT}` });
   await page.addInitScript(installSimulatedSpeech, 20);
+  // Counts cards animating in, to check one isn't replayed as words arrive.
+  await page.addInitScript(() => {
+    const animate = Element.prototype.animate;
+    const counts = { entrances: 0 };
+    Object.assign(window, { cardAnimations: counts });
+    Element.prototype.animate = function (keyframes, options) {
+      const first = Array.isArray(keyframes) ? keyframes[0] : undefined;
+      if (this.classList.contains("card") && first?.opacity === 0) counts.entrances++;
+      return animate.call(this, keyframes, options);
+    };
+  });
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
   await page.goto(`/?token=${token}`);
 });
@@ -307,4 +318,19 @@ test("keeps what was said when the button is pressed again straight away", async
   await expect(card("done").filter({ hasText: "“undo”" })).toContainText("Undone");
   await expect(card("done").filter({ hasText: "“redo”" })).toContainText("Redone");
   await expect(page.locator(".card", { hasText: "Didn't catch anything" })).toHaveCount(0);
+});
+
+test("shows what's being said in one card, without replaying it as words arrive", async () => {
+  await page.evaluate(() => {
+    (window as unknown as { cardAnimations: { entrances: number } }).cardAnimations.entrances = 0;
+  });
+  await hold("go to line one and then go to line two please", 1200);
+  await expect(
+    page.locator(".card", { hasText: "go to line one and then go to line two please" }),
+  ).toHaveClass(/\b(done|asked|problem)\b/);
+  const entrances = await page.evaluate(
+    () => (window as unknown as { cardAnimations: { entrances: number } }).cardAnimations.entrances,
+  );
+  // The listening card coming in; it then becomes the utterance's card, which doesn't.
+  expect(entrances).toBe(1);
 });

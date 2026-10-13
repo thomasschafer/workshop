@@ -1145,7 +1145,6 @@ code {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
   font-size: 13px;
   line-height: 1.4;
-  touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -1210,6 +1209,11 @@ code {
 }
 
 .card-transcript {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -1230,6 +1234,18 @@ code {
   align-items: baseline;
   gap: 4px 12px;
   margin-top: 2px;
+}
+
+.card-cancel {
+  flex: none;
+  align-self: center;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+  color: var(--error);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
 }
 
 .card-dismiss {
