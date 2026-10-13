@@ -35,7 +35,7 @@ import {
 } from "./utterances";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
-import { ConflictBanner, SheetFrame } from "./views/frame";
+import { ConflictBanner } from "./views/frame";
 import { Help } from "./views/help";
 import { Modal } from "./views/modal";
 import { MissingPackageBanner, OutdatedPackagesBanner } from "./views/packages";
@@ -55,6 +55,12 @@ import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
 type Sheet = "run" | "settings" | "help" | "setup" | null;
+
+/** How long an utterance waits for a puzzle's editor that's still loading. */
+const EDITOR_WAIT_MS = 10_000;
+
+/** The space kept clear below the code for the cards floating over it. */
+const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
 
 /** What an utterance needs besides its words. */
 interface UtteranceDetail {
@@ -116,6 +122,9 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<CodeEditor | null>(null);
+  // Utterances spoken while a puzzle's editor is still loading wait for it.
+  const editorWaiters = useRef<((editor: CodeEditor) => void)[]>([]);
+  const stackHeightRef = useRef(0);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
   const [lspStatus, setLspStatus] = useState<LanguageServerStatus>("connecting");
@@ -284,7 +293,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         const notesText = notes.recover();
         latest.current.notes = notesText;
         setNotes(notesText);
-        editor.current = new CodeEditor(host, {
+        const created = new CodeEditor(host, {
           doc: codeSaver.recover(),
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
@@ -306,6 +315,9 @@ export function App({ boot }: { boot: Bootstrap }) {
               prev.errors === d.errors && prev.warnings === d.warnings ? prev : d,
             ),
         });
+        created.setBottomInset(insetFor(stackHeightRef.current));
+        editor.current = created;
+        for (const waiter of editorWaiters.current.splice(0)) waiter(created);
       } catch (e) {
         if (!cancelled) setOpenError(message(e));
       }
@@ -525,12 +537,29 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
+  /** The editor, waiting for it if a puzzle is open but its editor is still loading. */
+  const editorReady = (): Promise<CodeEditor | null> => {
+    if (editor.current) return Promise.resolve(editor.current);
+    if (puzzleRef.current === null) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const waiter = (ready: CodeEditor) => {
+        clearTimeout(timer);
+        resolve(ready);
+      };
+      const timer = setTimeout(() => {
+        editorWaiters.current = editorWaiters.current.filter((w) => w !== waiter);
+        resolve(null);
+      }, EDITOR_WAIT_MS);
+      editorWaiters.current.push(waiter);
+    });
+  };
+
   const doEdit = async (
     job: Job<UtteranceDetail>,
     earlier: Exchange[],
     context: JobContext,
   ): Promise<Outcome> => {
-    const current = editor.current;
+    const current = await editorReady();
     if (!current) return warn("Open a puzzle first.");
     const { anchor, pieces } = job.detail;
     if (anchor?.editor === current) current.restore(anchor.anchor);
@@ -630,7 +659,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   const { hasSpeech, listening } = talk;
   // Keeps the code clear of the cards floating over its bottom edge.
   useEffect(() => {
-    editor.current?.setBottomInset(stackHeight > 0 ? stackHeight + 16 : 0);
+    stackHeightRef.current = stackHeight;
+    editor.current?.setBottomInset(insetFor(stackHeight));
   }, [stackHeight]);
   useEffect(() => {
     if (!hasSpeech) notify("warn", speechUnavailableReason());
@@ -837,7 +867,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           />
         ) : null}
         {sheet === "setup" ? (
-          <Modal title="Set up Workshop" onClose={() => setSheet(null)} full>
+          <Modal title="Set up Workshop" onClose={() => setSheet(null)} shape="full">
             <Setup
               models={models}
               onModels={setModels}
@@ -852,12 +882,12 @@ export function App({ boot }: { boot: Bootstrap }) {
           </Modal>
         ) : null}
         {sheet === "help" ? (
-          <Modal title="How Workshop works" onClose={() => setSheet(null)} full>
+          <Modal title="How Workshop works" onClose={() => setSheet(null)} shape="full">
             <Help />
           </Modal>
         ) : null}
         {sheet === "run" ? (
-          <SheetFrame title="Run" onClose={() => setSheet(null)}>
+          <Modal title="Run" onClose={() => setSheet(null)} shape="sheet">
             <RunSheet
               state={run}
               part={part}
@@ -871,10 +901,10 @@ export function App({ boot }: { boot: Bootstrap }) {
               hasSample={sampleInput(meta, part === 1 ? 0 : 1) !== null}
               onClaimFinalStar={() => void doSubmit("0")}
             />
-          </SheetFrame>
+          </Modal>
         ) : null}
         {sheet === "settings" ? (
-          <Modal title="Settings" onClose={() => setSheet(null)} full>
+          <Modal title="Settings" onClose={() => setSheet(null)} shape="full">
             <Settings
               snippets={boot.snippets}
               models={models}

@@ -168,11 +168,10 @@ export function RunSheet({
           {last.result.stderr.trim() ? <pre class="output">{last.result.stderr}</pre> : null}
           {last.result.answers.length > 2 ? <pre class="output">{last.result.stdout}</pre> : null}
         </div>
-      ) : (
+      ) : hasSample ? null : (
         <p class="muted">
-          {hasSample
-            ? "Line 1 of your program's output is the part 1 answer; line 2 is part 2."
-            : "No sample input is chosen. Tap code in the puzzle to use it as the sample, or run on your real input."}
+          No sample input is chosen. Tap code in the puzzle to use it as the sample, or run on your
+          real input.
         </p>
       )}
 

@@ -3,18 +3,24 @@ import { useLayoutEffect } from "preact/hooks";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
 
 /**
- * A centred card over a dimmed, blurred background, closed by tapping outside, Escape or going
- * back. A `full` modal fills the screen on phones, for longer content such as settings.
+ * How a modal sits on the screen: a centred `card`; `full`, filling the screen on phones, for
+ * longer content such as settings; or a `sheet` along the bottom, within reach of the thumb.
+ */
+export type ModalShape = "card" | "full" | "sheet";
+
+/**
+ * A dialog above everything else, over a dimmed, blurred background, closed by tapping outside,
+ * Escape or going back.
  */
 export function Modal({
   title,
   onClose,
-  full = false,
+  shape = "card",
   children,
 }: {
   title: string;
   onClose: () => void;
-  full?: boolean;
+  shape?: ModalShape;
   children: ComponentChildren;
 }) {
   useCloseOnBack(onClose);
@@ -29,8 +35,15 @@ export function Modal({
   }, [onClose]);
 
   return (
-    <div class={`modal-backdrop ${full ? "full" : ""}`}>
-      <button type="button" class="modal-dismiss" aria-label="Close" onClick={onClose} />
+    <div class={`modal-backdrop ${shape}`}>
+      {/* Tapping outside closes it; the ✕ and Escape are there for everyone else. */}
+      <button
+        type="button"
+        class="modal-dismiss"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={onClose}
+      />
       <div class="modal" role="dialog" aria-modal="true" aria-label={title}>
         <div class="sheet-header">
           <h1>{title}</h1>

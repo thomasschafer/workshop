@@ -104,6 +104,15 @@ test("runs what was said, even when run before the edit is made", async () => {
   await expect(card("working")).toContainText(/Editing · (0\.[5-9]|[1-9]\.\d)s/);
   await expect(page.locator(".talk")).toHaveText("Hold to talk");
   await page.getByRole("button", { name: "Run", exact: true }).click();
+  // The Run panel is above everything, cards included.
+  await expect(page.getByRole("dialog", { name: "Run" })).toBeVisible();
+  const box = await card("working").boundingBox();
+  if (!box) throw new Error("The working card isn't on screen.");
+  const onTop = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x ?? 0, y ?? 0)?.closest(".modal-backdrop") !== null,
+    [box.x + box.width / 2, box.y + box.height / 2],
+  );
+  expect(onTop).toBe(true);
   await page.getByRole("button", { name: "Run sample" }).click();
   await expect(page.locator(".run-result")).toContainText("Part 1: 7");
   await page.getByRole("button", { name: "Close" }).click();
@@ -333,4 +342,13 @@ test("shows what's being said in one card, without replaying it as words arrive"
   );
   // The listening card coming in; it then becomes the utterance's card, which doesn't.
   expect(entrances).toBe(1);
+});
+
+test("waits for the editor when something is said while a puzzle is still opening", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await page.reload();
+  // Straight away, before the editor has loaded.
+  await send("change it");
+  await expect(card("asked").filter({ hasText: "“change it”" })).toBeVisible();
+  await expect(page.locator(".card", { hasText: "Open a puzzle first" })).toHaveCount(0);
 });
