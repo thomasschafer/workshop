@@ -1105,8 +1105,11 @@ code {
   text-align: center;
 }
 
-/* A reply still being written ends in a blinking caret. */
-.turn.writing::after {
+/* A reply still being written ends in a blinking caret, at the end of its last line of text. */
+.turn.writing:not(.markdown)::after,
+.turn.writing > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+.turn.writing > :is(ul, ol):last-child > li:last-child::after,
+.turn.writing > pre:last-child > code::after {
   content: "▍";
   margin-left: 1px;
   color: var(--accent);
@@ -1120,7 +1123,84 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .turn.writing::after {
+  .turn.writing:not(.markdown)::after,
+  .turn.writing > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+  .turn.writing > :is(ul, ol):last-child > li:last-child::after,
+  .turn.writing > pre:last-child > code::after {
     animation: none;
   }
+}
+
+/* Coach replies, formatted from markdown. */
+.turn.markdown {
+  white-space: normal;
+  min-width: 0;
+}
+
+.markdown > * {
+  margin: 0 0 0.6em;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 2em;
+}
+
+.markdown li:not(:first-child) {
+  margin-top: 0.25em;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  font-size: 1em;
+  margin-top: 0.8em;
+}
+
+.markdown code {
+  font-size: 0.92em;
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.markdown pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown a {
+  color: var(--accent);
+}
+
+.markdown blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+  color: var(--muted);
+}
+
+.markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 2px 8px;
 }

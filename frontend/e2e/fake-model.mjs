@@ -23,8 +23,12 @@ async function reply(parts, pauseMs = 0) {
 const asked = prompt.match(/^Them: .*$/gm);
 if (asked) {
   const question = asked[asked.length - 1].replace(/^Them: /, "");
-  // In two parts, with time to see the first before the second.
-  await reply([`You asked "${question}", `, `after ${asked.length} question(s).`], 700);
+  if (question.includes("format")) {
+    await reply(["Some **clues**:\n\n1. Look at `seen`.\n", "2. Try a <b>set</b>.\n"], 700);
+  } else {
+    // In two parts, with time to see the first before the second.
+    await reply([`You asked "${question}", `, `after ${asked.length} question(s).`], 700);
+  }
   process.exit(0);
 }
 

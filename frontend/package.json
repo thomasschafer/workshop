@@ -22,6 +22,8 @@
     "@lezer/highlight": "^1.2.5",
     "@preact/signals": "^2.11.3",
     "codemirror": "^6.0.2",
+    "micromark": "^4.0.3",
+    "micromark-extension-gfm": "^3.0.0",
     "preact": "^11.0.1"
   },
   "devDependencies": {

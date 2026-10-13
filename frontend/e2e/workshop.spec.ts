@@ -101,6 +101,14 @@ test("discusses the puzzle, keeping the conversation", async () => {
   await expect(page.locator(".turn.coach").last()).toHaveText(
     'You asked "and part two", after 2 question(s).',
   );
+
+  // Replies are formatted from markdown as they're written, with any HTML in them shown as text.
+  await say("with some formatting please");
+  await expect(page.locator(".turn.coach.writing strong")).toHaveText("clues");
+  const formatted = page.locator(".turn.coach").last();
+  await expect(formatted.locator("ol li")).toHaveCount(2);
+  await expect(formatted.locator("code")).toHaveText("seen");
+  await expect(formatted).toContainText("Try a <b>set</b>.");
 });
 
 test("keeps everything across a reload", async () => {
@@ -108,7 +116,7 @@ test("keeps everything across a reload", async () => {
   await expect.poll(() => readFileSync(uiState, "utf8")).toMatch(/"tab": *"discuss"/);
   await page.reload();
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
-  await expect(page.locator(".turn")).toHaveCount(4);
+  await expect(page.locator(".turn")).toHaveCount(6);
   await page.getByRole("button", { name: "Clear" }).click();
   await expect(page.locator(".turn")).toHaveCount(0);
   await page.getByRole("button", { name: "Code", exact: true }).click();
