@@ -228,17 +228,22 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Sends a request, rejecting with an `ApiError` if the server says it failed. `keepalive` lets
- * a request finish after the page is hidden or closed, which is when the phone is put down.
- */
+interface RequestOptions {
+  /** Lets a request finish after the page is hidden or closed, which is when the phone is put down. */
+  keepalive?: boolean;
+  /** Abandons the request, such as when the user cancels what it was for. */
+  signal?: AbortSignal;
+}
+
+/** Sends a request, rejecting with an `ApiError` if the server says it failed. */
 async function send(
   method: string,
   path: string,
   body?: unknown,
-  { keepalive = false }: { keepalive?: boolean } = {},
+  { keepalive = false, signal }: RequestOptions = {},
 ): Promise<Response> {
   const init: RequestInit = { method, headers: {}, keepalive };
+  if (signal) init.signal = signal;
   if (body !== undefined) {
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);
@@ -260,7 +265,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  options: { keepalive?: boolean } = {},
+  options: RequestOptions = {},
 ): Promise<T> {
   const text = await (await send(method, path, body, options)).text();
   return (text ? JSON.parse(text) : null) as T;
@@ -334,7 +339,14 @@ export const api = {
     pieces: string[],
     recent: string | null,
     earlier: Exchange[],
-  ) => request<EditResult>("POST", "/edit", { doc, utterance, pieces, recent, earlier }),
+    signal?: AbortSignal,
+  ) =>
+    request<EditResult>(
+      "POST",
+      "/edit",
+      { doc, utterance, pieces, recent, earlier },
+      signal ? { signal } : {},
+    ),
   discuss: async (
     body: {
       year: number;

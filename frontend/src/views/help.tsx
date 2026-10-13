@@ -38,8 +38,12 @@ export function Help() {
         <p>
           Workshop only writes what you say. Ask it to write the solution for you and it will
           decline, and if it isn't sure what you meant it asks rather than guessing: tap Reply and
-          hold the button to answer, or just hold it to start afresh. The last thing you said and
-          what changed are shown above the button.
+          hold the button to answer, or just hold it to start afresh.
+        </p>
+        <p>
+          Each thing you say gets a card above the button, showing what was heard and then what
+          changed. You don't have to wait: keep talking, and later edits queue up behind earlier
+          ones. Swipe a card away, or tap its ✕, to cancel it.
         </p>
       </section>
 

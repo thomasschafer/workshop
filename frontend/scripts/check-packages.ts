@@ -90,10 +90,7 @@ async function check(
   await install.waitFor({ timeout: 600_000 });
   log(`offered: ${await banner.textContent()}`);
   await install.click();
-  await page
-    .locator(".feedback")
-    .getByText(`Installed ${test.package}`)
-    .waitFor({ timeout: 900_000 });
+  await page.locator(".card").getByText(`Installed ${test.package}`).waitFor({ timeout: 900_000 });
   log("installed");
   await page.locator(".status-line").getByText("no errors").waitFor({ timeout: 300_000 });
   log("the language server sees it");

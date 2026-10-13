@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { HOME, PORT } from "./fixture";
+import { installSimulatedSpeech } from "./speech";
 
 // The tests share one page and run in order, like one session with the app.
 test.describe.configure({ mode: "serial" });
@@ -10,17 +11,29 @@ let page: Page;
 const solution = join(HOME, "solutions", "2017", "day04", "main.py");
 const uiState = join(HOME, "data", "state.json");
 
-/** Says something, by typing it in place of speech, and waits for the reply. */
-async function say(text: string): Promise<void> {
+/** Says something, by typing it in place of speech, without waiting for what happens. */
+async function send(text: string): Promise<void> {
   await page.locator(".typed input").fill(text);
   await page.locator(".typed input").press("Enter");
-  await expect(page.locator(".talk.working")).toHaveCount(0, { timeout: 15_000 });
 }
+
+/** Says something and waits until its card shows what happened. */
+async function say(text: string): Promise<void> {
+  await send(text);
+  await expect(page.locator(".card", { hasText: `“${text}”` }).last()).toHaveClass(
+    /\b(done|asked|problem)\b/,
+    { timeout: 15_000 },
+  );
+}
+
+const card = (status: "waiting" | "working" | "done" | "asked" | "problem") =>
+  page.locator(`.card.${status}`);
 
 const editor = () => page.locator(".cm-content");
 
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ baseURL: `http://127.0.0.1:${PORT}` });
+  await page.addInitScript(installSimulatedSpeech, 20);
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
   await page.goto(`/?token=${token}`);
 });
@@ -45,7 +58,7 @@ test("opens a puzzle from the picker", async () => {
 test("edits by voice, and undoes without the model", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await say("return the number of lines");
-  await expect(page.locator(".feedback")).toContainText("returned the number of lines");
+  await expect(card("done").last()).toContainText("returned the number of lines");
   await expect(editor()).toContainText("return len(data.splitlines())");
 
   await say("undo");
@@ -56,7 +69,7 @@ test("edits by voice, and undoes without the model", async () => {
 
 test("replies to the model's question", async () => {
   await say("change it");
-  await expect(page.locator(".feedback")).toContainText("part 1 or part 2");
+  await expect(card("asked")).toContainText("part 1 or part 2");
   await page.getByRole("button", { name: "Reply" }).click();
   await expect(page.locator(".talk")).toHaveText("Hold to reply");
   await say("part two, make it return zero");
@@ -74,11 +87,11 @@ test("runs on the sample and the real input", async () => {
 });
 
 test("runs what was said, even when run before the edit is made", async () => {
-  await page.locator(".typed input").fill("slowly make it return seven");
-  await page.locator(".typed input").press("Enter");
-  // The button shows the edit is under way, and for how long.
-  await expect(page.locator(".talk")).toHaveText(/^Editing… \d+\.\ds$/);
-  await expect(page.locator(".talk")).toHaveText(/Editing… (0\.[5-9]|[1-9]\.\d)s/);
+  await send("slowly make it return seven");
+  // Its card shows the edit is under way, and for how long, leaving the button free.
+  await expect(card("working")).toContainText(/Editing · \d+\.\ds/);
+  await expect(card("working")).toContainText(/Editing · (0\.[5-9]|[1-9]\.\d)s/);
+  await expect(page.locator(".talk")).toHaveText("Hold to talk");
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await page.getByRole("button", { name: "Run sample" }).click();
   await expect(page.locator(".run-result")).toContainText("Part 1: 7");
@@ -87,9 +100,27 @@ test("runs what was said, even when run before the edit is made", async () => {
   await expect(editor()).toContainText("return len(data.splitlines())");
 });
 
+test("queues utterances as cards, and cancels them before or during their edit", async () => {
+  await send("slowly make it return seven");
+  await send("change it");
+  await expect(card("working")).toContainText("slowly make it return seven");
+  await expect(card("waiting")).toContainText("change it");
+
+  // Cancelled while waiting, it never runs.
+  await card("waiting").getByRole("button", { name: "Cancel" }).click();
+  await expect(card("waiting")).toHaveCount(0);
+  // Cancelled while being edited, the code is left alone.
+  await card("working").getByRole("button", { name: "Cancel" }).click();
+  await expect(card("working")).toHaveCount(0);
+  // Past when the slow edit would have landed.
+  await page.waitForTimeout(2000);
+  await expect(editor()).toContainText("return len(data.splitlines())");
+  await expect(card("asked")).toHaveCount(0);
+});
+
 test("discusses the puzzle, keeping the conversation", async () => {
   await page.getByRole("button", { name: "Discuss", exact: true }).click();
-  await say("why is part one wrong");
+  await send("why is part one wrong");
   // The reply appears as it's written.
   await expect(page.locator(".turn.coach.writing")).toHaveText(
     'You asked "why is part one wrong", ',
@@ -103,7 +134,7 @@ test("discusses the puzzle, keeping the conversation", async () => {
   );
 
   // Replies are formatted from markdown as they're written, with any HTML in them shown as text.
-  await say("with some formatting please");
+  await send("with some formatting please");
   await expect(page.locator(".turn.coach.writing strong")).toHaveText("clues");
   const formatted = page.locator(".turn.coach").last();
   await expect(formatted.locator("ol li")).toHaveCount(2);
@@ -167,7 +198,7 @@ test("offers to install a missing package, and uses it", async () => {
 
   await expect(page.locator(".banner")).toContainText("lanterns isn't installed.");
   await page.getByRole("button", { name: "Install lanterns" }).click();
-  await expect(page.locator(".feedback")).toContainText("Installed lanterns");
+  await expect(page.locator(".card", { hasText: "Installed lanterns" })).toBeVisible();
   await expect(page.locator(".banner")).toHaveCount(0);
   expect(readFileSync(join(HOME, "solutions", "python-packages.txt"), "utf8")).toMatch(
     /^lanterns$/m,
@@ -253,4 +284,27 @@ if __name__ == "__main__":
   await expect(page.locator(".problem")).toContainText("Part Two");
   await page.getByRole("button", { name: "Start again" }).click();
   await expect(page.locator(".problem")).not.toContainText("Part Two");
+});
+
+/** Holds the talk button while "saying" `text`, letting go after `ms`. */
+async function hold(text: string, ms: number): Promise<void> {
+  await page.evaluate((t) => {
+    (window as unknown as { demoSpeech: { text: string } }).demoSpeech.text = t;
+  }, text);
+  const box = await page.locator(".talk").boundingBox();
+  if (!box) throw new Error("The talk button isn't visible.");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(ms);
+  await page.mouse.up();
+}
+
+test("keeps what was said when the button is pressed again straight away", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await hold("undo", 300);
+  // Before the first press's last words have arrived.
+  await hold("redo", 300);
+  await expect(card("done").filter({ hasText: "“undo”" })).toContainText("Undone");
+  await expect(card("done").filter({ hasText: "“redo”" })).toContainText("Redone");
+  await expect(page.locator(".card", { hasText: "Didn't catch anything" })).toHaveCount(0);
 });

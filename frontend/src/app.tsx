@@ -11,13 +11,13 @@ import {
 } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
 import {
+  type Anchor,
   CodeEditor,
   type Diagnostics,
   hoverText,
   LanguageServerConnection,
   type LanguageServerStatus,
 } from "./editor";
-import type { Feedback } from "./feedback";
 import { useDiscussion } from "./hooks/useDiscussion";
 import { usePackages } from "./hooks/usePackages";
 import { usePushToTalk } from "./hooks/usePushToTalk";
@@ -26,6 +26,13 @@ import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleLabel, puzzleTitle } from "./puzzle";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
+import {
+  type Job,
+  type JobContext,
+  type Outcome,
+  type Card as UtteranceCard,
+  UtteranceQueue,
+} from "./utterances";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
 import { ConflictBanner, SheetFrame } from "./views/frame";
@@ -43,9 +50,21 @@ import {
 } from "./views/run";
 import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
+import { Stack } from "./views/stack";
+import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
 type Sheet = "run" | "settings" | "help" | "setup" | null;
+
+/** What an utterance needs besides its words. */
+interface UtteranceDetail {
+  /** The speech recogniser's own pieces, when it revised what it heard. */
+  pieces: string[];
+  /** The edit model's earlier questions, when this answers one. */
+  earlier: Exchange[] | null;
+  /** Where the cursor was when it was spoken. */
+  anchor: { editor: CodeEditor; anchor: Anchor } | null;
+}
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -70,7 +89,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [problemError, setProblemError] = useState<string | null>(null);
   const [problemLoading, setProblemLoading] = useState(false);
 
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [cards, setCards] = useState<UtteranceCard[]>([]);
+  const [stackHeight, setStackHeight] = useState(0);
   const [diagnostics, setDiagnostics] = useState<Diagnostics>({ errors: 0, warnings: 0 });
   const [hover, setHover] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -89,9 +109,9 @@ export function App({ boot }: { boot: Bootstrap }) {
         : "",
     };
   });
-  // The edit model's latest question, with the requests that led to it, and whether the user
-  // has chosen to reply to it rather than start afresh.
-  const [question, setQuestion] = useState<Exchange[] | null>(null);
+  // The edit model's latest question: its card, and the requests that led to it. Replying to it
+  // sends the next utterance as the answer, rather than starting afresh.
+  const [question, setQuestion] = useState<{ card: number; exchanges: Exchange[] } | null>(null);
   const [replying, setReplying] = useState(false);
 
   const editorHost = useRef<HTMLDivElement>(null);
@@ -113,7 +133,21 @@ export function App({ boot }: { boot: Bootstrap }) {
   const fileUri = useRef<string | null>(null);
   const metaRef = useRef(meta);
   const puzzleRef = useRef(puzzle);
-  const queue = useRef<Promise<void>>(Promise.resolve());
+  // Utterances are handled one at a time, in the order they were spoken. The handler is set
+  // each render, so it sees the latest state.
+  const handleUtterance = useRef<
+    (job: Job<UtteranceDetail>, context: JobContext) => Promise<Outcome>
+  >(async () => ({ kind: "cancelled" }));
+  const queue = useMemo(
+    () =>
+      new UtteranceQueue<UtteranceDetail>(
+        (job, context) => handleUtterance.current(job, context),
+        setCards,
+        ({ detail: { anchor } }) => anchor?.editor.release(anchor.anchor),
+      ),
+    [],
+  );
+  const notify = (tone: "ok" | "info" | "warn" | "error", text: string) => queue.notify(tone, text);
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const wakeLock = useMemo(() => new ScreenWakeLock(), []);
@@ -133,7 +167,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       saver = new LatestSaver<DayMeta>(
         (meta, keepalive) => api.saveMeta(p, meta, keepalive),
         600,
-        (e) => setFeedback({ kind: "error", text: `Couldn't save, retrying: ${e}` }),
+        (e) => notify("error", `Couldn't save, retrying: ${e}`),
       );
       metaSavers.current.set(key, saver);
     }
@@ -241,7 +275,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           opened.notes.text,
           (status, detail) => {
             if (status === "error") {
-              setFeedback({ kind: "error", text: `Couldn't save notes, retrying: ${detail}` });
+              notify("error", `Couldn't save notes, retrying: ${detail}`);
             }
           },
           setNotesConflict,
@@ -311,7 +345,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         // otherwise it saves them, which reports a conflict if the file changed.
         if (saver.current?.adopt(opened.code)) {
           current.replaceAll(opened.code.text);
-          setFeedback({ kind: "info", text: "Loaded code changed elsewhere." });
+          notify("info", "Loaded code changed elsewhere.");
         }
         if (notesSaver.current?.adopt(opened.notes)) {
           latest.current.notes = opened.notes.text;
@@ -350,7 +384,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
     try {
-      if (waitForEdits) await queue.current;
+      if (waitForEdits) await queue.idle();
       try {
         // The run reads the code and the chosen sample from the server.
         await saver.current?.flush();
@@ -413,20 +447,19 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  const installPackage = async (pkg: string, transcript?: string) => {
-    const said = transcript === undefined ? {} : { transcript };
-    setFeedback({ kind: "info", ...said, text: `Installing ${pkg}…` });
-    const installed = await packages.add(pkg);
-    setFeedback(
-      installed
-        ? { kind: "ok", ...said, text: `Installed ${pkg}` }
-        : { kind: "error", ...said, text: `Couldn't install ${pkg}; see Settings, Packages.` },
-    );
+  const installPackage = async (pkg: string) => {
+    if (await packages.add(pkg)) {
+      notify("ok", `Installed ${pkg}`);
+    } else {
+      notify("error", `Couldn't install ${pkg}; see Settings, Packages.`);
+    }
   };
 
-  const runCommand = (command: LocalCommand, transcript: string) => {
+  const done = (text: string): Outcome => ({ kind: "done", tone: "ok", text });
+  const warn = (text: string): Outcome => ({ kind: "problem", tone: "warn", text });
+
+  const runCommand = (command: LocalCommand): Outcome => {
     const current = editor.current;
-    const done = (text: string) => setFeedback({ kind: "ok", transcript, text });
     switch (command.kind) {
       case "undo":
         current?.undo();
@@ -443,12 +476,12 @@ export function App({ boot }: { boot: Bootstrap }) {
           setRun((r) => ({ ...r, confirmSubmit: true }));
           return done("Confirm to submit");
         }
-        return setFeedback({ kind: "warn", transcript, text: "Run on the real input first." });
+        return warn("Run on the real input first.");
       case "gotoLine":
         setTab("code");
         return current?.gotoLine(command.line)
           ? done(`Line ${command.line}`)
-          : setFeedback({ kind: "warn", transcript, text: `There's no line ${command.line}.` });
+          : warn(`There's no line ${command.line}.`);
       case "nextError":
         setTab("code");
         current?.nextError();
@@ -459,151 +492,149 @@ export function App({ boot }: { boot: Bootstrap }) {
         return done("Previous error");
       case "snippet": {
         const snippet = boot.snippets.find((s) => s.name === command.name);
-        if (snippet && current) {
-          current.insertSnippet(snippet.body);
-          return done(`Inserted ${snippet.name}`);
-        }
-        return;
+        if (!snippet || !current) return warn(`There's no snippet called ${command.name}.`);
+        current.insertSnippet(snippet.body);
+        return done(`Inserted ${snippet.name}`);
       }
       case "tab":
         setTab(command.tab);
         return done(`Showing ${command.tab}`);
       case "install": {
         if (boot.language.packages === null) {
-          return setFeedback({
-            kind: "warn",
-            transcript,
-            text: `${boot.language.name} has no packages to install.`,
-          });
+          return warn(`${boot.language.name} has no packages to install.`);
         }
+        // Installing can take a while, so it carries on in the background, shown in a banner.
         if (command.package !== null) {
-          void installPackage(command.package, transcript);
-          return;
+          void installPackage(command.package);
+          return { kind: "done", tone: "info", text: `Installing ${command.package}` };
         }
-        if (missing === null) {
-          return setFeedback({
-            kind: "warn",
-            transcript,
-            text: "Say which package, like “install package split”.",
-          });
-        }
+        if (missing === null) return warn("Say which package, like “install package split”.");
         void (async () => {
           const found = missing.package ?? (await packageFor(missing.module));
           if (found === null) {
-            setFeedback({
-              kind: "warn",
-              transcript,
-              text: `Couldn't find a package for ${missing.module}; add it in Settings, under Packages.`,
-            });
+            notify(
+              "warn",
+              `Couldn't find a package for ${missing.module}; add it in Settings, under Packages.`,
+            );
           } else {
-            await installPackage(found, transcript);
+            await installPackage(found);
           }
         })();
-        return;
+        return { kind: "done", tone: "info", text: `Installing the package for ${missing.module}` };
       }
     }
   };
 
-  /** `pieces` are the speech recogniser's own, when it revised what it heard. */
-  const doEdit = async (utterance: string, pieces: string[], earlier: Exchange[]) => {
+  const doEdit = async (
+    job: Job<UtteranceDetail>,
+    earlier: Exchange[],
+    context: JobContext,
+  ): Promise<Outcome> => {
     const current = editor.current;
-    if (!current) {
-      setFeedback({ kind: "warn", transcript: utterance, text: "Open a puzzle first." });
-      return;
-    }
-    let marked: string;
-    try {
-      marked = current.markedText();
-    } catch (e) {
-      setFeedback({ kind: "error", transcript: utterance, text: message(e) });
-      return;
-    }
+    if (!current) return warn("Open a puzzle first.");
+    const { anchor, pieces } = job.detail;
+    if (anchor?.editor === current) current.restore(anchor.anchor);
+    const marked = current.markedText();
     const before = current.text();
-    setFeedback({ kind: "pending", transcript: utterance, startedAt: performance.now() });
+    context.working("Editing");
     try {
-      const result = await api.edit(marked, utterance, pieces, current.recentInsertion, earlier);
+      const result = await api.edit(
+        marked,
+        job.text,
+        pieces,
+        current.recentInsertion,
+        earlier,
+        context.signal,
+      );
+      if (context.signal.aborted) return { kind: "cancelled" };
       if (editor.current !== current || current.text() !== before) {
-        setFeedback({
-          kind: "warn",
-          transcript: utterance,
-          text: "The code changed while I was thinking, so I left it alone.",
-        });
-        return;
+        return warn("The code changed while I was thinking, so I left it alone.");
       }
       const seconds = `${(result.elapsed_ms / 1000).toFixed(1)}s`;
       if (result.status === "applied") {
         current.applyMarked(result.doc, result.inserted);
-        setQuestion(null);
         const model = result.model ? ` · ${result.model.replace(/^claude-/, "")}` : "";
-        setFeedback({
-          kind: "ok",
-          transcript: utterance,
-          text: `${result.summary} · ${seconds}${model}`,
-        });
-      } else {
-        setQuestion([...earlier, { said: utterance, asked: result.message }]);
-        setFeedback({ kind: "warn", transcript: utterance, text: result.message });
+        return done(`${result.summary} · ${seconds}${model}`);
       }
+      setQuestion({
+        card: job.id,
+        exchanges: [...earlier, { said: job.text, asked: result.message }],
+      });
+      return { kind: "asked", question: result.message };
     } catch (e) {
-      api.log("error", `edit ${JSON.stringify(utterance)}: ${message(e)}`);
-      setFeedback({ kind: "error", transcript: utterance, text: message(e) });
+      if (context.signal.aborted) return { kind: "cancelled" };
+      api.log("error", `edit ${JSON.stringify(job.text)}: ${message(e)}`);
+      return { kind: "problem", tone: "error", text: message(e) };
     }
   };
 
-  const handleUtterance = async (text: string, pieces: string[], earlier: Exchange[] | null) => {
+  handleUtterance.current = async (job, context) => {
+    const { earlier, anchor } = job.detail;
     if (earlier) {
       // A reply to the edit model's question, wherever it was spoken from.
-      api.log("speech", `reply: ${text}`);
-      await doEdit(text, pieces, earlier);
-      return;
+      api.log("speech", `reply: ${job.text}`);
+      return doEdit(job, earlier, context);
     }
     const { tab, notes } = latest.current;
+    const command =
+      tab === "code" || tab === "problem"
+        ? matchCommand(
+            job.text,
+            boot.snippets.map((s) => s.name),
+          )
+        : null;
+    if (tab === "notes" || tab === "discuss" || command) {
+      // Not an edit, so where the cursor was doesn't matter.
+      if (anchor) anchor.editor.release(anchor.anchor);
+    }
     if (tab === "notes") {
-      api.log("speech", `notes: ${text}`);
-      updateNotes(notes ? `${notes.replace(/\s*$/, "")}\n${text}` : text);
-      setFeedback({ kind: "ok", transcript: text, text: "Added to notes" });
-      return;
+      api.log("speech", `notes: ${job.text}`);
+      updateNotes(notes ? `${notes.replace(/\s*$/, "")}\n${job.text}` : job.text);
+      return { kind: "done", tone: "info", text: "Added to notes" };
     }
     if (tab === "discuss") {
-      api.log("speech", `discuss: ${text}`);
-      setFeedback(null);
-      await discussion.send(text);
-      return;
+      api.log("speech", `discuss: ${job.text}`);
+      context.working("Asking the coach");
+      await discussion.send(job.text);
+      return { kind: "done", tone: "info", text: "Answered in Discuss" };
     }
-    const command = matchCommand(
-      text,
-      boot.snippets.map((s) => s.name),
-    );
     if (command) {
-      api.log("command", `${JSON.stringify(text)} -> ${JSON.stringify(command)}`);
-      runCommand(command, text);
-      return;
+      api.log("command", `${JSON.stringify(job.text)} -> ${JSON.stringify(command)}`);
+      return runCommand(command);
     }
-    setQuestion(null);
-    await doEdit(text, pieces, []);
+    return doEdit(job, [], context);
   };
 
-  // Utterances are handled one at a time, in the order they were spoken.
-  const enqueue = (text: string, pieces: string[] = []) => {
+  /** Queues what was said or typed. `card` is the card already shown while it was said. */
+  const enqueue = (text: string, pieces: string[] = [], card?: number) => {
     const { replying, question } = latest.current;
-    const earlier = replying && question ? question : null;
+    // Whether answering the question or starting afresh, the question's card has had its turn.
+    if (question) queue.dismiss(question.card);
+    setQuestion(null);
     setReplying(false);
-    // Each utterance handles its own errors; this catches any it misses, so one failure can't
-    // stop every later utterance, or a run waiting for them.
-    queue.current = queue.current
-      .then(() => handleUtterance(text, pieces, earlier))
-      .catch((e: unknown) => {
-        api.log("error", `utterance ${JSON.stringify(text)}: ${message(e)}`);
-        setFeedback({ kind: "error", transcript: text, text: message(e) });
-      });
+    const current = editor.current;
+    const detail: UtteranceDetail = {
+      pieces,
+      earlier: replying && question ? question.exchanges : null,
+      anchor: current ? { editor: current, anchor: current.anchor() } : null,
+    };
+    queue.enqueue(text, detail, card);
   };
 
   const talk = usePushToTalk({
     vocabulary: () => editor.current?.identifiers() ?? [],
-    onUtterance: enqueue,
-    onFeedback: setFeedback,
+    onStart: () => queue.reserveId(),
+    onUtterance: (id, text, pieces) => enqueue(text, pieces, id),
+    onNotice: notify,
   });
-  const { hasSpeech, listening, interim } = talk;
+  const { hasSpeech, listening } = talk;
+  // Keeps the code clear of the cards floating over its bottom edge.
+  useEffect(() => {
+    editor.current?.setBottomInset(stackHeight > 0 ? stackHeight + 16 : 0);
+  }, [stackHeight]);
+  useEffect(() => {
+    if (!hasSpeech) notify("warn", speechUnavailableReason());
+  }, []);
   // Typing commands is handy at a desk, and the only option without speech recognition.
   const showTyped = useMemo(
     () => !hasSpeech || window.matchMedia("(pointer: fine)").matches,
@@ -714,7 +745,22 @@ export function App({ boot }: { boot: Bootstrap }) {
         ))}
       </nav>
 
-      <main class="content">
+      <main class="content" style={{ "--stack-height": `${stackHeight}px` }}>
+        <Stack
+          cards={cards}
+          live={talk.live}
+          replyingTo={replying ? (question?.card ?? null) : null}
+          onDismiss={(id) => {
+            if (question?.card === id) {
+              setQuestion(null);
+              setReplying(false);
+            }
+            queue.dismiss(id);
+          }}
+          onReply={() => setReplying(true)}
+          onCancelReply={() => setReplying(false)}
+          onHeight={setStackHeight}
+        />
         {showPicker ? (
           <div class="pane">
             <Picker current={puzzle} hasSession={hasSession} onPick={openPuzzle} />
@@ -859,15 +905,11 @@ export function App({ boot }: { boot: Bootstrap }) {
 
       <Controls
         hidden={showPicker}
-        feedback={feedback}
         listening={listening}
-        interim={interim}
         hasSpeech={hasSpeech}
         showTyped={showTyped}
-        question={question}
         replying={replying}
-        onReplying={setReplying}
-        onSay={enqueue}
+        onSay={(text) => enqueue(text)}
         onTalkStart={talk.start}
         onTalkEnd={() => void talk.stop()}
         onUndo={() => editor.current?.undo()}

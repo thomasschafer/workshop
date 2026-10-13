@@ -132,13 +132,26 @@ export interface EditorOptions {
   onDiagnostics: (diagnostics: Diagnostics) => void;
 }
 
+/** Where the cursor was when an utterance was spoken. */
+export interface Anchor {
+  readonly id: number;
+  /** How many times the user had moved the cursor themselves by then. */
+  readonly moves: number;
+}
+
 export class CodeEditor {
   readonly view: EditorView;
   private readonly inputMode = new Compartment();
   private readonly wrapping = new Compartment();
+  private readonly inset = new Compartment();
   private flashTimer: number | undefined;
   /** The text most recently inserted by voice, which "that" refers to. */
   recentInsertion: string | null = null;
+  /** Anchored cursor positions, kept up to date as the text changes. */
+  private readonly anchors = new Map<number, number>();
+  private nextAnchor = 1;
+  /** How many times the user has moved the cursor themselves, by tapping or with keys. */
+  private userMoves = 0;
 
   constructor(parent: HTMLElement, options: EditorOptions) {
     const language = LANGUAGES[options.mode];
@@ -158,11 +171,20 @@ export class CodeEditor {
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         theme,
         this.wrapping.of(options.lineWrapping ? EditorView.lineWrapping : []),
+        this.inset.of([]),
         changedField,
         language ? language() : [],
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],
         this.inputMode.of(EditorView.contentAttributes.of({ inputmode: "none" })),
         EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            for (const [id, pos] of this.anchors) {
+              this.anchors.set(id, update.changes.mapPos(pos, 1));
+            }
+          }
+          if (update.transactions.some((tr) => tr.isUserEvent("select"))) {
+            this.userMoves++;
+          }
           if (update.docChanged) {
             options.onChange(update.state.doc.toString());
             const userTyped = update.transactions.some(
@@ -193,6 +215,19 @@ export class CodeEditor {
     if (enabled) {
       this.view.focus();
     }
+  }
+
+  /**
+   * Keeps the bottom `px` of the editor clear, for things floating over it, so the end of the
+   * file can be scrolled above them and the cursor is never hidden behind them.
+   */
+  setBottomInset(px: number): void {
+    this.view.dispatch({
+      effects: this.inset.reconfigure([
+        EditorView.scrollMargins.of(() => ({ bottom: px })),
+        EditorView.contentAttributes.of({ style: `padding-bottom: ${px}px` }),
+      ]),
+    });
   }
 
   setLineWrapping(enabled: boolean): void {
@@ -284,6 +319,33 @@ export class CodeEditor {
 
   previousError(): void {
     previousDiagnostic(this.view);
+  }
+
+  /** Remembers where the cursor is now, following it as the text changes. */
+  anchor(): Anchor {
+    const id = this.nextAnchor++;
+    this.anchors.set(id, this.view.state.selection.main.head);
+    return { id, moves: this.userMoves };
+  }
+
+  /**
+   * Puts the cursor back where it was anchored, if the user has moved it themselves since.
+   * Otherwise it stays where it is, which is where any earlier edits left it, so utterances
+   * spoken one after another carry on from each other. The anchor is then forgotten.
+   */
+  restore(anchor: Anchor): void {
+    const pos = this.anchors.get(anchor.id);
+    this.anchors.delete(anchor.id);
+    if (pos === undefined || this.userMoves === anchor.moves) return;
+    this.view.dispatch({
+      selection: EditorSelection.cursor(Math.min(pos, this.view.state.doc.length)),
+      scrollIntoView: true,
+    });
+  }
+
+  /** Forgets an anchor that won't be used, such as for a cancelled utterance. */
+  release(anchor: Anchor): void {
+    this.anchors.delete(anchor.id);
   }
 
   /**

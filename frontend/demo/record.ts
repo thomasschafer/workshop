@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, devices, type Page } from "@playwright/test";
 import { writeHome } from "../e2e/fixture.ts";
+import { installSimulatedSpeech } from "../e2e/speech.ts";
 
 const PORT = 7898;
 const HOME = join(tmpdir(), "workshop-demo");
@@ -35,81 +36,6 @@ const INPUT = "5 8 13\n21 1\n2 2 2 2\n40\n9 9 9\n";
 /** Words spoken per second, roughly a relaxed speaking pace. */
 const WORDS_PER_SECOND = 3;
 
-/** Stands in for the browser's speech recognition, and shows taps, which videos don't. */
-function installDemoHelpers(wordsPerSecond: number): void {
-  const speech = { text: "" };
-  (window as unknown as { demoSpeech: typeof speech }).demoSpeech = speech;
-
-  class FakeRecognition {
-    lang = "";
-    continuous = false;
-    interimResults = false;
-    onresult: ((event: unknown) => void) | null = null;
-    onerror: ((event: unknown) => void) | null = null;
-    onend: (() => void) | null = null;
-    private timer: ReturnType<typeof setInterval> | undefined;
-    private heard = "";
-
-    start(): void {
-      const words = speech.text.split(" ");
-      let count = 0;
-      this.timer = setInterval(() => {
-        count++;
-        this.emit(words.slice(0, count).join(" "), false);
-        if (count >= words.length) clearInterval(this.timer);
-      }, 1000 / wordsPerSecond);
-    }
-
-    stop(): void {
-      clearInterval(this.timer);
-      this.emit(this.heard, true);
-      setTimeout(() => this.onend?.(), 50);
-    }
-
-    abort(): void {
-      clearInterval(this.timer);
-      this.onend?.();
-    }
-
-    private emit(transcript: string, isFinal: boolean): void {
-      this.heard = transcript;
-      const result = Object.assign([{ transcript }], { isFinal });
-      this.onresult?.({ results: { length: 1, 0: result } });
-    }
-  }
-  Object.assign(window, { SpeechRecognition: FakeRecognition, webkitSpeechRecognition: undefined });
-
-  window.addEventListener("pointerdown", (event) => {
-    const dot = document.createElement("div");
-    Object.assign(dot.style, {
-      position: "fixed",
-      left: `${event.clientX - 22}px`,
-      top: `${event.clientY - 22}px`,
-      width: "44px",
-      height: "44px",
-      borderRadius: "50%",
-      background: "rgba(255, 255, 255, 0.35)",
-      border: "2px solid rgba(255, 255, 255, 0.7)",
-      pointerEvents: "none",
-      zIndex: "9999",
-      transition: "opacity 300ms",
-    });
-    document.body.append(dot);
-    const shown = Date.now();
-    const hide = () => {
-      window.removeEventListener("pointerup", hide);
-      setTimeout(
-        () => {
-          dot.style.opacity = "0";
-          setTimeout(() => dot.remove(), 300);
-        },
-        Math.max(0, 250 - (Date.now() - shown)),
-      );
-    };
-    window.addEventListener("pointerup", hide);
-  });
-}
-
 async function tap(page: Page, selector: ReturnType<Page["locator"]>): Promise<void> {
   const box = await selector.boundingBox();
   if (!box) throw new Error(`Nothing to tap: ${selector}`);
@@ -132,12 +58,12 @@ async function say(page: Page, text: string): Promise<void> {
   const words = text.split(" ").length;
   await page.waitForTimeout((words / WORDS_PER_SECOND) * 1000 + 600);
   await page.mouse.up();
-  const editing = page.locator(".talk.working");
+  const editing = page.locator(".card.working");
   await editing.waitFor();
   await editing.waitFor({ state: "detached" });
-  const feedback = (await page.locator(".feedback").textContent()) ?? "";
-  if (/couldn't|failed|error/i.test(feedback)) {
-    throw new Error(`The edit for "${text}" failed: ${feedback}`);
+  const result = (await page.locator(".card").last().textContent()) ?? "";
+  if (!(await page.locator(".card.done").last().isVisible())) {
+    throw new Error(`The edit for "${text}" didn't land: ${result}`);
   }
 }
 
@@ -236,7 +162,7 @@ async function record(): Promise<string> {
       ...device,
       colorScheme: "dark",
     });
-    await context.addInitScript(installDemoHelpers, WORDS_PER_SECOND);
+    await context.addInitScript(installSimulatedSpeech, WORDS_PER_SECOND);
     // A phone screen is too narrow for the demo's longest line.
     await context.addInitScript(() => localStorage.setItem("workshop:line-wrapping", "true"));
     const page = await context.newPage();

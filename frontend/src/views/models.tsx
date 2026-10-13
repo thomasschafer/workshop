@@ -82,8 +82,8 @@ export function ModelsSection({ models, onModels, heading = true }: Props) {
         )}
       </div>
       <p class="muted small">
-        Changes apply straight away. After each edit, the model that made it and how long it took
-        are shown above the button.
+        Changes apply straight away. After each edit, its card shows the model that made it and how
+        long it took.
       </p>
       {unavailable.map((p) => (
         <p key={p.id} class="muted small">

@@ -164,7 +164,8 @@ code {
 .pane {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 16px 24px;
+  /* Clear of the cards floating over the bottom. */
+  padding: 12px 16px calc(24px + var(--stack-height, 0px));
   overscroll-behavior: contain;
 }
 
@@ -598,38 +599,6 @@ code {
   gap: 8px;
 }
 
-.feedback {
-  min-height: 42px;
-  font-size: 13px;
-  line-height: 1.4;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.feedback .transcript {
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.feedback.ok .result {
-  color: var(--ok);
-}
-
-.feedback.warn .result {
-  color: var(--warn);
-}
-
-.feedback.error .result {
-  color: var(--error);
-}
-
-.feedback.pending .result {
-  color: var(--muted);
-}
-
 .buttons {
   display: flex;
   align-items: center;
@@ -670,60 +639,6 @@ code {
 .talk.listening {
   transform: scale(0.97);
   box-shadow: 0 0 0 4px var(--selection);
-}
-
-/* A band of light sweeping across the button while the model edits. */
-.talk.working {
-  background:
-    linear-gradient(
-      105deg,
-      transparent 30%,
-      color-mix(in srgb, white 45%, transparent) 50%,
-      transparent 70%
-    )
-    0 0 / 250% 100% no-repeat,
-    var(--accent);
-  animation: talk-sweep 1.4s ease-in-out infinite;
-}
-
-.talk .elapsed {
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  opacity: 0.75;
-}
-
-@keyframes talk-sweep {
-  from {
-    background-position:
-      100% 0,
-      0 0;
-  }
-  to {
-    background-position:
-      -50% 0,
-      0 0;
-  }
-}
-
-/* A glow that fades out as an edit lands. */
-.talk.landed {
-  animation: talk-landed 0.9s ease-out;
-}
-
-@keyframes talk-landed {
-  from {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 70%, transparent);
-  }
-  to {
-    box-shadow: 0 0 0 14px transparent;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .talk.working,
-  .talk.landed {
-    animation: none;
-  }
 }
 
 /* Help */
@@ -1203,4 +1118,242 @@ code {
 .markdown td {
   border: 1px solid var(--border);
   padding: 2px 8px;
+}
+
+/* Utterances, as cards floating above the controls. */
+
+.stack {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.card {
+  pointer-events: auto;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--surface) 84%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  font-size: 13px;
+  line-height: 1.4;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.card-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 8px 9px 12px;
+  animation: card-content-in 180ms ease-out;
+}
+
+.card-mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--border);
+  color: var(--muted);
+}
+
+.card.ok .card-mark {
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: var(--ok);
+}
+
+.card.warn .card-mark {
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  color: var(--warn);
+}
+
+.card.error .card-mark {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
+  color: var(--error);
+}
+
+.card.working .card-mark {
+  background: none;
+}
+
+.card-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.card-label {
+  font-weight: 600;
+}
+
+.card-label .elapsed {
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-transcript {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card.expanded .card-transcript {
+  white-space: normal;
+}
+
+.card.error .card-result {
+  color: var(--error);
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 2px;
+}
+
+.card-dismiss {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.card.waiting {
+  opacity: 0.85;
+}
+
+/* A soft band of light passing over the card while the model works. */
+.card.working {
+  background-image: linear-gradient(
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, var(--accent) 16%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  animation: card-sweep 1.6s ease-in-out infinite;
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+/* What's being said: two lines, always showing the newest words, older ones fading upwards. */
+.card.listening {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  animation: listen-breathe 1.8s ease-in-out infinite;
+}
+
+.live-text {
+  height: 2.8em;
+  padding: 10px 14px;
+  box-sizing: content-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  font-size: 16px;
+  line-height: 1.4;
+  mask-image: linear-gradient(to bottom, transparent 0, black 0.9em);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 0.9em);
+}
+
+.card.folded {
+  align-self: center;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card.leaving {
+  pointer-events: none;
+  animation: card-leave 220ms ease-in forwards;
+}
+
+@keyframes card-content-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes card-leave {
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+}
+
+@keyframes card-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes listen-breathe {
+  50% {
+    box-shadow:
+      0 6px 24px rgba(0, 0, 0, 0.22),
+      0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card.working,
+  .card.listening,
+  .card-body {
+    animation: none;
+  }
+
+  .spinner {
+    animation-duration: 3s;
+  }
+
+  .card.leaving {
+    animation: card-fade 150ms ease-in forwards;
+  }
+}
+
+@keyframes card-fade {
+  to {
+    opacity: 0;
+  }
 }
