@@ -97,11 +97,6 @@ export function Picker({ current, hasSession, onPick }: Props) {
         >
           Practice puzzle
         </button>
-        <span class="muted small">
-          {hasSession
-            ? "A made-up puzzle, for trying things out."
-            : "A made-up puzzle to try Workshop on, with no Advent of Code login needed."}
-        </span>
       </div>
     </div>
   );

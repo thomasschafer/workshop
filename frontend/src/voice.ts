@@ -40,31 +40,49 @@ function recognitionConstructor(): RecognitionConstructor | null {
   return typeof ctor === "function" ? (ctor as RecognitionConstructor) : null;
 }
 
+/** Recognition results joined into one transcript. */
+export interface Joined {
+  text: string;
+  /**
+   * Whether joining took guesswork, because pieces restated or overlapped each other, rather
+   * than following on.
+   */
+  revised: boolean;
+}
+
 /**
  * Joins recognition results into one transcript. Most browsers give consecutive pieces of what
  * was said. Chrome on Android instead gives each result as its latest guess at everything said
  * so far, revisions included ("can you replace … with open", then "… with", then "… with open
  * (and …"). When every piece restates the same opening, the last piece is the transcript.
  */
-export function mergeSegments(segments: readonly string[]): string {
-  const pieces = segments.map((s) => s.trim().replace(/\s+/g, " ")).filter((s) => s !== "");
+export function joinSegments(segments: readonly string[]): Joined {
+  const pieces = cleanSegments(segments);
   const [first, ...rest] = pieces;
-  if (first === undefined) return "";
+  if (first === undefined) return { text: "", revised: false };
   const opening = openingWords(first);
   const restated = rest.length > 0 && rest.every((p) => openingWords(p).startsWith(opening));
-  if (restated) return pieces[pieces.length - 1] ?? "";
+  if (restated) return { text: pieces[pieces.length - 1] ?? "", revised: true };
 
   let text = "";
+  let revised = false;
   for (const piece of pieces) {
     const lower = text.toLowerCase();
     const pieceLower = piece.toLowerCase();
     if (pieceLower.startsWith(lower)) {
+      revised ||= lower !== "";
       text = piece;
-    } else if (!lower.endsWith(pieceLower)) {
+    } else if (lower.endsWith(pieceLower)) {
+      revised = true;
+    } else {
       text = `${text} ${piece}`;
     }
   }
-  return text.trim();
+  return { text: text.trim(), revised };
+}
+
+function cleanSegments(segments: readonly string[]): string[] {
+  return segments.map((s) => s.trim().replace(/\s+/g, " ")).filter((s) => s !== "");
 }
 
 /** The first two words, lower-cased, to recognise a piece that starts the sentence again. */
@@ -83,6 +101,30 @@ export function speechUnavailableReason(): string {
   return "This browser has no built-in speech recognition. Try Safari on iOS or Chrome on Android.";
 }
 
+/** One recognition session: a held button can span several, as browsers end them after a pause. */
+export interface SessionReport {
+  /** The session's latest results, as the browser reported them. */
+  results: string[];
+  /** How many times the browser reported results. */
+  events: number;
+  errors: string[];
+}
+
+/** What was heard while the button was held. */
+export interface Heard {
+  /** Workshop's reading of what was said. */
+  text: string;
+  /**
+   * The recogniser's pieces, in order, when it revised what it heard and joining them took
+   * guesswork; otherwise empty.
+   */
+  pieces: string[];
+  /** Why listening failed, if it did. */
+  error: string | null;
+  /** How listening went, for the log. */
+  report: { heldMs: number; sessions: SessionReport[] };
+}
+
 /** Stops restarting if the browser keeps ending recognition straight away, such as offline. */
 const MAX_RESTARTS = 30;
 
@@ -94,9 +136,9 @@ const MAX_RESTARTS = 30;
 export class PushToTalk {
   private recognition: Recognition | null = null;
   private held = false;
-  /** Transcripts of earlier sessions during this press. */
-  private finished: string[] = [];
-  private current = "";
+  /** The sessions during this press, with what each heard. */
+  private sessions: (SessionReport & { joined: Joined })[] = [];
+  private startedAt = 0;
   private error: string | null = null;
   private restarts = 0;
   private ended: Promise<void> = Promise.resolve();
@@ -115,8 +157,8 @@ export class PushToTalk {
     }
     this.cancel();
     this.held = true;
-    this.finished = [];
-    this.current = "";
+    this.sessions = [];
+    this.startedAt = performance.now();
     this.error = null;
     this.restarts = 0;
     this.onInterim = onInterim;
@@ -125,7 +167,7 @@ export class PushToTalk {
   }
 
   /** Stops listening and resolves with everything heard. */
-  async stop(): Promise<string> {
+  async stop(): Promise<Heard> {
     this.held = false;
     const recognition = this.recognition;
     if (recognition) {
@@ -133,10 +175,17 @@ export class PushToTalk {
       await this.ended;
     }
     this.recognition = null;
-    if (this.error) {
-      throw new Error(this.error);
-    }
-    return this.transcript();
+    const revised = this.sessions.some((s) => s.joined.revised);
+    const pieces = revised ? this.sessions.flatMap((s) => cleanSegments(s.results)) : [];
+    return {
+      text: this.transcript(),
+      pieces: pieces.filter((piece, i) => piece !== pieces[i - 1]),
+      error: this.error,
+      report: {
+        heldMs: Math.round(performance.now() - this.startedAt),
+        sessions: this.sessions.map(({ results, events, errors }) => ({ results, events, errors })),
+      },
+    };
   }
 
   cancel(): void {
@@ -146,7 +195,10 @@ export class PushToTalk {
   }
 
   private transcript(): string {
-    return [...this.finished, this.current].filter((t) => t !== "").join(" ");
+    return this.sessions
+      .map((s) => s.joined.text)
+      .filter((t) => t !== "")
+      .join(" ");
   }
 
   private startSession(Ctor: RecognitionConstructor): void {
@@ -164,17 +216,27 @@ export class PushToTalk {
         // Biasing is an optional improvement; recognition works without it.
       }
     }
+    const session = {
+      results: [] as string[],
+      events: 0,
+      errors: [] as string[],
+      joined: { text: "", revised: false },
+    };
+    this.sessions.push(session);
     recognition.onresult = (event) => {
       const segments: string[] = [];
       for (let i = 0; i < event.results.length; i++) {
         segments.push(event.results[i]?.[0]?.transcript ?? "");
       }
-      this.current = mergeSegments(segments);
+      session.results = segments;
+      session.events++;
+      session.joined = joinSegments(segments);
       this.onInterim(this.transcript());
     };
     this.ended = new Promise((resolve) => {
       let failed = false;
       recognition.onerror = (event) => {
+        session.errors.push(event.error);
         if (event.error === "no-speech" || event.error === "aborted") return;
         failed = true;
         this.error =
@@ -190,8 +252,6 @@ export class PushToTalk {
         if (this.held && !failed && this.restarts < MAX_RESTARTS) {
           // Ended by the browser while the button is still held: keep listening.
           this.restarts++;
-          if (this.current !== "") this.finished.push(this.current);
-          this.current = "";
           this.startSession(Ctor);
           // Whoever is waiting for the end now waits for the new session instead.
           void this.ended.then(resolve);

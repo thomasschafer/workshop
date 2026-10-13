@@ -62,12 +62,26 @@ pub struct Exchange {
     pub asked: String,
 }
 
+/// What the user said, as the speech recogniser heard it.
+#[derive(Debug, Clone, Copy)]
+pub struct Utterance<'a> {
+    /// Workshop's reading of what was said.
+    pub text: &'a str,
+    /// The recogniser's own pieces, in order, when it revised what it heard as the user spoke
+    /// and Workshop had to guess how they fit together. Empty otherwise.
+    pub pieces: &'a [String],
+}
+
 pub fn user_prompt(
     doc_with_cursor: &str,
-    utterance: &str,
+    utterance: Utterance,
     recent: Option<&str>,
     earlier: &[Exchange],
 ) -> String {
+    let Utterance {
+        text: utterance,
+        pieces,
+    } = utterance;
     let mut prompt = format!("File:\n```\n{doc_with_cursor}\n```\n");
     if let Some((number, line)) = cursor_line(doc_with_cursor) {
         prompt.push_str(&format!(
@@ -90,6 +104,14 @@ pub fn user_prompt(
         prompt.push_str(&format!(
             "Reply: {utterance}\nMake the edit the user meant by the utterance, now that the reply has answered your question."
         ));
+    }
+    if !pieces.is_empty() {
+        prompt.push_str(
+            "\n\nThe speech recogniser revised what it heard as they spoke, so that is only a guess at how its pieces fit together. Its pieces, in order:\n",
+        );
+        for (i, piece) in pieces.iter().enumerate() {
+            prompt.push_str(&format!("{}. {piece}\n", i + 1));
+        }
     }
     prompt
 }
@@ -556,12 +578,32 @@ mod tests {
     }
 
     #[test]
+    fn prompt_includes_the_recognisers_pieces_when_revised() {
+        let pieces = [
+            "add filter".to_owned(),
+            "add filter greater than 100".to_owned(),
+        ];
+        let prompt = user_prompt(
+            "a‸",
+            Utterance {
+                text: "add filter greater than 100",
+                pieces: &pieces,
+            },
+            None,
+            &[],
+        );
+        assert!(prompt.contains("Utterance: add filter greater than 100\n\nThe speech recogniser"));
+        assert!(prompt.ends_with("1. add filter\n2. add filter greater than 100\n"));
+    }
+
+    #[test]
     fn prompt_includes_earlier_questions() {
-        let plain = user_prompt("a‸", "add b", None, &[]);
+        let said = |text| Utterance { text, pieces: &[] };
+        let plain = user_prompt("a‸", said("add b"), None, &[]);
         assert!(plain.ends_with("Utterance: add b"));
         let reply = user_prompt(
             "a‸",
-            "the second one",
+            said("the second one"),
             Some("a"),
             &[Exchange {
                 said: "add it".into(),

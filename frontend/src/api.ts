@@ -328,8 +328,13 @@ export const api = {
       part,
       answer,
     }),
-  edit: (doc: string, utterance: string, recent: string | null, earlier: Exchange[]) =>
-    request<EditResult>("POST", "/edit", { doc, utterance, recent, earlier }),
+  edit: (
+    doc: string,
+    utterance: string,
+    pieces: string[],
+    recent: string | null,
+    earlier: Exchange[],
+  ) => request<EditResult>("POST", "/edit", { doc, utterance, pieces, recent, earlier }),
   discuss: async (
     body: {
       year: number;

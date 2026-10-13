@@ -504,7 +504,8 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  const doEdit = async (utterance: string, earlier: Exchange[]) => {
+  /** `pieces` are the speech recogniser's own, when it revised what it heard. */
+  const doEdit = async (utterance: string, pieces: string[], earlier: Exchange[]) => {
     const current = editor.current;
     if (!current) {
       setFeedback({ kind: "warn", transcript: utterance, text: "Open a puzzle first." });
@@ -520,7 +521,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     const before = current.text();
     setFeedback({ kind: "pending", transcript: utterance, startedAt: performance.now() });
     try {
-      const result = await api.edit(marked, utterance, current.recentInsertion, earlier);
+      const result = await api.edit(marked, utterance, pieces, current.recentInsertion, earlier);
       if (editor.current !== current || current.text() !== before) {
         setFeedback({
           kind: "warn",
@@ -549,11 +550,11 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  const handleUtterance = async (text: string, earlier: Exchange[] | null) => {
+  const handleUtterance = async (text: string, pieces: string[], earlier: Exchange[] | null) => {
     if (earlier) {
       // A reply to the edit model's question, wherever it was spoken from.
       api.log("speech", `reply: ${text}`);
-      await doEdit(text, earlier);
+      await doEdit(text, pieces, earlier);
       return;
     }
     const { tab, notes } = latest.current;
@@ -579,18 +580,18 @@ export function App({ boot }: { boot: Bootstrap }) {
       return;
     }
     setQuestion(null);
-    await doEdit(text, []);
+    await doEdit(text, pieces, []);
   };
 
   // Utterances are handled one at a time, in the order they were spoken.
-  const enqueue = (text: string) => {
+  const enqueue = (text: string, pieces: string[] = []) => {
     const { replying, question } = latest.current;
     const earlier = replying && question ? question : null;
     setReplying(false);
     // Each utterance handles its own errors; this catches any it misses, so one failure can't
     // stop every later utterance, or a run waiting for them.
     queue.current = queue.current
-      .then(() => handleUtterance(text, earlier))
+      .then(() => handleUtterance(text, pieces, earlier))
       .catch((e: unknown) => {
         api.log("error", `utterance ${JSON.stringify(text)}: ${message(e)}`);
         setFeedback({ kind: "error", transcript: text, text: message(e) });

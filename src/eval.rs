@@ -28,6 +28,9 @@ struct EvalFile {
 struct Case {
     name: String,
     utterance: String,
+    /// The speech recogniser's pieces, when it revised what it heard.
+    #[serde(default)]
+    pieces: Vec<String>,
     /// The file before the edit, with `‸` marking the cursor.
     before: String,
     /// The most recent insertion, which "that" refers to.
@@ -212,7 +215,10 @@ fn eval_files(path: &Path) -> Result<Vec<std::path::PathBuf>> {
 async fn run_case(runner: &ProviderRunner, spec: &CallSpec, case: &Case, totals: &mut Totals) {
     let prompt = edit::user_prompt(
         &case.before,
-        &case.utterance,
+        edit::Utterance {
+            text: &case.utterance,
+            pieces: &case.pieces,
+        },
         case.recent.as_deref(),
         &case.earlier,
     );
@@ -275,6 +281,7 @@ mod tests {
         Case {
             name: "c".into(),
             utterance: "u".into(),
+            pieces: Vec::new(),
             before: "a‸".into(),
             recent: None,
             earlier: Vec::new(),

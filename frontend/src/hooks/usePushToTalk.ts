@@ -6,8 +6,11 @@ import { PushToTalk, speechSupported } from "../voice";
 interface Options {
   /** Words to help recognition hear, such as identifiers in the file. */
   vocabulary: () => string[];
-  /** Called with what was heard once the button is released. */
-  onUtterance: (text: string) => void;
+  /**
+   * Called with what was heard once the button is released, and the recogniser's own pieces
+   * when it revised what it heard.
+   */
+  onUtterance: (text: string, pieces: string[]) => void;
   onFeedback: (feedback: Feedback) => void;
 }
 
@@ -44,19 +47,17 @@ export function usePushToTalk(options: Options) {
     if (!listeningRef.current) return;
     listeningRef.current = false;
     setListening(false);
-    try {
-      const text = await ptt.stop();
-      setInterim("");
-      if (text.trim()) {
-        latest.current.onUtterance(text.trim());
-      } else {
-        api.log("speech", "(nothing heard)");
-        latest.current.onFeedback({ kind: "info", text: "Didn't catch anything." });
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      api.log("error", `speech recognition: ${message}`);
-      latest.current.onFeedback({ kind: "error", text: message });
+    const heard = await ptt.stop();
+    setInterim("");
+    // Everything the browser reported, so a wrong edit can be traced to what was heard.
+    const { text, pieces, error, report } = heard;
+    api.log("speech", `heard ${JSON.stringify({ text, pieces, error, ...report })}`);
+    if (error) {
+      latest.current.onFeedback({ kind: "error", text: error });
+    } else if (text.trim()) {
+      latest.current.onUtterance(text.trim(), pieces);
+    } else {
+      latest.current.onFeedback({ kind: "info", text: "Didn't catch anything." });
     }
   };
 

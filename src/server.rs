@@ -710,6 +710,9 @@ struct EditBody {
     /// The document with the cursor marked by `‸`.
     doc: String,
     utterance: String,
+    /// The speech recogniser's pieces, when it revised what it heard.
+    #[serde(default)]
+    pieces: Vec<String>,
     recent: Option<String>,
     /// Questions the model asked about earlier utterances, which this one answers.
     #[serde(default)]
@@ -727,7 +730,10 @@ struct Edited {
 async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> ApiResult<Edited> {
     let prompt = edit::user_prompt(
         &body.doc,
-        &body.utterance,
+        edit::Utterance {
+            text: &body.utterance,
+            pieces: &body.pieces,
+        },
         body.recent.as_deref(),
         &body.earlier,
     );
@@ -746,6 +752,7 @@ async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> Api
     };
     tracing::info!(
         utterance = %body.utterance,
+        pieces = ?body.pieces,
         recent = ?body.recent,
         earlier = ?body.earlier,
         elapsed_ms,

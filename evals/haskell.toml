@@ -845,3 +845,32 @@ main = getContents >>= print . part1
 
 part1 :: String -> Int
 part1 = sum . ‸''']
+
+# The recogniser revised what it heard, so its pieces are given as well as Workshop's guess
+
+[[case]]
+name = "pieces-revised-brackets"
+utterance = "add filter (greater than 100) before that"
+pieces = ["add filter", "add filter brackets", "add filter brackets greater than 100", "add filter (greater than 100) before that"]
+before = '''
+part1 :: String -> Int
+part1 = ‸map (sum . read . words) . lines'''
+after = '''
+part1 :: String -> Int
+part1 = ‸filter (> 100) . map (sum . read . words) . lines'''
+also = ['''
+part1 :: String -> Int
+part1 = filter (> 100) . ‸map (sum . read . words) . lines''']
+
+[[case]]
+name = "pieces-badly-joined"
+utterance = "new line where new line where and on the next new line where and on the next line solve equals undefined"
+pieces = ["new line where", "new line where and on the next", "new line where and on the next line solve equals undefined"]
+before = '''
+part2 :: String -> Int
+part2 = solve . map read . lines‸'''
+after = '''
+part2 :: String -> Int
+part2 = solve . map read . lines
+  where
+    solve = undefined‸'''
