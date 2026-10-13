@@ -33,6 +33,7 @@ import {
   type Card as UtteranceCard,
   UtteranceQueue,
 } from "./utterances";
+import { SpeechBench } from "./views/bench";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
@@ -54,7 +55,7 @@ import { Stack } from "./views/stack";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
-type Sheet = "run" | "settings" | "help" | "setup" | null;
+type Sheet = "run" | "settings" | "help" | "setup" | "bench" | null;
 
 /** How long an utterance waits for a puzzle's editor that's still loading. */
 const EDITOR_WAIT_MS = 10_000;
@@ -881,6 +882,11 @@ export function App({ boot }: { boot: Bootstrap }) {
             />
           </Modal>
         ) : null}
+        {sheet === "bench" ? (
+          <Modal title="Compare speech recognition" onClose={() => setSheet(null)} shape="full">
+            <SpeechBench />
+          </Modal>
+        ) : null}
         {sheet === "help" ? (
           <Modal title="How Workshop works" onClose={() => setSheet(null)} shape="full">
             <Help />
@@ -910,6 +916,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               models={models}
               onModels={setModels}
               onSetup={() => setSheet("setup")}
+              onBench={() => setSheet("bench")}
               commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
               keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
               onKeepScreenOn={(enabled) => {

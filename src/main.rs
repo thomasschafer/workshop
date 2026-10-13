@@ -1,4 +1,5 @@
 mod aoc;
+mod bench;
 mod config;
 mod discuss;
 mod doctor;

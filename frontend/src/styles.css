@@ -1403,3 +1403,48 @@ code {
     opacity: 0;
   }
 }
+
+/* Comparing speech recognition */
+
+.bench {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bench-phrase {
+  font-size: 18px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.bench-results {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bench-results th,
+.bench-results td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.bench-results th {
+  font-weight: 500;
+  color: var(--muted);
+  width: 38%;
+}
+
+.bench-keyboard {
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}

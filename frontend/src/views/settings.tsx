@@ -11,6 +11,8 @@ interface Props {
   models: ModelsState;
   onModels: (models: ModelsState) => void;
   onSetup: () => void;
+  /** Opens the comparison of speech recognition on this phone and computer. */
+  onBench: () => void;
   commitMessage: string;
   onInsertSnippet: (snippet: Snippet) => void;
   keepScreenOn: boolean | null;
@@ -25,6 +27,7 @@ export function Settings({
   models,
   onModels,
   onSetup,
+  onBench,
   commitMessage,
   onInsertSnippet,
   keepScreenOn,
@@ -113,6 +116,9 @@ export function Settings({
         <h2>Setup</h2>
         <button type="button" class="pill" onClick={onSetup}>
           Run setup again
+        </button>
+        <button type="button" class="pill" onClick={onBench}>
+          Compare speech recognition
         </button>
         <Checks />
       </section>

@@ -229,6 +229,9 @@ pub fn router(app: Shared) -> Router {
         .route("/packages/cancel", post(cancel_install))
         .route("/packages/resolve", post(resolve_package))
         .route("/practice/reset", post(reset_practice))
+        .route("/bench", get(bench_info))
+        .route("/bench/transcribe", post(bench_transcribe))
+        .route("/bench/result", post(bench_result))
         .route("/years/{year}/stars", get(stars))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
@@ -1488,4 +1491,88 @@ async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesRespon
 async fn reset_practice(State(app): State<Shared>) -> ApiResult<Problem> {
     app.aoc.reset_practice()?;
     Ok(Json(app.aoc.problem(Puzzle::PRACTICE, false).await?))
+}
+
+#[derive(Serialize)]
+struct BenchInfo {
+    whisper_installed: bool,
+    /// The Whisper models downloaded, smallest first.
+    models: Vec<String>,
+    /// Where to put models: whisper.cpp's `ggml-<name>.bin` files.
+    models_dir: String,
+}
+
+async fn bench_info(State(app): State<Shared>) -> ApiResult<BenchInfo> {
+    let whisper = crate::bench::Whisper::find(&app.paths.cache_dir);
+    Ok(Json(BenchInfo {
+        whisper_installed: whisper.is_some(),
+        models: whisper
+            .map(|w| w.models.into_iter().map(|(name, _)| name).collect())
+            .unwrap_or_default(),
+        models_dir: crate::bench::models_dir(&app.paths.cache_dir)
+            .display()
+            .to_string(),
+    }))
+}
+
+fn bench_dir(app: &App, session: &str) -> Result<std::path::PathBuf, ApiError> {
+    crate::bench::check_session(session).map_err(|e| bad_request(format!("{e:#}")))?;
+    let dir = app.paths.data_dir.join("bench").join(session);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    Ok(dir)
+}
+
+#[derive(Deserialize)]
+struct BenchTranscribe {
+    session: String,
+    phrase: u32,
+    /// What to prime Whisper with, such as the code's vocabulary.
+    prompt: String,
+}
+
+/// Transcribes a recording with every Whisper model, with and without the prompt, keeping the
+/// recording so it can be listened to and run again later.
+async fn bench_transcribe(
+    State(app): State<Shared>,
+    Query(query): Query<BenchTranscribe>,
+    wav: axum::body::Bytes,
+) -> ApiResult<Vec<crate::bench::Transcript>> {
+    if !wav.starts_with(b"RIFF") {
+        return Err(bad_request("The recording should be a WAV file."));
+    }
+    let Some(whisper) = crate::bench::Whisper::find(&app.paths.cache_dir) else {
+        return Err(bad_request(
+            "Whisper isn't installed on this computer: install whisper.cpp, such as with `brew install whisper-cpp`.",
+        ));
+    };
+    let path = bench_dir(&app, &query.session)?.join(format!("{:02}.wav", query.phrase));
+    crate::paths::write_atomic(&path, &wav)?;
+    let mut transcripts = Vec::new();
+    // One at a time, so the timings aren't skewed by models competing for the GPU.
+    for (model, _) in &whisper.models {
+        for prompt in [None, Some(query.prompt.as_str())] {
+            transcripts.push(whisper.transcribe(&path, model, prompt).await?);
+        }
+    }
+    Ok(Json(transcripts))
+}
+
+/// Appends a phrase's results to the session's file.
+async fn bench_result(
+    State(app): State<Shared>,
+    Json(result): Json<serde_json::Value>,
+) -> ApiResult<()> {
+    let session = result
+        .get("session")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| bad_request("The result needs its session."))?;
+    let path = bench_dir(&app, session)?.join("results.jsonl");
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    writeln!(file, "{result}").with_context(|| format!("writing {}", path.display()))?;
+    Ok(Json(()))
 }

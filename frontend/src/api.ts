@@ -73,6 +73,22 @@ export interface PackagesResponse {
   last_install: { succeeded: boolean; log: string[] } | null;
 }
 
+export interface BenchInfo {
+  whisper_installed: boolean;
+  /** Whisper models downloaded, smallest first. */
+  models: string[];
+  models_dir: string;
+}
+
+export interface WhisperTranscript {
+  model: string;
+  prompted: boolean;
+  text: string;
+  wall_ms: number;
+  load_ms: number | null;
+  total_ms: number | null;
+}
+
 /** What to use for light or dark mode. */
 export type ThemeChoice =
   | { kind: "default" }
@@ -244,7 +260,10 @@ async function send(
 ): Promise<Response> {
   const init: RequestInit = { method, headers: {}, keepalive };
   if (signal) init.signal = signal;
-  if (body !== undefined) {
+  if (body instanceof ArrayBuffer) {
+    init.headers = { "content-type": "audio/wav" };
+    init.body = body;
+  } else if (body !== undefined) {
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);
   }
@@ -381,6 +400,14 @@ export const api = {
     request<PackagesResponse>("POST", "/packages/remove", { package: pkg }),
   cancelInstall: () => request<null>("POST", "/packages/cancel"),
   resolvePackage: (module: string) => request<Resolution>("POST", "/packages/resolve", { module }),
+  bench: () => request<BenchInfo>("GET", "/bench"),
+  benchTranscribe: (session: string, phrase: number, prompt: string, wav: ArrayBuffer) =>
+    request<WhisperTranscript[]>(
+      "POST",
+      `/bench/transcribe?${new URLSearchParams({ session, phrase: String(phrase), prompt })}`,
+      wav,
+    ),
+  benchResult: (result: Record<string, unknown>) => request<null>("POST", "/bench/result", result),
   resetPractice: () => request<Problem>("POST", "/practice/reset"),
   gitSync: (message: string) => request<{ summary: string }>("POST", "/git/sync", { message }),
 };
