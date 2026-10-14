@@ -392,3 +392,21 @@ test("shows the puzzle beside the code on a wide screen", async () => {
   await expect(page.locator(".side")).toHaveCount(0);
   await expect(page.locator("nav.tabs").getByRole("button", { name: "Problem" })).toBeVisible();
 });
+
+test("waits for the server when it can't be reached, then carries on", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  // As if the server were asleep: nothing gets through.
+  await page.route("**/api/**", (route) => route.abort("connectionrefused"));
+  await send("change it");
+  await expect(page.locator(".banner.offline")).toBeVisible();
+  await expect(card("working").filter({ hasText: "“change it”" })).toContainText(
+    "Waiting for the server",
+  );
+  await page.unroute("**/api/**");
+  await expect(page.locator(".banner.offline")).toHaveCount(0, { timeout: 10_000 });
+  await expect(card("asked").filter({ hasText: "“change it”" })).toBeVisible();
+  await card("asked")
+    .filter({ hasText: "“change it”" })
+    .getByRole("button", { name: "Dismiss" })
+    .click();
+});

@@ -244,6 +244,52 @@ export class ApiError extends Error {
   }
 }
 
+/** The server couldn't be reached at all, as opposed to answering with an error. */
+export class ConnectionError extends Error {}
+
+/** Answers a proxy such as `tailscale serve` gives when the server behind it isn't running. */
+const UNREACHABLE = new Set([502, 503, 504]);
+
+/** Whether the server can be reached, as last seen by any request. */
+export class Connection {
+  private online = true;
+  private readonly listeners = new Set<(online: boolean) => void>();
+
+  get isOnline(): boolean {
+    return this.online;
+  }
+
+  /** Calls `listener` whenever the server is lost or found again, returning how to stop. */
+  subscribe(listener: (online: boolean) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  set(online: boolean): void {
+    if (online === this.online) return;
+    this.online = online;
+    for (const listener of this.listeners) listener(online);
+  }
+
+  /** Resolves once the server can be reached, or rejects if `signal` aborts first. */
+  whenOnline(signal?: AbortSignal): Promise<void> {
+    if (this.online) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const stop = this.subscribe((online) => {
+        if (!online) return;
+        stop();
+        resolve();
+      });
+      signal?.addEventListener("abort", () => {
+        stop();
+        reject(signal.reason);
+      });
+    });
+  }
+}
+
+export const connection = new Connection();
+
 interface RequestOptions {
   /** Lets a request finish after the page is hidden or closed, which is when the phone is put down. */
   keepalive?: boolean;
@@ -267,7 +313,19 @@ async function send(
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(`/api${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, init);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    connection.set(false);
+    throw new ConnectionError("Can't reach the server.");
+  }
+  if (UNREACHABLE.has(response.status)) {
+    connection.set(false);
+    throw new ConnectionError("Can't reach the server.");
+  }
+  connection.set(true);
   if (!response.ok) {
     const text = await response.text();
     const json: unknown = text ? JSON.parse(text) : null;
@@ -322,6 +380,8 @@ type DiscussEvent =
 const day = (p: Puzzle) => `/puzzles/${p.year}/${p.day}`;
 
 export const api = {
+  /** Checks the server can be reached; any answer from it will do. */
+  ping: () => request<null>("GET", "/ping"),
   bootstrap: () => request<Bootstrap>("GET", "/bootstrap"),
   saveState: (state: UiState, keepalive = false) =>
     request<null>("PUT", "/state", state, { keepalive }),

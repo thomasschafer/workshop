@@ -214,6 +214,7 @@ impl App {
 pub fn router(app: Shared) -> Router {
     let api = Router::new()
         .route("/bootstrap", get(bootstrap))
+        .route("/ping", get(ping))
         .route("/state", put(save_state))
         .route("/doctor", get(run_doctor))
         .route("/models", get(get_models).put(set_models))
@@ -1574,5 +1575,10 @@ async fn bench_result(
         .open(&path)
         .with_context(|| format!("opening {}", path.display()))?;
     writeln!(file, "{result}").with_context(|| format!("writing {}", path.display()))?;
+    Ok(Json(()))
+}
+
+/// Lets the app check the server can be reached, such as after it was asleep.
+async fn ping() -> ApiResult<()> {
     Ok(Json(()))
 }

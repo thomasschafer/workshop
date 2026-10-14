@@ -3,6 +3,7 @@ import {
   history,
   historyKeymap,
   indentWithTab,
+  isolateHistory,
   redo,
   undo,
 } from "@codemirror/commands";
@@ -256,6 +257,8 @@ export class CodeEditor {
       selection: EditorSelection.cursor(cursor),
       scrollIntoView: true,
       userEvent: "input.voice",
+      // Its own undo step, never merged with typing or another edit made just before.
+      annotations: isolateHistory.of("full"),
     });
     if (change) {
       const end = change.from + change.insert.length;
@@ -271,6 +274,7 @@ export class CodeEditor {
       selection: EditorSelection.cursor(from + body.length),
       scrollIntoView: true,
       userEvent: "input.snippet",
+      annotations: isolateHistory.of("full"),
     });
     this.recentInsertion = body;
     this.flash(from, from + body.length);

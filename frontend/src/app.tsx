@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks"
 import {
   api,
   type Bootstrap,
+  ConnectionError,
+  connection,
   type DayMeta,
   type Exchange,
   type Problem,
@@ -19,6 +21,7 @@ import {
   LanguageServerConnection,
   type LanguageServerStatus,
 } from "./editor";
+import { useConnection } from "./hooks/useConnection";
 import { useDiscussion } from "./hooks/useDiscussion";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePackages } from "./hooks/usePackages";
@@ -84,6 +87,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [tab, setTab] = useState<Tab>(boot.state.tab);
   // On a wide screen the puzzle has a column of its own, beside the other tabs.
   const wide = useMediaQuery("(min-width: 1000px)");
+  const online = useConnection();
   const shownTab: Tab = wide && tab === "problem" ? "code" : tab;
   const [models, setModels] = useState(boot.models);
   const [chosenDiscussModel, setDiscussModel] = useState(boot.state.discuss_model);
@@ -563,6 +567,27 @@ export function App({ boot }: { boot: Bootstrap }) {
     });
   };
 
+  /**
+   * Makes a request, and if the server can't be reached, waits until it can and tries again,
+   * so what was said while it was away isn't lost.
+   */
+  const untilReached = async <T,>(
+    context: JobContext,
+    label: string,
+    request: () => Promise<T>,
+  ): Promise<T> => {
+    for (;;) {
+      context.working(label);
+      try {
+        return await request();
+      } catch (e) {
+        if (!(e instanceof ConnectionError)) throw e;
+        context.working("Waiting for the server");
+        await connection.whenOnline(context.signal);
+      }
+    }
+  };
+
   const doEdit = async (
     job: Job<UtteranceDetail>,
     earlier: Exchange[],
@@ -574,15 +599,9 @@ export function App({ boot }: { boot: Bootstrap }) {
     if (anchor?.editor === current) current.restore(anchor.anchor);
     const marked = current.markedText();
     const before = current.text();
-    context.working("Editing");
     try {
-      const result = await api.edit(
-        marked,
-        job.text,
-        pieces,
-        current.recentInsertion,
-        earlier,
-        context.signal,
+      const result = await untilReached(context, "Editing", () =>
+        api.edit(marked, job.text, pieces, current.recentInsertion, earlier, context.signal),
       );
       if (context.signal.aborted) return { kind: "cancelled" };
       if (editor.current !== current || current.text() !== before) {
@@ -830,6 +849,11 @@ export function App({ boot }: { boot: Bootstrap }) {
             <Picker current={puzzle} hasSession={hasSession} onPick={openPuzzle} />
           </div>
         ) : null}
+        {online ? null : (
+          <div class="banner offline" role="status">
+            Can't reach the server. Is it running, and is this device connected to it? Trying again…
+          </div>
+        )}
         {openError && !showPicker ? <p class="pane error-text">{openError}</p> : null}
         {codeConflict && !showPicker ? (
           <ConflictBanner what="code" onResolve={resolveCodeConflict} />
