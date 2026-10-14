@@ -14,6 +14,9 @@ export class ServerDictation implements Listener {
   private startedAt = 0;
 
   private onDelay: (reason: string | null) => void = () => {};
+  /** Abandons hearing it, once it's been recorded. */
+  private readonly abandon = new AbortController();
+  private cancelled = false;
 
   start({ onListening, onLevel, onDelay = () => {} }: Listening) {
     this.startedAt = performance.now();
@@ -42,6 +45,7 @@ export class ServerDictation implements Listener {
     }
     const { wav, peak, report } = await audio.stop();
     const log = { heldMs, sessions: [], recording: report };
+    if (this.cancelled) return heard("", null, log);
     if (report.startMs === null && heldMs >= QUICK_PRESS_MS) {
       return heard(
         "",
@@ -53,6 +57,7 @@ export class ServerDictation implements Listener {
     try {
       return heard(await this.transcribe(wav), null, log);
     } catch (e) {
+      if (this.cancelled) return heard("", null, log);
       return heard("", `Couldn't hear that: ${e instanceof Error ? e.message : String(e)}`, log);
     }
   }
@@ -62,25 +67,33 @@ export class ServerDictation implements Listener {
    * it wakes up, so what was said isn't lost.
    */
   private async transcribe(wav: ArrayBuffer): Promise<string> {
-    const giveUp = AbortSignal.timeout(SERVER_WAIT_MS);
-    for (;;) {
-      try {
-        return (await api.transcribe(wav)).text;
-      } catch (e) {
-        if (!(e instanceof ConnectionError)) throw e;
-        this.onDelay("Waiting for the server…");
+    const signal = this.abandon.signal;
+    const giveUp = setTimeout(
+      () => this.abandon.abort(new Error("the server couldn't be reached")),
+      SERVER_WAIT_MS,
+    );
+    try {
+      for (;;) {
         try {
-          await connection.whenOnline(giveUp);
-        } catch {
-          throw new Error("the server couldn't be reached");
-        } finally {
-          this.onDelay(null);
+          return (await api.transcribe(wav, signal)).text;
+        } catch (e) {
+          if (!(e instanceof ConnectionError) || signal.aborted) throw signal.reason ?? e;
+          this.onDelay("Waiting for the server…");
+          try {
+            await connection.whenOnline(signal);
+          } finally {
+            this.onDelay(null);
+          }
         }
       }
+    } finally {
+      clearTimeout(giveUp);
     }
   }
 
   cancel(): void {
+    this.cancelled = true;
+    this.abandon.abort();
     const recording = this.recording;
     this.recording = null;
     recording?.then((audio) => audio.cancel()).catch(() => {});

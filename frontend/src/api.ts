@@ -499,7 +499,8 @@ export const api = {
   speech: () => request<SpeechState>("GET", "/speech"),
   downloadSpeechModel: () => request<SpeechState>("POST", "/speech/download"),
   cancelSpeechDownload: () => request<null>("POST", "/speech/download/cancel"),
-  transcribe: (wav: ArrayBuffer) => request<{ text: string }>("POST", "/speech/transcribe", wav),
+  transcribe: (wav: ArrayBuffer, signal?: AbortSignal) =>
+    request<{ text: string }>("POST", "/speech/transcribe", wav, signal ? { signal } : {}),
   bench: () => request<BenchInfo>("GET", "/bench"),
   benchTranscribe: (session: string, phrase: number, prompt: string, wav: ArrayBuffer) =>
     request<WhisperTranscript[]>(

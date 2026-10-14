@@ -31,6 +31,8 @@ interface Press {
   level: number | null;
   /** What's holding up hearing it, if anything, such as waiting for the server. */
   delay: string | null;
+  /** Cancelled after it was released, while it was still being heard. */
+  cancelled: boolean;
   startedAt: number;
   /** Settles once every earlier press has handed over what it heard. */
   after: Promise<void>;
@@ -106,6 +108,7 @@ export function usePushToTalk(options: Options) {
         listening: false,
         level: null,
         delay: null,
+        cancelled: false,
         startedAt: performance.now(),
         after,
         handedOver,
@@ -147,9 +150,12 @@ export function usePushToTalk(options: Options) {
     try {
       const { text, pieces, error, report } = await press.listener.stop();
       await press.after;
+      const cancelled = current.current.find((p) => p.id === press.id)?.cancelled ?? false;
       // Everything the browser reported, so a wrong edit can be traced to what was heard.
-      api.log("speech", `heard ${JSON.stringify({ text, pieces, error, ...report })}`);
-      if (error) {
+      api.log("speech", `heard ${JSON.stringify({ text, pieces, error, cancelled, ...report })}`);
+      if (cancelled) {
+        // Nothing more to say: the card just goes.
+      } else if (error) {
         latest.current.onNotice("error", error);
       } else if (text.trim()) {
         latest.current.onUtterance(press.id, text.trim(), pieces);
@@ -178,6 +184,14 @@ export function usePushToTalk(options: Options) {
     return () => document.removeEventListener("visibilitychange", hidden);
   }, []);
 
+  /** Abandons hearing a press that's been released, such as when the server is slow. */
+  const cancel = (id: number) => {
+    const press = current.current.find((p) => p.id === id && !p.held);
+    if (!press || press.cancelled) return;
+    update((presses) => presses.map((p) => (p.id === id ? { ...p, cancelled: true } : p)));
+    press.listener.cancel();
+  };
+
   const heldPress = presses.find((p) => p.held);
   return {
     /** The held press's phase, if the button is held. */
@@ -192,5 +206,6 @@ export function usePushToTalk(options: Options) {
     })),
     start,
     stop,
+    cancel,
   };
 }

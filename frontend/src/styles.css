@@ -1365,9 +1365,20 @@ code {
   position: relative;
 }
 
-/* Room for the level meter. */
+/* Room for the level meter, or Cancel. */
 .card.live.listening .live-text {
   padding-right: 52px;
+}
+
+.card.live.hearing .live-text {
+  padding-right: 84px;
+}
+
+.card.live .card-cancel {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .level-meter {

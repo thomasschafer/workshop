@@ -532,6 +532,22 @@ test("hears what's said with Whisper on the server, once its model is there", as
   await expect(transcripts.last()).toHaveText("“go to line two”");
   await expect(page.locator(".card", { hasText: "Couldn't hear" })).toHaveCount(0);
 
+  // Cancelled while it's waiting to be heard: it just goes, and nothing is done with it.
+  await page.route("**/api/**", (route) => route.abort("connectionrefused"));
+  await page.mouse.down();
+  await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
+  await page.waitForTimeout(300);
+  await page.mouse.up();
+  await expect(page.locator(".card.live")).toContainText("Waiting for the server…");
+  const heardBefore = await transcripts.count();
+  await page.locator(".card.live").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator(".card.live")).toHaveCount(0);
+  await page.unroute("**/api/**");
+  await page.waitForTimeout(1500);
+  expect(await transcripts.count()).toBeLessThanOrEqual(heardBefore);
+  await expect(page.locator(".card", { hasText: "Couldn't hear" })).toHaveCount(0);
+  await expect(page.locator(".card", { hasText: "Didn't catch" })).toHaveCount(0);
+
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator(".server-speech")).toContainText("Whisper is ready");
   await page.keyboard.press("Escape");

@@ -866,6 +866,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         <Stack
           cards={cards}
           live={talk.live}
+          onCancelLive={talk.cancel}
           replyingTo={replying ? (question?.card ?? null) : null}
           onAct={(id) => queue.act(id)}
           onDismiss={(id) => {

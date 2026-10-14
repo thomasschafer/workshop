@@ -14,6 +14,8 @@ interface Props {
     level: number | null;
     delay: string | null;
   }[];
+  /** Abandons hearing what was said, once the button's been released. */
+  onCancelLive: (id: number) => void;
   /** The card whose question is being answered, if any. */
   replyingTo: number | null;
   onDismiss: (id: number) => void;
@@ -35,6 +37,7 @@ const MAX_SHOWN = 4;
 export function Stack({
   cards,
   live,
+  onCancelLive,
   replyingTo,
   onDismiss,
   onAct,
@@ -91,6 +94,11 @@ export function Stack({
             <span>{delay ?? (text || LIVE_PROMPT[phase])}</span>
           </div>
           {phase === "listening" && level !== null ? <LevelMeter level={level} /> : null}
+          {phase === "hearing" ? (
+            <button type="button" class="card-cancel" onClick={() => onCancelLive(id)}>
+              Cancel
+            </button>
+          ) : null}
         </div>
       ))}
     </div>
