@@ -33,8 +33,17 @@ const PUZZLE = `<html><body><main>
 </main></body></html>`;
 const INPUT = "5 8 13\n21 1\n2 2 2 2\n40\n9 9 9\n";
 
-/** Words spoken per second, roughly a relaxed speaking pace. */
-const WORDS_PER_SECOND = 3;
+/** Words spoken per second, roughly a brisk speaking pace. */
+const WORDS_PER_SECOND = 3.5;
+
+/**
+ * How long, at most, the GIF shows the model working on an edit. Longer waits are sped up, so
+ * the demo keeps moving; the edit itself is shown as it happened.
+ */
+const MAX_SHOWN_WAIT_SECONDS = 1;
+
+/** When the model was working on an edit, in seconds since the epoch, as frames are timed. */
+const waits: [number, number][] = [];
 
 async function tap(page: Page, selector: ReturnType<Page["locator"]>): Promise<void> {
   const box = await selector.boundingBox();
@@ -56,43 +65,48 @@ async function say(page: Page, text: string): Promise<void> {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   const words = text.split(" ").length;
-  await page.waitForTimeout((words / WORDS_PER_SECOND) * 1000 + 600);
+  await page.waitForTimeout((words / WORDS_PER_SECOND) * 1000 + 300);
   await page.mouse.up();
   const editing = page.locator(".card.working");
   await editing.waitFor();
+  const started = Date.now() / 1000;
   await editing.waitFor({ state: "detached" });
+  waits.push([started, Date.now() / 1000]);
   const result = (await page.locator(".card").last().textContent()) ?? "";
   if (!(await page.locator(".card.done").last().isVisible())) {
     throw new Error(`The edit for "${text}" didn't land: ${result}`);
   }
 }
 
-/** What the demo shows: opening a puzzle, two edits by voice, and running the solution. */
+/** What the demo shows: opening a puzzle, three short edits by voice, and running the solution. */
 async function perform(page: Page, token: string): Promise<void> {
   await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`);
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(1000);
 
   await tap(page, page.locator(".day", { hasText: new RegExp(`^${DAY}$`) }));
   await page.locator(".problem").getByText("Lantern Rows").waitFor();
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(2200);
 
   await tap(page, page.getByRole("button", { name: "Code", exact: true }));
-  await page.waitForTimeout(800);
-  await tap(page, page.locator(".cm-line", { hasText: "raise NotImplementedError" }).first());
   await page.waitForTimeout(600);
+  await tap(page, page.locator(".cm-line", { hasText: "raise NotImplementedError" }).first());
+  await page.waitForTimeout(400);
+  // Lands at the top of the file, wherever the cursor is.
+  await say(page, "import ints from AOC");
+  await page.waitForTimeout(1200);
   await say(page, "replace this line with rows equals data dot split lines");
-  await page.waitForTimeout(2000);
-  await say(page, "new line return max of sum of map int of row dot split for row in rows");
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(1200);
+  await say(page, "new line return max of sum of ints of row for row in rows");
+  await page.waitForTimeout(1800);
 
   await tap(page, page.getByRole("button", { name: "Run", exact: true }));
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(500);
   await tap(page, page.getByRole("button", { name: "Run sample" }));
   await page.locator(".run-result").getByText("✓").waitFor();
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(1300);
   await tap(page, page.getByRole("button", { name: "Run real input" }));
   await page.locator(".run-result").getByText("Real input").waitFor();
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(2500);
 }
 
 async function waitForServer(server: ChildProcess): Promise<void> {
@@ -106,6 +120,18 @@ async function waitForServer(server: ChildProcess): Promise<void> {
     }
   }
   throw new Error("The server didn't start.");
+}
+
+/** When a moment of the recording comes in the GIF, once long waits for the model are sped up. */
+function shownAt(at: number): number {
+  let removed = 0;
+  for (const [start, end] of waits) {
+    const length = end - start;
+    if (length <= MAX_SHOWN_WAIT_SECONDS) continue;
+    const elapsed = Math.min(Math.max(at - start, 0), length);
+    removed += elapsed * (1 - MAX_SHOWN_WAIT_SECONDS / length);
+  }
+  return at - removed;
 }
 
 /** Captures the page as frames with timestamps, through Chrome's screencast. */
@@ -126,7 +152,7 @@ async function startCapture(page: Page): Promise<() => Promise<string>> {
     // Frames only arrive when something changes, so each is shown until the next one.
     const list = frames.flatMap((frame, i) => {
       const next = frames[i + 1];
-      const duration = next ? next.at - frame.at : 1;
+      const duration = next ? shownAt(next.at) - shownAt(frame.at) : 1;
       return [`file '${frame.file}'`, `duration ${duration.toFixed(3)}`];
     });
     const last = frames.at(-1);
