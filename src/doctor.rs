@@ -125,6 +125,8 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         checks.push(check_packages(&packages));
     }
 
+    checks.push(check_speech(paths));
+
     checks.push(match find_program("git") {
         Some(_) => Check::ok("Git", "Found git"),
         None => Check::problem(
@@ -164,6 +166,30 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
     checks.push(check_network(&config.aoc).await);
     checks.push(check_https(config).await);
     checks
+}
+
+/// Whisper on the server, which hears dictation more accurately than phones. Optional.
+fn check_speech(paths: &Paths) -> Check {
+    use crate::whisper::{DICTATION_MODEL, INSTALL_HINT, Whisper};
+    let name = "Speech";
+    match Whisper::find(&paths.cache_dir) {
+        Some(whisper) if whisper.dictation_model().is_some() => Check::ok(
+            name,
+            format!("Whisper is ready, with its {DICTATION_MODEL} model"),
+        ),
+        Some(_) => Check::problem(
+            Status::Warn,
+            name,
+            format!("Whisper is installed, but its {DICTATION_MODEL} model isn't downloaded"),
+            "Optional: download it in the app, in Settings under Talking, for more accurate dictation.",
+        ),
+        None => Check::problem(
+            Status::Warn,
+            name,
+            "Whisper isn't installed, so dictation uses the phone's own speech recognition",
+            format!("Optional, for more accurate dictation: {INSTALL_HINT}"),
+        ),
+    }
 }
 
 /// The environment from the solutions directory's mise config, if it has one, and how that went.
