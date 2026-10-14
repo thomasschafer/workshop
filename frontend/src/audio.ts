@@ -32,6 +32,9 @@ export interface RecordingReport {
   settings: MediaTrackSettings | null;
 }
 
+/** How long a microphone can send exact silence before it's taken to have started anyway. */
+const SILENT_START_MS = 1000;
+
 /** Collects the microphone's sound in batches, off the main thread. */
 const PROCESSOR = `
 class WorkshopRecorder extends AudioWorkletProcessor {
@@ -90,6 +93,17 @@ function audioContext(): { context: AudioContext; ready: Promise<void> } {
 }
 
 /**
+ * Gets recording ready ahead of the first press, which would otherwise wait for it. The audio
+ * stays paused until a press starts it, as browsers require.
+ */
+export function prepareRecording(): void {
+  void audioContext().ready.catch(() => {
+    // Tried again, and reported, when recording starts.
+    shared = null;
+  });
+}
+
+/**
  * Records from the microphone until stopped, as 16 kHz mono WAV, which Whisper takes. The sound
  * is collected as it is, rather than encoded and decoded again, so stopping is quick and even a
  * very short recording can be read.
@@ -97,6 +111,9 @@ function audioContext(): { context: AudioContext; ready: Promise<void> } {
 export class AudioRecorder {
   private readonly chunks: Float32Array[] = [];
   private firstSoundMs: number | null = null;
+  /** When the microphone's first batch arrived, sound or not. */
+  private firstBatchAt: number | null = null;
+  private started = false;
   private stopped: (() => void) | null = null;
 
   private constructor(
@@ -113,9 +130,13 @@ export class AudioRecorder {
       if (samples.length > 0) {
         this.chunks.push(samples);
         const peak = peakOf(samples);
-        // A microphone that isn't working yet sends exact silence; a working one never does.
-        if (this.firstSoundMs === null && peak > 0) {
-          this.firstSoundMs = performance.now() - this.startedAt;
+        const now = performance.now();
+        this.firstBatchAt ??= now;
+        // A microphone that isn't working yet sends exact silence; a working one hardly ever
+        // does. In case one does in a quiet room, a second of it counts as started too.
+        if (this.firstSoundMs === null && peak > 0) this.firstSoundMs = now - this.startedAt;
+        if (!this.started && (peak > 0 || now - this.firstBatchAt > SILENT_START_MS)) {
+          this.started = true;
           onStarted();
         }
         onLevel(peak);

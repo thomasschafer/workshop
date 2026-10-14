@@ -1387,6 +1387,11 @@ code {
   transform: translateY(-50%);
 }
 
+/* Only once hearing it takes a while, so a quick one doesn't flash a button. */
+.card.live.hearing .card-cancel {
+  animation: card-content-in 200ms ease-out 700ms both;
+}
+
 .level-meter {
   position: absolute;
   right: 14px;

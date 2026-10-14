@@ -11,7 +11,7 @@ import {
   type Tab,
   type UiState,
 } from "./api";
-import { recordingSupported } from "./audio";
+import { prepareRecording, recordingSupported } from "./audio";
 import { type LocalCommand, matchCommand } from "./commands";
 import { resolveDictation } from "./dictation";
 import {
@@ -713,6 +713,9 @@ export function App({ boot }: { boot: Bootstrap }) {
     browser: hasSpeech,
   };
   const dictationMethod = resolveDictation(dictationChoice, dictationSupport);
+  useEffect(() => {
+    if (dictationMethod === "server") prepareRecording();
+  }, [dictationMethod]);
   const talk = usePushToTalk({
     method: () => (dictationMethod === "server" ? "server" : "browser"),
     vocabulary: () => editor.current?.identifiers() ?? [],
