@@ -48,7 +48,7 @@ run = [
   "cargo clippy --all-targets -- -D warnings",
   "cargo test",
   "cd frontend && npm run typecheck && npm run lint && npm test && npm run build",
-  "cargo build && cd frontend && npm run e2e",
+  "cargo build && cd frontend && npm run e2e && npm run e2e:webkit",
 ]
 
 [tasks.check-packages]

@@ -62,13 +62,18 @@ jobs:
       - name: Build server
         run: cargo build --locked
 
-      - name: Install browser
+      - name: Install browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
 
       - name: End-to-end tests
         working-directory: frontend
         run: npm run e2e
+
+      # Safari's engine, as a stand-in for iPhones.
+      - name: End-to-end tests in WebKit
+        working-directory: frontend
+        run: npm run e2e:webkit
 
   frontend:
     name: Frontend
