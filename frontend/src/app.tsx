@@ -1022,7 +1022,8 @@ export function App({ boot }: { boot: Bootstrap }) {
       </main>
 
       <Controls
-        hidden={showPicker}
+        // Nothing to do with them while reading the puzzle: speech would edit code out of sight.
+        hidden={showPicker || shownTab === "problem"}
         method={dictationMethod}
         listening={listening}
         hasSpeech={hasSpeech}

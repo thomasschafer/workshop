@@ -286,6 +286,9 @@ if __name__ == "__main__":
   await expect(page.locator(".puzzle-button")).toContainText("Practice puzzle");
   await expect(page.locator(".problem")).toContainText("Practice: Sled Parcels");
   await expect(page.locator(".sample-summary")).toContainText("expects 2");
+  // Reading the puzzle, there's nothing for the controls to do.
+  await expect(page.locator(".talk")).toBeHidden();
+  await page.getByRole("button", { name: "Code", exact: true }).click();
 
   for (const part of [1, 2]) {
     await page.getByRole("button", { name: "Run", exact: true }).click();
