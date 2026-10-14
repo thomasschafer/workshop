@@ -1,3 +1,5 @@
+import type { RecordingReport } from "./audio";
+
 // Push-to-talk speech recognition using the browser's built-in engine.
 
 interface RecognitionAlternative {
@@ -136,19 +138,21 @@ export interface Heard {
   /** Why listening failed, if it did. */
   error: string | null;
   /** How listening went, for the log. */
-  report: { heldMs: number; sessions: SessionReport[] };
+  report: { heldMs: number; sessions: SessionReport[]; recording?: RecordingReport };
 }
 
 /** Hears what's said while the talk button is held, one press per instance. */
 export interface Listener {
   /**
    * Starts listening. `onInterim` gets what's been heard so far, where that's known before the
-   * end; `onListening` is called once audio is being captured, which takes a moment.
+   * end; `onListening` is called once audio is being captured, which takes a moment; `onLevel`
+   * with how loud it is, from 0 to 1, where that's known.
    */
   start(
     onInterim: (text: string) => void,
     vocabulary: readonly string[],
     onListening: () => void,
+    onLevel: (level: number) => void,
   ): void;
   /** Stops listening and resolves with everything heard. */
   stop(): Promise<Heard>;
@@ -187,6 +191,8 @@ export class PushToTalk implements Listener {
     vocabulary: readonly string[] = [],
     /** Called once the browser is capturing audio, which takes a moment after pressing. */
     onListening: () => void = () => {},
+    // The browser doesn't say how loud it is.
+    _onLevel: (level: number) => void = () => {},
   ): void {
     if (!this.ctor) {
       throw new Error(speechUnavailableReason());

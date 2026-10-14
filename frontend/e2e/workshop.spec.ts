@@ -37,11 +37,13 @@ test.beforeAll(async ({ browser }) => {
   // Counts cards animating in, to check one isn't replayed as words arrive.
   await page.addInitScript(() => {
     const animate = Element.prototype.animate;
-    const counts = { entrances: 0 };
+    const counts = { entrances: 0, moves: [] as string[] };
     Object.assign(window, { cardAnimations: counts });
     Element.prototype.animate = function (keyframes, options) {
       const first = Array.isArray(keyframes) ? keyframes[0] : undefined;
       if (this.classList.contains("card") && first?.opacity === 0) counts.entrances++;
+      else if (this.classList.contains("card"))
+        counts.moves.push(`${this.className} ${JSON.stringify(first)}`);
       return animate.call(this, keyframes, options);
     };
   });
@@ -358,6 +360,24 @@ test("shows what's being said in one card, without replaying it as words arrive"
   expect(entrances).toBe(1);
 });
 
+test("keeps what's being said still while a card above it leaves", async () => {
+  await send("undo");
+  await expect(card("done").filter({ hasText: "“undo”" }).last()).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { cardAnimations: { moves: string[] } }).cardAnimations.moves = [];
+  });
+  // Held for longer than a finished card lingers, so it leaves during the press.
+  await hold("go to line one", 3500);
+  await expect(page.locator(".card", { hasText: "“go to line one”" })).toHaveClass(
+    /\b(done|asked|problem)\b/,
+  );
+  const moves = await page.evaluate(
+    () => (window as unknown as { cardAnimations: { moves: string[] } }).cardAnimations.moves,
+  );
+  // The stack is anchored at the bottom, so a card leaving the top moves nothing below it.
+  expect(moves.filter((m) => m.includes("live"))).toEqual([]);
+});
+
 test("waits for the editor when something is said while a puzzle is still opening", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await page.reload();
@@ -433,6 +453,8 @@ test("hears what's said with Whisper on the server, once its model is there", as
   // A microphone that hears a steady tone, loud enough not to be taken for silence.
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = async () => {
+      // As long as a phone's microphone takes to start, roughly.
+      await new Promise((r) => setTimeout(r, 300));
       const context = new AudioContext();
       const tone = context.createOscillator();
       const out = context.createMediaStreamDestination();
@@ -449,11 +471,21 @@ test("hears what's said with Whisper on the server, once its model is there", as
   if (!box) throw new Error("The talk button isn't visible.");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
+  await expect(page.locator(".talk")).toHaveClass(/\bstarting\b/);
+  await expect(page.locator(".card.live")).toContainText("Starting the microphone…");
   await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
   await expect(page.locator(".card.live")).toContainText("Listening…");
   await page.waitForTimeout(400);
   await page.mouse.up();
-  await expect(card("done").filter({ hasText: "“undo”" }).last()).toContainText("Undone");
+  await expect(page.locator(".card.live")).toContainText("Hearing…");
+
+  // Again while the first is still being heard: it starts, and then listens, just the same.
+  await page.mouse.down();
+  await expect(page.locator(".talk")).toHaveClass(/\bstarting\b/);
+  await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
+  await page.waitForTimeout(400);
+  await page.mouse.up();
+  await expect(card("done").filter({ hasText: "“undo”" })).toHaveCount(2);
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator(".server-speech")).toContainText("Whisper is ready");

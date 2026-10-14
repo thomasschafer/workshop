@@ -1361,6 +1361,34 @@ code {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 0.9em);
 }
 
+.card.live {
+  position: relative;
+}
+
+/* Room for the level meter. */
+.card.live.listening .live-text {
+  padding-right: 52px;
+}
+
+.level-meter {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  height: 22px;
+  margin-top: -11px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.level-meter span {
+  width: 4px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ok);
+  transition: transform 80ms linear;
+}
+
 .card.folded {
   align-self: center;
   padding: 3px 12px;

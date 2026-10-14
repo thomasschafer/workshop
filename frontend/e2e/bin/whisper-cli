@@ -5,4 +5,6 @@ while [ $# -gt 0 ]; do
   shift
 done
 head -c 4 "$file" | grep -q RIFF || { echo "not a WAV recording: $file" >&2; exit 1; }
+# As long as Whisper takes, roughly, so a press can come while another is being heard.
+sleep 0.5
 echo " undo"

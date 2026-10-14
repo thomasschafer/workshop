@@ -7,7 +7,7 @@ import type { Card } from "../utterances";
 interface Props {
   cards: Card[];
   /** What's being said, or was just said and is still arriving, oldest first. */
-  live: { id: number; text: string; phase: TalkPhase }[];
+  live: { id: number; text: string; phase: TalkPhase; level: number | null }[];
   /** The card whose question is being answered, if any. */
   replyingTo: number | null;
   onDismiss: (id: number) => void;
@@ -78,17 +78,37 @@ export function Stack({
   return (
     <div class="stack" ref={ref} aria-live="polite">
       {shown}
-      {live.map(({ id, text, phase }) => (
+      {live.map(({ id, text, phase, level }) => (
         <div key={id} data-flip={String(id)} class={`card live ${phase}`}>
           <div class="live-text">
             {/* Words said before the microphone is on are lost, so this says when to start. */}
             <span>{text || LIVE_PROMPT[phase]}</span>
           </div>
+          {phase === "listening" && level !== null ? <LevelMeter level={level} /> : null}
         </div>
       ))}
     </div>
   );
 }
+
+/**
+ * How loud the microphone hears it, so it's plain that it's hearing you: a row of bars that rise
+ * with your voice.
+ */
+function LevelMeter({ level }: { level: number }) {
+  // Speech is mostly quiet in absolute terms, so the scale favours the low end.
+  const shown = Math.min(1, Math.sqrt(level) * 1.4);
+  return (
+    <div class="level-meter" aria-hidden="true">
+      {METER_BARS.map((weight) => (
+        <span key={weight} style={{ transform: `scaleY(${Math.max(0.12, shown * weight)})` }} />
+      ))}
+    </div>
+  );
+}
+
+/** Each bar's share of the level: tallest in the middle. */
+const METER_BARS = [0.55, 0.8, 1, 0.85, 0.6];
 
 const LIVE_PROMPT: Record<TalkPhase, string> = {
   starting: "Starting the microphone…",

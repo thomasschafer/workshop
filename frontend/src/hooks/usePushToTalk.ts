@@ -27,8 +27,13 @@ interface Press {
   held: boolean;
   /** Whether audio is being captured yet, after which words are heard. */
   listening: boolean;
+  /** How loud it is, from 0 to 1, if the listener can tell. */
+  level: number | null;
   startedAt: number;
 }
+
+/** How often the sound level is shown, which is plenty for the eye. */
+const LEVEL_MS = 80;
 
 /**
  * Where a press is: waiting for the microphone, when words would be lost; listening while held;
@@ -74,8 +79,17 @@ export function usePushToTalk(options: Options) {
         update((presses) => presses.map((p) => (p.id === id ? { ...p, ...fields } : p)));
       update((presses) => [
         ...presses,
-        { id, listener, text: "", held: true, listening: false, startedAt: performance.now() },
+        {
+          id,
+          listener,
+          text: "",
+          held: true,
+          listening: false,
+          level: null,
+          startedAt: performance.now(),
+        },
       ]);
+      let levelShownAt = 0;
       listener.start(
         (text) => change({ text }),
         latest.current.vocabulary(),
@@ -83,6 +97,12 @@ export function usePushToTalk(options: Options) {
           change({ listening: true });
           // Felt as well as seen, as the moment to start speaking.
           navigator.vibrate?.(25);
+        },
+        (level) => {
+          const now = performance.now();
+          if (now - levelShownAt < LEVEL_MS) return;
+          levelShownAt = now;
+          change({ level });
         },
       );
     } catch (e) {
@@ -116,7 +136,12 @@ export function usePushToTalk(options: Options) {
     /** The held press's phase, if the button is held. */
     held: heldPress ? phaseOf(heldPress) : null,
     /** What's being said, or was just said and is still arriving, oldest first. */
-    live: presses.map((press) => ({ id: press.id, text: press.text, phase: phaseOf(press) })),
+    live: presses.map((press) => ({
+      id: press.id,
+      text: press.text,
+      phase: phaseOf(press),
+      level: press.level,
+    })),
     start,
     stop,
   };
