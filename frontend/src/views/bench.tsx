@@ -57,6 +57,58 @@ type Phase = "ready" | "recording" | "transcribing" | "keyboard";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const percent = (rate: number) => `${Math.round(rate * 100)}%`;
+/** Progress through the phrases, kept on this device so the benchmark can be finished later. */
+interface Progress {
+  session: string;
+  index: number;
+  takes: Take[];
+  /** The phrase recorded and transcribed, waiting for its keyboard dictation. */
+  current: Omit<Take, "keyboard"> | null;
+  keyboard: string;
+}
+
+const PROGRESS_KEY = "workshop:speech-bench";
+
+function loadProgress(): Progress | null {
+  try {
+    const stored = localStorage.getItem(PROGRESS_KEY);
+    const progress = stored ? (JSON.parse(stored) as Partial<Progress>) : null;
+    if (
+      progress === null ||
+      typeof progress.session !== "string" ||
+      typeof progress.index !== "number" ||
+      !Array.isArray(progress.takes) ||
+      progress.index >= PHRASES.length
+    ) {
+      return null;
+    }
+    return {
+      session: progress.session,
+      index: progress.index,
+      takes: progress.takes,
+      current: progress.current ?? null,
+      keyboard: progress.keyboard ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveProgress(progress: Progress | null): void {
+  try {
+    if (progress === null) localStorage.removeItem(PROGRESS_KEY);
+    else localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  } catch {
+    // Storage can be full or disabled; the benchmark still works, but can't be resumed.
+  }
+}
+
+const newSession = () =>
+  new Date()
+    .toISOString()
+    .replace(/[^0-9]/g, "")
+    .slice(0, 14);
+
 const engineName = (t: WhisperTranscript) =>
   `Whisper ${t.model}${t.prompted ? ", primed with the code's names" : ""}`;
 
@@ -72,12 +124,9 @@ export function SpeechBench() {
   const [current, setCurrent] = useState<Omit<Take, "keyboard"> | null>(null);
   const [keyboard, setKeyboard] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const session = useRef(
-    new Date()
-      .toISOString()
-      .replace(/[^0-9]/g, "")
-      .slice(0, 14),
-  );
+  const [session, setSession] = useState(newSession);
+  /** Progress left unfinished last time, until the user chooses to carry on or start again. */
+  const [unfinished, setUnfinished] = useState(loadProgress);
   const recording = useRef<{ audio: AudioRecorder; ptt: PushToTalk | null } | null>(null);
 
   useEffect(() => {
@@ -87,8 +136,53 @@ export function SpeechBench() {
       .catch((e: unknown) => setError(message(e)));
   }, []);
 
+  // Kept as it changes, so leaving part way through loses nothing.
+  useEffect(() => {
+    if (unfinished !== null) return;
+    if (index >= PHRASES.length) saveProgress(null);
+    else if (takes.length > 0 || current !== null) {
+      saveProgress({ session, index, takes, current, keyboard });
+    }
+  }, [unfinished, session, index, takes, current, keyboard]);
+
   const phrase = PHRASES[index];
   if (info === null) return error ? <p class="error-text">{error}</p> : null;
+
+  if (unfinished !== null) {
+    return (
+      <div class="bench">
+        <p>
+          You stopped part way through last time, at phrase {unfinished.index + 1} of{" "}
+          {PHRASES.length}.
+        </p>
+        <button
+          type="button"
+          class="pill primary wide"
+          onClick={() => {
+            setSession(unfinished.session);
+            setIndex(unfinished.index);
+            setTakes(unfinished.takes);
+            setCurrent(unfinished.current);
+            setKeyboard(unfinished.keyboard);
+            setPhase(unfinished.current ? "keyboard" : "ready");
+            setUnfinished(null);
+          }}
+        >
+          Carry on
+        </button>
+        <button
+          type="button"
+          class="pill wide"
+          onClick={() => {
+            saveProgress(null);
+            setUnfinished(null);
+          }}
+        >
+          Start again
+        </button>
+      </div>
+    );
+  }
 
   const start = async (event: PointerEvent) => {
     event.preventDefault();
@@ -123,7 +217,7 @@ export function SpeechBench() {
       : { text: "", error: "This browser has no speech recognition." };
     let whisper: Take["whisper"];
     try {
-      whisper = await api.benchTranscribe(session.current, index, prompt(phrase.language), wav);
+      whisper = await api.benchTranscribe(session, index, prompt(phrase.language), wav);
     } catch (e) {
       whisper = { error: message(e) };
     }
@@ -137,7 +231,7 @@ export function SpeechBench() {
     const take = { ...current, keyboard };
     try {
       await api.benchResult({
-        session: session.current,
+        session: session,
         phrase: index,
         expected: phrase.text,
         language: phrase.language,
@@ -155,15 +249,18 @@ export function SpeechBench() {
   };
 
   if (!phrase) {
-    return <Summary takes={takes} session={session.current} />;
+    return <Summary takes={takes} session={session} />;
   }
 
   return (
     <div class="bench">
-      <p class="muted small">
-        Phrase {index + 1} of {PHRASES.length} · {phrase.language}
-      </p>
-      <p class="bench-phrase">{phrase.text}</p>
+      {/* Stays in view while scrolling down to the results and the keyboard's box. */}
+      <div class="bench-prompt">
+        <p class="muted small">
+          Phrase {index + 1} of {PHRASES.length} · {phrase.language}
+        </p>
+        <p class="bench-phrase">{phrase.text}</p>
+      </div>
       {!info.whisper_installed || info.models.length === 0 ? (
         <p class="error-text small">
           {info.whisper_installed
@@ -195,7 +292,7 @@ export function SpeechBench() {
       ) : (
         <button
           type="button"
-          class={`talk ${phase === "recording" ? "listening" : ""}`}
+          class={`talk bench-talk ${phase === "recording" ? "listening" : ""}`}
           disabled={phase === "transcribing"}
           onPointerDown={(e) => void start(e)}
           onPointerUp={() => void stop()}
