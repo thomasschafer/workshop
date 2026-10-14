@@ -1,5 +1,4 @@
 mod aoc;
-mod bench;
 mod commands;
 mod config;
 mod discuss;
@@ -22,6 +21,7 @@ mod tailscale;
 mod template;
 mod theme;
 mod toolchain;
+mod whisper;
 mod workspace;
 
 use std::net::SocketAddr;

@@ -1,12 +1,13 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useElapsed } from "../hooks/useElapsed";
 import { useFlip } from "../hooks/useFlip";
+import type { TalkPhase } from "../hooks/usePushToTalk";
 import type { Card } from "../utterances";
 
 interface Props {
   cards: Card[];
   /** What's being said, or was just said and is still arriving, oldest first. */
-  live: { id: number; text: string; listening: boolean }[];
+  live: { id: number; text: string; phase: TalkPhase }[];
   /** The card whose question is being answered, if any. */
   replyingTo: number | null;
   onDismiss: (id: number) => void;
@@ -77,21 +78,23 @@ export function Stack({
   return (
     <div class="stack" ref={ref} aria-live="polite">
       {shown}
-      {live.map(({ id, text, listening }) => (
-        <div
-          key={id}
-          data-flip={String(id)}
-          class={`card listening ${listening ? "" : "starting"}`}
-        >
+      {live.map(({ id, text, phase }) => (
+        <div key={id} data-flip={String(id)} class={`card live ${phase}`}>
           <div class="live-text">
-            {/* Words said before the browser is listening are lost, so this says when to start. */}
-            <span>{text || (listening ? "Listening…" : "Starting…")}</span>
+            {/* Words said before the microphone is on are lost, so this says when to start. */}
+            <span>{text || LIVE_PROMPT[phase]}</span>
           </div>
         </div>
       ))}
     </div>
   );
 }
+
+const LIVE_PROMPT: Record<TalkPhase, string> = {
+  starting: "Starting the microphone…",
+  listening: "Listening…",
+  hearing: "Hearing…",
+};
 
 function CardView({
   card,

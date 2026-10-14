@@ -6,6 +6,7 @@ import { Checks } from "./checks";
 import { InstallProgress, LastInstallLog } from "./install";
 import { ModelsSection } from "./models";
 import { PackagesSection } from "./packages";
+import { ServerSpeechSection } from "./speech";
 
 interface Props {
   models: ModelsState;
@@ -15,6 +16,8 @@ interface Props {
   onPractice: () => void;
   /** Called once a session cookie has been saved. */
   onLoggedIn: () => void;
+  /** Called with whether Whisper on the server is ready, as that's found out. */
+  onServerSpeech: (ready: boolean) => void;
   onDone: () => void;
 }
 
@@ -22,7 +25,15 @@ interface Props {
 const INSTALL_PROGRESS_MS = 1000;
 
 /** Getting Workshop ready: language, model, Advent of Code login and phone access. */
-export function Setup({ models, onModels, packages, onPractice, onLoggedIn, onDone }: Props) {
+export function Setup({
+  models,
+  onModels,
+  packages,
+  onPractice,
+  onLoggedIn,
+  onServerSpeech,
+  onDone,
+}: Props) {
   const [state, setState] = useState<SetupState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +58,7 @@ export function Setup({ models, onModels, packages, onPractice, onLoggedIn, onDo
         ),
         (n) => <ModelStep key="model" n={n} state={state} models={models} onModels={onModels} />,
         packages.state ? (n) => <PackagesStep key="packages" n={n} packages={packages} /> : null,
+        (n) => <SpeechStep key="speech" n={n} onServerSpeech={onServerSpeech} />,
         (n) => (
           <LoginStep
             key="login"
@@ -216,6 +228,32 @@ function LanguageStep({
         </p>
       ) : null}
       {error ? <p class="error-text">{error}</p> : null}
+    </Step>
+  );
+}
+
+function SpeechStep({
+  n,
+  onServerSpeech,
+}: {
+  n: number;
+  onServerSpeech: (ready: boolean) => void;
+}) {
+  const [ready, setReady] = useState(false);
+  return (
+    <Step title={`${n}. Speech`} done={ready}>
+      <ServerSpeechSection
+        onReady={(next) => {
+          setReady(next);
+          onServerSpeech(next);
+        }}
+      />
+      {ready ? null : (
+        <p class="muted small">
+          Optional: without it, Workshop uses your browser's own speech recognition, or your
+          keyboard's dictation, which you can choose in Settings, under Talking.
+        </p>
+      )}
     </Step>
   );
 }

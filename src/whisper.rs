@@ -1,5 +1,5 @@
-//! Comparing speech recognition, for the benchmark page: the phone's own recognition against
-//! Whisper running on this machine, on the same recordings.
+//! Whisper, from whisper.cpp, running on the server: for dictation, which it hears more
+//! accurately than phones' own recognition, and for the benchmark page that compared them.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -8,12 +8,26 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
+use tokio_util::sync::CancellationToken;
 
+use crate::packages::InstallLog;
 use crate::process::{self, ProcessGroup};
 
 /// The Whisper command-line program, from whisper.cpp.
 const PROGRAM: &str = "whisper-cli";
 const TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The model dictation uses. In the benchmark it heard code best for its speed: about half a
+/// second for a sentence on a laptop.
+pub const DICTATION_MODEL: &str = "small.en";
+
+/// Its size, for saying how big the download is.
+pub const DICTATION_MODEL_MB: u64 = 488;
+
+/// Where whisper.cpp's models are published.
+const MODELS_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+
+pub const INSTALL_HINT: &str = "Install whisper.cpp on the server, for its whisper-cli program: `brew install whisper-cpp` on macOS, or see https://github.com/ggml-org/whisper.cpp for other systems.";
 
 /// Whisper on this machine: the program, and the models downloaded for it.
 pub struct Whisper {
@@ -48,6 +62,14 @@ impl Whisper {
         // Smallest first, so results read from fastest to most capable.
         models.sort_by_key(|(_, path)| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
         Some(Self { program, models })
+    }
+
+    /// The model dictation uses, if it's been downloaded.
+    pub fn dictation_model(&self) -> Option<&str> {
+        self.models
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .find(|name| *name == DICTATION_MODEL)
     }
 
     pub async fn transcribe(
@@ -119,6 +141,112 @@ impl Whisper {
     }
 }
 
+/// What was said, without Whisper's notes on what it heard: tags such as `[BLANK_AUDIO]`, and a
+/// transcript that's only a description, such as `(keyboard clicking)`. Brackets in what was
+/// said, such as `(x:xs)`, are kept.
+pub fn spoken_text(transcript: &str) -> String {
+    let words: Vec<&str> = transcript
+        .split_whitespace()
+        .filter(|word| {
+            let tag = word.strip_prefix('[').and_then(|w| w.strip_suffix(']'));
+            !tag.is_some_and(|t| t.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        })
+        .collect();
+    let text = words.join(" ");
+    // Descriptions are words alone, unlike code.
+    let description = text
+        .strip_prefix('(')
+        .and_then(|t| t.strip_suffix(')'))
+        .or_else(|| text.strip_prefix('*').and_then(|t| t.strip_suffix('*')));
+    if description.is_some_and(|d| d.len() > 1 && d.chars().all(|c| c.is_alphabetic() || c == ' '))
+    {
+        return String::new();
+    }
+    text
+}
+
+/// Downloads a model into the models directory, logging progress, and only puts it in place
+/// once it's complete.
+pub async fn download_model(
+    cache_dir: &Path,
+    name: &str,
+    cancel: &CancellationToken,
+    log: &InstallLog,
+) -> Result<()> {
+    let dir = models_dir(cache_dir);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let file = dir.join(format!("ggml-{name}.bin"));
+    let partial = dir.join(format!("ggml-{name}.bin.part"));
+    let url = format!("{MODELS_URL}/ggml-{name}.bin");
+    log.push(format!("Downloading {url}"));
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        // Per read, rather than for the whole download, which takes minutes on a slow line.
+        .read_timeout(Duration::from_secs(60))
+        .build()?;
+    let mut response = http
+        .get(&url)
+        .send()
+        .await
+        .context("couldn't reach Hugging Face to download the model")?
+        .error_for_status()
+        .context("Hugging Face couldn't send the model")?;
+    let total = response.content_length();
+    let mut out = tokio::fs::File::create(&partial)
+        .await
+        .with_context(|| format!("creating {}", partial.display()))?;
+    let mut received: u64 = 0;
+    let mut reported_mb = 0;
+    let downloaded = async {
+        while let Some(chunk) = response.chunk().await.context("downloading the model")? {
+            tokio::io::AsyncWriteExt::write_all(&mut out, &chunk).await?;
+            received += chunk.len() as u64;
+            let mb = received / 1_000_000;
+            if mb >= reported_mb + 10 {
+                reported_mb = mb;
+                log.push(match total {
+                    Some(total) => format!("Downloaded {mb} of {} MB", total / 1_000_000),
+                    None => format!("Downloaded {mb} MB"),
+                });
+            }
+        }
+        tokio::io::AsyncWriteExt::flush(&mut out).await?;
+        anyhow::Ok(())
+    };
+    let result = tokio::select! {
+        result = downloaded => result,
+        () = cancel.cancelled() => Err(anyhow::anyhow!("Downloading was cancelled.")),
+    };
+    drop(out);
+    let checked = result.and_then(|()| check_model(&partial, total));
+    if let Err(err) = checked {
+        let _ = std::fs::remove_file(&partial);
+        return Err(err);
+    }
+    std::fs::rename(&partial, &file)
+        .with_context(|| format!("moving the model to {}", file.display()))?;
+    log.push(format!("Saved {}", file.display()));
+    Ok(())
+}
+
+/// Checks a download is whole, and is a whisper.cpp model rather than, say, an error page.
+fn check_model(path: &Path, expected_len: Option<u64>) -> Result<()> {
+    let len = std::fs::metadata(path)?.len();
+    if let Some(expected) = expected_len
+        && len != expected
+    {
+        bail!("the download stopped early, at {len} of {expected} bytes");
+    }
+    let mut magic = [0u8; 4];
+    std::io::Read::read_exact(&mut std::fs::File::open(path)?, &mut magic)
+        .context("the download is empty")?;
+    // GGML files start with "ggml" as a little-endian number.
+    if magic != *b"lmgg" {
+        bail!("the download isn't a Whisper model");
+    }
+    Ok(())
+}
+
 /// What one model heard, and how long it took.
 #[derive(Debug, Serialize)]
 pub struct Transcript {
@@ -151,20 +279,32 @@ fn last_line(text: &str) -> &str {
         .unwrap_or("")
 }
 
-/// A benchmark session's id, which names a directory, so only plain characters are allowed.
-pub fn check_session(id: &str) -> Result<()> {
-    let valid = !id.is_empty()
-        && id.len() <= 64
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    if !valid {
-        bail!("{id:?} isn't a benchmark session id");
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_only_what_was_said() {
+        assert_eq!(spoken_text("[BLANK_AUDIO]"), "");
+        assert_eq!(spoken_text(" (keyboard clicking)"), "");
+        assert_eq!(
+            spoken_text("new line return x [MUSIC]"),
+            "new line return x"
+        );
+        assert_eq!(spoken_text("solve (x:xs) equals"), "solve (x:xs) equals");
+        assert_eq!(spoken_text("(x:xs)"), "(x:xs)");
+    }
+
+    #[test]
+    fn checks_downloaded_models() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("ggml-tiny.bin");
+        std::fs::write(&model, b"lmgg and the rest").unwrap();
+        check_model(&model, Some(17)).unwrap();
+        assert!(check_model(&model, Some(18)).is_err());
+        std::fs::write(&model, b"<html>Not found</html>").unwrap();
+        assert!(check_model(&model, None).is_err());
+    }
 
     #[test]
     fn reads_whisper_timings() {
@@ -172,14 +312,6 @@ mod tests {
         assert_eq!(timing(stderr, "load time"), Some(109));
         assert_eq!(timing(stderr, "total time"), Some(696));
         assert_eq!(timing(stderr, "encode time"), None);
-    }
-
-    #[test]
-    fn accepts_only_plain_session_ids() {
-        check_session("2026-10-13-1650").unwrap();
-        for bad in ["", "../x", "a/b", "a b"] {
-            assert!(check_session(bad).is_err(), "{bad}");
-        }
     }
 
     #[cfg(unix)]

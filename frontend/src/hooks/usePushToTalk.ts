@@ -1,8 +1,12 @@
-import { useMemo, useRef, useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { api } from "../api";
-import { PushToTalk, speechSupported } from "../voice";
+import type { HoldMethod } from "../dictation";
+import { ServerDictation } from "../serverDictation";
+import { type Listener, PushToTalk } from "../voice";
 
 interface Options {
+  /** How this press is heard. */
+  method: () => HoldMethod;
   /** Words to help recognition hear, such as identifiers in the file. */
   vocabulary: () => string[];
   /** Called as a press starts, returning an id for what's said during it. */
@@ -18,12 +22,23 @@ interface Options {
 /** One press of the talk button, from pressing until its last words have arrived. */
 interface Press {
   id: number;
-  ptt: PushToTalk;
+  listener: Listener;
   text: string;
   held: boolean;
-  /** Whether the browser has started capturing audio, after which words are heard. */
+  /** Whether audio is being captured yet, after which words are heard. */
   listening: boolean;
   startedAt: number;
+}
+
+/**
+ * Where a press is: waiting for the microphone, when words would be lost; listening while held;
+ * then hearing the last of it once released.
+ */
+export type TalkPhase = "starting" | "listening" | "hearing";
+
+function phaseOf(press: Press): TalkPhase {
+  if (!press.held) return "hearing";
+  return press.listening ? "listening" : "starting";
 }
 
 /** A press shorter than this that heard nothing was probably a tap rather than a hold. */
@@ -35,7 +50,6 @@ const TAP_MS = 400;
  * previous one's words.
  */
 export function usePushToTalk(options: Options) {
-  const hasSpeech = useMemo(speechSupported, []);
   const [presses, setPresses] = useState<Press[]>([]);
   // Pointer events can arrive faster than state updates, so this is the source of truth.
   const current = useRef<Press[]>([]);
@@ -53,20 +67,24 @@ export function usePushToTalk(options: Options) {
     if (held()) return;
     try {
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-      const ptt = new PushToTalk();
+      const listener: Listener =
+        latest.current.method() === "server" ? new ServerDictation() : new PushToTalk();
       const id = latest.current.onStart();
       const change = (fields: Partial<Press>) =>
         update((presses) => presses.map((p) => (p.id === id ? { ...p, ...fields } : p)));
       update((presses) => [
         ...presses,
-        { id, ptt, text: "", held: true, listening: false, startedAt: performance.now() },
+        { id, listener, text: "", held: true, listening: false, startedAt: performance.now() },
       ]);
-      ptt.start(
+      listener.start(
         (text) => change({ text }),
         latest.current.vocabulary(),
-        () => change({ listening: true }),
+        () => {
+          change({ listening: true });
+          // Felt as well as seen, as the moment to start speaking.
+          navigator.vibrate?.(25);
+        },
       );
-      navigator.vibrate?.(10);
     } catch (e) {
       latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
     }
@@ -77,7 +95,7 @@ export function usePushToTalk(options: Options) {
     if (!press) return;
     const heldMs = performance.now() - press.startedAt;
     update((presses) => presses.map((p) => (p === press ? { ...p, held: false } : p)));
-    const { text, pieces, error, report } = await press.ptt.stop();
+    const { text, pieces, error, report } = await press.listener.stop();
     // Everything the browser reported, so a wrong edit can be traced to what was heard.
     api.log("speech", `heard ${JSON.stringify({ text, pieces, error, ...report })}`);
     if (error) {
@@ -93,11 +111,12 @@ export function usePushToTalk(options: Options) {
     update((presses) => presses.filter((p) => p.id !== press.id));
   };
 
+  const heldPress = presses.find((p) => p.held);
   return {
-    hasSpeech,
-    listening: presses.some((p) => p.held),
+    /** The held press's phase, if the button is held. */
+    held: heldPress ? phaseOf(heldPress) : null,
     /** What's being said, or was just said and is still arriving, oldest first. */
-    live: presses.map(({ id, text, listening }) => ({ id, text, listening })),
+    live: presses.map((press) => ({ id: press.id, text: press.text, phase: phaseOf(press) })),
     start,
     stop,
   };

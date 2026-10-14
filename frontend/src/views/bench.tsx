@@ -210,7 +210,7 @@ export function SpeechBench() {
     setPhase("transcribing");
     const [heard, wav] = await Promise.all([
       taking.ptt?.stop() ?? Promise.resolve(null),
-      taking.audio.stop(),
+      taking.audio.stop().then((r) => r.wav),
     ]);
     const browser = heard
       ? { text: heard.text, error: heard.error }

@@ -56,6 +56,8 @@ pub struct App {
     packages_install: Installs,
     /// Installing the language's programs with mise.
     toolchain_install: Installs,
+    /// Downloading Whisper's model for dictation.
+    speech_install: Installs,
     /// Packages already found for missing modules, by language and module.
     resolutions: std::sync::Mutex<BTreeMap<(String, String), Resolution>>,
     http: reqwest::Client,
@@ -93,6 +95,7 @@ impl App {
             install_lock: Arc::new(Mutex::new(())),
             packages_install: Installs::default(),
             toolchain_install: Installs::default(),
+            speech_install: Installs::default(),
             resolutions: std::sync::Mutex::new(BTreeMap::new()),
             http: reqwest::Client::builder()
                 .user_agent(&config.aoc.user_agent)
@@ -188,6 +191,10 @@ pub fn router(app: Shared) -> Router {
         .route("/packages/cancel", post(cancel_install))
         .route("/packages/resolve", post(resolve_package))
         .route("/practice/reset", post(reset_practice))
+        .route("/speech", get(get_speech))
+        .route("/speech/download", post(download_speech_model))
+        .route("/speech/download/cancel", post(cancel_speech_download))
+        .route("/speech/transcribe", post(transcribe))
         .route("/bench", get(bench_info))
         .route("/bench/transcribe", post(bench_transcribe))
         .route("/bench/result", post(bench_result))
@@ -369,6 +376,8 @@ struct Bootstrap {
     /// Overrides Workshop's colours with the chosen terminal themes.
     theme_css: Option<String>,
     commit_after_star: bool,
+    /// Whether Whisper on the server is ready to hear dictation.
+    server_dictation: bool,
 }
 
 #[derive(Serialize)]
@@ -425,6 +434,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         has_aoc_session: app.aoc.has_session(),
         theme_css: theme_css(&app),
         commit_after_star: app.settings().commit_after_star,
+        server_dictation: speech_state(&app).ready,
         needs_setup: !app.aoc.has_session()
             || models::options(&app.config)
                 .iter()
@@ -1316,6 +1326,14 @@ mod tests {
     }
 
     #[test]
+    fn accepts_only_plain_session_ids() {
+        check_session("2026-10-13-1650").unwrap();
+        for bad in ["", "../x", "a/b", "a b"] {
+            assert!(check_session(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn makes_file_uris() {
         assert_eq!(
             file_uri(std::path::Path::new("/a b/Main.hs")),
@@ -1369,11 +1387,19 @@ impl Installs {
     }
 }
 
-/// Runs an install in its own task, so it finishes even if the phone disconnects while waiting,
-/// then restarts language servers so they see what was installed.
+/// What to restart once an install succeeds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AfterInstall {
+    /// Language servers, so they see what was installed.
+    RestartLanguageServers,
+    Nothing,
+}
+
+/// Runs an install in its own task, so it finishes even if the phone disconnects while waiting.
 async fn install_with<T, Job, Fut>(
     app: &Shared,
     installs: fn(&App) -> &Installs,
+    after: AfterInstall,
     job: Job,
 ) -> Result<T, ApiError>
 where
@@ -1409,7 +1435,7 @@ where
             log: running.log.lines(),
         });
         *lock(&installs.running) = None;
-        if result.is_ok() {
+        if result.is_ok() && after == AfterInstall::RestartLanguageServers {
             app.lsp_restarts.send_modify(|n| *n += 1);
         }
         result
@@ -1526,6 +1552,7 @@ async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesRespon
     let installed = install_with(
         &app,
         |app| &app.packages_install,
+        AfterInstall::RestartLanguageServers,
         |app, running| async move {
             let packages = app
                 .solutions()
@@ -1551,6 +1578,7 @@ async fn install_toolchain(State(app): State<Shared>) -> ApiResult<SetupState> {
     install_with(
         &app,
         |app| &app.toolchain_install,
+        AfterInstall::RestartLanguageServers,
         |app, running| async move {
             let profile = app
                 .language()
@@ -1591,20 +1619,31 @@ struct BenchInfo {
 }
 
 async fn bench_info(State(app): State<Shared>) -> ApiResult<BenchInfo> {
-    let whisper = crate::bench::Whisper::find(&app.paths.cache_dir);
+    let whisper = crate::whisper::Whisper::find(&app.paths.cache_dir);
     Ok(Json(BenchInfo {
         whisper_installed: whisper.is_some(),
         models: whisper
             .map(|w| w.models.into_iter().map(|(name, _)| name).collect())
             .unwrap_or_default(),
-        models_dir: crate::bench::models_dir(&app.paths.cache_dir)
+        models_dir: crate::whisper::models_dir(&app.paths.cache_dir)
             .display()
             .to_string(),
     }))
 }
 
+/// A benchmark session's id, which names a directory, so only plain characters are allowed.
+fn check_session(id: &str) -> Result<()> {
+    let valid = !id.is_empty()
+        && id.len() <= 64
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !valid {
+        anyhow::bail!("{id:?} isn't a benchmark session id");
+    }
+    Ok(())
+}
+
 fn bench_dir(app: &App, session: &str) -> Result<std::path::PathBuf, ApiError> {
-    crate::bench::check_session(session).map_err(|e| bad_request(format!("{e:#}")))?;
+    check_session(session).map_err(|e| bad_request(format!("{e:#}")))?;
     let dir = app.paths.data_dir.join("bench").join(session);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     Ok(dir)
@@ -1624,14 +1663,12 @@ async fn bench_transcribe(
     State(app): State<Shared>,
     Query(query): Query<BenchTranscribe>,
     wav: axum::body::Bytes,
-) -> ApiResult<Vec<crate::bench::Transcript>> {
+) -> ApiResult<Vec<crate::whisper::Transcript>> {
     if !wav.starts_with(b"RIFF") {
         return Err(bad_request("The recording should be a WAV file."));
     }
-    let Some(whisper) = crate::bench::Whisper::find(&app.paths.cache_dir) else {
-        return Err(bad_request(
-            "Whisper isn't installed on the server: install whisper.cpp's whisper-cli, for example with `brew install whisper-cpp` on macOS.",
-        ));
+    let Some(whisper) = crate::whisper::Whisper::find(&app.paths.cache_dir) else {
+        return Err(bad_request(crate::whisper::INSTALL_HINT));
     };
     let path = bench_dir(&app, &query.session)?.join(format!("{:02}.wav", query.phrase));
     crate::paths::write_atomic(&path, &wav)?;
@@ -1663,6 +1700,103 @@ async fn bench_result(
         .with_context(|| format!("opening {}", path.display()))?;
     writeln!(file, "{result}").with_context(|| format!("writing {}", path.display()))?;
     Ok(Json(()))
+}
+
+#[derive(Serialize)]
+struct SpeechState {
+    /// Whether dictation can use Whisper: the program and its model are both installed.
+    ready: bool,
+    whisper_installed: bool,
+    model: &'static str,
+    model_mb: u64,
+    model_installed: bool,
+    install_hint: &'static str,
+    download: InstallStatus,
+}
+
+fn speech_state(app: &App) -> SpeechState {
+    let whisper = crate::whisper::Whisper::find(&app.paths.cache_dir);
+    let model_installed = crate::whisper::models_dir(&app.paths.cache_dir)
+        .join(format!("ggml-{}.bin", crate::whisper::DICTATION_MODEL))
+        .is_file();
+    SpeechState {
+        ready: whisper
+            .as_ref()
+            .is_some_and(|w| w.dictation_model().is_some()),
+        whisper_installed: whisper.is_some(),
+        model: crate::whisper::DICTATION_MODEL,
+        model_mb: crate::whisper::DICTATION_MODEL_MB,
+        model_installed,
+        install_hint: crate::whisper::INSTALL_HINT,
+        download: app.speech_install.status(),
+    }
+}
+
+async fn get_speech(State(app): State<Shared>) -> ApiResult<SpeechState> {
+    Ok(Json(speech_state(&app)))
+}
+
+/// Downloads Whisper's model for dictation.
+async fn download_speech_model(State(app): State<Shared>) -> ApiResult<SpeechState> {
+    install_with(
+        &app,
+        |app| &app.speech_install,
+        AfterInstall::Nothing,
+        |app, running| async move {
+            crate::whisper::download_model(
+                &app.paths.cache_dir,
+                crate::whisper::DICTATION_MODEL,
+                &running.cancel,
+                &running.log,
+            )
+            .await
+        },
+    )
+    .await?;
+    Ok(Json(speech_state(&app)))
+}
+
+async fn cancel_speech_download(State(app): State<Shared>) -> ApiResult<()> {
+    app.speech_install.cancel();
+    Ok(Json(()))
+}
+
+#[derive(Serialize)]
+struct Dictated {
+    text: String,
+}
+
+/// Hears a recording of what was said, with Whisper.
+async fn transcribe(State(app): State<Shared>, wav: axum::body::Bytes) -> ApiResult<Dictated> {
+    if !wav.starts_with(b"RIFF") {
+        return Err(bad_request("The recording should be a WAV file."));
+    }
+    let Some(whisper) = crate::whisper::Whisper::find(&app.paths.cache_dir) else {
+        return Err(bad_request(crate::whisper::INSTALL_HINT));
+    };
+    let Some(model) = whisper.dictation_model() else {
+        return Err(bad_request(format!(
+            "Whisper's {} model isn't downloaded yet; download it in Settings, under Talking.",
+            crate::whisper::DICTATION_MODEL
+        )));
+    };
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = app.paths.cache_dir.join("dictation");
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(format!("{}-{n}.wav", std::process::id()));
+    crate::paths::write_atomic(&path, &wav)?;
+    let transcript = whisper.transcribe(&path, model, None).await;
+    let _ = std::fs::remove_file(&path);
+    let transcript = transcript?;
+    tracing::info!(
+        "dictation: heard {:?} in {}ms",
+        transcript.text,
+        transcript.wall_ms
+    );
+    Ok(Json(Dictated {
+        text: crate::whisper::spoken_text(&transcript.text),
+    }))
 }
 
 /// Lets the app check the server can be reached, such as after it was asleep.

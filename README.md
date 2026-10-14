@@ -23,6 +23,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 - A model CLI that you're logged in to, used through your existing subscription: [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex). Workshop sets itself up for whichever you have.
 - [mise](https://mise.jdx.dev), which setup uses to install your language's toolchain for your solutions repo only. If you already have it (GHC and cabal, or Python 3, and optionally haskell-language-server or pyright for error underlines and types), you don't need mise.
 - Your Advent of Code session cookie.
+- Optionally, [whisper.cpp](https://github.com/ggml-org/whisper.cpp) on the server (`brew install whisper-cpp` on macOS), which hears code more accurately than phones' own speech recognition. Setup downloads its model.
 - A way to reach the server from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
 
 ## Getting started

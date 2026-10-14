@@ -1,13 +1,14 @@
 import { useRef, useState } from "preact/hooks";
 import type { DictationMethod } from "../dictation";
+import type { TalkPhase } from "../hooks/usePushToTalk";
 import { TALK_LABEL } from "./help";
 
 interface Props {
   hidden: boolean;
   /** How what's said reaches Workshop on this device. */
   method: DictationMethod;
-  listening: boolean;
-  hasSpeech: boolean;
+  /** Where the held press is, while the button is held. */
+  talk: TalkPhase | null;
   /** Whether to show a box for typing what you'd say, in place of or as well as speech. */
   showTyped: boolean;
   /** Whether the next utterance answers the edit model's question. */
@@ -27,7 +28,7 @@ interface Props {
  * the talk button is always free for the next utterance.
  */
 export function Controls(props: Props) {
-  const { listening, replying, method } = props;
+  const { talk, replying, method } = props;
   const [typed, setTyped] = useState("");
   const [composing, setComposing] = useState(false);
   const [composed, setComposed] = useState("");
@@ -64,11 +65,13 @@ export function Controls(props: Props) {
         : replying
           ? "Tap to reply"
           : "Tap to dictate"
-      : listening
-        ? "Release to send"
-        : replying
-          ? "Hold to reply"
-          : TALK_LABEL;
+      : talk === "starting"
+        ? "Wait…"
+        : talk === "listening"
+          ? "Release to send"
+          : replying
+            ? "Hold to reply"
+            : TALK_LABEL;
 
   return (
     <footer class={`controls ${props.hidden ? "hidden" : ""}`}>
@@ -123,8 +126,7 @@ export function Controls(props: Props) {
         ) : (
           <button
             type="button"
-            class={`talk ${listening ? "listening" : ""}`}
-            disabled={!props.hasSpeech}
+            class={`talk ${talk ?? ""}`}
             onPointerDown={props.onTalkStart}
             onPointerUp={props.onTalkEnd}
             onPointerCancel={props.onTalkEnd}

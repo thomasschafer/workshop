@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stands in for whisper.cpp's whisper-cli: hears "undo" in any WAV recording it's given.
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--file" ]; then file=$2; fi
+  shift
+done
+head -c 4 "$file" | grep -q RIFF || { echo "not a WAV recording: $file" >&2; exit 1; }
+echo " undo"

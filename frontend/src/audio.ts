@@ -1,6 +1,22 @@
 /** The sample rate Whisper works at. */
 export const WHISPER_RATE = 16_000;
 
+/** Whether this browser can record from the microphone. */
+export function recordingSupported(): boolean {
+  return (
+    window.isSecureContext &&
+    typeof navigator.mediaDevices?.getUserMedia === "function" &&
+    typeof MediaRecorder === "function"
+  );
+}
+
+/** A recording, ready for Whisper. */
+export interface Recording {
+  wav: ArrayBuffer;
+  /** The loudest sample, from 0 to 1, to tell silence from speech. */
+  peak: number;
+}
+
 /**
  * Records from the microphone until stopped, as 16 kHz mono WAV, which Whisper takes. Converting
  * here means the server needs nothing else to read it, on any platform.
@@ -15,15 +31,23 @@ export class AudioRecorder {
     recorder.ondataavailable = (event) => this.chunks.push(event.data);
   }
 
-  static async start(): Promise<AudioRecorder> {
+  /** Starts recording; `onStarted` is called once audio is being captured. */
+  static async start(onStarted: () => void = () => {}): Promise<AudioRecorder> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const recorder = new MediaRecorder(stream);
     const audio = new AudioRecorder(stream, recorder);
+    recorder.onstart = () => onStarted();
     recorder.start();
     return audio;
   }
 
-  async stop(): Promise<ArrayBuffer> {
+  /** Stops recording and lets the microphone go, keeping nothing. */
+  cancel(): void {
+    if (this.recorder.state !== "inactive") this.recorder.stop();
+    for (const track of this.stream.getTracks()) track.stop();
+  }
+
+  async stop(): Promise<Recording> {
     const stopped = new Promise<void>((resolve) => {
       this.recorder.onstop = () => resolve();
     });
@@ -38,8 +62,10 @@ export class AudioRecorder {
     source.buffer = decoded;
     source.connect(offline.destination);
     source.start();
-    const resampled = await offline.startRendering();
-    return encodeWav(resampled.getChannelData(0), WHISPER_RATE);
+    const samples = (await offline.startRendering()).getChannelData(0);
+    let peak = 0;
+    for (const sample of samples) peak = Math.max(peak, Math.abs(sample));
+    return { wav: encodeWav(samples, WHISPER_RATE), peak };
   }
 }
 

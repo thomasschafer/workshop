@@ -11,6 +11,7 @@ import {
   type Tab,
   type UiState,
 } from "./api";
+import { recordingSupported } from "./audio";
 import { type LocalCommand, matchCommand } from "./commands";
 import { resolveDictation } from "./dictation";
 import {
@@ -57,7 +58,7 @@ import {
 import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
 import { Stack } from "./views/stack";
-import { speechUnavailableReason } from "./voice";
+import { speechSupported, speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
 type Sheet = "run" | "settings" | "help" | "setup" | "bench" | null;
@@ -172,6 +173,9 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
+  const [serverSpeech, setServerSpeech] = useState(boot.server_dictation);
+  const hasSpeech = useMemo(speechSupported, []);
+  const canRecord = useMemo(recordingSupported, []);
   const [commitAfterStar, setCommitAfterStar] = useState(boot.commit_after_star);
   const wakeLock = useMemo(() => new ScreenWakeLock(), []);
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
@@ -704,26 +708,30 @@ export function App({ boot }: { boot: Bootstrap }) {
     queue.enqueue(text, detail, card);
   };
 
+  const dictationSupport = {
+    server: serverSpeech && canRecord,
+    browser: hasSpeech,
+  };
+  const dictationMethod = resolveDictation(dictationChoice, dictationSupport);
   const talk = usePushToTalk({
+    method: () => (dictationMethod === "server" ? "server" : "browser"),
     vocabulary: () => editor.current?.identifiers() ?? [],
     onStart: () => queue.reserveId(),
     onUtterance: (id, text, pieces) => enqueue(text, pieces, id),
     onNotice: notify,
   });
-  const { hasSpeech, listening } = talk;
-  const dictationMethod = resolveDictation(dictationChoice, hasSpeech);
   // Keeps the code clear of the cards floating over its bottom edge.
   useEffect(() => {
     stackHeightRef.current = stackHeight;
     editor.current?.setBottomInset(insetFor(stackHeight));
   }, [stackHeight]);
   useEffect(() => {
-    if (!hasSpeech) notify("warn", speechUnavailableReason());
+    if (!hasSpeech && !dictationSupport.server) notify("warn", speechUnavailableReason());
   }, []);
-  // Typing commands is handy at a desk, and the only option without speech recognition.
+  // Typing commands is handy at a desk, and the only option without a way to hold and talk.
   const showTyped = useMemo(
-    () => !hasSpeech || window.matchMedia("(pointer: fine)").matches,
-    [hasSpeech],
+    () => dictationMethod === "keyboard" || window.matchMedia("(pointer: fine)").matches,
+    [dictationMethod],
   );
 
   const toggleKeyboard = () => {
@@ -942,6 +950,7 @@ export function App({ boot }: { boot: Bootstrap }) {
                 openPuzzle(PRACTICE);
               }}
               onLoggedIn={() => setHasSession(true)}
+              onServerSpeech={setServerSpeech}
               onDone={() => setSheet(null)}
             />
           </Modal>
@@ -999,8 +1008,9 @@ export function App({ boot }: { boot: Bootstrap }) {
               dictation={{
                 choice: dictationChoice,
                 method: dictationMethod,
-                browserSpeech: hasSpeech,
+                support: dictationSupport,
               }}
+              onServerSpeech={setServerSpeech}
               onDictation={(choice) => {
                 preferences.dictation.set(choice);
                 setDictationChoice(choice);
@@ -1025,8 +1035,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         // Nothing to do with them while reading the puzzle: speech would edit code out of sight.
         hidden={showPicker || shownTab === "problem"}
         method={dictationMethod}
-        listening={listening}
-        hasSpeech={hasSpeech}
+        talk={talk.held}
         showTyped={showTyped}
         replying={replying}
         onSay={(text) => enqueue(text)}

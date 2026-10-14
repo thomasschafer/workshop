@@ -139,6 +139,22 @@ export interface Heard {
   report: { heldMs: number; sessions: SessionReport[] };
 }
 
+/** Hears what's said while the talk button is held, one press per instance. */
+export interface Listener {
+  /**
+   * Starts listening. `onInterim` gets what's been heard so far, where that's known before the
+   * end; `onListening` is called once audio is being captured, which takes a moment.
+   */
+  start(
+    onInterim: (text: string) => void,
+    vocabulary: readonly string[],
+    onListening: () => void,
+  ): void;
+  /** Stops listening and resolves with everything heard. */
+  stop(): Promise<Heard>;
+  cancel(): void;
+}
+
 /** Stops restarting if the browser keeps ending recognition straight away, such as offline. */
 const MAX_RESTARTS = 30;
 
@@ -147,7 +163,7 @@ const MAX_RESTARTS = 30;
  * (Chrome on Android does, mid-sentence), so it restarts while the button is still held and the
  * pieces are joined.
  */
-export class PushToTalk {
+export class PushToTalk implements Listener {
   private recognition: Recognition | null = null;
   private held = false;
   /** The sessions during this press, with what each heard. */

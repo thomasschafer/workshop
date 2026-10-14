@@ -1,11 +1,12 @@
 import { useState } from "preact/hooks";
 import { api, type ModelsState, type Snippet } from "../api";
-import type { DictationMethod } from "../dictation";
+import type { DictationMethod, DictationSupport } from "../dictation";
 import type { Packages } from "../hooks/usePackages";
 import type { DictationChoice } from "../preferences";
 import { Checks } from "./checks";
 import { ModelsSection } from "./models";
 import { PackagesSection } from "./packages";
+import { ServerSpeechSection } from "./speech";
 import { ThemeSection } from "./theme";
 
 interface Props {
@@ -22,11 +23,21 @@ interface Props {
   keepScreenOn: boolean | null;
   onKeepScreenOn: (enabled: boolean) => void;
   packages: Packages;
-  dictation: { choice: DictationChoice; method: DictationMethod; browserSpeech: boolean };
+  dictation: { choice: DictationChoice; method: DictationMethod; support: DictationSupport };
   onDictation: (choice: DictationChoice) => void;
+  /** Called with whether Whisper on the server is ready, as that's found out. */
+  onServerSpeech: (ready: boolean) => void;
   lineWrapping: boolean;
   onLineWrapping: (enabled: boolean) => void;
 }
+
+const METHOD_DESCRIPTIONS: Record<DictationMethod, string> = {
+  server:
+    "Hold the button and speak; Whisper on the server hears you once you let go, which is the most accurate.",
+  browser: "Hold the button and speak; this browser's speech recognition hears you as you go.",
+  keyboard:
+    "Tap the button, then use your keyboard's microphone, which is often more accurate than the browser's.",
+};
 
 export function Settings({
   snippets,
@@ -43,6 +54,7 @@ export function Settings({
   packages,
   dictation,
   onDictation,
+  onServerSpeech,
   lineWrapping,
   onLineWrapping,
 }: Props) {
@@ -72,7 +84,8 @@ export function Settings({
           {(
             [
               ["auto", "Automatic"],
-              ["browser", "Hold to talk"],
+              ["server", "Whisper"],
+              ["browser", "This browser"],
               ["keyboard", "Keyboard dictation"],
             ] as const
           ).map(([choice, label]) => (
@@ -80,7 +93,10 @@ export function Settings({
               type="button"
               key={choice}
               class={`chip ${dictation.choice === choice ? "selected" : ""}`}
-              disabled={choice === "browser" && !dictation.browserSpeech}
+              disabled={
+                (choice === "server" && !dictation.support.server) ||
+                (choice === "browser" && !dictation.support.browser)
+              }
               onClick={() => onDictation(choice)}
             >
               {label}
@@ -88,12 +104,11 @@ export function Settings({
           ))}
         </div>
         <p class="muted small">
-          {dictation.method === "browser"
-            ? "Hold the button and speak; this browser's speech recognition hears you."
-            : "Tap the button, then use your keyboard's microphone, which is often more accurate than the browser's."}{" "}
-          {dictation.browserSpeech ? "" : "This browser has no speech recognition of its own."} Kept
-          on this device only.
+          {METHOD_DESCRIPTIONS[dictation.method]}{" "}
+          {dictation.support.browser ? "" : "This browser has no speech recognition of its own."}{" "}
+          Kept on this device only.
         </p>
+        <ServerSpeechSection onReady={onServerSpeech} />
       </section>
 
       {packages.state ? (

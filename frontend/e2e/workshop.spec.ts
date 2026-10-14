@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { HOME, PORT } from "./fixture";
@@ -423,4 +423,41 @@ test("waits for the server when it can't be reached, then carries on", async () 
     .filter({ hasText: "“change it”" })
     .getByRole("button", { name: "Dismiss" })
     .click();
+});
+
+test("hears what's said with Whisper on the server, once its model is there", async () => {
+  const model = join(HOME, "cache", "whisper", "ggml-small.en.bin");
+  mkdirSync(join(HOME, "cache", "whisper"), { recursive: true });
+  // The stand-in whisper-cli only checks it's given a recording.
+  writeFileSync(model, "lmgg");
+  // A microphone that hears a steady tone, loud enough not to be taken for silence.
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const context = new AudioContext();
+      const tone = context.createOscillator();
+      const out = context.createMediaStreamDestination();
+      tone.connect(out);
+      tone.start();
+      return out.stream;
+    };
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+
+  // Automatic picks Whisper now it's ready.
+  const box = await page.locator(".talk").boundingBox();
+  if (!box) throw new Error("The talk button isn't visible.");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
+  await expect(page.locator(".card.live")).toContainText("Listening…");
+  await page.waitForTimeout(400);
+  await page.mouse.up();
+  await expect(card("done").filter({ hasText: "“undo”" }).last()).toContainText("Undone");
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator(".server-speech")).toContainText("Whisper is ready");
+  await page.keyboard.press("Escape");
+  rmSync(model);
+  await page.reload();
 });

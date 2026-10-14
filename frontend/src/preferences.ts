@@ -43,9 +43,9 @@ export const keepScreenOn = flag("workshop:keep-screen-on", true);
 export const lineWrapping = flag("workshop:line-wrapping", false);
 
 /**
- * How what's said is heard: the browser's own speech recognition while the button is held, or
- * the keyboard's dictation into a box. `auto` picks the best this device supports.
+ * How what's said is heard: Whisper on the server or the browser's own speech recognition while
+ * the button is held, or the keyboard's dictation into a box. `auto` picks the best available.
  */
-export const DICTATION_CHOICES = ["auto", "browser", "keyboard"] as const;
+export const DICTATION_CHOICES = ["auto", "server", "browser", "keyboard"] as const;
 export type DictationChoice = (typeof DICTATION_CHOICES)[number];
 export const dictation = choice<DictationChoice>("workshop:dictation", DICTATION_CHOICES, "auto");

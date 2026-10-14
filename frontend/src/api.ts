@@ -39,6 +39,19 @@ export interface Bootstrap {
   theme_css: string | null;
   /** Whether the solutions repo is committed and pushed after each star. */
   commit_after_star: boolean;
+  /** Whether Whisper on the server is ready to hear dictation. */
+  server_dictation: boolean;
+}
+
+export interface SpeechState {
+  /** Whether dictation can use Whisper: the program and its model are both installed. */
+  ready: boolean;
+  whisper_installed: boolean;
+  model: string;
+  model_mb: number;
+  model_installed: boolean;
+  install_hint: string;
+  download: InstallStatus;
 }
 
 export interface PackageHints {
@@ -483,6 +496,10 @@ export const api = {
     request<PackagesResponse>("POST", "/packages/remove", { package: pkg }),
   cancelInstall: () => request<null>("POST", "/packages/cancel"),
   resolvePackage: (module: string) => request<Resolution>("POST", "/packages/resolve", { module }),
+  speech: () => request<SpeechState>("GET", "/speech"),
+  downloadSpeechModel: () => request<SpeechState>("POST", "/speech/download"),
+  cancelSpeechDownload: () => request<null>("POST", "/speech/download/cancel"),
+  transcribe: (wav: ArrayBuffer) => request<{ text: string }>("POST", "/speech/transcribe", wav),
   bench: () => request<BenchInfo>("GET", "/bench"),
   benchTranscribe: (session: string, phrase: number, prompt: string, wav: ArrayBuffer) =>
     request<WhisperTranscript[]>(

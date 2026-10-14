@@ -623,9 +623,23 @@ code {
   transition: transform 0.08s ease;
 }
 
+/* Grey while the microphone starts, when words would be lost; green once it's listening. */
+.talk.starting,
 .talk.listening {
   transform: scale(0.97);
-  box-shadow: 0 0 0 4px var(--selection);
+  color: var(--bg);
+}
+
+.talk.starting {
+  background: var(--muted);
+}
+
+.talk.listening {
+  background: var(--ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 35%, transparent);
+  transition:
+    transform 0.08s ease,
+    background-color 0.12s ease;
 }
 
 /* Help */
@@ -1314,14 +1328,22 @@ code {
 }
 
 /* What's being said: two lines, always showing the newest words, older ones fading upwards. */
-.card.listening {
+.card.live {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   animation: listen-breathe 1.8s ease-in-out infinite;
 }
 
-.card.listening.starting {
+.card.live.listening {
+  border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
+}
+
+.card.live.starting,
+.card.live.hearing {
   border-color: var(--border);
   animation: none;
+}
+
+.card.live.starting {
   opacity: 0.8;
 }
 
@@ -1390,7 +1412,7 @@ code {
 
 @media (prefers-reduced-motion: reduce) {
   .card.working,
-  .card.listening,
+  .card.live,
   .card-body {
     animation: none;
   }

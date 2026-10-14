@@ -31,6 +31,8 @@ export default defineConfig({
     command: `${binary} serve`,
     env: {
       WORKSHOP_HOME: HOME,
+      // A stand-in for Whisper, used once a test puts its model in place.
+      PATH: `${resolve(import.meta.dirname, "e2e", "bin")}:${process.env.PATH ?? ""}`,
       RUST_LOG: "workshop=warn",
       // So committing works wherever the tests run, with or without a git identity set up.
       GIT_AUTHOR_NAME: "Workshop tests",
