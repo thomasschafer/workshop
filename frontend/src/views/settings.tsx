@@ -1,6 +1,8 @@
 import { useState } from "preact/hooks";
 import { api, type ModelsState, type Snippet } from "../api";
+import type { DictationMethod } from "../dictation";
 import type { Packages } from "../hooks/usePackages";
+import type { DictationChoice } from "../preferences";
 import { Checks } from "./checks";
 import { ModelsSection } from "./models";
 import { PackagesSection } from "./packages";
@@ -11,13 +13,15 @@ interface Props {
   models: ModelsState;
   onModels: (models: ModelsState) => void;
   onSetup: () => void;
-  /** Opens the comparison of speech recognition on this phone and computer. */
+  /** Opens the comparison of speech recognition on this device and the server. */
   onBench: () => void;
   commitMessage: string;
   onInsertSnippet: (snippet: Snippet) => void;
   keepScreenOn: boolean | null;
   onKeepScreenOn: (enabled: boolean) => void;
   packages: Packages;
+  dictation: { choice: DictationChoice; method: DictationMethod; browserSpeech: boolean };
+  onDictation: (choice: DictationChoice) => void;
   lineWrapping: boolean;
   onLineWrapping: (enabled: boolean) => void;
 }
@@ -33,6 +37,8 @@ export function Settings({
   keepScreenOn,
   onKeepScreenOn,
   packages,
+  dictation,
+  onDictation,
   lineWrapping,
   onLineWrapping,
 }: Props) {
@@ -54,6 +60,36 @@ export function Settings({
     <div class="settings">
       <section>
         <ModelsSection models={models} onModels={onModels} />
+      </section>
+
+      <section>
+        <h2>Talking</h2>
+        <div class="snippets">
+          {(
+            [
+              ["auto", "Automatic"],
+              ["browser", "Hold to talk"],
+              ["keyboard", "Keyboard dictation"],
+            ] as const
+          ).map(([choice, label]) => (
+            <button
+              type="button"
+              key={choice}
+              class={`chip ${dictation.choice === choice ? "selected" : ""}`}
+              disabled={choice === "browser" && !dictation.browserSpeech}
+              onClick={() => onDictation(choice)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p class="muted small">
+          {dictation.method === "browser"
+            ? "Hold the button and speak; this browser's speech recognition hears you."
+            : "Tap the button, then use your keyboard's microphone, which is often more accurate than the browser's."}{" "}
+          {dictation.browserSpeech ? "" : "This browser has no speech recognition of its own."} Kept
+          on this device only.
+        </p>
       </section>
 
       {packages.state ? (

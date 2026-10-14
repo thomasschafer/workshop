@@ -62,7 +62,7 @@ const engineName = (t: WhisperTranscript) =>
 
 /**
  * Compares speech recognition on the same phrases: the browser's own, the phone keyboard's, and
- * Whisper's on the computer running Workshop. Recordings and results are saved there.
+ * Whisper's on the server. Recordings and results are saved there.
  */
 export function SpeechBench() {
   const [info, setInfo] = useState<BenchInfo | null>(null);
@@ -168,7 +168,7 @@ export function SpeechBench() {
         <p class="error-text small">
           {info.whisper_installed
             ? `No Whisper models yet: put whisper.cpp's ggml-<name>.bin files in ${info.models_dir}.`
-            : "Whisper isn't installed on this computer, so only the phone's recognition is compared."}
+            : "Whisper isn't installed on the server, so only this device's recognition is compared."}
         </p>
       ) : null}
       {phase === "keyboard" && current ? (
@@ -294,9 +294,7 @@ function Summary({ takes, session }: { takes: Take[]; session: string }) {
           ))}
         </tbody>
       </table>
-      <p class="muted small">
-        Saved on the computer running Workshop, as session {session}, with the recordings.
-      </p>
+      <p class="muted small">Saved on the server, as session {session}, with the recordings.</p>
     </div>
   );
 }

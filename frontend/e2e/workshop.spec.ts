@@ -359,3 +359,24 @@ test("says to hold the button after a quick tap that heard nothing", async () =>
     page.locator(".card", { hasText: "Hold the button while you speak." }),
   ).toBeVisible();
 });
+
+test("dictates with the keyboard when chosen, on this device", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Keyboard dictation" }).click();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Tap to dictate" }).click();
+  const box = page.locator(".composer textarea");
+  await expect(box).toBeFocused();
+  // As the keyboard's microphone would type it.
+  await box.fill("undo");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(card("done").filter({ hasText: "“undo”" }).last()).toContainText("Undone");
+  await expect(page.locator(".composer")).not.toHaveClass(/\bopen\b/);
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Automatic" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".talk")).toHaveText("Hold to talk");
+});

@@ -105,7 +105,7 @@ export function Help() {
         <h2>Saving</h2>
         <p>
           Everything saves as you go, so you can put your phone down at any point. Solutions live in
-          a git repo on your computer; commit and push from Settings.
+          a git repo on the server; commit and push from Settings.
         </p>
       </section>
     </div>

@@ -1542,7 +1542,7 @@ async fn bench_transcribe(
     }
     let Some(whisper) = crate::bench::Whisper::find(&app.paths.cache_dir) else {
         return Err(bad_request(
-            "Whisper isn't installed on this computer: install whisper.cpp, such as with `brew install whisper-cpp`.",
+            "Whisper isn't installed on the server: install whisper.cpp's whisper-cli, for example with `brew install whisper-cpp` on macOS.",
         ));
     };
     let path = bench_dir(&app, &query.session)?.join(format!("{:02}.wav", query.phrase));

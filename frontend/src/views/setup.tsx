@@ -227,7 +227,7 @@ function LoginStep({
             Workshop fetches puzzles as you, using your session cookie. In a desktop browser, log in
             at adventofcode.com, open the developer tools (Application in Chrome, Storage in Firefox
             and Safari), and under Cookies copy the value of the one called
-            <code> session</code>. It's saved on this computer only.
+            <code> session</code>. It's saved on the server only.
           </p>
           <form class="cookie-form" onSubmit={save}>
             <input
@@ -283,10 +283,10 @@ function PhoneStep({
         <>
           <p class="small">
             Browsers only allow the microphone over HTTPS, so your phone needs a secure way to reach
-            this computer.{" "}
+            the server.{" "}
             {state.tailscale_installed
               ? "Tailscale is installed: restart Workshop with `workshop serve --tailscale`, and a link and QR code for your phone will appear here."
-              : "The easiest is Tailscale (tailscale.com): install it on this computer and your phone, then start Workshop with `workshop serve --tailscale`."}
+              : "The easiest is Tailscale (tailscale.com): install it on the server and your phone, then start Workshop with `workshop serve --tailscale`."}
           </p>
           <button type="button" class="text-button" onClick={onRefresh}>
             Check again

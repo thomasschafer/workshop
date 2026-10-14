@@ -10,6 +10,7 @@ import {
   type UiState,
 } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
+import { resolveDictation } from "./dictation";
 import {
   type Anchor,
   CodeEditor,
@@ -160,6 +161,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   const notify = (tone: "ok" | "info" | "warn" | "error", text: string) => queue.notify(tone, text);
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
+  const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
   const wakeLock = useMemo(() => new ScreenWakeLock(), []);
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
   useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
@@ -658,6 +660,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     onNotice: notify,
   });
   const { hasSpeech, listening } = talk;
+  const dictationMethod = resolveDictation(dictationChoice, hasSpeech);
   // Keeps the code clear of the cards floating over its bottom edge.
   useEffect(() => {
     stackHeightRef.current = stackHeight;
@@ -924,6 +927,15 @@ export function App({ boot }: { boot: Bootstrap }) {
                 setKeepScreenOn(enabled);
               }}
               packages={packages}
+              dictation={{
+                choice: dictationChoice,
+                method: dictationMethod,
+                browserSpeech: hasSpeech,
+              }}
+              onDictation={(choice) => {
+                preferences.dictation.set(choice);
+                setDictationChoice(choice);
+              }}
               lineWrapping={lineWrapping}
               onLineWrapping={(enabled) => {
                 preferences.lineWrapping.set(enabled);
@@ -942,6 +954,7 @@ export function App({ boot }: { boot: Bootstrap }) {
 
       <Controls
         hidden={showPicker}
+        method={dictationMethod}
         listening={listening}
         hasSpeech={hasSpeech}
         showTyped={showTyped}

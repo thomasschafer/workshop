@@ -2,7 +2,7 @@
 
 Solve [Advent of Code](https://adventofcode.com) puzzles by voice, from your phone.
 
-Workshop runs on your laptop and you open it on your phone. The phone shows the puzzle and your code; you hold a button and say the code you want, roughly as you'd type it, and a model turns what you said into a precise edit. It's built for working one-handed, away from a desk.
+Workshop runs on a server you control, such as your laptop, a desktop or a VPS, and you open it on your phone. The phone shows the puzzle and your code; you hold a button and say the code you want, roughly as you'd type it, and a model turns what you said into a precise edit. It's built for working one-handed, away from a desk.
 
 <p align="center">
   <img src="docs/demo.gif" width="300" alt="Workshop on a phone: holding the talk button to dictate two lines of Python, then running them on the sample and the real input">
@@ -31,7 +31,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 - A model CLI that you're logged in to, used through your existing subscription: [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex). Workshop sets itself up for whichever you have.
 - The toolchain for your language. Haskell and Python are built in: GHC and cabal with haskell-language-server, or Python 3 with pyright. The language server is optional and adds error underlines and types. Other languages can be added in your config.
 - Your Advent of Code session cookie.
-- A way to reach your laptop from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
+- A way to reach the server from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
 
 ## Getting started
 
@@ -48,7 +48,7 @@ To use it from your phone over Tailscale, start it with:
 workshop serve --tailscale
 ```
 
-This runs `tailscale serve` for you, which gives Workshop an HTTPS address on your tailnet, and prints a link and QR code to open on your phone. The token in the link is then remembered by your phone's browser. Keep your laptop awake while you're out, for example with `caffeinate -i` on macOS.
+This runs `tailscale serve` for you, which gives Workshop an HTTPS address on your tailnet, and prints a link and QR code to open on your phone. The token in the link is then remembered by your phone's browser. Keep the server awake while you're out; on a Mac, for example, with `caffeinate -i`.
 
 The first time you open Workshop, a short setup walks you through choosing your language and model, logging in to Advent of Code with your session cookie, and opening Workshop on your phone. You can run it again from Settings. If you'd rather not paste the cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
