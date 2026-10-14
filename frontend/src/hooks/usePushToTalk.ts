@@ -21,7 +21,13 @@ interface Press {
   ptt: PushToTalk;
   text: string;
   held: boolean;
+  /** Whether the browser has started capturing audio, after which words are heard. */
+  listening: boolean;
+  startedAt: number;
 }
+
+/** A press shorter than this that heard nothing was probably a tap rather than a hold. */
+const TAP_MS = 400;
 
 /**
  * Listening while the talk button is held. After it's released, the last words take a moment to
@@ -49,11 +55,17 @@ export function usePushToTalk(options: Options) {
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
       const ptt = new PushToTalk();
       const id = latest.current.onStart();
+      const change = (fields: Partial<Press>) =>
+        update((presses) => presses.map((p) => (p.id === id ? { ...p, ...fields } : p)));
+      update((presses) => [
+        ...presses,
+        { id, ptt, text: "", held: true, listening: false, startedAt: performance.now() },
+      ]);
       ptt.start(
-        (text) => update((presses) => presses.map((p) => (p.id === id ? { ...p, text } : p))),
+        (text) => change({ text }),
         latest.current.vocabulary(),
+        () => change({ listening: true }),
       );
-      update((presses) => [...presses, { id, ptt, text: "", held: true }]);
       navigator.vibrate?.(10);
     } catch (e) {
       latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
@@ -63,6 +75,7 @@ export function usePushToTalk(options: Options) {
   const stop = async () => {
     const press = held();
     if (!press) return;
+    const heldMs = performance.now() - press.startedAt;
     update((presses) => presses.map((p) => (p === press ? { ...p, held: false } : p)));
     const { text, pieces, error, report } = await press.ptt.stop();
     // Everything the browser reported, so a wrong edit can be traced to what was heard.
@@ -71,6 +84,8 @@ export function usePushToTalk(options: Options) {
       latest.current.onNotice("error", error);
     } else if (text.trim()) {
       latest.current.onUtterance(press.id, text.trim(), pieces);
+    } else if (heldMs < TAP_MS) {
+      latest.current.onNotice("info", "Hold the button while you speak.");
     } else {
       latest.current.onNotice("info", "Didn't catch anything.");
     }
@@ -82,7 +97,7 @@ export function usePushToTalk(options: Options) {
     hasSpeech,
     listening: presses.some((p) => p.held),
     /** What's being said, or was just said and is still arriving, oldest first. */
-    live: presses.map(({ id, text }) => ({ id, text })),
+    live: presses.map(({ id, text, listening }) => ({ id, text, listening })),
     start,
     stop,
   };

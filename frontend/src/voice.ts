@@ -29,6 +29,8 @@ export interface Recognition extends EventTarget {
   onresult: ((event: RecognitionEvent) => void) | null;
   onerror: ((event: RecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
+  /** When the browser starts capturing audio, so words from then on are heard. */
+  onaudiostart?: (() => void) | null;
 }
 
 export type RecognitionConstructor = new () => Recognition;
@@ -79,6 +81,18 @@ export function joinSegments(segments: readonly string[]): Joined {
     }
   }
   return { text: text.trim(), revised };
+}
+
+/**
+ * The pieces worth showing the model: those no later piece simply carries on from. Chrome on
+ * Android restates the sentence as it grows ("can you", "can you import", …), and only the
+ * pieces where it changed its mind about earlier words add anything.
+ */
+export function telling(pieces: readonly string[]): string[] {
+  return pieces.filter((piece, i) => {
+    const lower = piece.toLowerCase();
+    return !pieces.slice(i + 1).some((later) => later.toLowerCase().startsWith(lower));
+  });
 }
 
 function cleanSegments(segments: readonly string[]): string[] {
@@ -143,6 +157,7 @@ export class PushToTalk {
   private restarts = 0;
   private ended: Promise<void> = Promise.resolve();
   private onInterim: (text: string) => void = () => {};
+  private onListening: () => void = () => {};
   private vocabulary: readonly string[] = [];
 
   constructor(private readonly ctor: RecognitionConstructor | null = recognitionConstructor()) {}
@@ -151,7 +166,12 @@ export class PushToTalk {
    * Starts listening. `vocabulary` biases recognition towards words such as identifiers in the
    * file, where the browser supports it.
    */
-  start(onInterim: (text: string) => void, vocabulary: readonly string[] = []): void {
+  start(
+    onInterim: (text: string) => void,
+    vocabulary: readonly string[] = [],
+    /** Called once the browser is capturing audio, which takes a moment after pressing. */
+    onListening: () => void = () => {},
+  ): void {
     if (!this.ctor) {
       throw new Error(speechUnavailableReason());
     }
@@ -162,6 +182,7 @@ export class PushToTalk {
     this.error = null;
     this.restarts = 0;
     this.onInterim = onInterim;
+    this.onListening = onListening;
     this.vocabulary = vocabulary;
     this.startSession(this.ctor);
   }
@@ -176,10 +197,11 @@ export class PushToTalk {
     }
     this.recognition = null;
     const revised = this.sessions.some((s) => s.joined.revised);
-    const pieces = revised ? this.sessions.flatMap((s) => cleanSegments(s.results)) : [];
+    const pieces = revised ? telling(this.sessions.flatMap((s) => cleanSegments(s.results))) : [];
     return {
       text: this.transcript(),
-      pieces: pieces.filter((piece, i) => piece !== pieces[i - 1]),
+      // A single piece says nothing the text doesn't.
+      pieces: pieces.length > 1 ? pieces : [],
       error: this.error,
       report: {
         heldMs: Math.round(performance.now() - this.startedAt),
@@ -223,6 +245,7 @@ export class PushToTalk {
       joined: { text: "", revised: false },
     };
     this.sessions.push(session);
+    recognition.onaudiostart = () => this.onListening();
     recognition.onresult = (event) => {
       const segments: string[] = [];
       for (let i = 0; i < event.results.length; i++) {

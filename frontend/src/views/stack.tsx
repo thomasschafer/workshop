@@ -6,7 +6,7 @@ import type { Card } from "../utterances";
 interface Props {
   cards: Card[];
   /** What's being said, or was just said and is still arriving, oldest first. */
-  live: { id: number; text: string }[];
+  live: { id: number; text: string; listening: boolean }[];
   /** The card whose question is being answered, if any. */
   replyingTo: number | null;
   onDismiss: (id: number) => void;
@@ -73,10 +73,15 @@ export function Stack({
   return (
     <div class="stack" ref={ref} aria-live="polite">
       {shown}
-      {live.map(({ id, text }) => (
-        <div key={id} data-flip={String(id)} class="card listening">
+      {live.map(({ id, text, listening }) => (
+        <div
+          key={id}
+          data-flip={String(id)}
+          class={`card listening ${listening ? "" : "starting"}`}
+        >
           <div class="live-text">
-            <span>{text || "Listening…"}</span>
+            {/* Words said before the browser is listening are lost, so this says when to start. */}
+            <span>{text || (listening ? "Listening…" : "Starting…")}</span>
           </div>
         </div>
       ))}

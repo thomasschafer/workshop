@@ -1319,6 +1319,12 @@ code {
   animation: listen-breathe 1.8s ease-in-out infinite;
 }
 
+.card.listening.starting {
+  border-color: var(--border);
+  animation: none;
+  opacity: 0.8;
+}
+
 .live-text {
   height: 2.8em;
   padding: 10px 14px;

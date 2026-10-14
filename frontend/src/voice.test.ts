@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinSegments, PushToTalk } from "./voice";
+import { joinSegments, PushToTalk, telling } from "./voice";
 
 describe("joinSegments", () => {
   it("joins consecutive pieces, with no guesswork", () => {
@@ -67,6 +67,29 @@ describe("joinSegments", () => {
   });
 });
 
+describe("telling", () => {
+  it("drops pieces that a later one carries on from", () => {
+    // From a real session on Android.
+    expect(
+      telling([
+        "can you",
+        "can you add",
+        "can you add a two here so it's constitute",
+        "no",
+        "no const",
+        "no const too",
+      ]),
+    ).toEqual(["can you add a two here so it's constitute", "no const too"]);
+  });
+
+  it("keeps a piece the recogniser changed its mind about", () => {
+    expect(telling(["add filter brackets", "add filter (greater than 100)"])).toEqual([
+      "add filter brackets",
+      "add filter (greater than 100)",
+    ]);
+  });
+});
+
 describe("PushToTalk", () => {
   /** Stands in for the browser's recognition, letting tests say what was heard and end it. */
   class FakeRecognition extends EventTarget {
@@ -123,6 +146,22 @@ describe("PushToTalk", () => {
     expect(interim.at(-1)).toContain("and then replace");
   });
 
+  it("says when the browser has started capturing audio", () => {
+    FakeRecognition.sessions = [];
+    const ptt = new PushToTalk(FakeRecognition as never);
+    let listening = false;
+    ptt.start(
+      () => {},
+      [],
+      () => {
+        listening = true;
+      },
+    );
+    expect(listening).toBe(false);
+    (latest() as unknown as { onaudiostart: () => void }).onaudiostart();
+    expect(listening).toBe(true);
+  });
+
   it("reports errors such as a refused microphone", async () => {
     FakeRecognition.sessions = [];
     const ptt = new PushToTalk(FakeRecognition as never);
@@ -151,10 +190,7 @@ describe("PushToTalk", () => {
     latest().hear("add filter", "add filter brackets", "add filter (greater than 100)");
     const heard = await ptt.stop();
     expect(heard.text).toBe("add filter (greater than 100)");
-    expect(heard.pieces).toEqual([
-      "add filter",
-      "add filter brackets",
-      "add filter (greater than 100)",
-    ]);
+    // "add filter" only grew into "add filter brackets", so it's left out.
+    expect(heard.pieces).toEqual(["add filter brackets", "add filter (greater than 100)"]);
   });
 });

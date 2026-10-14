@@ -13,10 +13,12 @@ export function installSimulatedSpeech(wordsPerSecond: number): void {
     onresult: ((event: unknown) => void) | null = null;
     onerror: ((event: unknown) => void) | null = null;
     onend: (() => void) | null = null;
+    onaudiostart: (() => void) | null = null;
     private timer: ReturnType<typeof setInterval> | undefined;
     private heard = "";
 
     start(): void {
+      setTimeout(() => this.onaudiostart?.(), 0);
       const words = speech.text.split(" ");
       let count = 0;
       this.timer = setInterval(() => {

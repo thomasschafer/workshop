@@ -874,3 +874,63 @@ part2 :: String -> Int
 part2 = solve . map read . lines
   where
     solve = undefined‸'''
+
+# Cases from real use
+
+[[case]]
+name = "import-common-module-without-details"
+utterance = "can you import hash map at the top"
+before = '''
+module Main where
+
+import Data.List (sort)
+
+part1 :: String -> Int
+part1 = ‸'''
+after = '''
+module Main where
+
+import Data.List (sort)
+import qualified Data.HashMap.Strict as HM‸
+
+part1 :: String -> Int
+part1 = '''
+also = ['''
+module Main where
+
+import Data.List (sort)
+import qualified Data.HashMap.Strict as HM
+
+part1 :: String -> Int
+part1 = ‸''', '''
+module Main where
+
+import qualified Data.HashMap.Strict as HM
+import Data.List (sort)
+
+part1 :: String -> Int
+part1 = ‸''', '''
+module Main where
+
+import qualified Data.HashMap.Strict as HM‸
+import Data.List (sort)
+
+part1 :: String -> Int
+part1 = ''']
+
+[[case]]
+name = "this-is-at-the-cursor-not-the-last-insertion"
+utterance = "replace this with filter brackets greater than 100"
+recent = "length . "
+before = '''
+part1 :: String -> Int
+part1 = length . map read . lines
+
+part2 :: String -> Int
+part2 = undefin‸ed'''
+after = '''
+part1 :: String -> Int
+part1 = length . map read . lines
+
+part2 :: String -> Int
+part2 = filter (> 100)‸'''

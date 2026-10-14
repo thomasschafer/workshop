@@ -352,3 +352,10 @@ test("waits for the editor when something is said while a puzzle is still openin
   await expect(card("asked").filter({ hasText: "“change it”" })).toBeVisible();
   await expect(page.locator(".card", { hasText: "Open a puzzle first" })).toHaveCount(0);
 });
+
+test("says to hold the button after a quick tap that heard nothing", async () => {
+  await hold("", 100);
+  await expect(
+    page.locator(".card", { hasText: "Hold the button while you speak." }),
+  ).toBeVisible();
+});
