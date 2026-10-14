@@ -174,12 +174,13 @@ async function record(): Promise<string> {
     stars: { 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 1, 8: 2, 9: 0 },
     model: "default",
   });
+  // Before the server starts, so a browser that won't launch doesn't leave it running.
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
+  const browser = await chromium.launch(executablePath ? { executablePath } : {});
   const server = spawn(join(ROOT, "target", "debug", "workshop"), ["serve"], {
     env: { ...process.env, WORKSHOP_HOME: HOME, RUST_LOG: process.env.RUST_LOG ?? "workshop=warn" },
     stdio: ["ignore", "ignore", "inherit"],
   });
-  const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
-  const browser = await chromium.launch(executablePath ? { executablePath } : {});
   try {
     await waitForServer(server);
     const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();

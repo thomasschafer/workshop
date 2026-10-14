@@ -123,12 +123,13 @@ async function run(test: Case): Promise<void> {
   );
   const solution = join(home, "solutions", "2017", "day04", test.file);
 
+  // Before the server starts, so a browser that won't launch doesn't leave it running.
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
+  const browser = await chromium.launch(executablePath ? { executablePath } : {});
   const server = spawn(join(ROOT, "target", "debug", "workshop"), ["serve"], {
     env: { ...process.env, WORKSHOP_HOME: home, RUST_LOG: "workshop=warn" },
     stdio: ["ignore", "ignore", "inherit"],
   });
-  const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
-  const browser = await chromium.launch(executablePath ? { executablePath } : {});
   const started = Date.now();
   const log = (message: string) =>
     console.log(`${test.language} ${((Date.now() - started) / 1000).toFixed(1)}s: ${message}`);
