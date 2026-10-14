@@ -487,8 +487,9 @@ test("hears what's said with Whisper on the server, once its model is there", as
       tone.connect(out);
       tone.start();
       const resumed = context.resume();
-      // As long as a phone's microphone takes to start, roughly.
-      await new Promise((r) => setTimeout(r, 300));
+      // As long as a phone's microphone takes to start, roughly, unless a test says otherwise.
+      const delay = (window as unknown as { micDelayMs?: number }).micDelayMs ?? 300;
+      await new Promise((r) => setTimeout(r, delay));
       await resumed;
       return out.stream;
     };
@@ -499,6 +500,19 @@ test("hears what's said with Whisper on the server, once its model is there", as
   // Automatic picks Whisper now it's ready.
   const box = await page.locator(".talk").boundingBox();
   if (!box) throw new Error("The talk button isn't visible.");
+
+  // The first press, when the browser asks whether to allow the microphone and the button is let
+  // go to answer.
+  await page.evaluate(() => Object.assign(window, { micDelayMs: 2000 }));
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await expect(
+    page.locator(".card", { hasText: "Microphone allowed. Now hold the button while you speak." }),
+  ).toBeVisible();
+  await page.evaluate(() => Object.assign(window, { micDelayMs: 300 }));
+
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await expect(page.locator(".talk")).toHaveClass(/\bstarting\b/);

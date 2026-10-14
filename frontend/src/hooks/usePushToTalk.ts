@@ -148,7 +148,7 @@ export function usePushToTalk(options: Options) {
     const heldMs = performance.now() - press.startedAt;
     update((presses) => presses.map((p) => (p === press ? { ...p, held: false } : p)));
     try {
-      const { text, pieces, error, report } = await press.listener.stop();
+      const { text, pieces, error, hint, report } = await press.listener.stop();
       await press.after;
       const cancelled = current.current.find((p) => p.id === press.id)?.cancelled ?? false;
       // Everything the browser reported, so a wrong edit can be traced to what was heard.
@@ -159,6 +159,8 @@ export function usePushToTalk(options: Options) {
         latest.current.onNotice("error", error);
       } else if (text.trim()) {
         latest.current.onUtterance(press.id, text.trim(), pieces);
+      } else if (hint) {
+        latest.current.onNotice("info", hint);
       } else if (heldMs < TAP_MS) {
         latest.current.onNotice("info", "Hold the button while you speak.");
       } else {

@@ -137,6 +137,8 @@ export interface Heard {
   pieces: string[];
   /** Why listening failed, if it did. */
   error: string | null;
+  /** What to tell the user when nothing was heard, if there's more to say than that. */
+  hint?: string;
   /** How listening went, for the log. */
   report: { heldMs: number; sessions: SessionReport[]; recording?: RecordingReport };
 }

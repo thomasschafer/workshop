@@ -11,6 +11,8 @@ const SILENT_PEAK = 0.02;
 /** Records while the button is held, then has Whisper on the server hear it. */
 export class ServerDictation implements Listener {
   private recording: Promise<AudioRecorder> | null = null;
+  /** Whether the browser has granted the microphone, or refused it, for this press. */
+  private answered = false;
   private startedAt = 0;
 
   private onDelay: (reason: string | null) => void = () => {};
@@ -22,12 +24,16 @@ export class ServerDictation implements Listener {
     this.startedAt = performance.now();
     this.onDelay = onDelay;
     this.recording = AudioRecorder.start(onListening, onLevel);
-    // Reported by `stop`, which every press ends with.
-    this.recording.catch(() => {});
+    const answered = () => {
+      this.answered = true;
+    };
+    // A failure is reported by `stop`, which every press ends with.
+    this.recording.then(answered, answered);
   }
 
   async stop(): Promise<Heard> {
-    const heldMs = Math.round(performance.now() - this.startedAt);
+    const releasedAt = performance.now();
+    const heldMs = Math.round(releasedAt - this.startedAt);
     const heard = (text: string, error: string | null, report: Heard["report"]): Heard => ({
       text,
       pieces: [],
@@ -37,15 +43,25 @@ export class ServerDictation implements Listener {
     const recording = this.recording;
     this.recording = null;
     if (!recording) return heard("", null, { heldMs, sessions: [] });
+    // Waiting for the microphone well after the button's released means the browser was asking
+    // whether to allow it, which the button was let go to answer.
+    const waiting = !this.answered;
     let audio: AudioRecorder;
     try {
       audio = await recording;
     } catch (e) {
       return heard("", microphoneError(e), { heldMs, sessions: [] });
     }
+    const asked = waiting && performance.now() - releasedAt > ASKING_MS;
     const { wav, peak, report } = await audio.stop();
     const log = { heldMs, sessions: [], recording: report };
     if (this.cancelled) return heard("", null, log);
+    if (asked && peak < SILENT_PEAK) {
+      return {
+        ...heard("", null, log),
+        hint: "Microphone allowed. Now hold the button while you speak.",
+      };
+    }
     if (report.startMs === null && heldMs >= QUICK_PRESS_MS) {
       return heard(
         "",
@@ -99,6 +115,9 @@ export class ServerDictation implements Listener {
     recording?.then((audio) => audio.cancel()).catch(() => {});
   }
 }
+
+/** Longer than this to get the microphone after the button's released, and it was asked for. */
+const ASKING_MS = 700;
 
 /** How long to wait for the server to be reachable before giving up on a recording. */
 const SERVER_WAIT_MS = 120_000;
