@@ -10,6 +10,8 @@ interface Props {
   /** The card whose question is being answered, if any. */
   replyingTo: number | null;
   onDismiss: (id: number) => void;
+  /** Does what an offer's button says. */
+  onAct: (id: number) => void;
   onReply: (id: number) => void;
   onCancelReply: () => void;
   /** Called with the stack's height, so what's underneath can keep clear of it. */
@@ -28,6 +30,7 @@ export function Stack({
   live,
   replyingTo,
   onDismiss,
+  onAct,
   onReply,
   onCancelReply,
   onHeight,
@@ -51,6 +54,7 @@ export function Stack({
       card={card}
       replying={replyingTo === card.id}
       onDismiss={() => onDismiss(card.id)}
+      onAct={() => onAct(card.id)}
       onReply={() => onReply(card.id)}
       onCancelReply={onCancelReply}
     />
@@ -93,12 +97,14 @@ function CardView({
   card,
   replying,
   onDismiss,
+  onAct,
   onReply,
   onCancelReply,
 }: {
   card: Card;
   replying: boolean;
   onDismiss: () => void;
+  onAct: () => void;
   onReply: () => void;
   onCancelReply: () => void;
 }) {
@@ -145,6 +151,8 @@ function CardView({
             )
           ) : status.kind === "asked" ? (
             "?"
+          ) : status.kind === "offer" ? (
+            "★"
           ) : (
             "!"
           )}
@@ -167,10 +175,17 @@ function CardView({
               <span class="card-result">
                 {status.kind === "asked"
                   ? status.question
-                  : status.kind === "done" || status.kind === "problem"
+                  : status.kind === "done" || status.kind === "problem" || status.kind === "offer"
                     ? status.text
                     : null}
               </span>
+              {status.kind === "offer" ? (
+                <span class="card-actions">
+                  <button type="button" class="pill primary small" onClick={onAct}>
+                    {status.action}
+                  </button>
+                </span>
+              ) : null}
               {status.kind === "asked" ? (
                 <span class="card-actions">
                   {replying ? (

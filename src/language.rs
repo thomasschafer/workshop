@@ -33,6 +33,18 @@ pub struct LanguageProfile {
     /// A module of the user's own that every solution can import.
     #[serde(default)]
     pub helpers: Option<HelpersProfile>,
+    /// Turns on the template's part 2 code once part 1 is solved, such as by uncommenting the
+    /// line that prints its answer.
+    #[serde(default)]
+    pub start_part_two: Option<TextSwap>,
+}
+
+/// Text to replace with other text.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextSwap {
+    pub find: String,
+    pub replace: String,
 }
 
 /// A module of the user's own, shared by every solution, such as for parsing input.
@@ -170,6 +182,15 @@ impl Puzzle {
         self == Self::PRACTICE
     }
 
+    /// How the puzzle is named in commit messages.
+    pub fn title(self) -> String {
+        if self.is_practice() {
+            "Workshop practice puzzle".to_owned()
+        } else {
+            format!("Advent of Code {} day {}", self.year, self.day)
+        }
+    }
+
     /// The year as it appears in paths: `practice` for the practice puzzle, which keeps its
     /// files apart from real years.
     pub fn year_label(self) -> String {
@@ -243,6 +264,19 @@ mod tests {
                 dir.path().join("lib").to_string_lossy().into_owned()
             )]
         );
+    }
+
+    #[test]
+    fn builtin_templates_contain_their_part_two_swaps() {
+        for (id, profile) in builtin_profiles().unwrap() {
+            if let Some(swap) = profile.start_part_two {
+                assert!(
+                    profile.template.contains(&swap.find),
+                    "{id}: {:?}",
+                    swap.find
+                );
+            }
+        }
     }
 
     #[test]

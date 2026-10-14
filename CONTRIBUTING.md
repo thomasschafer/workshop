@@ -80,6 +80,19 @@ Then:
 
 Commands are lists of arguments, not shell strings. The placeholders are `{file}`, `{dir}` (the solution's directory), `{build_dir}` (a scratch directory outside the solutions repo, for build output), `{year}` and `{day}`; `{day:02}` pads with zeros. An unknown placeholder is an error.
 
+### Starting part 2
+
+Templates usually leave part 2's output commented out. `start_part_two` says how to turn it on, so once part 1 is solved Workshop can offer to, and "start part two" does it by voice:
+
+```toml
+start_part_two = { find = """
+    # When you start part 2, uncomment the next line.
+    # print(part2(data))""", replace = """
+    print(part2(data))""" }
+```
+
+`find` must appear in the template exactly; a test checks the built-in profiles.
+
 ### Helpers
 
 A `[helpers]` table gives solutions a module of the user's own to share. Workshop creates it with the first solution, along with any settings the language server needs to find it, but never replaces files the user already has. Commands can use its directory as `{helpers}`, such as `-i{helpers}` for GHC.

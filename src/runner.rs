@@ -252,6 +252,7 @@ mod tests {
             dictation_hints: String::new(),
             packages: None,
             helpers: None,
+            start_part_two: None,
         }
     }
 

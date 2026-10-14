@@ -221,6 +221,7 @@ pub fn router(app: Shared) -> Router {
         .route("/setup", get(setup_state))
         .route("/themes", get(themes))
         .route("/theme", put(set_theme))
+        .route("/solutions-repo", put(set_solutions_repo))
         .route("/setup/language", put(set_language))
         .route("/setup/aoc-session", post(set_aoc_session))
         .route("/packages", get(get_packages).put(save_packages))
@@ -410,6 +411,7 @@ struct Bootstrap {
     needs_setup: bool,
     /// Overrides Workshop's colours with the chosen terminal themes.
     theme_css: Option<String>,
+    commit_after_star: bool,
 }
 
 #[derive(Serialize)]
@@ -422,6 +424,7 @@ struct LanguageInfo {
     root_uri: String,
     /// For recognising a missing package in errors, if the language has packages.
     packages: Option<PackageHints>,
+    start_part_two: Option<crate::language::TextSwap>,
 }
 
 #[derive(Serialize)]
@@ -450,11 +453,13 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
                 missing_module: p.missing_module.clone(),
                 missing_package: p.missing_package.clone(),
             }),
+            start_part_two: language.start_part_two.clone(),
         },
         snippets: app.config.snippets.clone(),
         models: models_state(&app),
         has_aoc_session: app.aoc.has_session(),
         theme_css: theme_css(&app),
+        commit_after_star: app.settings().commit_after_star,
         needs_setup: !app.aoc.has_session()
             || models::options(&app.config)
                 .iter()
@@ -691,6 +696,14 @@ struct Submitted {
     outcome: SubmitOutcome,
     /// The refreshed puzzle after a correct answer, which shows the next part.
     problem: Option<Problem>,
+    /// What committing and pushing the solutions repo did, if that's done after each star.
+    committed: Option<Committed>,
+}
+
+#[derive(Serialize)]
+struct Committed {
+    succeeded: bool,
+    summary: String,
 }
 
 async fn submit(
@@ -701,12 +714,33 @@ async fn submit(
     let puzzle = puzzle(year, day)?;
     let part = Part::from_number(body.part)?;
     let outcome = app.aoc.submit(puzzle, part, &body.answer).await?;
-    let problem = if outcome == SubmitOutcome::Correct {
+    let correct = outcome == SubmitOutcome::Correct;
+    let problem = if correct {
         Some(app.aoc.problem(puzzle, true).await?)
     } else {
         None
     };
-    Ok(Json(Submitted { outcome, problem }))
+    let committed = if correct && app.settings().commit_after_star {
+        let message = format!("{}, part {}", puzzle.title(), part.number());
+        // The star is earned either way, so a failed push is reported rather than an error.
+        Some(match app.workspace.commit_and_push(&message).await {
+            Ok(summary) => Committed {
+                succeeded: true,
+                summary,
+            },
+            Err(err) => Committed {
+                succeeded: false,
+                summary: format!("Couldn't commit and push: {err:#}"),
+            },
+        })
+    } else {
+        None
+    };
+    Ok(Json(Submitted {
+        outcome,
+        problem,
+        committed,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1580,5 +1614,18 @@ async fn bench_result(
 
 /// Lets the app check the server can be reached, such as after it was asleep.
 async fn ping() -> ApiResult<()> {
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+struct SolutionsRepoBody {
+    commit_after_star: bool,
+}
+
+async fn set_solutions_repo(
+    State(app): State<Shared>,
+    Json(body): Json<SolutionsRepoBody>,
+) -> ApiResult<()> {
+    app.update_settings(|s| s.commit_after_star = body.commit_after_star)?;
     Ok(Json(()))
 }

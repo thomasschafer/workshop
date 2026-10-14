@@ -172,6 +172,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
+  const [commitAfterStar, setCommitAfterStar] = useState(boot.commit_after_star);
   const wakeLock = useMemo(() => new ScreenWakeLock(), []);
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
   useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
@@ -430,11 +431,21 @@ export function App({ boot }: { boot: Bootstrap }) {
     if (!p || part === null) return;
     setRun((r) => ({ ...r, submitting: true }));
     try {
-      const { outcome, problem: refreshed } = await api.submit(p, part, answer);
+      const { outcome, problem: refreshed, committed } = await api.submit(p, part, answer);
       setRun((r) => ({ ...r, submitting: false, submitted: outcome, confirmSubmit: false }));
       if (refreshed) {
         setProblem(refreshed);
         updateMeta(withSuggestions(metaRef.current, refreshed));
+      }
+      if (committed) notify(committed.succeeded ? "info" : "error", committed.summary);
+      const swap = boot.language.start_part_two;
+      if (outcome.result === "correct" && part === 1 && swap) {
+        if (editor.current?.text().includes(swap.find)) {
+          queue.offer("Part 1 solved. Start part 2?", "Start part 2", () => {
+            const started = startPartTwo();
+            if (started.kind === "problem") notify(started.tone, started.text);
+          });
+        }
       }
     } catch (e) {
       setRun((r) => ({ ...r, submitting: false, confirmSubmit: false, error: message(e) }));
@@ -483,6 +494,19 @@ export function App({ boot }: { boot: Bootstrap }) {
   const done = (text: string): Outcome => ({ kind: "done", tone: "ok", text });
   const warn = (text: string): Outcome => ({ kind: "problem", tone: "warn", text });
 
+  /** Turns on the template's part 2 code, such as by uncommenting the line printing its answer. */
+  const startPartTwo = (): Outcome => {
+    const swap = boot.language.start_part_two;
+    if (!swap) return warn(`${boot.language.name} has nothing to turn on for part 2.`);
+    const current = editor.current;
+    if (!current) return warn("Open a puzzle first.");
+    if (!current.swapText(swap.find, swap.replace)) {
+      return warn("Part 2's line isn't there to uncomment; it may be on already.");
+    }
+    setTab("code");
+    return done("Started part 2");
+  };
+
   const runCommand = (command: LocalCommand): Outcome => {
     const current = editor.current;
     switch (command.kind) {
@@ -524,6 +548,8 @@ export function App({ boot }: { boot: Bootstrap }) {
       case "tab":
         setTab(command.tab);
         return done(`Showing ${command.tab}`);
+      case "startPartTwo":
+        return startPartTwo();
       case "install": {
         if (boot.language.packages === null) {
           return warn(`${boot.language.name} has no packages to install.`);
@@ -833,6 +859,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           cards={cards}
           live={talk.live}
           replyingTo={replying ? (question?.card ?? null) : null}
+          onAct={(id) => queue.act(id)}
           onDismiss={(id) => {
             if (question?.card === id) {
               setQuestion(null);
@@ -954,6 +981,14 @@ export function App({ boot }: { boot: Bootstrap }) {
               onModels={setModels}
               onSetup={() => setSheet("setup")}
               onBench={() => setSheet("bench")}
+              commitAfterStar={commitAfterStar}
+              onCommitAfterStar={(enabled) => {
+                setCommitAfterStar(enabled);
+                api.setSolutionsRepo(enabled).catch((e: unknown) => {
+                  setCommitAfterStar(!enabled);
+                  notify("error", `Couldn't change that: ${message(e)}`);
+                });
+              }}
               commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
               keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
               onKeepScreenOn={(enabled) => {

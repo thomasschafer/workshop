@@ -277,7 +277,8 @@ def part2(data: str) -> int:
 if __name__ == "__main__":
     data = sys.stdin.read()
     print(part1(data))
-    print(part2(data))
+    # When you start part 2, uncomment the next line.
+    # print(part2(data))
 `,
   );
   await page.locator(".puzzle-button").click();
@@ -298,7 +299,17 @@ if __name__ == "__main__":
     await expect(page.locator(".submitted").first()).toContainText("Correct!");
     await page.getByRole("button", { name: "Close" }).click();
     await expect(page.locator(".top")).toContainText("★".repeat(part));
+    if (part === 1) {
+      // Offered straight after the first star, as the template has part 2 commented out.
+      await page.getByRole("button", { name: "Start part 2" }).click();
+      await expect(page.locator(".cm-content")).toContainText("    print(part2(data))");
+      await expect(page.locator(".cm-content")).not.toContainText("# print(part2(data))");
+      await page.getByRole("button", { name: "Settings" }).click();
+      await page.getByLabel("Commit and push after each star").check();
+      await page.keyboard.press("Escape");
+    }
   }
+  await expect(page.locator(".card", { hasText: "Committed." })).toBeVisible();
 
   await page.getByRole("button", { name: "Problem", exact: true }).click();
   await expect(page.locator(".problem")).toContainText("Part Two");

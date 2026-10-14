@@ -29,12 +29,16 @@ export interface Bootstrap {
     root_uri: string;
     /** For recognising a missing package in errors, if the language has packages. */
     packages: PackageHints | null;
+    /** Turns on the template's part 2 code once part 1 is solved. */
+    start_part_two: { find: string; replace: string } | null;
   };
   snippets: Snippet[];
   models: ModelsState;
   has_aoc_session: boolean;
   needs_setup: boolean;
   theme_css: string | null;
+  /** Whether the solutions repo is committed and pushed after each star. */
+  commit_after_star: boolean;
 }
 
 export interface PackageHints {
@@ -408,7 +412,11 @@ export const api = {
     request<RunResult>("POST", `${day(p)}/run`, { input, part }),
   cancelRun: () => request<null>("POST", "/run/cancel"),
   submit: (p: Puzzle, part: number, answer: string) =>
-    request<{ outcome: SubmitOutcome; problem: Problem | null }>("POST", `${day(p)}/submit`, {
+    request<{
+      outcome: SubmitOutcome;
+      problem: Problem | null;
+      committed: { succeeded: boolean; summary: string } | null;
+    }>("POST", `${day(p)}/submit`, {
       part,
       answer,
     }),
@@ -469,5 +477,7 @@ export const api = {
     ),
   benchResult: (result: Record<string, unknown>) => request<null>("POST", "/bench/result", result),
   resetPractice: () => request<Problem>("POST", "/practice/reset"),
+  setSolutionsRepo: (commitAfterStar: boolean) =>
+    request<null>("PUT", "/solutions-repo", { commit_after_star: commitAfterStar }),
   gitSync: (message: string) => request<{ summary: string }>("POST", "/git/sync", { message }),
 };

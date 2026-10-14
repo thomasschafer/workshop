@@ -140,4 +140,23 @@ describe("UtteranceQueue", () => {
     await vi.advanceTimersByTimeAsync(1100);
     expect(statuses(cards())).toEqual(["null:problem"]);
   });
+
+  it("does what an offer suggests, then lets it go", async () => {
+    const { q, cards } = queue();
+    let done = 0;
+    q.offer("Part 1 solved. Start part 2?", "Start part 2", () => {
+      done++;
+    });
+    const offer = cards()[0];
+    expect(offer?.status).toEqual({
+      kind: "offer",
+      text: "Part 1 solved. Start part 2?",
+      action: "Start part 2",
+    });
+    q.act(offer?.id ?? -1);
+    expect(done).toBe(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(cards()).toEqual([]);
+    expect(() => q.act(offer?.id ?? -1)).toThrow("nothing to do");
+  });
 });

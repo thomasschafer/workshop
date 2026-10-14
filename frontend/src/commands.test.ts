@@ -27,6 +27,7 @@ describe("matchCommand", () => {
     ["go to line 7", { kind: "gotoLine", line: 7 }],
     ["next error", { kind: "nextError" }],
     ["install it", { kind: "install", package: null }],
+    ["Start part two", { kind: "startPartTwo" }],
     ["Install unordered containers", { kind: "install", package: "unordered-containers" }],
     ["install the package numpy", { kind: "install", package: "numpy" }],
     ["previous error", { kind: "previousError" }],

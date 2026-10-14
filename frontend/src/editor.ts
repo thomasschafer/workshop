@@ -325,6 +325,24 @@ export class CodeEditor {
     previousDiagnostic(this.view);
   }
 
+  /**
+   * Replaces `find` with `replace` as one undoable edit, highlighting the change, if the text
+   * contains it. Returns whether it did.
+   */
+  swapText(find: string, replace: string): boolean {
+    const from = this.view.state.doc.toString().indexOf(find);
+    if (from === -1) return false;
+    this.view.dispatch({
+      changes: { from, to: from + find.length, insert: replace },
+      selection: EditorSelection.cursor(from + replace.length),
+      scrollIntoView: true,
+      userEvent: "input.voice",
+      annotations: isolateHistory.of("full"),
+    });
+    this.flash(from, from + replace.length);
+    return true;
+  }
+
   /** Remembers where the cursor is now, following it as the text changes. */
   anchor(): Anchor {
     const id = this.nextAnchor++;

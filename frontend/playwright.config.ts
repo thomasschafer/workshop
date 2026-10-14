@@ -29,7 +29,15 @@ export default defineConfig({
   },
   webServer: {
     command: `${binary} serve`,
-    env: { WORKSHOP_HOME: HOME, RUST_LOG: "workshop=warn" },
+    env: {
+      WORKSHOP_HOME: HOME,
+      RUST_LOG: "workshop=warn",
+      // So committing works wherever the tests run, with or without a git identity set up.
+      GIT_AUTHOR_NAME: "Workshop tests",
+      GIT_AUTHOR_EMAIL: "tests@example.com",
+      GIT_COMMITTER_NAME: "Workshop tests",
+      GIT_COMMITTER_EMAIL: "tests@example.com",
+    },
     url: `http://127.0.0.1:${PORT}/api/bootstrap`,
     reuseExistingServer: false,
     timeout: 30_000,

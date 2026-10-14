@@ -9,6 +9,8 @@ export type LocalCommand =
   | { kind: "nextError" }
   | { kind: "previousError" }
   | { kind: "snippet"; name: string }
+  /** Turns on the template's part 2 code, such as the line printing its answer. */
+  | { kind: "startPartTwo" }
   /** Installs a package; with no name, the one an error says is missing. */
   | { kind: "install"; package: string | null }
   | { kind: "tab"; tab: "problem" | "code" | "notes" | "discuss" };
@@ -121,6 +123,7 @@ export function matchCommand(
     const number = parseNumber(line[2]);
     if (number !== null && number > 0) return { kind: "gotoLine", line: number };
   }
+  if (/^start part (two|2)$/.test(text)) return { kind: "startPartTwo" };
   if (/^install (it|that|this|the package|the missing package)$/.test(text)) {
     return { kind: "install", package: null };
   }

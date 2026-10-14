@@ -7,7 +7,9 @@ export type CardStatus =
   /** The model needs an answer before it can edit. */
   | { kind: "asked"; question: string }
   /** Stays until dismissed. */
-  | { kind: "problem"; text: string; tone: "warn" | "error" };
+  | { kind: "problem"; text: string; tone: "warn" | "error" }
+  /** Suggests something to do, with a button for it; stays until used or dismissed. */
+  | { kind: "offer"; text: string; action: string };
 
 export interface Card {
   id: number;
@@ -59,6 +61,8 @@ export class UtteranceQueue<T> {
   private running: { job: Job<T>; controller: AbortController } | null = null;
   private idleWaiters: (() => void)[] = [];
   private nextId = 1;
+  /** What each offer's button does, by card. */
+  private readonly actions = new Map<number, () => void>();
 
   constructor(
     private readonly handle: (job: Job<T>, context: JobContext) => Promise<Outcome>,
@@ -98,6 +102,24 @@ export class UtteranceQueue<T> {
         : { kind: "problem", text, tone };
     this.update((cards) => [...cards, { id, transcript: null, status, leaving: false }]);
     if (status.kind === "done") setTimeout(() => this.leave(id), this.timing.lingerMs);
+  }
+
+  /** Shows a suggestion with a button that does `act`, then removes the card. */
+  offer(text: string, action: string, act: () => void): void {
+    const id = this.reserveId();
+    this.actions.set(id, act);
+    this.update((cards) => [
+      ...cards,
+      { id, transcript: null, status: { kind: "offer", text, action }, leaving: false },
+    ]);
+  }
+
+  /** Does what an offer's button says, then removes it. */
+  act(id: number): void {
+    const act = this.actions.get(id);
+    if (!act) throw new Error(`Card ${id} has nothing to do.`);
+    act();
+    this.dismiss(id);
   }
 
   /** Removes a card, cancelling its utterance if it hasn't finished. */
@@ -142,6 +164,7 @@ export class UtteranceQueue<T> {
 
   private leave(id: number): void {
     if (!this.cards.some((c) => c.id === id && !c.leaving)) return;
+    this.actions.delete(id);
     this.update((cards) => cards.map((c) => (c.id === id ? { ...c, leaving: true } : c)));
     setTimeout(() => this.update((cards) => cards.filter((c) => c.id !== id)), this.timing.leaveMs);
   }

@@ -48,6 +48,12 @@ dictation_hints = '''
 
 # A module of your own that every solution can import, created with your first solution unless
 # it's already there.
+# When part 1 is solved, the template's part 2 line is offered to be turned on.
+start_part_two = { find = """
+  -- When you start part 2, uncomment the next line.
+  -- print (part2 input)""", replace = """
+  print (part2 input)""" }
+
 [helpers]
 file = "lib/Aoc.hs"
 # Tells haskell-language-server where the module is, unless you have a hie.yaml already.

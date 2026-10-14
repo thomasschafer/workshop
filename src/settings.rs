@@ -16,6 +16,9 @@ pub struct AppSettings {
     pub language: String,
     #[serde(default)]
     pub theme: ThemeSettings,
+    /// Whether to commit and push the solutions repo after each star.
+    #[serde(default)]
+    pub commit_after_star: bool,
 }
 
 impl AppSettings {
@@ -24,6 +27,7 @@ impl AppSettings {
             models: ModelSettings::defaults(config),
             language: config.language_id.clone(),
             theme: ThemeSettings::default(),
+            commit_after_star: false,
         }
     }
 
@@ -84,6 +88,7 @@ mod tests {
             },
             language: "python".into(),
             theme: ThemeSettings::default(),
+            commit_after_star: true,
         };
         chosen.save(&paths).unwrap();
         assert_eq!(AppSettings::load(&config, &paths), chosen);

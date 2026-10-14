@@ -16,6 +16,8 @@ interface Props {
   /** Opens the comparison of speech recognition on this device and the server. */
   onBench: () => void;
   commitMessage: string;
+  commitAfterStar: boolean;
+  onCommitAfterStar: (enabled: boolean) => void;
   onInsertSnippet: (snippet: Snippet) => void;
   keepScreenOn: boolean | null;
   onKeepScreenOn: (enabled: boolean) => void;
@@ -33,6 +35,8 @@ export function Settings({
   onSetup,
   onBench,
   commitMessage,
+  commitAfterStar,
+  onCommitAfterStar,
   onInsertSnippet,
   keepScreenOn,
   onKeepScreenOn,
@@ -104,6 +108,14 @@ export function Settings({
           {syncing ? "Committing…" : "Commit and push"}
         </button>
         {sync ? <p class="muted">{sync}</p> : null}
+        <label class="toggle">
+          <input
+            type="checkbox"
+            checked={commitAfterStar}
+            onChange={(e) => onCommitAfterStar((e.target as HTMLInputElement).checked)}
+          />
+          Commit and push after each star
+        </label>
       </section>
 
       <section>
