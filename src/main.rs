@@ -1,5 +1,6 @@
 mod aoc;
 mod bench;
+mod commands;
 mod config;
 mod discuss;
 mod doctor;
@@ -16,6 +17,7 @@ mod provider;
 mod runner;
 mod server;
 mod settings;
+mod solutions;
 mod tailscale;
 mod template;
 mod theme;
@@ -65,6 +67,26 @@ enum Command {
         /// chosen in the app.
         #[arg(long)]
         model: Option<String>,
+    },
+    /// Run a solution as the app does: on your input, or with `--sample` on the sample chosen in
+    /// the app, with the same packages and helpers.
+    Run {
+        /// The year, or `practice` for the practice puzzle.
+        year: String,
+        /// The day; not needed for the practice puzzle.
+        day: Option<u8>,
+        /// Run on the sample chosen in the app, and check its expected answers.
+        #[arg(long)]
+        sample: bool,
+        /// Which part's sample to use: part 2 uses part 1's if it has none of its own.
+        #[arg(long, default_value_t = 1)]
+        part: u8,
+    },
+    /// Print commands that set the environment solutions run with, such as where packages are
+    /// installed, so a terminal or editor matches the app: `eval "$(workshop env)"`.
+    Env {
+        #[arg(long, value_enum, default_value = "posix")]
+        shell: commands::Shell,
     },
     /// Print the link, including the access token, for opening Workshop.
     Token {
@@ -116,6 +138,23 @@ async fn main() -> Result<()> {
             if !eval::run(&config, &paths, &cases, filter.as_deref(), model).await? {
                 std::process::exit(1);
             }
+            Ok(())
+        }
+        Command::Run {
+            year,
+            day,
+            sample,
+            part,
+        } => {
+            let puzzle = commands::parse_puzzle(&year, day)?;
+            let part = aoc::Part::from_number(part)?;
+            if !commands::run(&config, &paths, aoc_session, puzzle, sample, part).await? {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Command::Env { shell } => {
+            print!("{}", commands::env(&config, &paths, shell)?);
             Ok(())
         }
         Command::Token { tailscale } => {

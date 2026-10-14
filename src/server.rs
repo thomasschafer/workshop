@@ -24,10 +24,10 @@ use crate::language::{LanguageProfile, Puzzle};
 use crate::models::{self, ModelSettings, ProviderOption};
 use crate::packages::{InstallLog, Packages, PackagesState, Resolution};
 use crate::paths::Paths;
-use crate::practice::Practice;
 use crate::provider::{CallSpec, ProviderRunner, Role};
-use crate::runner::{self, RunResult};
+use crate::runner::RunResult;
 use crate::settings::AppSettings;
+use crate::solutions::Solutions;
 use crate::workspace::{DayMeta, SaveError, UiState, VersionedFile, Workspace};
 
 const TOKEN_COOKIE: &str = "workshop_token";
@@ -85,13 +85,7 @@ impl App {
             .collect::<Result<_>>()?;
         Ok(Self {
             workspace: Workspace::new(config.solutions_dir.clone(), paths.clone()),
-            aoc: AocClient::with_base_url(
-                aoc_session,
-                &config.aoc.user_agent,
-                paths.aoc_cache_dir(),
-                config.aoc.base_url.clone(),
-            )?
-            .with_practice(Practice::new(paths.data_dir.join("practice.json"))),
+            aoc: crate::solutions::aoc_client(&config, &paths, aoc_session)?,
             runners,
             settings: std::sync::RwLock::new(AppSettings::load(&config, &paths)),
             run_lock: Mutex::new(()),
@@ -127,49 +121,22 @@ impl App {
         &self.config.languages[&self.settings().language]
     }
 
+    /// Solutions in the chosen language: their packages, environment and how to run them.
+    fn solutions(&self) -> Solutions<'_> {
+        Solutions {
+            config: &self.config,
+            paths: &self.paths,
+            language_id: self.settings().language,
+        }
+    }
+
     /// The chosen language's packages, if it has any.
     fn packages(&self) -> Option<Packages<'_>> {
-        let id = self.settings().language;
-        let language = &self.config.languages[&id];
-        language.packages.as_ref().map(|profile| Packages {
-            profile,
-            language_name: &language.name,
-            solutions_dir: &self.config.solutions_dir,
-            dir: self.paths.packages_dir(&id),
-        })
+        self.solutions().packages()
     }
 
-    /// Environment variables for building, running and the language server: where the user's
-    /// helpers and installed packages are. A variable both set, such as a search path, gets
-    /// both values.
     fn solution_environment(&self) -> Result<Vec<(String, String)>> {
-        let mut environment: Vec<(String, String)> = Vec::new();
-        let helpers = match &self.language().helpers {
-            Some(helpers) => helpers.environment(&self.config.solutions_dir)?,
-            None => Vec::new(),
-        };
-        let packages = match self.packages() {
-            Some(packages) => packages.environment()?,
-            None => Vec::new(),
-        };
-        for (name, value) in helpers.into_iter().chain(packages) {
-            match environment.iter_mut().find(|(n, _)| *n == name) {
-                Some((_, existing)) => {
-                    existing.push(':');
-                    existing.push_str(&value);
-                }
-                None => environment.push((name, value)),
-            }
-        }
-        Ok(environment)
-    }
-
-    fn helpers_dir(&self) -> Result<Option<std::path::PathBuf>> {
-        self.language()
-            .helpers
-            .as_ref()
-            .map(|h| h.dir(&self.config.solutions_dir))
-            .transpose()
+        self.solutions().environment()
     }
 
     fn update_settings(&self, change: impl FnOnce(&mut AppSettings)) -> Result<()> {
@@ -636,26 +603,7 @@ async fn run(
             () = cancel.cancelled() => return Err(anyhow::anyhow!("Cancelled.").into()),
         },
     };
-    let profile = app.language();
-    let file = profile.solution_path(&app.config.solutions_dir, puzzle)?;
-    let build_dir = app
-        .paths
-        .build_dir()
-        .join(puzzle.year_label())
-        .join(format!("{:02}", puzzle.day));
-    let result = runner::run(runner::RunRequest {
-        profile,
-        file: &file,
-        build_dir: &build_dir,
-        puzzle,
-        input: &input,
-        timeout: Duration::from_secs(app.config.run.timeout_secs),
-        cancel: &cancel,
-        environment: &app.solution_environment()?,
-        helpers: app.helpers_dir()?.as_deref(),
-    })
-    .await?;
-    Ok(Json(result))
+    Ok(Json(app.solutions().run(puzzle, &input, &cancel).await?))
 }
 
 async fn cancel_run(State(app): State<Shared>) -> ApiResult<()> {
