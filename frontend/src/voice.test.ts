@@ -130,7 +130,7 @@ describe("PushToTalk", () => {
     FakeRecognition.sessions = [];
     const ptt = new PushToTalk(FakeRecognition as never);
     const interim: string[] = [];
-    ptt.start((t) => interim.push(t));
+    ptt.start({ onInterim: (t) => interim.push(t) });
     latest().hear("create a function called parse from string to int");
     // The browser decides the user has finished, but the button is still held.
     latest().onend?.();
@@ -150,13 +150,11 @@ describe("PushToTalk", () => {
     FakeRecognition.sessions = [];
     const ptt = new PushToTalk(FakeRecognition as never);
     let listening = false;
-    ptt.start(
-      () => {},
-      [],
-      () => {
+    ptt.start({
+      onListening: () => {
         listening = true;
       },
-    );
+    });
     expect(listening).toBe(false);
     (latest() as unknown as { onaudiostart: () => void }).onaudiostart();
     expect(listening).toBe(true);
@@ -165,7 +163,7 @@ describe("PushToTalk", () => {
   it("reports errors such as a refused microphone", async () => {
     FakeRecognition.sessions = [];
     const ptt = new PushToTalk(FakeRecognition as never);
-    ptt.start(() => {});
+    ptt.start();
     latest().fail("not-allowed");
     expect(FakeRecognition.sessions).toHaveLength(1);
     const heard = await ptt.stop();
@@ -176,7 +174,7 @@ describe("PushToTalk", () => {
   it("ignores silence", async () => {
     FakeRecognition.sessions = [];
     const ptt = new PushToTalk(FakeRecognition as never);
-    ptt.start(() => {});
+    ptt.start();
     latest().fail("no-speech");
     const heard = await ptt.stop();
     expect(heard).toMatchObject({ text: "", error: null });
@@ -186,7 +184,7 @@ describe("PushToTalk", () => {
   it("passes on the recogniser's pieces when it revised what it heard", async () => {
     FakeRecognition.sessions = [];
     const ptt = new PushToTalk(FakeRecognition as never);
-    ptt.start(() => {});
+    ptt.start();
     latest().hear("add filter", "add filter brackets", "add filter (greater than 100)");
     const heard = await ptt.stop();
     expect(heard.text).toBe("add filter (greater than 100)");

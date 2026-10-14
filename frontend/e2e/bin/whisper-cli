@@ -1,10 +1,17 @@
 #!/bin/sh
-# Stands in for whisper.cpp's whisper-cli: hears "undo" in any WAV recording it's given.
+# Stands in for whisper.cpp's whisper-cli. A long recording is heard as "go to line one" and a
+# short one as "go to line two", and a long one takes longer to hear, as with Whisper, so a
+# short press after a long one is heard first.
 while [ $# -gt 0 ]; do
   if [ "$1" = "--file" ]; then file=$2; fi
   shift
 done
 head -c 4 "$file" | grep -q RIFF || { echo "not a WAV recording: $file" >&2; exit 1; }
-# As long as Whisper takes, roughly, so a press can come while another is being heard.
-sleep 0.5
-echo " undo"
+# 16 kHz, 16-bit mono: 32,000 bytes a second.
+if [ "$(wc -c < "$file")" -gt 32000 ]; then
+  sleep 2.5
+  echo " go to line one"
+else
+  sleep 0.3
+  echo " go to line two"
+fi

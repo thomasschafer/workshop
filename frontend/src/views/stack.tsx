@@ -7,7 +7,13 @@ import type { Card } from "../utterances";
 interface Props {
   cards: Card[];
   /** What's being said, or was just said and is still arriving, oldest first. */
-  live: { id: number; text: string; phase: TalkPhase; level: number | null }[];
+  live: {
+    id: number;
+    text: string;
+    phase: TalkPhase;
+    level: number | null;
+    delay: string | null;
+  }[];
   /** The card whose question is being answered, if any. */
   replyingTo: number | null;
   onDismiss: (id: number) => void;
@@ -78,11 +84,11 @@ export function Stack({
   return (
     <div class="stack" ref={ref} aria-live="polite">
       {shown}
-      {live.map(({ id, text, phase, level }) => (
+      {live.map(({ id, text, phase, level, delay }) => (
         <div key={id} data-flip={String(id)} class={`card live ${phase}`}>
           <div class="live-text">
             {/* Words said before the microphone is on are lost, so this says when to start. */}
-            <span>{text || LIVE_PROMPT[phase]}</span>
+            <span>{delay ?? (text || LIVE_PROMPT[phase])}</span>
           </div>
           {phase === "listening" && level !== null ? <LevelMeter level={level} /> : null}
         </div>

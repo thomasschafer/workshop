@@ -378,6 +378,29 @@ test("keeps what's being said still while a card above it leaves", async () => {
   expect(moves.filter((m) => m.includes("live"))).toEqual([]);
 });
 
+test("finishes a press when the page is left mid-press, keeping what was said", async () => {
+  await page.evaluate(() => {
+    (window as unknown as { demoSpeech: { text: string } }).demoSpeech.text = "go to line two";
+  });
+  const box = await page.locator(".talk").boundingBox();
+  if (!box) throw new Error("The talk button isn't visible.");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
+  await page.waitForTimeout(800);
+  // As when the phone is locked: the page is hidden, and the button's release never comes.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(page.locator(".talk")).not.toHaveClass(/\blistening\b/);
+  await expect(card("done").filter({ hasText: "“go to line two”" }).last()).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+  });
+  await page.mouse.up();
+});
+
 test("waits for the editor when something is said while a puzzle is still opening", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await page.reload();
@@ -452,14 +475,21 @@ test("hears what's said with Whisper on the server, once its model is there", as
   writeFileSync(model, "lmgg");
   // A microphone that hears a steady tone, loud enough not to be taken for silence.
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
-      // As long as a phone's microphone takes to start, roughly.
-      await new Promise((r) => setTimeout(r, 300));
-      const context = new AudioContext();
+    // One for every press, as browsers limit how many a page can have.
+    let shared: AudioContext | null = null;
+    // On the prototype, as WebKit can give the page a new `navigator.mediaDevices`.
+    MediaDevices.prototype.getUserMedia = async () => {
+      // Made while the button is pressed, as browsers only start audio in response to a press.
+      shared ??= new AudioContext();
+      const context = shared;
       const tone = context.createOscillator();
       const out = context.createMediaStreamDestination();
       tone.connect(out);
       tone.start();
+      const resumed = context.resume();
+      // As long as a phone's microphone takes to start, roughly.
+      await new Promise((r) => setTimeout(r, 300));
+      await resumed;
       return out.stream;
     };
   });
@@ -475,17 +505,32 @@ test("hears what's said with Whisper on the server, once its model is there", as
   await expect(page.locator(".card.live")).toContainText("Starting the microphone…");
   await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
   await expect(page.locator(".card.live")).toContainText("Listening…");
-  await page.waitForTimeout(400);
+  await expect(page.locator(".card.live .level-meter")).toBeVisible();
+  await page.waitForTimeout(1500);
   await page.mouse.up();
   await expect(page.locator(".card.live")).toContainText("Hearing…");
 
-  // Again while the first is still being heard: it starts, and then listens, just the same.
+  // A short press while the long one is still being heard: it's heard first, but handed over
+  // second, as it was said second.
   await page.mouse.down();
   await expect(page.locator(".talk")).toHaveClass(/\bstarting\b/);
   await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(300);
   await page.mouse.up();
-  await expect(card("done").filter({ hasText: "“undo”" })).toHaveCount(2);
+  const transcripts = page.locator(".card .card-transcript");
+  await expect(transcripts).toHaveText(["“go to line one”", "“go to line two”"]);
+
+  // Said while the server can't be reached: kept until it can, then heard.
+  await page.route("**/api/**", (route) => route.abort("connectionrefused"));
+  await page.mouse.down();
+  await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
+  await page.waitForTimeout(300);
+  await page.mouse.up();
+  await expect(page.locator(".card.live")).toContainText("Waiting for the server…");
+  await page.unroute("**/api/**");
+  await expect(page.locator(".card.live")).toHaveCount(0, { timeout: 10_000 });
+  await expect(transcripts.last()).toHaveText("“go to line two”");
+  await expect(page.locator(".card", { hasText: "Couldn't hear" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator(".server-speech")).toContainText("Whisper is ready");

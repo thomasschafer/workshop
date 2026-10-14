@@ -1,6 +1,6 @@
-import { api } from "./api";
+import { api, ConnectionError, connection } from "./api";
 import { AudioRecorder } from "./audio";
-import type { Heard, Listener } from "./voice";
+import type { Heard, Listener, Listening } from "./voice";
 
 /**
  * Below this, a recording is taken to be silence. Whisper tends to invent words, such as "Thank
@@ -13,13 +13,11 @@ export class ServerDictation implements Listener {
   private recording: Promise<AudioRecorder> | null = null;
   private startedAt = 0;
 
-  start(
-    _onInterim: (text: string) => void,
-    _vocabulary: readonly string[],
-    onListening: () => void,
-    onLevel: (level: number) => void,
-  ) {
+  private onDelay: (reason: string | null) => void = () => {};
+
+  start({ onListening, onLevel, onDelay = () => {} }: Listening) {
     this.startedAt = performance.now();
+    this.onDelay = onDelay;
     this.recording = AudioRecorder.start(onListening, onLevel);
     // Reported by `stop`, which every press ends with.
     this.recording.catch(() => {});
@@ -53,10 +51,32 @@ export class ServerDictation implements Listener {
     }
     if (peak < SILENT_PEAK) return heard("", null, log);
     try {
-      const { text } = await api.transcribe(wav);
-      return heard(text, null, log);
+      return heard(await this.transcribe(wav), null, log);
     } catch (e) {
       return heard("", `Couldn't hear that: ${e instanceof Error ? e.message : String(e)}`, log);
+    }
+  }
+
+  /**
+   * Has Whisper hear a recording, waiting for the server if it can't be reached, such as while
+   * it wakes up, so what was said isn't lost.
+   */
+  private async transcribe(wav: ArrayBuffer): Promise<string> {
+    const giveUp = AbortSignal.timeout(SERVER_WAIT_MS);
+    for (;;) {
+      try {
+        return (await api.transcribe(wav)).text;
+      } catch (e) {
+        if (!(e instanceof ConnectionError)) throw e;
+        this.onDelay("Waiting for the server…");
+        try {
+          await connection.whenOnline(giveUp);
+        } catch {
+          throw new Error("the server couldn't be reached");
+        } finally {
+          this.onDelay(null);
+        }
+      }
     }
   }
 
@@ -66,6 +86,9 @@ export class ServerDictation implements Listener {
     recording?.then((audio) => audio.cancel()).catch(() => {});
   }
 }
+
+/** How long to wait for the server to be reachable before giving up on a recording. */
+const SERVER_WAIT_MS = 120_000;
 
 /** Shorter than this, a microphone may not have started at all, which is no fault of its own. */
 const QUICK_PRESS_MS = 1000;

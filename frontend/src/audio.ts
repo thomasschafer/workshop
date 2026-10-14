@@ -71,6 +71,15 @@ registerProcessor("workshop-recorder", WorkshopRecorder);
  */
 let shared: { context: AudioContext; ready: Promise<void> } | null = null;
 
+/**
+ * Recordings starting or under way. The context is paused a while after there are none, as a
+ * running one keeps the phone's audio hardware busy. Not straight away: pausing and resuming
+ * at once can leave it paused in some browsers, and presses often come in quick succession.
+ */
+let recordings = 0;
+let pausing: ReturnType<typeof setTimeout> | undefined;
+const PAUSE_AFTER_MS = 10_000;
+
 function audioContext(): { context: AudioContext; ready: Promise<void> } {
   if (shared === null || shared.context.state === "closed") {
     const context = new AudioContext();
@@ -127,12 +136,21 @@ export class AudioRecorder {
     // Before anything is awaited, while this is still part of the press: browsers only let
     // audio start in response to one.
     const { context, ready } = audioContext();
+    recordings++;
+    clearTimeout(pausing);
     const resumed = context.resume();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    } catch (e) {
+      finished(context);
+      throw e;
+    }
     try {
       await Promise.all([ready, resumed]);
+      if (context.state !== "running") await context.resume();
       const source = context.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(context, "workshop-recorder");
       const audio = new AudioRecorder(stream, context, source, node, startedAt, onStarted, onLevel);
@@ -142,6 +160,7 @@ export class AudioRecorder {
       return audio;
     } catch (e) {
       for (const track of stream.getTracks()) track.stop();
+      finished(context);
       throw e;
     }
   }
@@ -178,12 +197,30 @@ export class AudioRecorder {
     };
   }
 
+  private released = false;
+
   private release(): void {
+    if (this.released) return;
+    this.released = true;
     this.source.disconnect();
     this.node.disconnect();
     this.node.port.onmessage = null;
     for (const track of this.stream.getTracks()) track.stop();
+    finished(this.context);
   }
+}
+
+/** Notes a recording has finished, pausing the context a while later if it was the last. */
+function finished(context: AudioContext): void {
+  recordings--;
+  if (recordings > 0) return;
+  clearTimeout(pausing);
+  pausing = setTimeout(() => {
+    if (recordings === 0 && context.state === "running") {
+      // A failure to pause only costs battery, and the next recording resumes it anyway.
+      context.suspend().catch(() => {});
+    }
+  }, PAUSE_AFTER_MS);
 }
 
 function concat(chunks: readonly Float32Array[]): Float32Array {

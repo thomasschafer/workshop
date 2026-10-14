@@ -194,7 +194,7 @@ export function SpeechBench() {
       let ptt: PushToTalk | null = null;
       if (speechSupported()) {
         ptt = new PushToTalk();
-        ptt.start(() => {});
+        ptt.start();
       }
       recording.current = { audio, ptt };
       setPhase("recording");

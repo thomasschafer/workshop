@@ -141,19 +141,23 @@ export interface Heard {
   report: { heldMs: number; sessions: SessionReport[]; recording?: RecordingReport };
 }
 
+/** What a listener reports as it goes. Each is optional, as not every listener can tell. */
+export interface Listening {
+  /** Words such as identifiers in the file, to help recognition hear them. */
+  vocabulary?: readonly string[];
+  /** What's been heard so far, before the end. */
+  onInterim?: (text: string) => void;
+  /** Audio is being captured, which takes a moment after pressing. */
+  onListening?: () => void;
+  /** How loud it is, from 0 to 1. */
+  onLevel?: (level: number) => void;
+  /** What's holding up hearing it, such as waiting for the server; null once it's not. */
+  onDelay?: (reason: string | null) => void;
+}
+
 /** Hears what's said while the talk button is held, one press per instance. */
 export interface Listener {
-  /**
-   * Starts listening. `onInterim` gets what's been heard so far, where that's known before the
-   * end; `onListening` is called once audio is being captured, which takes a moment; `onLevel`
-   * with how loud it is, from 0 to 1, where that's known.
-   */
-  start(
-    onInterim: (text: string) => void,
-    vocabulary: readonly string[],
-    onListening: () => void,
-    onLevel: (level: number) => void,
-  ): void;
+  start(listening: Listening): void;
   /** Stops listening and resolves with everything heard. */
   stop(): Promise<Heard>;
   cancel(): void;
@@ -183,17 +187,10 @@ export class PushToTalk implements Listener {
   constructor(private readonly ctor: RecognitionConstructor | null = recognitionConstructor()) {}
 
   /**
-   * Starts listening. `vocabulary` biases recognition towards words such as identifiers in the
-   * file, where the browser supports it.
+   * Starts listening. The vocabulary biases recognition towards its words, where the browser
+   * supports it. The browser doesn't say how loud it is.
    */
-  start(
-    onInterim: (text: string) => void,
-    vocabulary: readonly string[] = [],
-    /** Called once the browser is capturing audio, which takes a moment after pressing. */
-    onListening: () => void = () => {},
-    // The browser doesn't say how loud it is.
-    _onLevel: (level: number) => void = () => {},
-  ): void {
+  start({ onInterim = () => {}, vocabulary = [], onListening = () => {} }: Listening = {}): void {
     if (!this.ctor) {
       throw new Error(speechUnavailableReason());
     }

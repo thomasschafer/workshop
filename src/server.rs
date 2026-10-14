@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
-use axum::extract::{Path, Query, Request, State, WebSocketUpgrade};
+use axum::extract::{DefaultBodyLimit, Path, Query, Request, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -194,9 +194,15 @@ pub fn router(app: Shared) -> Router {
         .route("/speech", get(get_speech))
         .route("/speech/download", post(download_speech_model))
         .route("/speech/download/cancel", post(cancel_speech_download))
-        .route("/speech/transcribe", post(transcribe))
+        .route(
+            "/speech/transcribe",
+            post(transcribe).layer(DefaultBodyLimit::max(RECORDING_LIMIT)),
+        )
         .route("/bench", get(bench_info))
-        .route("/bench/transcribe", post(bench_transcribe))
+        .route(
+            "/bench/transcribe",
+            post(bench_transcribe).layer(DefaultBodyLimit::max(RECORDING_LIMIT)),
+        )
         .route("/bench/result", post(bench_result))
         .route("/years/{year}/stars", get(stars))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
@@ -1285,6 +1291,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn takes_recordings_of_several_minutes() {
+        let (_dir, router) = test_app().await;
+        // Four minutes at 16 kHz, 16-bit mono.
+        let mut wav = b"RIFF".to_vec();
+        wav.resize(4 * 60 * 32_000, 0);
+        let request = Request::post("/api/speech/transcribe")
+            .header(header::COOKIE, "workshop_token=secret")
+            .body(Body::from(wav))
+            .unwrap();
+        let status = send(&router, request).await.status();
+        // Refused for want of Whisper's model, not for its size.
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn rejects_cross_origin_writes() {
         let (_dir, router) = test_app().await;
         let request = Request::put("/api/state")
@@ -1760,6 +1781,9 @@ async fn cancel_speech_download(State(app): State<Shared>) -> ApiResult<()> {
     app.speech_install.cancel();
     Ok(Json(()))
 }
+
+/// The largest recording accepted: about eight minutes, at the 32 kB a second the app sends.
+const RECORDING_LIMIT: usize = 16 * 1024 * 1024;
 
 #[derive(Serialize)]
 struct Dictated {

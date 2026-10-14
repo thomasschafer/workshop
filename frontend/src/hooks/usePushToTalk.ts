@@ -1,4 +1,4 @@
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api";
 import type { HoldMethod } from "../dictation";
 import { ServerDictation } from "../serverDictation";
@@ -29,7 +29,13 @@ interface Press {
   listening: boolean;
   /** How loud it is, from 0 to 1, if the listener can tell. */
   level: number | null;
+  /** What's holding up hearing it, if anything, such as waiting for the server. */
+  delay: string | null;
   startedAt: number;
+  /** Settles once every earlier press has handed over what it heard. */
+  after: Promise<void>;
+  /** Says this press has handed over what it heard, so the next one can. */
+  handedOver: () => void;
 }
 
 /** How often the sound level is shown, which is plenty for the eye. */
@@ -58,6 +64,9 @@ export function usePushToTalk(options: Options) {
   const [presses, setPresses] = useState<Press[]>([]);
   // Pointer events can arrive faster than state updates, so this is the source of truth.
   const current = useRef<Press[]>([]);
+  // What's heard is handed over in the order it was said, even when a later, shorter press is
+  // heard first, as Whisper can do.
+  const lastHandover = useRef(Promise.resolve());
   const latest = useRef(options);
   latest.current = options;
 
@@ -70,43 +79,63 @@ export function usePushToTalk(options: Options) {
   const start = (event: PointerEvent) => {
     event.preventDefault();
     if (held()) return;
+    let listener: Listener;
+    let id: number;
     try {
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-      const listener: Listener =
-        latest.current.method() === "server" ? new ServerDictation() : new PushToTalk();
-      const id = latest.current.onStart();
-      const change = (fields: Partial<Press>) =>
-        update((presses) => presses.map((p) => (p.id === id ? { ...p, ...fields } : p)));
-      update((presses) => [
-        ...presses,
-        {
-          id,
-          listener,
-          text: "",
-          held: true,
-          listening: false,
-          level: null,
-          startedAt: performance.now(),
-        },
-      ]);
-      let levelShownAt = 0;
-      listener.start(
-        (text) => change({ text }),
-        latest.current.vocabulary(),
-        () => {
+      listener = latest.current.method() === "server" ? new ServerDictation() : new PushToTalk();
+      id = latest.current.onStart();
+    } catch (e) {
+      latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+      return;
+    }
+    const change = (fields: Partial<Press>) =>
+      update((presses) => presses.map((p) => (p.id === id ? { ...p, ...fields } : p)));
+    const after = lastHandover.current;
+    let handedOver = () => {};
+    lastHandover.current = new Promise((resolve) => {
+      handedOver = resolve;
+    });
+    update((presses) => [
+      ...presses,
+      {
+        id,
+        listener,
+        text: "",
+        held: true,
+        listening: false,
+        level: null,
+        delay: null,
+        startedAt: performance.now(),
+        after,
+        handedOver,
+      },
+    ]);
+    let levelShownAt = 0;
+    try {
+      listener.start({
+        vocabulary: latest.current.vocabulary(),
+        onInterim: (text) => change({ text }),
+        onListening: () => {
           change({ listening: true });
           // Felt as well as seen, as the moment to start speaking.
           navigator.vibrate?.(25);
         },
-        (level) => {
+        onLevel: (level) => {
           const now = performance.now();
           if (now - levelShownAt < LEVEL_MS) return;
           levelShownAt = now;
           change({ level });
         },
-      );
+        onDelay: (delay) => change({ delay }),
+      });
     } catch (e) {
-      latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+      // Nothing to hear, so the press ends here rather than holding up the ones after it.
+      update((presses) => presses.filter((p) => p.id !== id));
+      void after.then(() => {
+        latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+        handedOver();
+      });
     }
   };
 
@@ -115,21 +144,39 @@ export function usePushToTalk(options: Options) {
     if (!press) return;
     const heldMs = performance.now() - press.startedAt;
     update((presses) => presses.map((p) => (p === press ? { ...p, held: false } : p)));
-    const { text, pieces, error, report } = await press.listener.stop();
-    // Everything the browser reported, so a wrong edit can be traced to what was heard.
-    api.log("speech", `heard ${JSON.stringify({ text, pieces, error, ...report })}`);
-    if (error) {
-      latest.current.onNotice("error", error);
-    } else if (text.trim()) {
-      latest.current.onUtterance(press.id, text.trim(), pieces);
-    } else if (heldMs < TAP_MS) {
-      latest.current.onNotice("info", "Hold the button while you speak.");
-    } else {
-      latest.current.onNotice("info", "Didn't catch anything.");
+    try {
+      const { text, pieces, error, report } = await press.listener.stop();
+      await press.after;
+      // Everything the browser reported, so a wrong edit can be traced to what was heard.
+      api.log("speech", `heard ${JSON.stringify({ text, pieces, error, ...report })}`);
+      if (error) {
+        latest.current.onNotice("error", error);
+      } else if (text.trim()) {
+        latest.current.onUtterance(press.id, text.trim(), pieces);
+      } else if (heldMs < TAP_MS) {
+        latest.current.onNotice("info", "Hold the button while you speak.");
+      } else {
+        latest.current.onNotice("info", "Didn't catch anything.");
+      }
+    } catch (e) {
+      await press.after;
+      latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+    } finally {
+      // In the same render as the utterance's card appears, so the one becomes the other.
+      update((presses) => presses.filter((p) => p.id !== press.id));
+      press.handedOver();
     }
-    // In the same render as the utterance's card appears, so the one becomes the other.
-    update((presses) => presses.filter((p) => p.id !== press.id));
   };
+
+  // Leaving the page, such as by locking the phone, can lose the button's release, which would
+  // leave the microphone on; what's been said so far is kept.
+  useEffect(() => {
+    const hidden = () => {
+      if (document.visibilityState === "hidden") void stop();
+    };
+    document.addEventListener("visibilitychange", hidden);
+    return () => document.removeEventListener("visibilitychange", hidden);
+  }, []);
 
   const heldPress = presses.find((p) => p.held);
   return {
@@ -141,6 +188,7 @@ export function usePushToTalk(options: Options) {
       text: press.text,
       phase: phaseOf(press),
       level: press.level,
+      delay: press.delay,
     })),
     start,
     stop,
