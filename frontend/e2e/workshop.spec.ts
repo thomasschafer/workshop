@@ -533,6 +533,8 @@ test("hears what's said with Whisper on the server, once its model is there", as
   await page.mouse.up();
   const transcripts = page.locator(".card .card-transcript");
   await expect(transcripts).toHaveText(["“go to line one”", "“go to line two”"]);
+  // Heard by whisper-server, which keeps the model loaded, rather than by whisper-cli.
+  expect(readFileSync(join(HOME, "whisper-server-heard"), "utf8")).toContain("heard");
 
   // Said while the server can't be reached: kept until it can, then heard.
   await page.route("**/api/**", (route) => route.abort("connectionrefused"));

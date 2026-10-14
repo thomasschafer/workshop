@@ -58,6 +58,7 @@ pub struct App {
     toolchain_install: Installs,
     /// Downloading Whisper's model for dictation.
     speech_install: Installs,
+    dictation: Arc<crate::whisper::Dictation>,
     /// Packages already found for missing modules, by language and module.
     resolutions: std::sync::Mutex<BTreeMap<(String, String), Resolution>>,
     http: reqwest::Client,
@@ -96,6 +97,7 @@ impl App {
             packages_install: Installs::default(),
             toolchain_install: Installs::default(),
             speech_install: Installs::default(),
+            dictation: Arc::default(),
             resolutions: std::sync::Mutex::new(BTreeMap::new()),
             http: reqwest::Client::builder()
                 .user_agent(&config.aoc.user_agent)
@@ -440,7 +442,17 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         has_aoc_session: app.aoc.has_session(),
         theme_css: theme_css(&app),
         commit_after_star: app.settings().commit_after_star,
-        server_dictation: speech_state(&app).ready,
+        server_dictation: {
+            let ready = speech_state(&app).ready;
+            if ready {
+                // So the first thing said is heard as quickly as the rest.
+                let app = app.clone();
+                tokio::spawn(async move {
+                    app.dictation.warm(&app.paths.cache_dir, &app.http).await;
+                });
+            }
+            ready
+        },
         needs_setup: !app.aoc.has_session()
             || models::options(&app.config)
                 .iter()
@@ -1798,28 +1810,28 @@ async fn transcribe(State(app): State<Shared>, wav: axum::body::Bytes) -> ApiRes
     let Some(whisper) = crate::whisper::Whisper::find(&app.paths.cache_dir) else {
         return Err(bad_request(crate::whisper::INSTALL_HINT));
     };
-    let Some(model) = whisper.dictation_model() else {
+    if whisper.dictation_model().is_none() {
         return Err(bad_request(format!(
             "Whisper's {} model isn't downloaded yet; download it in Settings, under Talking.",
             crate::whisper::DICTATION_MODEL
         )));
-    };
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = app.paths.cache_dir.join("dictation");
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let path = dir.join(format!("{}-{n}.wav", std::process::id()));
-    crate::paths::write_atomic(&path, &wav)?;
-    let transcript = whisper.transcribe(&path, model, None).await;
-    let _ = std::fs::remove_file(&path);
-    let transcript = transcript?;
+    }
+    let started = std::time::Instant::now();
+    let text = app
+        .dictation
+        .transcribe(
+            &whisper,
+            wav.to_vec(),
+            &app.paths.cache_dir.join("dictation"),
+            &app.http,
+        )
+        .await?;
     tracing::info!(
-        "dictation: heard {:?} in {}ms",
-        transcript.text,
-        transcript.wall_ms
+        "dictation: heard {text:?} in {}ms",
+        started.elapsed().as_millis()
     );
     Ok(Json(Dictated {
-        text: crate::whisper::spoken_text(&transcript.text),
+        text: crate::whisper::spoken_text(&text),
     }))
 }
 

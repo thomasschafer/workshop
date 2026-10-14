@@ -42,6 +42,8 @@ export default defineConfig({
     },
     url: `http://127.0.0.1:${PORT}/api/bootstrap`,
     reuseExistingServer: false,
+    // So the server stops what it started, such as whisper-server, as it would when stopped by hand.
+    gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
     timeout: 30_000,
   },
 });

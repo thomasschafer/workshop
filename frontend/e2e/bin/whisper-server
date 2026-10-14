@@ -1,0 +1,31 @@
+#!/usr/bin/env node
+// Stands in for whisper.cpp's whisper-server, hearing recordings as the stand-in whisper-cli
+// does: a long one as "go to line one", slowly, and a short one as "go to line two".
+import { appendFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { join } from "node:path";
+
+const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
+createServer((request, response) => {
+  if (request.method === "GET") {
+    response.end("ready");
+    return;
+  }
+  const chunks = [];
+  request.on("data", (chunk) => chunks.push(chunk));
+  request.on("end", () => {
+    const body = Buffer.concat(chunks);
+    if (!body.includes("RIFF")) {
+      response.writeHead(400).end("not a WAV recording");
+      return;
+    }
+    // So a test can tell the server heard it, rather than whisper-cli.
+    appendFileSync(join(process.env.WORKSHOP_HOME ?? ".", "whisper-server-heard"), "heard\n");
+    // 16 kHz, 16-bit mono: 32,000 bytes a second.
+    const long = body.length > 32_000;
+    setTimeout(
+      () => response.end(JSON.stringify({ text: long ? " go to line one" : " go to line two" })),
+      long ? 2500 : 300,
+    );
+  });
+}).listen(port, "127.0.0.1");
