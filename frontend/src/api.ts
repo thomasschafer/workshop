@@ -68,13 +68,21 @@ export interface PackagesState {
   missing_programs: string[];
 }
 
-export interface PackagesResponse {
-  /** Null when the language has no packages beyond its standard library. */
-  state: PackagesState | null;
+export interface LastInstall {
+  succeeded: boolean;
+  log: string[];
+}
+
+export interface InstallStatus {
   installing: boolean;
   /** The installer's latest line of output, while installing. */
   progress: string | null;
-  last_install: { succeeded: boolean; log: string[] } | null;
+  last_install: LastInstall | null;
+}
+
+export interface PackagesResponse extends InstallStatus {
+  /** Null when the language has no packages beyond its standard library. */
+  state: PackagesState | null;
 }
 
 export interface BenchInfo {
@@ -116,6 +124,8 @@ export interface SetupState {
     name: string;
     missing: string[];
     missing_language_server: string | null;
+    /** Whether setup can install its programs with mise. */
+    installable: boolean;
   }[];
   language: string;
   has_aoc_session: boolean;
@@ -127,6 +137,11 @@ export interface SetupState {
     install_hint: string | null;
   }[];
   tailscale_installed: boolean;
+  mise_installed: boolean;
+  /** Why the solutions folder's mise config couldn't be read, if it couldn't. */
+  toolchain_problem: string | null;
+  /** Installing the chosen language's programs with mise. */
+  toolchain_install: InstallStatus;
   phone_url: string | null;
   phone_qr_svg: string | null;
   port: number;
@@ -476,6 +491,8 @@ export const api = {
       wav,
     ),
   benchResult: (result: Record<string, unknown>) => request<null>("POST", "/bench/result", result),
+  installToolchain: () => request<SetupState>("POST", "/setup/toolchain"),
+  cancelToolchainInstall: () => request<null>("POST", "/setup/toolchain/cancel"),
   resetPractice: () => request<Problem>("POST", "/practice/reset"),
   setSolutionsRepo: (commitAfterStar: boolean) =>
     request<null>("PUT", "/solutions-repo", { commit_after_star: commitAfterStar }),

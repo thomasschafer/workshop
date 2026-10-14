@@ -253,6 +253,7 @@ mod tests {
             packages: None,
             helpers: None,
             start_part_two: None,
+            toolchain: None,
         }
     }
 

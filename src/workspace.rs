@@ -23,6 +23,77 @@ input*.txt
 dist-newstyle/
 ";
 
+/// A README for the solutions repo, on working with the solutions outside Workshop.
+fn solutions_readme(profile: &LanguageProfile) -> Result<String> {
+    let example = profile.solution_path(Path::new(""), Puzzle::new(2024, 1)?)?;
+    let mut layout = vec![format!(
+        "- `{}`: a puzzle's solution, here 2024 day 1's. It reads the puzzle input on stdin and \
+         prints part 1's answer on the first line and part 2's on the second.",
+        example.display()
+    )];
+    if let Some(helpers) = &profile.helpers {
+        layout.push(format!(
+            "- `{}`: helpers every solution can import. Add your own.",
+            helpers.file
+        ));
+    }
+    if let Some(packages) = &profile.packages {
+        layout.push(format!(
+            "- `{}`: packages solutions can use, one per line. Install them in Workshop's \
+             settings, under Packages.",
+            packages.manifest
+        ));
+    }
+    layout.push(
+        "- `practice/`: the practice puzzle, made up by Workshop for trying things out.".to_owned(),
+    );
+    let programs = match &profile.toolchain {
+        Some(toolchain) => {
+            let install = std::iter::once("mise install".to_owned())
+                .chain(toolchain.after_install.iter().map(|c| c.join(" ")))
+                .collect::<Vec<_>>()
+                .join(" && ");
+            format!(
+                "\n## Programs\n\n\
+                 If {name} wasn't installed when Workshop was set up, it may have installed it \
+                 with [mise](https://mise.jdx.dev), for this folder only. `mise.toml` lists what, \
+                 and `workshop env` includes them. To install them on another machine, run \
+                 `{install}` here.\n",
+                name = profile.name
+            )
+        }
+        None => String::new(),
+    };
+    Ok(format!(
+        "# Advent of Code solutions\n\n\
+         Solutions in {name}, written with [Workshop](https://github.com/thomasschafer/workshop). \
+         They're ordinary files, so they can be edited and run without it too.\n\n\
+         ## Layout\n\n\
+         {layout}\n\n\
+         Puzzle inputs are kept outside this repo, as Advent of Code asks that they aren't \
+         published.\n\n\
+         ## Running a solution\n\n\
+         ```sh\n\
+         workshop run 2024 1                    # on your puzzle input\n\
+         workshop run 2024 1 --sample           # on the example chosen in Workshop, checking its answers\n\
+         workshop run 2024 1 --sample --part 2  # on part 2's example\n\
+         workshop run practice                  # the practice puzzle\n\
+         ```\n\n\
+         ## Editing in another editor\n\n\
+         Solutions need the same setup as in Workshop, such as where the helpers and packages \
+         are. `workshop env` prints it as commands for your shell. Run it in the terminal you \
+         start your editor from, so its language server finds them too, and again after \
+         installing packages.\n\n\
+         ```sh\n\
+         eval \"$(workshop env)\"               # bash and zsh\n\
+         workshop env --shell fish | source   # fish\n\
+         ```\n\
+         {programs}",
+        name = profile.name,
+        layout = layout.join("\n"),
+    ))
+}
+
 pub struct Workspace {
     pub solutions_dir: PathBuf,
     paths: Paths,
@@ -149,6 +220,10 @@ impl Workspace {
             // Along with the first solution, unless the user has them already.
             if let Some(helpers) = &profile.helpers {
                 helpers.create(&self.solutions_dir)?;
+            }
+            let readme = self.solutions_dir.join("README.md");
+            if !readme.exists() {
+                paths::write_atomic(&readme, solutions_readme(profile)?.as_bytes())?;
             }
         }
         read_versioned(&path)
@@ -405,6 +480,28 @@ mod tests {
                 .solutions_dir
                 .join("notes/2017/day04.md")
                 .starts_with(&workspace.paths.data_dir)
+        );
+    }
+
+    #[test]
+    fn writes_a_readme_for_each_language() {
+        for (id, profile) in crate::language::builtin_profiles().unwrap() {
+            let readme = solutions_readme(&profile).unwrap();
+            assert!(readme.contains("workshop run 2024 1"), "{id}");
+            assert!(readme.contains("eval \"$(workshop env)\""), "{id}");
+            let helpers = profile.helpers.as_ref().unwrap();
+            assert!(readme.contains(&format!("`{}`", helpers.file)), "{id}");
+        }
+        let haskell = crate::language::builtin_profiles()
+            .unwrap()
+            .into_iter()
+            .find(|(id, _)| id == "haskell")
+            .unwrap()
+            .1;
+        assert!(
+            solutions_readme(&haskell)
+                .unwrap()
+                .contains("`mise install && mise run setup`")
         );
     }
 

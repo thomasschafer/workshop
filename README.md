@@ -29,7 +29,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 ## Requirements
 
 - A model CLI that you're logged in to, used through your existing subscription: [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex). Workshop sets itself up for whichever you have.
-- The toolchain for your language. Haskell and Python are built in: GHC and cabal with haskell-language-server, or Python 3 with pyright. The language server is optional and adds error underlines and types. Other languages can be added in your config.
+- The toolchain for your language. Haskell and Python are built in: GHC and cabal with haskell-language-server, or Python 3 with pyright. The language server is optional and adds error underlines and types. Other languages can be added in your config. If you don't have the toolchain and do have [mise](https://mise.jdx.dev), setup can install it for your solutions repo only, leaving the rest of the system as it was.
 - Your Advent of Code session cookie.
 - A way to reach the server from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
 
@@ -82,6 +82,18 @@ body = "map read . lines"
 You can switch between Claude Code and Codex, and between models, in the app under Settings, Models. After each edit, the model that made it and how long it took are shown, which makes comparing them easy. To check models against the same set of example utterances, use `workshop eval --model codex:luna`, for example.
 
 Your program reads the puzzle input on stdin and prints the part 1 answer on the first line and the part 2 answer on the second.
+
+## Working from a terminal
+
+Solutions are ordinary files in your solutions repo, so you can also edit and run them at the server with your own editor. Workshop writes a README there with the details. In short:
+
+```sh
+workshop run 2024 1            # build and run a solution on your input, as the app does
+workshop run 2024 1 --sample   # on the example chosen in the app, checking its answers
+eval "$(workshop env)"         # set up a shell, and an editor started from it, as the app runs solutions
+```
+
+`workshop env` covers where your helpers and packages are, and any programs installed with mise for the solutions repo.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for adding a language or a model CLI.
 

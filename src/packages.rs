@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 use crate::paths;
 use crate::process::{self, ProcessGroup};
 use crate::template::{self, Vars};
+use crate::toolchain::Toolchain;
 
 /// How a language's packages are listed, installed and used.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -239,7 +240,7 @@ const KEPT_LOG_LINES: usize = 400;
 
 impl InstallLog {
     pub fn push(&self, line: impl Into<String>) {
-        let line = line.into();
+        let line = plain_text(&line.into());
         if line.trim().is_empty() {
             return;
         }
@@ -283,6 +284,8 @@ pub struct Packages<'a> {
     pub solutions_dir: &'a Path,
     /// Where this language's installations live.
     pub dir: PathBuf,
+    /// The programs installers are run with, and solutions' `PATH` builds on.
+    pub toolchain: Toolchain,
 }
 
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -329,7 +332,7 @@ impl Packages<'_> {
                 .profile
                 .required_programs()
                 .into_iter()
-                .filter(|p| crate::doctor::find_program(p).is_none())
+                .filter(|p| self.toolchain.find_program(p).is_none())
                 .map(str::to_owned)
                 .collect(),
         })
@@ -401,7 +404,10 @@ impl Packages<'_> {
             return Ok(Vec::new());
         }
         let env = self.dir.join(&installed.dir);
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = match self.toolchain.path() {
+            Some(path) => path.to_owned(),
+            None => std::env::var("PATH").unwrap_or_default(),
+        };
         let vars = Vars::new()
             .set("env", env.to_string_lossy())
             .set("PATH", path);
@@ -507,7 +513,7 @@ impl Packages<'_> {
     ) -> Result<()> {
         std::fs::create_dir_all(env).with_context(|| format!("creating {}", env.display()))?;
         let args = self.render(&update.command, env, &[])?;
-        run_logged(&args, env, cancel, log).await?;
+        run_logged(&args, env, self.toolchain.variables(), cancel, log).await?;
         paths::write_atomic(&self.updated_at_path(), now_secs().to_string().as_bytes())
     }
 
@@ -521,7 +527,7 @@ impl Packages<'_> {
         std::fs::create_dir_all(env).with_context(|| format!("creating {}", env.display()))?;
         for command in &self.profile.install {
             let args = self.render(command, env, packages)?;
-            run_logged(&args, env, cancel, log).await?;
+            run_logged(&args, env, self.toolchain.variables(), cancel, log).await?;
         }
         Ok(())
     }
@@ -675,9 +681,10 @@ async fn hoogle(base: Option<&str>, module: &str, http: &reqwest::Client) -> Res
 }
 
 /// Runs an installer, logging its output line by line as it goes.
-async fn run_logged(
+pub async fn run_logged(
     args: &[String],
     dir: &Path,
+    environment: &[(String, String)],
     cancel: &CancellationToken,
     log: &InstallLog,
 ) -> Result<()> {
@@ -685,6 +692,7 @@ async fn run_logged(
     log.push(format!("$ {}", args.join(" ")));
     let mut child = process::command(program)
         .args(rest)
+        .envs(environment.iter().map(|(k, v)| (k, v)))
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -716,6 +724,44 @@ async fn run_logged(
         Some(status) => bail!("`{}` failed ({status}):\n{}", args.join(" "), log.tail(15)),
         None => bail!("`{}` took too long and was stopped", args.join(" ")),
     }
+}
+
+/// A line of terminal output as it ended up on screen: without colours and links, and only the
+/// last of the versions a progress bar redraws with carriage returns.
+fn plain_text(line: &str) -> String {
+    let shown = line
+        .trim_end_matches('\r')
+        .rsplit('\r')
+        .next()
+        .unwrap_or_default();
+    let mut text = String::with_capacity(shown.len());
+    let mut chars = shown.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            text.push(c);
+            continue;
+        }
+        match chars.next() {
+            // Control sequences, such as colours, end with a letter or similar.
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // Operating system commands, such as links, end with a bell or `ESC \`.
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    text
 }
 
 async fn follow_lines(reader: impl AsyncRead + Unpin, log: &InstallLog) {
@@ -753,7 +799,20 @@ mod tests {
             language_name: "Test",
             solutions_dir: dir,
             dir: dir.join("installs"),
+            toolchain: Toolchain::default(),
         }
+    }
+
+    #[test]
+    fn keeps_what_a_terminal_would_show() {
+        assert_eq!(
+            plain_text(
+                "\x1b[1m\x1b[93m[ Warn  ]\x1b[0m see \x1b]8;;https://x\x1b\\GHC-1\x1b]8;;\x1b\\ ok"
+            ),
+            "[ Warn  ] see GHC-1 ok"
+        );
+        assert_eq!(plain_text("  0%\r 50%\r100% done\r"), "100% done");
+        assert_eq!(plain_text("plain"), "plain");
     }
 
     #[test]

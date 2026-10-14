@@ -44,14 +44,14 @@ dictation_hints = '''
 - Common mishearings: "in put" is `input`, "split lines" is `splitlines`, "enumerate" may be heard as "e numerate", "deck" or "deque" is `deque`.
 '''
 
-# A module of your own that every solution can import, created with your first solution unless
-# it's already there.
 # When part 1 is solved, the template's part 2 line is offered to be turned on.
 start_part_two = { find = """
     # When you start part 2, uncomment the next line.
     # print(part2(data))""", replace = """
     print(part2(data))""" }
 
+# A module of your own that every solution can import, created with your first solution unless
+# it's already there.
 [helpers]
 file = "lib/aoc.py"
 environment = { PYTHONPATH = "{helpers}" }
@@ -85,6 +85,20 @@ def neighbours4(r: int, c: int) -> list[tuple[int, int]]:
 def neighbours8(r: int, c: int) -> list[tuple[int, int]]:
     """The positions around, diagonals included."""
     return [(r + dr, c + dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
+'''
+
+# Setup offers to install the programs above with mise (https://mise.jdx.dev) when they're
+# missing, into the solutions directory only. This is the mise.toml it writes there, unless one is
+# there already. Programs you have installed already are used as they are.
+[toolchain]
+mise = '''
+# The programs these solutions are run with, installed by mise for this directory only. Run
+# `mise install` to install them, and see https://mise.jdx.dev to use them in your shell.
+[tools]
+python = "3.13"
+# Pyright, the language server for error underlines and types, runs on Node.
+node = "lts"
+"npm:pyright" = "latest"
 '''
 
 [packages]

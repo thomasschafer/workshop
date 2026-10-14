@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::packages::PackagesProfile;
 use crate::template::{self, Vars};
+use crate::toolchain::ToolchainProfile;
 
 /// Everything Workshop needs to know to work with one programming language.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -37,6 +38,9 @@ pub struct LanguageProfile {
     /// line that prints its answer.
     #[serde(default)]
     pub start_part_two: Option<TextSwap>,
+    /// How to install the programs above with mise, for setup to offer when they're missing.
+    #[serde(default)]
+    pub toolchain: Option<ToolchainProfile>,
 }
 
 /// Text to replace with other text.

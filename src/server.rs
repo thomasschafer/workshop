@@ -28,6 +28,7 @@ use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::runner::RunResult;
 use crate::settings::AppSettings;
 use crate::solutions::Solutions;
+use crate::toolchain::Toolchain;
 use crate::workspace::{DayMeta, SaveError, UiState, VersionedFile, Workspace};
 
 const TOKEN_COOKIE: &str = "workshop_token";
@@ -50,12 +51,11 @@ pub struct App {
     run_lock: Mutex<()>,
     /// Cancels the run in progress, if there is one.
     current_run: std::sync::Mutex<Option<CancellationToken>>,
-    /// Held while packages are being installed.
+    /// Held while anything is being installed, as packages need the toolchain.
     install_lock: Arc<Mutex<()>>,
-    /// The install under way, to follow or cancel.
-    install: std::sync::Mutex<Option<Arc<RunningInstall>>>,
-    /// How the last install ended, and its output.
-    last_install: std::sync::Mutex<Option<LastInstall>>,
+    packages_install: Installs,
+    /// Installing the language's programs with mise.
+    toolchain_install: Installs,
     /// Packages already found for missing modules, by language and module.
     resolutions: std::sync::Mutex<BTreeMap<(String, String), Resolution>>,
     http: reqwest::Client,
@@ -91,8 +91,8 @@ impl App {
             run_lock: Mutex::new(()),
             current_run: std::sync::Mutex::new(None),
             install_lock: Arc::new(Mutex::new(())),
-            install: std::sync::Mutex::new(None),
-            last_install: std::sync::Mutex::new(None),
+            packages_install: Installs::default(),
+            toolchain_install: Installs::default(),
             resolutions: std::sync::Mutex::new(BTreeMap::new()),
             http: reqwest::Client::builder()
                 .user_agent(&config.aoc.user_agent)
@@ -121,22 +121,10 @@ impl App {
         &self.config.languages[&self.settings().language]
     }
 
-    /// Solutions in the chosen language: their packages, environment and how to run them.
-    fn solutions(&self) -> Solutions<'_> {
-        Solutions {
-            config: &self.config,
-            paths: &self.paths,
-            language_id: self.settings().language,
-        }
-    }
-
-    /// The chosen language's packages, if it has any.
-    fn packages(&self) -> Option<Packages<'_>> {
-        self.solutions().packages()
-    }
-
-    fn solution_environment(&self) -> Result<Vec<(String, String)>> {
-        self.solutions().environment()
+    /// Solutions in the chosen language: their toolchain, packages, environment and how to run
+    /// them.
+    async fn solutions(&self) -> Result<Solutions<'_>> {
+        Solutions::load(&self.config, &self.paths, self.settings().language).await
     }
 
     fn update_settings(&self, change: impl FnOnce(&mut AppSettings)) -> Result<()> {
@@ -191,6 +179,8 @@ pub fn router(app: Shared) -> Router {
         .route("/solutions-repo", put(set_solutions_repo))
         .route("/setup/language", put(set_language))
         .route("/setup/aoc-session", post(set_aoc_session))
+        .route("/setup/toolchain", post(install_toolchain))
+        .route("/setup/toolchain/cancel", post(cancel_toolchain_install))
         .route("/packages", get(get_packages).put(save_packages))
         .route("/packages/install", post(install_packages))
         .route("/packages/add", post(add_package))
@@ -402,11 +392,19 @@ struct PackageHints {
 
 async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
     let language = app.language();
+    // A toolchain that can't be read shouldn't stop the app loading; the checks report it.
+    let toolchain = match app.solutions().await {
+        Ok(solutions) => solutions.toolchain,
+        Err(err) => {
+            tracing::warn!("{err:#}");
+            Toolchain::default()
+        }
+    };
     let has_lsp = language
         .lsp
         .as_ref()
         .and_then(|c| c.first())
-        .is_some_and(|p| doctor::find_program(p).is_some());
+        .is_some_and(|p| toolchain.find_program(p).is_some());
     Ok(Json(Bootstrap {
         state: app.workspace.load_ui_state()?,
         language: LanguageInfo {
@@ -603,7 +601,9 @@ async fn run(
             () = cancel.cancelled() => return Err(anyhow::anyhow!("Cancelled.").into()),
         },
     };
-    Ok(Json(app.solutions().run(puzzle, &input, &cancel).await?))
+    Ok(Json(
+        app.solutions().await?.run(puzzle, &input, &cancel).await?,
+    ))
 }
 
 async fn cancel_run(State(app): State<Shared>) -> ApiResult<()> {
@@ -797,7 +797,7 @@ async fn discuss(
             .map(|text| (helpers.file.clone(), text)),
         None => None,
     };
-    let packages = match app.packages() {
+    let packages = match app.solutions().await?.packages() {
         Some(packages) => packages.state()?.installed.unwrap_or_default(),
         None => Vec::new(),
     };
@@ -917,6 +917,12 @@ struct SetupState {
     has_aoc_session: bool,
     providers: Vec<ProviderStatus>,
     tailscale_installed: bool,
+    /// Whether mise is installed, to install a language's programs with.
+    mise_installed: bool,
+    /// Why the solutions directory's mise config couldn't be read, if it couldn't.
+    toolchain_problem: Option<String>,
+    /// Installing the chosen language's programs with mise.
+    toolchain_install: InstallStatus,
     /// The address to open on a phone, with the token, if Tailscale is serving Workshop.
     phone_url: Option<String>,
     /// `phone_url` as a QR code, in SVG.
@@ -932,6 +938,8 @@ struct LanguageOption {
     missing: Vec<String>,
     /// The language server, if it isn't installed. Workshop works without it.
     missing_language_server: Option<String>,
+    /// Whether setup can install its programs with mise.
+    installable: bool,
 }
 
 #[derive(Serialize)]
@@ -945,6 +953,10 @@ struct ProviderStatus {
 }
 
 async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupState> {
+    let (toolchain, toolchain_problem) = match Toolchain::load(&app.config.solutions_dir).await {
+        Ok(toolchain) => (toolchain, None),
+        Err(err) => (Toolchain::default(), Some(format!("{err:#}"))),
+    };
     let languages = app
         .config
         .languages
@@ -955,15 +967,16 @@ async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupState> {
             missing: profile
                 .required_programs()
                 .into_iter()
-                .filter(|p| doctor::find_program(p).is_none())
+                .filter(|p| toolchain.find_program(p).is_none())
                 .map(str::to_owned)
                 .collect(),
             missing_language_server: profile
                 .lsp
                 .as_ref()
                 .and_then(|c| c.first())
-                .filter(|p| doctor::find_program(p).is_none())
+                .filter(|p| toolchain.find_program(p).is_none())
                 .cloned(),
+            installable: profile.toolchain.is_some(),
         })
         .collect();
     let providers =
@@ -996,6 +1009,9 @@ async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupState> {
         has_aoc_session: app.aoc.has_session(),
         providers,
         tailscale_installed: doctor::find_program("tailscale").is_some(),
+        mise_installed: doctor::find_program("mise").is_some(),
+        toolchain_problem,
+        toolchain_install: app.toolchain_install.status(),
         phone_url,
         phone_qr_svg,
         port,
@@ -1144,7 +1160,7 @@ async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {
         return (StatusCode::NOT_FOUND, "No language server is configured").into_response();
     };
     upgrade.on_upgrade(move |socket| async move {
-        let environment = match app.solution_environment() {
+        let environment = match app.solutions().await.and_then(|s| s.environment()) {
             Ok(environment) => environment,
             Err(err) => {
                 tracing::warn!("language server: {err:#}");
@@ -1319,28 +1335,110 @@ struct LastInstall {
     log: Vec<String>,
 }
 
+/// One kind of install, such as of packages, run one at a time in the background.
+#[derive(Default)]
+struct Installs {
+    /// The install under way, to follow or cancel.
+    running: std::sync::Mutex<Option<Arc<RunningInstall>>>,
+    /// How the last install ended, and its output.
+    last: std::sync::Mutex<Option<LastInstall>>,
+}
+
 #[derive(Serialize)]
-struct PackagesResponse {
-    /// None when the language has no packages beyond its standard library.
-    state: Option<PackagesState>,
+struct InstallStatus {
     installing: bool,
     /// The installer's latest line of output, while installing.
     progress: Option<String>,
     last_install: Option<LastInstall>,
 }
 
-fn packages_response(app: &App) -> Result<PackagesResponse> {
-    let running = lock(&app.install).clone();
+impl Installs {
+    fn status(&self) -> InstallStatus {
+        let running = lock(&self.running).clone();
+        InstallStatus {
+            installing: running.is_some(),
+            progress: running.and_then(|r| r.log.last()),
+            last_install: lock(&self.last).clone(),
+        }
+    }
+
+    fn cancel(&self) {
+        if let Some(running) = lock(&self.running).as_ref() {
+            running.cancel.cancel();
+        }
+    }
+}
+
+/// Runs an install in its own task, so it finishes even if the phone disconnects while waiting,
+/// then restarts language servers so they see what was installed.
+async fn install_with<T, Job, Fut>(
+    app: &Shared,
+    installs: fn(&App) -> &Installs,
+    job: Job,
+) -> Result<T, ApiError>
+where
+    Job: FnOnce(Shared, Arc<RunningInstall>) -> Fut,
+    Fut: std::future::Future<Output = Result<T>> + Send + 'static,
+    T: Send + 'static,
+{
+    let Ok(guard) = app.install_lock.clone().try_lock_owned() else {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            serde_json::json!({ "error": "Something is already being installed." }),
+        ));
+    };
+    let running = Arc::new(RunningInstall {
+        cancel: CancellationToken::new(),
+        log: InstallLog::default(),
+    });
+    *lock(&installs(app).running) = Some(running.clone());
+    let installing = job(app.clone(), running.clone());
+    let app = app.clone();
+    let task = tokio::spawn(async move {
+        let _guard = guard;
+        let result = installing.await;
+        // The error itself already quotes the end of the output.
+        if let Err(err) = &result {
+            running
+                .log
+                .push(err.to_string().lines().next().unwrap_or_default());
+        }
+        let installs = installs(&app);
+        *lock(&installs.last) = Some(LastInstall {
+            succeeded: result.is_ok(),
+            log: running.log.lines(),
+        });
+        *lock(&installs.running) = None;
+        if result.is_ok() {
+            app.lsp_restarts.send_modify(|n| *n += 1);
+        }
+        result
+    });
+    Ok(task.await.context("the install stopped unexpectedly")??)
+}
+
+#[derive(Serialize)]
+struct PackagesResponse {
+    /// None when the language has no packages beyond its standard library.
+    state: Option<PackagesState>,
+    #[serde(flatten)]
+    install: InstallStatus,
+}
+
+async fn packages_response(app: &App) -> Result<PackagesResponse> {
     Ok(PackagesResponse {
-        state: app.packages().map(|p| p.state()).transpose()?,
-        installing: running.is_some(),
-        progress: running.and_then(|r| r.log.last()),
-        last_install: lock(&app.last_install).clone(),
+        state: app
+            .solutions()
+            .await?
+            .packages()
+            .map(|p| p.state())
+            .transpose()?,
+        install: app.packages_install.status(),
     })
 }
 
-fn require_packages(app: &App) -> Result<Packages<'_>, ApiError> {
-    app.packages().ok_or_else(|| {
+async fn require_packages(app: &App) -> Result<Packages<'_>, ApiError> {
+    app.solutions().await?.packages().ok_or_else(|| {
         bad_request(format!(
             "{} has no packages to install.",
             app.language().name
@@ -1349,7 +1447,7 @@ fn require_packages(app: &App) -> Result<Packages<'_>, ApiError> {
 }
 
 async fn get_packages(State(app): State<Shared>) -> ApiResult<PackagesResponse> {
-    Ok(Json(packages_response(&app)?))
+    Ok(Json(packages_response(&app).await?))
 }
 
 #[derive(Deserialize)]
@@ -1361,10 +1459,11 @@ async fn save_packages(
     State(app): State<Shared>,
     Json(body): Json<ManifestBody>,
 ) -> ApiResult<PackagesResponse> {
-    require_packages(&app)?
+    require_packages(&app)
+        .await?
         .save_manifest(&body.text)
         .map_err(|e| bad_request(format!("{e:#}")))?;
-    Ok(Json(packages_response(&app)?))
+    Ok(Json(packages_response(&app).await?))
 }
 
 #[derive(Deserialize)]
@@ -1376,7 +1475,8 @@ async fn add_package(
     State(app): State<Shared>,
     Json(body): Json<PackageBody>,
 ) -> ApiResult<PackagesResponse> {
-    require_packages(&app)?
+    require_packages(&app)
+        .await?
         .add(&body.package)
         .map_err(|e| bad_request(format!("{e:#}")))?;
     install_packages(State(app)).await
@@ -1386,16 +1486,15 @@ async fn remove_package(
     State(app): State<Shared>,
     Json(body): Json<PackageBody>,
 ) -> ApiResult<PackagesResponse> {
-    require_packages(&app)?
+    require_packages(&app)
+        .await?
         .remove(&body.package)
         .map_err(|e| bad_request(format!("{e:#}")))?;
     install_packages(State(app)).await
 }
 
 async fn cancel_install(State(app): State<Shared>) -> ApiResult<()> {
-    if let Some(running) = lock(&app.install).as_ref() {
-        running.cancel.cancel();
-    }
+    app.packages_install.cancel();
     Ok(Json(()))
 }
 
@@ -1413,62 +1512,68 @@ async fn resolve_package(
     if let Some(found) = lock(&app.resolutions).get(&key) {
         return Ok(Json(found.clone()));
     }
-    let resolution = require_packages(&app)?
+    let resolution = require_packages(&app)
+        .await?
         .resolve(&body.module, &app.http)
         .await?;
     lock(&app.resolutions).insert(key, resolution.clone());
     Ok(Json(resolution))
 }
 
-/// Installs the manifest's packages, then restarts language servers so they see them.
+/// Installs the manifest's packages.
 async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesResponse> {
-    require_packages(&app)?;
-    let Ok(guard) = app.install_lock.clone().try_lock_owned() else {
-        return Err(ApiError(
-            StatusCode::CONFLICT,
-            serde_json::json!({ "error": "Packages are already being installed." }),
-        ));
-    };
-    let running = Arc::new(RunningInstall {
-        cancel: CancellationToken::new(),
-        log: InstallLog::default(),
-    });
-    *lock(&app.install) = Some(running.clone());
-    // Its own task, so the install finishes even if the phone disconnects while waiting.
-    let task = {
-        let app = app.clone();
-        tokio::spawn(async move {
-            let _guard = guard;
-            let installed = match app.packages() {
-                Some(packages) => packages.install(&running.cancel, &running.log).await,
-                None => Err(anyhow::anyhow!("the language has no packages")),
-            };
-            // The error itself already quotes the end of the output.
-            if let Err(err) = &installed {
-                running
-                    .log
-                    .push(err.to_string().lines().next().unwrap_or_default());
-            }
-            *lock(&app.last_install) = Some(LastInstall {
-                succeeded: installed.is_ok(),
-                log: running.log.lines(),
-            });
-            *lock(&app.install) = None;
-            if installed.is_ok() {
-                app.lsp_restarts.send_modify(|n| *n += 1);
-            }
-            installed
-        })
-    };
-    let installed = task.await.context("the install stopped unexpectedly")?;
-    match installed {
-        Ok(packages) => tracing::info!("installed packages: {}", packages.join(" ")),
-        Err(err) => {
-            tracing::warn!("installing packages: {err:#}");
-            return Err(err.into());
-        }
+    require_packages(&app).await?;
+    let installed = install_with(
+        &app,
+        |app| &app.packages_install,
+        |app, running| async move {
+            let packages = app
+                .solutions()
+                .await?
+                .packages()
+                .context("the language has no packages")?;
+            packages.install(&running.cancel, &running.log).await
+        },
+    )
+    .await?;
+    tracing::info!("installed packages: {}", installed.join(" "));
+    Ok(Json(packages_response(&app).await?))
+}
+
+/// Installs the chosen language's programs with mise, into the solutions directory.
+async fn install_toolchain(State(app): State<Shared>) -> ApiResult<SetupState> {
+    if app.language().toolchain.is_none() {
+        return Err(bad_request(format!(
+            "Workshop doesn't know how to install {} with mise.",
+            app.language().name
+        )));
     }
-    Ok(Json(packages_response(&app)?))
+    install_with(
+        &app,
+        |app| &app.toolchain_install,
+        |app, running| async move {
+            let profile = app
+                .language()
+                .toolchain
+                .clone()
+                .context("the language has no toolchain")?;
+            crate::toolchain::install(
+                &profile,
+                &app.config.solutions_dir,
+                &running.cancel,
+                &running.log,
+            )
+            .await
+        },
+    )
+    .await?;
+    tracing::info!("installed {} with mise", app.language().name);
+    setup_state(State(app)).await
+}
+
+async fn cancel_toolchain_install(State(app): State<Shared>) -> ApiResult<()> {
+    app.toolchain_install.cancel();
+    Ok(Json(()))
 }
 
 async fn reset_practice(State(app): State<Shared>) -> ApiResult<Problem> {

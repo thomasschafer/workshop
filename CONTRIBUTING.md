@@ -150,6 +150,24 @@ The patterns are matched in the browser too, so keep to regex syntax that Rust a
 
 `mise run check-packages` checks the built-in profiles against the real toolchains: a missing module is found, looked up, installed, and then seen by the language server and the solution. It needs the network, so it isn't part of CI; run it when you change how packages work.
 
+### Toolchain
+
+A `[toolchain]` table lets setup install the language's programs with [mise](https://mise.jdx.dev) when they're missing. Workshop writes `mise` to the solutions directory as `mise.toml`, unless the directory has a mise config already, then runs `mise install` and any `after_install` commands there. Building, running, installing packages and the language server then happen in that environment, as does `workshop env`. Prefer mise's own tools; when one isn't good enough, install it with another installer, keeping everything inside the solutions directory, as the Haskell profile does with ghcup.
+
+```toml
+[toolchain]
+mise = '''
+[tools]
+python = "3.13"
+node = "lts"
+"npm:pyright" = "latest"
+'''
+# Run in the solutions directory after `mise install`.
+after_install = []
+# Added to the solutions repo's .gitignore, for anything installed inside it.
+gitignore = []
+```
+
 Dictation hints matter most. They're given to the edit model with every request, so keep them short, and focus on how the language's operators, chaining and idioms are spoken, and which words speech recognition commonly gets wrong.
 
 ## Adding a model provider

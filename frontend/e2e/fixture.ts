@@ -34,7 +34,7 @@ function pythonProfile(): string {
     ],
     [/^environment = \{ PATH = .*$/m, 'environment = { PYTHONPATH = "{env}/site" }'],
     [/^lookup = .*\n/m, ""],
-    [/^\[(packages|helpers)/gm, "[languages.python.$1"],
+    [/^\[(packages|helpers|toolchain)/gm, "[languages.python.$1"],
   ];
   let profile = builtin;
   for (const [pattern, replacement] of replacements) {

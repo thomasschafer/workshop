@@ -21,6 +21,7 @@ mod solutions;
 mod tailscale;
 mod template;
 mod theme;
+mod toolchain;
 mod workspace;
 
 use std::net::SocketAddr;
@@ -69,7 +70,7 @@ enum Command {
         model: Option<String>,
     },
     /// Run a solution as the app does: on your input, or with `--sample` on the sample chosen in
-    /// the app, with the same packages and helpers.
+    /// the app, with the same programs, packages and helpers.
     Run {
         /// The year, or `practice` for the practice puzzle.
         year: String,
@@ -83,7 +84,8 @@ enum Command {
         part: u8,
     },
     /// Print commands that set the environment solutions run with, such as where packages are
-    /// installed, so a terminal or editor matches the app: `eval "$(workshop env)"`.
+    /// installed and any programs from mise, so a terminal or editor matches the app:
+    /// `eval "$(workshop env)"`.
     Env {
         #[arg(long, value_enum, default_value = "posix")]
         shell: commands::Shell,
@@ -154,7 +156,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Env { shell } => {
-            print!("{}", commands::env(&config, &paths, shell)?);
+            print!("{}", commands::env(&config, &paths, shell).await?);
             Ok(())
         }
         Command::Token { tailscale } => {

@@ -46,14 +46,14 @@ dictation_hints = '''
 - Common mishearings: "fold are" or "fold R" is `foldr`, "fold L prime" is `foldl'`, "map M underscore" is `mapM_`, "in pew" is `input`, "read MaybeD" is `readMaybe`.
 '''
 
-# A module of your own that every solution can import, created with your first solution unless
-# it's already there.
 # When part 1 is solved, the template's part 2 line is offered to be turned on.
 start_part_two = { find = """
   -- When you start part 2, uncomment the next line.
   -- print (part2 input)""", replace = """
   print (part2 input)""" }
 
+# A module of your own that every solution can import, created with your first solution unless
+# it's already there.
 [helpers]
 file = "lib/Aoc.hs"
 # Tells haskell-language-server where the module is, unless you have a hie.yaml already.
@@ -93,6 +93,34 @@ neighbours4 (r, c) = [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
 neighbours8 :: (Int, Int) -> [(Int, Int)]
 neighbours8 (r, c) = [(r + dr, c + dc) | dr <- [-1, 0, 1], dc <- [-1, 0, 1], (dr, dc) /= (0, 0)]
 '''
+
+# Setup offers to install the programs above with mise (https://mise.jdx.dev) when they're
+# missing, into the solutions directory only. This is the mise.toml it writes there, unless one is
+# there already. Programs you have installed already are used as they are.
+[toolchain]
+# GHC, cabal and haskell-language-server come from ghcup, which keeps them in .toolchain, as
+# mise's own GHC is out of date.
+mise = '''
+# The programs these solutions are built with, installed for this directory only. Run
+# `mise install` then `mise run setup` to install them, and see https://mise.jdx.dev to use them
+# in your shell.
+[tools]
+ghcup = "latest"
+
+[env]
+GHCUP_INSTALL_BASE_PREFIX = "{{config_root}}/.toolchain"
+_.path = ["{{config_root}}/.toolchain/.ghcup/bin"]
+
+[tasks.setup]
+description = "Install GHC, cabal and haskell-language-server with ghcup"
+run = [
+  "ghcup install ghc recommended --set",
+  "ghcup install cabal recommended --set",
+  "ghcup install hls recommended --set",
+]
+'''
+after_install = [["mise", "run", "setup"]]
+gitignore = [".toolchain/"]
 
 [packages]
 # Relative to the solutions directory. One package per line; edit it by hand or in the app.

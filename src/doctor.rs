@@ -1,5 +1,6 @@
 //! Setup checks, shared by `workshop doctor` and the app.
 
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -9,6 +10,8 @@ use tokio::process::Command;
 
 use crate::config::Config;
 use crate::paths::Paths;
+use crate::solutions::Solutions;
+use crate::toolchain::{self, Toolchain};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,9 +73,22 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         checks.extend(check_provider(config, id).await);
     }
 
-    let language = &config.languages[&settings.language];
+    let (toolchain, toolchain_check) = check_toolchain(config).await;
+    checks.extend(toolchain_check);
+    let solutions = Solutions {
+        config,
+        paths,
+        language_id: settings.language.clone(),
+        toolchain,
+    };
+    let language = solutions.language();
+    let install_hint = if language.toolchain.is_some() {
+        " Setup in the app can install it for you with mise."
+    } else {
+        ""
+    };
     for program in language.required_programs() {
-        checks.push(match find_program(program) {
+        checks.push(match solutions.toolchain.find_program(program) {
             Some(path) => Check::ok(
                 format!("{} runner", language.name),
                 format!("Found {program} at {}", path.display()),
@@ -82,14 +98,14 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
                 format!("{} runner", language.name),
                 format!("`{program}` isn't on your PATH"),
                 format!(
-                    "Install {} so that `{program}` is on your PATH, or change the commands in your language profile.",
+                    "Install {} so that `{program}` is on your PATH, or change the commands in your language profile.{install_hint}",
                     language.name
                 ),
             ),
         });
     }
     if let Some(lsp) = language.lsp.as_ref().and_then(|c| c.first()) {
-        checks.push(match find_program(lsp) {
+        checks.push(match solutions.toolchain.find_program(lsp) {
             Some(path) => Check::ok(
                 "Language server",
                 format!("Found {lsp} at {}", path.display()),
@@ -105,13 +121,7 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         });
     }
 
-    if let Some(profile) = &language.packages {
-        let packages = crate::packages::Packages {
-            profile,
-            language_name: &language.name,
-            solutions_dir: &config.solutions_dir,
-            dir: paths.packages_dir(&settings.language),
-        };
+    if let Some(packages) = solutions.packages() {
         checks.push(check_packages(&packages));
     }
 
@@ -154,6 +164,49 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
     checks.push(check_network(&config.aoc).await);
     checks.push(check_https(config).await);
     checks
+}
+
+/// The environment from the solutions directory's mise config, if it has one, and how that went.
+async fn check_toolchain(config: &Config) -> (Toolchain, Option<Check>) {
+    let Some(file) = toolchain::mise_config(&config.solutions_dir) else {
+        return (Toolchain::default(), None);
+    };
+    let name = "Toolchain";
+    if find_program("mise").is_none() {
+        return (
+            Toolchain::default(),
+            Some(Check::problem(
+                Status::Warn,
+                name,
+                format!(
+                    "{} lists programs to install with mise, but mise isn't installed, so they're looked for on your PATH instead",
+                    file.display()
+                ),
+                toolchain::MISE_INSTALL_HINT,
+            )),
+        );
+    }
+    match Toolchain::load(&config.solutions_dir).await {
+        Ok(toolchain) => (
+            toolchain,
+            Some(Check::ok(
+                name,
+                format!("Programs from {}, via mise", file.display()),
+            )),
+        ),
+        Err(err) => (
+            Toolchain::default(),
+            Some(Check::problem(
+                Status::Fail,
+                name,
+                format!("{err:#}"),
+                format!(
+                    "Run `mise trust` and `mise install` in {}.",
+                    config.solutions_dir.display()
+                ),
+            )),
+        ),
+    }
 }
 
 fn check_packages(packages: &crate::packages::Packages) -> Check {
@@ -327,7 +380,13 @@ pub async fn output(command: &[String]) -> Option<(bool, String)> {
     ))
 }
 
+/// Finds a program on Workshop's own `PATH`.
 pub fn find_program(program: &str) -> Option<PathBuf> {
+    find_program_in(program, &std::env::var_os("PATH")?)
+}
+
+/// Finds a program on the given search path, or at the path given.
+pub fn find_program_in(program: &str, search_path: &OsStr) -> Option<PathBuf> {
     let candidate = PathBuf::from(program);
     if candidate.components().count() > 1 {
         return candidate.is_file().then_some(candidate);
@@ -337,7 +396,7 @@ pub fn find_program(program: &str) -> Option<PathBuf> {
     } else {
         &[""]
     };
-    std::env::split_paths(&std::env::var_os("PATH")?).find_map(|dir| {
+    std::env::split_paths(search_path).find_map(|dir| {
         extensions.iter().find_map(|ext| {
             let path = if ext.is_empty() {
                 dir.join(program)

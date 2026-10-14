@@ -27,12 +27,8 @@ pub fn parse_puzzle(year: &str, day: Option<u8>) -> Result<Puzzle> {
     Puzzle::new(year, day)
 }
 
-fn solutions<'a>(config: &'a Config, paths: &'a Paths) -> Solutions<'a> {
-    Solutions {
-        config,
-        paths,
-        language_id: AppSettings::load(config, paths).language,
-    }
+async fn solutions<'a>(config: &'a Config, paths: &'a Paths) -> Result<Solutions<'a>> {
+    Solutions::load(config, paths, AppSettings::load(config, paths).language).await
 }
 
 /// Runs a solution on the real input or the sample chosen in the app, printing its output and
@@ -61,6 +57,7 @@ pub async fn run(
         }
     });
     let result = solutions(config, paths)
+        .await?
         .run(puzzle, &input, &cancel)
         .await?;
     print!("{}", result.stdout);
@@ -116,9 +113,9 @@ pub enum Shell {
 }
 
 /// The environment solutions run with, as commands for a shell to set it, so a terminal or
-/// editor sees the same packages and helpers as the app.
-pub fn env(config: &Config, paths: &Paths, shell: Shell) -> Result<String> {
-    let environment = solutions(config, paths).environment()?;
+/// editor sees the same programs, packages and helpers as the app.
+pub async fn env(config: &Config, paths: &Paths, shell: Shell) -> Result<String> {
+    let environment = solutions(config, paths).await?.environment()?;
     Ok(environment
         .iter()
         .map(|(name, value)| match shell {

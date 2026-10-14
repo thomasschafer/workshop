@@ -15,6 +15,7 @@ use crate::packages::Packages;
 use crate::paths::Paths;
 use crate::practice::Practice;
 use crate::runner::{self, RunResult};
+use crate::toolchain::Toolchain;
 
 /// The client for Advent of Code, with the practice puzzle served alongside it.
 pub fn aoc_client(config: &Config, paths: &Paths, session: Option<String>) -> Result<AocClient> {
@@ -33,9 +34,19 @@ pub struct Solutions<'a> {
     pub paths: &'a Paths,
     /// The chosen language, such as `haskell`.
     pub language_id: String,
+    pub toolchain: Toolchain,
 }
 
 impl<'a> Solutions<'a> {
+    pub async fn load(config: &'a Config, paths: &'a Paths, language_id: String) -> Result<Self> {
+        Ok(Self {
+            config,
+            paths,
+            language_id,
+            toolchain: Toolchain::load(&config.solutions_dir).await?,
+        })
+    }
+
     pub fn language(&self) -> &'a LanguageProfile {
         &self.config.languages[&self.language_id]
     }
@@ -48,6 +59,7 @@ impl<'a> Solutions<'a> {
             language_name: &language.name,
             solutions_dir: &self.config.solutions_dir,
             dir: self.paths.packages_dir(&self.language_id),
+            toolchain: self.toolchain.clone(),
         })
     }
 
@@ -60,9 +72,9 @@ impl<'a> Solutions<'a> {
             .transpose()
     }
 
-    /// Environment variables for building, running and the language server: where the user's
-    /// helpers and installed packages are. A variable both set, such as a search path, gets
-    /// both values.
+    /// Environment variables for building, running and the language server: the toolchain's,
+    /// and where the user's helpers and installed packages are. A variable both helpers and
+    /// packages set, such as a search path, gets both values.
     pub fn environment(&self) -> Result<Vec<(String, String)>> {
         let helpers = match &self.language().helpers {
             Some(helpers) => helpers.environment(&self.config.solutions_dir)?,
@@ -72,7 +84,9 @@ impl<'a> Solutions<'a> {
             Some(packages) => packages.environment()?,
             None => Vec::new(),
         };
-        Ok(merge_environment(helpers.into_iter().chain(packages)))
+        Ok(self
+            .toolchain
+            .overlay(merge_environment(helpers.into_iter().chain(packages))))
     }
 
     /// Builds and runs a puzzle's solution on `input`.

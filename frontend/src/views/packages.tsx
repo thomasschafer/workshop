@@ -1,8 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import type { Resolution } from "../api";
-import { useElapsed } from "../hooks/useElapsed";
 import type { Packages, PackagesActivity } from "../hooks/usePackages";
 import { isUpToDate, type MissingModule } from "../packages";
+import { InstallProgress, LastInstallLog } from "./install";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -18,20 +18,14 @@ function describe(activity: PackagesActivity | null): string {
   }
 }
 
-/** An install under way: how long it's taken, what the installer last said, and Cancel. */
-function InstallProgress({ packages }: { packages: Packages }) {
-  const elapsed = useElapsed(packages.installingSince);
+function PackagesProgress({ packages }: { packages: Packages }) {
   return (
-    <div class="install-progress">
-      <span>
-        {describe(packages.activity)}{" "}
-        {elapsed === null ? null : <span class="elapsed">{elapsed.toFixed(0)}s</span>}
-        <button type="button" class="text-button" onClick={packages.cancel}>
-          Cancel
-        </button>
-      </span>
-      {packages.progress ? <code class="progress-line">{packages.progress}</code> : null}
-    </div>
+    <InstallProgress
+      label={describe(packages.activity)}
+      since={packages.installingSince}
+      progress={packages.progress}
+      onCancel={packages.cancel}
+    />
   );
 }
 
@@ -47,7 +41,6 @@ export function PackagesSection({
   const [adding, setAdding] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [showLog, setShowLog] = useState(false);
   if (state === null) return null;
 
   const add = async (event: Event) => {
@@ -103,7 +96,7 @@ export function PackagesSection({
       ) : null}
       {state.problem ? <p class="error-text small">{state.problem}</p> : null}
       {busy ? (
-        <InstallProgress packages={packages} />
+        <PackagesProgress packages={packages} />
       ) : isUpToDate(state) ? (
         state.packages.length > 0 ? (
           <p class="muted small">Installed.</p>
@@ -119,16 +112,7 @@ export function PackagesSection({
         </p>
       )}
       {packages.error ? <pre class="install-error">{packages.error}</pre> : null}
-      {packages.lastInstall && !busy ? (
-        <p class="small">
-          <button type="button" class="text-button" onClick={() => setShowLog(!showLog)}>
-            {showLog ? "Hide" : "Show"} the last install's output
-          </button>
-        </p>
-      ) : null}
-      {showLog && packages.lastInstall ? (
-        <pre class="install-log">{packages.lastInstall.log.join("\n")}</pre>
-      ) : null}
+      {packages.lastInstall && !busy ? <LastInstallLog last={packages.lastInstall} /> : null}
       <form class="add-package" onSubmit={add}>
         <input
           value={adding}
@@ -220,7 +204,7 @@ export function MissingPackageBanner({
   if (packages.installing) {
     return (
       <div class="banner">
-        <InstallProgress packages={packages} />
+        <PackagesProgress packages={packages} />
       </div>
     );
   }
@@ -267,7 +251,7 @@ export function OutdatedPackagesBanner({
   if (packages.installing) {
     return (
       <div class="banner">
-        <InstallProgress packages={packages} />
+        <PackagesProgress packages={packages} />
       </div>
     );
   }
