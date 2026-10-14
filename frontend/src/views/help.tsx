@@ -59,6 +59,7 @@ export function Help() {
           <li>
             "install it", for a package an error says is missing, or "install package" and a name
           </li>
+          <li>"start part two", which uncomments the line printing part 2's answer</li>
         </ul>
       </section>
 
