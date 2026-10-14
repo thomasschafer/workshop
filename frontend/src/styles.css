@@ -1487,3 +1487,42 @@ code {
 .composer textarea:focus {
   outline: none;
 }
+
+/* On a wide screen, the puzzle in a column of its own beside the code. */
+.app.split {
+  display: grid;
+  grid-template-columns: minmax(320px, 2fr) 3fr;
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.app.split > .top {
+  grid-column: 1 / -1;
+}
+
+.app.split > .side {
+  grid-column: 1;
+  grid-row: 2 / -1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+
+.app.split > .tabs,
+.app.split > .content,
+.app.split > .controls {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.app.split > .content {
+  min-height: 0;
+}
+
+.app.split .buttons {
+  justify-content: center;
+}
+
+.app.split .talk {
+  flex: 0 1 360px;
+}

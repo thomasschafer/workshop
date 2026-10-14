@@ -20,6 +20,7 @@ import {
   type LanguageServerStatus,
 } from "./editor";
 import { useDiscussion } from "./hooks/useDiscussion";
+import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePackages } from "./hooks/usePackages";
 import { usePushToTalk } from "./hooks/usePushToTalk";
 import { findMissingModule, isUpToDate } from "./packages";
@@ -58,6 +59,8 @@ import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
 type Sheet = "run" | "settings" | "help" | "setup" | "bench" | null;
 
+const TABS = ["problem", "code", "notes", "discuss"] as const;
+
 /** How long an utterance waits for a puzzle's editor that's still loading. */
 const EDITOR_WAIT_MS = 10_000;
 
@@ -79,6 +82,9 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function App({ boot }: { boot: Bootstrap }) {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(boot.state.puzzle);
   const [tab, setTab] = useState<Tab>(boot.state.tab);
+  // On a wide screen the puzzle has a column of its own, beside the other tabs.
+  const wide = useMediaQuery("(min-width: 1000px)");
+  const shownTab: Tab = wide && tab === "problem" ? "code" : tab;
   const [models, setModels] = useState(boot.models);
   const [chosenDiscussModel, setDiscussModel] = useState(boot.state.discuss_model);
   // The chosen discussion model, if the current provider offers it, or its first model.
@@ -166,8 +172,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
   useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
   // Queued utterances run after later renders, so they read the latest state through refs.
-  const latest = useRef({ tab, notes, run, question, replying });
-  latest.current = { tab, notes, run, question, replying };
+  const latest = useRef({ tab: shownTab, notes, run, question, replying });
+  latest.current = { tab: shownTab, notes, run, question, replying };
   puzzleRef.current = puzzle;
 
   // One saver per puzzle, so switching puzzles never drops the previous one's unsaved changes.
@@ -722,8 +728,31 @@ export function App({ boot }: { boot: Bootstrap }) {
   // The picker is the home screen until a puzzle is open, and can be reopened from the header.
   const showPicker = picking || puzzle === null;
 
+  const problemView = puzzle ? (
+    <ProblemView
+      puzzle={puzzle}
+      problem={problem}
+      error={problemError}
+      loading={problemLoading}
+      meta={meta}
+      onMeta={updateMeta}
+      onRefresh={() => puzzle && void loadProblem(puzzle, true)}
+      onStartAgain={
+        puzzle && isPractice(puzzle)
+          ? () => {
+              api
+                .resetPractice()
+                .then(setProblem)
+                .catch((e: unknown) => setProblemError(message(e)));
+            }
+          : null
+      }
+    />
+  ) : null;
+  const split = wide && !showPicker && problemView !== null;
+
   return (
-    <div class="app">
+    <div class={`app ${split ? "split" : ""}`}>
       <header class="top">
         {showPicker ? (
           puzzle ? (
@@ -765,13 +794,14 @@ export function App({ boot }: { boot: Bootstrap }) {
           </button>
         </span>
       </header>
+      {split ? <aside class="side">{problemView}</aside> : null}
 
       <nav class={`tabs ${showPicker ? "hidden" : ""}`}>
-        {(["problem", "code", "notes", "discuss"] as const).map((t) => (
+        {(wide ? (["code", "notes", "discuss"] as const) : TABS).map((t) => (
           <button
             type="button"
             key={t}
-            class={t === tab ? "selected" : ""}
+            class={t === shownTab ? "selected" : ""}
             onClick={() => setTab(t)}
           >
             {t === "discuss" ? "Discuss" : t[0]?.toUpperCase() + t.slice(1)}
@@ -820,35 +850,15 @@ export function App({ boot }: { boot: Bootstrap }) {
             onDismiss={() => setOutdatedDismissed(true)}
           />
         ) : null}
-        <div class={`code-pane ${tab === "code" && !showPicker ? "" : "hidden"}`}>
+        <div class={`code-pane ${shownTab === "code" && !showPicker ? "" : "hidden"}`}>
           <div class="status-line">
             <span>{statusParts.join(" · ")}</span>
             {hover ? <code class="hover">{hover}</code> : null}
           </div>
           <div class="editor" ref={editorHost} />
         </div>
-        {!showPicker && tab === "problem" ? (
-          <ProblemView
-            puzzle={puzzle}
-            problem={problem}
-            error={problemError}
-            loading={problemLoading}
-            meta={meta}
-            onMeta={updateMeta}
-            onRefresh={() => puzzle && void loadProblem(puzzle, true)}
-            onStartAgain={
-              puzzle && isPractice(puzzle)
-                ? () => {
-                    api
-                      .resetPractice()
-                      .then(setProblem)
-                      .catch((e: unknown) => setProblemError(message(e)));
-                  }
-                : null
-            }
-          />
-        ) : null}
-        {!showPicker && tab === "notes" ? (
+        {!showPicker && !wide && shownTab === "problem" ? problemView : null}
+        {!showPicker && shownTab === "notes" ? (
           <div class="pane notes">
             <textarea
               value={notes}
@@ -857,7 +867,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             />
           </div>
         ) : null}
-        {!showPicker && tab === "discuss" ? (
+        {!showPicker && shownTab === "discuss" ? (
           <DiscussView
             turns={discussion.turns}
             models={models.discuss_models}

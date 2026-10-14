@@ -380,3 +380,15 @@ test("dictates with the keyboard when chosen, on this device", async () => {
   await page.keyboard.press("Escape");
   await expect(page.locator(".talk")).toHaveText("Hold to talk");
 });
+
+test("shows the puzzle beside the code on a wide screen", async () => {
+  const phone = page.viewportSize();
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(page.locator(".side .problem")).toBeVisible();
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await expect(page.locator("nav.tabs").getByRole("button", { name: "Problem" })).toHaveCount(0);
+  if (phone) await page.setViewportSize(phone);
+  await expect(page.locator(".side")).toHaveCount(0);
+  await expect(page.locator("nav.tabs").getByRole("button", { name: "Problem" })).toBeVisible();
+});
