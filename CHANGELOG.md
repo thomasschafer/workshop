@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/thomasschafer/workshop/compare/v0.2.0...v0.3.0) - 2026-10-14
+
+### Other
+
+- Prepare version 0.3.0
+- Mention starting part 2 in Help
+- Offer to start part 2 after the first star, and optionally commit and push after each star
+- Run the end-to-end tests in WebKit too, as a stand-in for iPhones
+- Say when the server can't be reached, and hold edits until it can; one undo step per voice edit
+- On a wide screen, show the puzzle in a column beside the code
+- Choose how to talk on each device, including the keyboard's dictation, and call the server the server
+- Act on real usage: fewer pieces to the model, a cue for when listening starts, clearer imports and "this"
+- Add a page comparing speech recognition, to decide what Workshop should use
+- Make cards opaque, put the Run panel above everything, and wait for an editor still loading
+- Stop the listening card flickering as words arrive, and make cancelling explicit
+- Re-record the demo with utterance cards
+- Show each utterance as a card stacked above the controls
+- Let the edit model see the speech recogniser's own pieces when joining them took guesswork
+- Format discussion replies as markdown
+
 ## [0.2.0](https://github.com/thomasschafer/workshop/compare/v0.1.0...v0.2.0) - 2026-10-12
 
 ### Other
