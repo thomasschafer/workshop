@@ -80,13 +80,13 @@ export function Settings({
 
       <section>
         <h2>Talking</h2>
-        <div class="snippets">
+        <div class="snippets wrap">
           {(
             [
               ["auto", "Automatic"],
               ["server", "Whisper"],
-              ["browser", "This browser"],
-              ["keyboard", "Keyboard dictation"],
+              ["browser", "Browser"],
+              ["keyboard", "Keyboard"],
             ] as const
           ).map(([choice, label]) => (
             <button

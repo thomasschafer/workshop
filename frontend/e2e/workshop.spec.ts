@@ -420,7 +420,7 @@ test("says to hold the button after a quick tap that heard nothing", async () =>
 test("dictates with the keyboard when chosen, on this device", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "Keyboard dictation" }).click();
+  await page.getByRole("button", { name: "Keyboard", exact: true }).click();
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Tap to dictate" }).click();

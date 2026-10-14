@@ -445,6 +445,12 @@ code {
   padding: 4px 0;
 }
 
+/* Choices that should all be in view, rather than scrolled to. */
+.snippets.wrap {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
 .days {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
