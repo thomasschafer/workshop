@@ -84,6 +84,9 @@ interface UtteranceDetail {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** How often to look for changes made elsewhere while a puzzle is open. */
+const CHANGES_CHECK_MS = 10_000;
+
 export function App({ boot }: { boot: Bootstrap }) {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(boot.state.puzzle);
   const [tab, setTab] = useState<Tab>(boot.state.tab);
@@ -367,7 +370,9 @@ export function App({ boot }: { boot: Bootstrap }) {
     };
   }, [puzzle, boot, lsp, loadProblem, updateMeta, lookUpType]);
 
-  // Save when the phone is put down, and pick up changes made at a desk when it comes back.
+  // Save when the phone is put down, and pick up changes made elsewhere, such as at the server
+  // in an editor of one's own: when the app comes back, and every so often while it's open, as a
+  // phone kept awake beside the keyboard never goes away.
   useEffect(() => {
     const onHide = () => {
       saver.current?.flushOnExit();
@@ -375,14 +380,12 @@ export function App({ boot }: { boot: Bootstrap }) {
       for (const metaSaver of metaSavers.current.values()) metaSaver.flushOnExit();
       stateSaver.flushOnExit();
     };
-    const onVisibility = async () => {
-      if (document.visibilityState === "hidden") {
-        onHide();
-        return;
-      }
+    let checking = false;
+    const pickUpChanges = async () => {
       const p = puzzleRef.current;
       const current = editor.current;
-      if (!p || !current) return;
+      if (!p || !current || checking || document.visibilityState === "hidden") return;
+      checking = true;
       try {
         const opened = await api.open(p);
         if (puzzleRef.current !== p || editor.current !== current) return;
@@ -398,12 +401,23 @@ export function App({ boot }: { boot: Bootstrap }) {
         }
       } catch {
         // Offline or the server restarted; the next save will report any real problem.
+      } finally {
+        checking = false;
       }
     };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") onHide();
+      else void pickUpChanges();
+    };
+    const onFocus = () => void pickUpChanges();
+    const timer = setInterval(() => void pickUpChanges(), CHANGES_CHECK_MS);
     window.addEventListener("pagehide", onHide);
+    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      clearInterval(timer);
       window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [stateSaver]);

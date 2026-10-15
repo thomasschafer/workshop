@@ -236,6 +236,18 @@ test("offers to log in again when Advent of Code no longer accepts the cookie", 
   await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
 });
 
+test("picks up code changed at the server while the app stays open", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(card("working")).toHaveCount(0);
+  const before = readFileSync(solution, "utf8");
+  // As if edited in an editor on the server, with the phone left open beside it.
+  writeFileSync(solution, `# changed at the server\n${before}`);
+  await expect(editor()).toContainText("# changed at the server", { timeout: 15_000 });
+  await expect(page.locator(".banner", { hasText: "changed elsewhere" })).toHaveCount(0);
+  writeFileSync(solution, before);
+  await expect(editor()).not.toContainText("# changed at the server", { timeout: 15_000 });
+});
+
 test("opens a page of settings from the list, and goes back to the list", async () => {
   await openSettings("Display");
   await expect(page.getByLabel("Wrap long lines of code")).toBeVisible();

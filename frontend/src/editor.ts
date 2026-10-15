@@ -74,7 +74,7 @@ const theme = EditorView.theme({
   ".cm-content": { caretColor: "var(--accent)", paddingBottom: "40vh" },
   ".cm-cursor": { borderLeft: "2px solid var(--accent)" },
   "&.cm-focused .cm-cursor": { borderLeftColor: "var(--accent)" },
-  ".cm-gutters": { background: "transparent", border: "none", color: "var(--muted)" },
+  ".cm-gutters": { background: "var(--bg)", border: "none", color: "var(--muted)" },
   ".cm-activeLine": { background: "var(--active-line)" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
     background: "var(--selection) !important",

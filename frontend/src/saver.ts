@@ -80,7 +80,9 @@ export class VersionedSaver {
   }
 
   schedule(text: string): void {
-    if (this.closed) return;
+    // Such as when a version from elsewhere is shown: saving it back would only race with the
+    // next change made there.
+    if (this.closed || text === this.latest) return;
     this.latest = text;
     this.writeUnsaved();
     if (this.conflicted) return;

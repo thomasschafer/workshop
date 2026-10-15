@@ -188,6 +188,20 @@ describe("VersionedSaver", () => {
     expect(server.text).toBe("desk, then phone");
   });
 
+  it("doesn't save back a version from elsewhere as it's shown, racing the next change there", async () => {
+    const server = new FakeServer("a");
+    const { saver, conflicts } = saverFor(server);
+    server.editElsewhere("desk");
+    expect(saver.adopt(server.file)).toBe(true);
+    // The editor reports showing it as a change.
+    saver.schedule("desk");
+    server.editElsewhere("desk, again");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(server.saves).toEqual([]);
+    expect(conflicts).toEqual([]);
+    expect(saver.adopt(server.file)).toBe(true);
+  });
+
   it("recovers unsaved text after a reload and saves it", async () => {
     const server = new FakeServer("a");
     server.failBefore = 100;
