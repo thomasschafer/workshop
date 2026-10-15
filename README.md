@@ -43,6 +43,8 @@ workshop serve --tailscale
 
 This runs `tailscale serve` for you, which gives Workshop an HTTPS address on your tailnet, and prints a link and QR code to open on your phone. The token in the link is then remembered by your phone's browser. Keep the server awake while you're out; on a Mac, for example, with `caffeinate -i`.
 
+Add Workshop to your phone's home screen from the browser's menu, and it opens full screen like an app. On an iPhone, the app asks for the link once more, as it doesn't share Safari's login; paste the link or its token.
+
 The first time you open Workshop, a short setup walks you through choosing your language and model, logging in to Advent of Code with your session cookie, and opening Workshop on your phone. You can run it again from Settings. If you'd rather not paste the cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
 To try Workshop before logging in, or outside December, open the practice puzzle from the bottom of the puzzle list. It's made up for Workshop and works like a real puzzle, including submitting answers, which it checks itself.
