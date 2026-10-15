@@ -233,9 +233,19 @@ async fn serve(
     }
     let token = server::load_or_create_token(&paths)?;
     let app = Arc::new(server::App::new(config, paths, token.clone(), aoc_session)?);
-    let listener = tokio::net::TcpListener::bind(bind)
-        .await
-        .with_context(|| format!("listening on {bind}"))?;
+    let listener = match tokio::net::TcpListener::bind(bind).await {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
+            let next = std::net::SocketAddr::new(bind.ip(), bind.port().wrapping_add(1));
+            anyhow::bail!(
+                "port {port} is already in use, perhaps by Workshop running elsewhere. Stop that, \
+                 or use another port: `workshop serve --bind {next}`, or set `bind` under \
+                 [server] in your config.",
+                port = bind.port()
+            );
+        }
+        Err(err) => return Err(err).with_context(|| format!("listening on {bind}")),
+    };
     println!(
         "Workshop is running. On this computer, open {}",
         open_url(bind, &token)
