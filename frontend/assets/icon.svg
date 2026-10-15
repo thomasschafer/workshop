@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Workshop's icon: an Advent of Code star, spoken into being. Kept within the middle 80%,
+       the part of a maskable icon that's always shown. -->
+  <rect width="512" height="512" fill="#16161a"/>
+  <path fill="#f5c542" d="M216 118l29 59 65 9-47 46 11 65-58-31-58 31 11-65-47-46 65-9z"/>
+  <g fill="none" stroke="#7aa2f7" stroke-width="22" stroke-linecap="round">
+    <path d="M318 170a100 100 0 0 1 0 108"/>
+    <path d="M352 140a148 148 0 0 1 0 168"/>
+  </g>
+  <rect x="140" y="352" width="232" height="22" rx="11" fill="#ececf1" opacity="0.9"/>
+  <rect x="180" y="392" width="152" height="22" rx="11" fill="#ececf1" opacity="0.55"/>
+</svg>
