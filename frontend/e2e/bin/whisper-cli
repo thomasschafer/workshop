@@ -1,17 +1,15 @@
-#!/bin/sh
-# Stands in for whisper.cpp's whisper-cli. A long recording is heard as "go to line one" and a
-# short one as "go to line two", and a long one takes longer to hear, as with Whisper, so a
-# short press after a long one is heard first.
-while [ $# -gt 0 ]; do
-  if [ "$1" = "--file" ]; then file=$2; fi
-  shift
-done
-head -c 4 "$file" | grep -q RIFF || { echo "not a WAV recording: $file" >&2; exit 1; }
-# 16 kHz, 16-bit mono: 32,000 bytes a second.
-if [ "$(wc -c < "$file")" -gt 32000 ]; then
-  sleep 2.5
-  echo " go to line one"
-else
-  sleep 0.3
-  echo " go to line two"
-fi
+#!/usr/bin/env node
+// Stands in for whisper.cpp's whisper-cli. A long recording is heard as "go to line one" and a
+// short one as "go to line two", and a long one takes longer to hear, as with Whisper, so a
+// short press after a long one is heard first.
+import { readFileSync } from "node:fs";
+
+const file = process.argv[process.argv.indexOf("--file") + 1];
+const wav = readFileSync(file);
+if (wav.subarray(0, 4).toString() !== "RIFF") {
+  console.error(`not a WAV recording: ${file}`);
+  process.exit(1);
+}
+// 16 kHz, 16-bit mono: 32,000 bytes a second.
+const long = wav.length > 32_000;
+setTimeout(() => console.log(long ? " go to line one" : " go to line two"), long ? 2500 : 300);

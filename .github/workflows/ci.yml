@@ -75,6 +75,54 @@ jobs:
         working-directory: frontend
         run: npm run e2e:webkit
 
+  # The server can run on Windows, so its tests and the app's run there too: the end-to-end tests
+  # run solutions in Python, so they show whether running them works.
+  windows:
+    name: Windows
+    runs-on: windows-2025
+    timeout-minutes: 45
+    # Reported without failing the run until it's known to pass.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build server
+        run: cargo build --locked
+
+      - name: Install browser
+        working-directory: frontend
+        run: npx playwright install chromium
+
+      - name: End-to-end tests
+        working-directory: frontend
+        run: npm run e2e
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

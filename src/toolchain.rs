@@ -235,7 +235,13 @@ mod tests {
     #[test]
     fn finds_programs_on_the_toolchain_path() {
         let dir = tempfile::tempdir().unwrap();
-        let program = dir.path().join("only-in-the-toolchain");
+        // Windows only runs files with an extension that says they can be run.
+        let file = if cfg!(windows) {
+            "only-in-the-toolchain.exe"
+        } else {
+            "only-in-the-toolchain"
+        };
+        let program = dir.path().join(file);
         std::fs::write(&program, "").unwrap();
         let toolchain = Toolchain {
             variables: vec![("PATH".to_owned(), dir.path().to_string_lossy().into_owned())],

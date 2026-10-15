@@ -869,6 +869,8 @@ mod tests {
         assert!(packages.remove("alpha").is_err());
     }
 
+    // The stand-in installers are shell commands.
+    #[cfg(unix)]
     #[tokio::test]
     async fn installs_and_switches_environment_only_on_success() {
         let dir = tempfile::tempdir().unwrap();
@@ -911,6 +913,8 @@ mod tests {
         assert_eq!(broken.state().unwrap().installed.unwrap(), ["alpha"]);
     }
 
+    // The stand-in installers are shell commands.
+    #[cfg(unix)]
     #[tokio::test]
     async fn refreshes_the_index_when_due_or_when_an_install_fails() {
         let dir = tempfile::tempdir().unwrap();
@@ -958,6 +962,8 @@ mod tests {
         );
     }
 
+    // The stand-in installers are shell commands.
+    #[cfg(unix)]
     #[tokio::test]
     async fn cancels_an_install() {
         let dir = tempfile::tempdir().unwrap();

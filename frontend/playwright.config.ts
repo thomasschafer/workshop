@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { delimiter, resolve } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { createHome, HOME, PORT } from "./e2e/fixture";
 
@@ -32,7 +32,7 @@ export default defineConfig({
     env: {
       WORKSHOP_HOME: HOME,
       // A stand-in for Whisper, used once a test puts its model in place.
-      PATH: `${resolve(import.meta.dirname, "e2e", "bin")}:${process.env.PATH ?? ""}`,
+      PATH: `${resolve(import.meta.dirname, "e2e", "bin")}${delimiter}${process.env.PATH ?? ""}`,
       RUST_LOG: "workshop=warn",
       // So committing works wherever the tests run, with or without a git identity set up.
       GIT_AUTHOR_NAME: "Workshop tests",
