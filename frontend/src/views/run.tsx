@@ -25,6 +25,8 @@ interface Props {
   /** 1 or 2, or null once both stars are earned. */
   part: number | null;
   expected: string | null;
+  /** The answers Advent of Code has accepted, by part, to check runs on the real input against. */
+  accepted: string[];
   onRun: (input: InputKind) => void;
   onCancel: () => void;
   onAskSubmit: () => void;
@@ -66,6 +68,7 @@ export function RunSheet({
   state,
   part,
   expected,
+  accepted,
   onRun,
   onCancel,
   onAskSubmit,
@@ -154,7 +157,11 @@ export function RunSheet({
                     ? a === expected
                       ? " ✓"
                       : ` ✗ (expected ${expected})`
-                    : null}
+                    : last.input === "real" && accepted[i] !== undefined
+                      ? a === accepted[i]
+                        ? " ✓ (as accepted)"
+                        : ` ✗ (${accepted[i]} was accepted)`
+                      : null}
                 </li>
               ))}
             </ol>

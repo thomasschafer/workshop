@@ -1056,6 +1056,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               state={run}
               part={part}
               expected={expected}
+              accepted={problem?.answers ?? []}
               onRun={(input) => void doRun(input, true)}
               onCancel={() => void api.cancelRun()}
               onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}

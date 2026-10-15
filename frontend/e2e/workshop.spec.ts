@@ -372,6 +372,10 @@ if __name__ == "__main__":
       RUN,
     );
     await page.getByRole("button", { name: "Run real input" }).click();
+    if (part === 2) {
+      // Part 1's answer, checked against the one already accepted.
+      await expect(page.locator(".run-result")).toContainText("✓ (as accepted)", RUN);
+    }
     await page.getByRole("button", { name: new RegExp(`^Submit part ${part}: \\d+$`) }).click();
     await page.getByRole("button", { name: "Submit", exact: true }).click();
     await expect(page.locator(".submitted").first()).toContainText("Correct!");
