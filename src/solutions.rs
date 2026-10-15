@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio_util::sync::CancellationToken;
 
 use crate::aoc::AocClient;
@@ -98,6 +98,12 @@ impl<'a> Solutions<'a> {
     ) -> Result<RunResult> {
         let profile = self.language();
         let file = profile.solution_path(&self.config.solutions_dir, puzzle)?;
+        if !file.is_file() {
+            bail!(
+                "there's no solution for {puzzle} yet: open it in the app, which starts one, or write {}",
+                crate::paths::display_path(&file)
+            );
+        }
         let build_dir = self
             .paths
             .build_dir()

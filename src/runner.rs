@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
@@ -151,6 +151,10 @@ pub async fn execute(
     cancel: &CancellationToken,
 ) -> Result<Output> {
     let (program, rest) = args.split_first().context("empty command")?;
+    // Otherwise starting fails as though the program were missing.
+    if !dir.is_dir() {
+        bail!("{} doesn't exist", dir.display());
+    }
     let mut child = process::command(program)
         .args(rest)
         .envs(environment.iter().map(|(k, v)| (k, v)))
@@ -390,6 +394,23 @@ mod tests {
         .await;
         assert!(result.stdout.ends_with("output truncated"));
         assert!(result.stdout.len() < MAX_OUTPUT_BYTES + 100);
+    }
+
+    #[tokio::test]
+    async fn says_when_the_directory_is_missing_rather_than_the_program() {
+        let err = execute(
+            &["sh".to_owned(), "-c".to_owned(), "true".to_owned()],
+            Path::new("/definitely/not/a/dir"),
+            &[],
+            None,
+            Duration::from_secs(5),
+            &CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("running in a missing directory should fail")
+        .to_string();
+        assert!(err.contains("/definitely/not/a/dir doesn't exist"), "{err}");
     }
 
     #[tokio::test]
