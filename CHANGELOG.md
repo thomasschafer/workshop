@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/thomasschafer/workshop/compare/v0.3.0...v0.4.0) - 2026-10-15
+
+### Other
+
+- Prepare version 0.4.0
+- Always say the microphone is allowed after a press that asked for it, as recording only began once the button was let go
+- Pick up code changed at the server while the app is open, without false conflicts
+- Make the controls smaller on a phone held sideways, leaving room for the code
+- Keep what's typed in full colour, and stop iPhones zooming into text fields
+- Mention adding Workshop to a phone's home screen in the README
+- Wrap long strings in a puzzle's sentences rather than widening the page
+- Say when a puzzle has no solution yet, rather than that the compiler is missing
+- Name the code editor for screen readers, give the page a heading, and make line numbers easier to read
+- Bring the help up to date: the Run panel, Settings' pages, ways of hearing speech, and adding Workshop to a home screen
+- Find Tailscale inside its macOS app, and say how to give it permission on Linux
+- Say what to do when the model CLI is logged out, at its usage limit or busy
+- Offer to log in again when Advent of Code stops accepting the cookie
+- Show paths in run output relative to the solutions repo, and say when nothing was printed
+- Say what to do when Workshop's port is already in use
+- Show where solutions are kept, and only make the repo when it's needed
+- Make Workshop installable as an app, and let the token be pasted
+- Settings as a list of pages, and say "Transcribing…" while Whisper hears it
+- Check Whisper in workshop doctor
+- Hear dictation with whisper-server, which keeps the model loaded
+- Get recording ready before the first press, and polish what a press shows
+- Fit the dictation choices on a phone screen
+- Say the microphone is allowed after the first press asks for it, rather than to hold the button
+- Let a recording be cancelled while it's being heard or waiting for the server
+- Keep dictation in the order it was said, and keep it through hiccups
+- Record dictation as raw sound, and keep cards still when one above leaves
+- Dictate with Whisper on the server, and show when to start speaking
+- Start the browser before the server in the demo and package check scripts, so a browser that won't launch doesn't leave the server running
+- Shorten the README's opening and re-record the demo
+- Install a language's programs with mise when they're missing
+- Add workshop run and workshop env, for working on solutions from a terminal
+- Make the speech benchmark resumable, its button bigger, and the phrase to read stay in view
+- Hide the controls on the Problem tab
+
 ## [0.3.0](https://github.com/thomasschafer/workshop/compare/v0.2.0...v0.3.0) - 2026-10-14
 
 ### Other
