@@ -1,6 +1,8 @@
 :root {
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --code-size: 15px;
+  /* Fields that are a little smaller than the text around them. */
+  --small-field-size: 13px;
   --radius: 10px;
 
   --bg: #f7f6f3;
@@ -76,6 +78,12 @@ input,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+/* What's typed is never muted, even in a field labelled with muted text. */
+input,
+textarea {
+  color: var(--fg);
 }
 
 button {
@@ -770,7 +778,7 @@ code {
 .sample-editor textarea,
 .sample-editor input {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--small-field-size);
   padding: 8px 10px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -1065,7 +1073,7 @@ code {
 .manifest-editor textarea {
   width: 100%;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--small-field-size);
   color: var(--fg);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1092,7 +1100,7 @@ code {
   flex: 1;
   min-width: 0;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--small-field-size);
   color: var(--fg);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1713,4 +1721,19 @@ code {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* iPhones zoom the page into any text field smaller than 16px when it's tapped, and don't zoom
+   back out. Only iOS Safari supports -webkit-touch-callout, so elsewhere sizes are unchanged. */
+@supports (-webkit-touch-callout: none) {
+  :root {
+    --code-size: 16px;
+    --small-field-size: 16px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
