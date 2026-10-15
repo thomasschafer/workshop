@@ -670,6 +670,29 @@ test("hears what's said with Whisper on the server, once its model is there", as
   await page.reload();
 });
 
+test("shows a private leaderboard once one is chosen", async () => {
+  await openSettings("Leaderboard");
+  await page.getByLabel("Leaderboard ID").fill("12a");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.locator(".error-text")).toContainText("the number at the end");
+  await page.getByLabel("Leaderboard ID").fill("123456");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("button", { name: "Stop showing it" })).toBeVisible();
+  await closeSettings();
+
+  await page.locator(".puzzle-button").click();
+  await page.getByRole("button", { name: "2017" }).click();
+  const board = page.locator(".star-times", { hasText: "Leaderboard" });
+  await expect(board.locator("tbody tr").first()).toContainText("Anonymous user #2");
+  await expect(board).toContainText("Ada");
+  await page.locator(".puzzle-button").click();
+
+  await openSettings("Leaderboard");
+  await page.getByRole("button", { name: "Stop showing it" }).click();
+  await expect(page.getByRole("button", { name: "Stop showing it" })).toHaveCount(0);
+  await closeSettings();
+});
+
 test("counts down to the next puzzle, and offers today's", async ({ browser }) => {
   // The evening before day 4 of the fixture's year, in its own page so the clock is its own.
   const context = await browser.newContext({ baseURL: `http://127.0.0.1:${PORT}` });

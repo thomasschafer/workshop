@@ -110,6 +110,16 @@ ${pythonProfile()}`,
     join(home, "cache", "aoc", String(year), "times.html"),
     "<main><pre>Day   -Part 1-   -Part 2-\n  1   01:02:03   01:30:00\n</pre></main>",
   );
+  // An invented private leaderboard, as fresh as if just fetched.
+  writeFileSync(
+    join(home, "cache", "aoc", String(year), "leaderboard-123456.json"),
+    JSON.stringify({
+      members: {
+        "1": { id: 1, name: "Ada", local_score: 40, stars: 6 },
+        "2": { id: 2, name: null, local_score: 52, stars: 7 },
+      },
+    }),
+  );
 }
 
 /** A calendar page in the form Advent of Code uses, for the stars in the picker. */

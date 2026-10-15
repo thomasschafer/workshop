@@ -207,6 +207,8 @@ pub fn router(app: Shared) -> Router {
         .route("/bench/result", post(bench_result))
         .route("/years/{year}/stars", get(stars))
         .route("/years/{year}/times", get(times))
+        .route("/years/{year}/leaderboard", get(leaderboard))
+        .route("/leaderboard", put(set_leaderboard))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
         .route("/puzzles/{year}/{day}/notes", put(save_notes))
@@ -449,6 +451,8 @@ struct Bootstrap {
     server_dictation: bool,
     /// Where solutions are saved, as shown to the user.
     solutions_dir: String,
+    /// The private leaderboard shown, if one is chosen.
+    leaderboard: Option<crate::aoc::LeaderboardId>,
 }
 
 #[derive(Serialize)]
@@ -506,6 +510,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         theme_css: theme_css(&app),
         commit_after_star: app.settings().commit_after_star,
         solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
+        leaderboard: app.settings().leaderboard,
         server_dictation: {
             let ready = speech_state(&app).ready;
             if ready {
@@ -539,6 +544,36 @@ async fn run_doctor(State(app): State<Shared>) -> ApiResult<Vec<doctor::Check>> 
 struct RefreshQuery {
     #[serde(default)]
     refresh: bool,
+}
+
+/// The chosen private leaderboard for a year, or nothing if none is chosen.
+async fn leaderboard(
+    State(app): State<Shared>,
+    Path(year): Path<u16>,
+) -> ApiResult<Option<Vec<crate::aoc::LeaderboardMember>>> {
+    let Some(id) = app.settings().leaderboard else {
+        return Ok(Json(None));
+    };
+    Ok(Json(Some(app.aoc.leaderboard(year, &id).await?)))
+}
+
+#[derive(Deserialize)]
+struct LeaderboardBody {
+    /// The ID, or nothing to stop showing one.
+    id: Option<String>,
+}
+
+async fn set_leaderboard(
+    State(app): State<Shared>,
+    Json(body): Json<LeaderboardBody>,
+) -> ApiResult<()> {
+    let id = body
+        .id
+        .map(crate::aoc::LeaderboardId::try_from)
+        .transpose()
+        .map_err(|e| bad_request(format!("{e:#}")))?;
+    app.update_settings(|s| s.leaderboard = id)?;
+    Ok(Json(()))
 }
 
 async fn times(

@@ -22,6 +22,9 @@ interface Props {
   /** Opens the comparison of speech recognition on this device and the server. */
   onBench: () => void;
   commitMessage: string;
+  /** The private leaderboard shown in the puzzle list, if one is chosen. */
+  leaderboard: string | null;
+  onLeaderboard: (id: string | null) => Promise<void>;
   /** Where solutions are saved, as shown to the user. */
   solutionsDir: string;
   commitAfterStar: boolean;
@@ -39,7 +42,15 @@ interface Props {
 }
 
 /** A page of settings, opened from the list. */
-type Page = "models" | "talking" | "packages" | "display" | "repo" | "snippets" | "setup";
+type Page =
+  | "models"
+  | "talking"
+  | "packages"
+  | "display"
+  | "repo"
+  | "leaderboard"
+  | "snippets"
+  | "setup";
 
 const TITLES: Record<Page, string> = {
   models: "Models",
@@ -47,6 +58,7 @@ const TITLES: Record<Page, string> = {
   packages: "Packages",
   display: "Display",
   repo: "Solutions repo",
+  leaderboard: "Leaderboard",
   snippets: "Snippets",
   setup: "Setup and checks",
 };
@@ -141,6 +153,7 @@ function SettingsList(props: Props & { onOpen: (page: Page) => void }) {
       "repo",
       props.commitAfterStar ? "Commits and pushes after each star" : "Commit and push by hand",
     ],
+    ["leaderboard", props.leaderboard ? `Private leaderboard ${props.leaderboard}` : "None chosen"],
     ["snippets", snippets.length === 0 ? "None yet" : `${snippets.length} to insert`],
     ["setup", "Run setup again, and check everything is working"],
   ];
@@ -179,6 +192,8 @@ function PageContent({ page, ...props }: Props & { page: Page }) {
       return <DisplayPage {...props} />;
     case "repo":
       return <RepoPage {...props} />;
+    case "leaderboard":
+      return <LeaderboardPage {...props} />;
     case "snippets":
       return <SnippetsPage {...props} />;
     case "setup":
@@ -285,6 +300,64 @@ function RepoPage({ commitMessage, solutionsDir, commitAfterStar, onCommitAfterS
         />
         Commit and push after each star
       </label>
+    </>
+  );
+}
+
+function LeaderboardPage({ leaderboard, onLeaderboard }: Props) {
+  const [id, setId] = useState(leaderboard ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = async (value: string | null) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onLeaderboard(value);
+      if (value === null) setId("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <>
+      <p class="small">
+        Show a private leaderboard in the puzzle list. Its ID is the number at the end of its
+        address on Advent of Code. It's checked at most every 15 minutes, as Advent of Code asks.
+      </p>
+      <form
+        class="add-package"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save(id.trim());
+        }}
+      >
+        <input
+          value={id}
+          onInput={(e) => setId((e.target as HTMLInputElement).value)}
+          placeholder="Leaderboard ID"
+          inputMode="numeric"
+          autocomplete="off"
+          aria-label="Leaderboard ID"
+        />
+        <button type="submit" class="pill" disabled={saving || id.trim() === ""}>
+          Save
+        </button>
+      </form>
+      {leaderboard ? (
+        <p class="small">
+          <button
+            type="button"
+            class="text-button"
+            disabled={saving}
+            onClick={() => void save(null)}
+          >
+            Stop showing it
+          </button>
+        </p>
+      ) : null}
+      {error ? <p class="error-text small">{error}</p> : null}
     </>
   );
 }

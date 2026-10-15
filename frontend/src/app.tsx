@@ -196,6 +196,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
   const [serverSpeech, setServerSpeech] = useState(boot.server_dictation);
+  const [leaderboard, setLeaderboard] = useState(boot.leaderboard);
   const hasSpeech = useMemo(speechSupported, []);
   const canRecord = useMemo(recordingSupported, []);
   const [commitAfterStar, setCommitAfterStar] = useState(boot.commit_after_star);
@@ -1073,6 +1074,11 @@ export function App({ boot }: { boot: Bootstrap }) {
             }}
             commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
             solutionsDir={boot.solutions_dir}
+            leaderboard={leaderboard}
+            onLeaderboard={async (id) => {
+              await api.setLeaderboard(id);
+              setLeaderboard(id);
+            }}
             keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
             onKeepScreenOn={(enabled) => {
               preferences.keepScreenOn.set(enabled);

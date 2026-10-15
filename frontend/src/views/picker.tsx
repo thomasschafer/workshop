@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, type Puzzle, type StarTimes } from "../api";
+import { api, type LeaderboardMember, type Puzzle, type StarTimes } from "../api";
 import {
   daysIn,
   formatCountdown,
@@ -76,6 +76,29 @@ export function Picker({ current, hasSession, onPick }: Props) {
   }, [year, hasSession]);
   const yearTimes = times?.year === year ? Object.entries(times.times) : [];
 
+  // Only when one's chosen: the server says so by returning nothing.
+  const [board, setBoard] = useState<{ year: number; members: LeaderboardMember[] } | null>(null);
+  const [boardError, setBoardError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hasSession) return;
+    let cancelled = false;
+    setBoardError(null);
+    api
+      .leaderboard(year)
+      .then((members) => !cancelled && setBoard(members ? { year, members } : null))
+      .catch(
+        (e: unknown) =>
+          !cancelled &&
+          setBoardError(
+            `Couldn't load the leaderboard: ${e instanceof Error ? e.message : String(e)}`,
+          ),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [year, hasSession]);
+  const members = board?.year === year ? board.members : null;
+
   const years: number[] = [];
   for (let y = latestYear(now); y >= 2015; y--) years.push(y);
   const total = stars === null ? null : Object.values(stars).reduce((a, b) => a + b, 0);
@@ -145,6 +168,28 @@ export function Picker({ current, hasSession, onPick }: Props) {
           </tbody>
         </table>
       ) : null}
+      {members && members.length > 0 ? (
+        <table class="star-times">
+          <caption>Leaderboard</caption>
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Stars</th>
+              <th scope="col">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m) => (
+              <tr key={m.name}>
+                <th scope="row">{m.name}</th>
+                <td>{m.stars}</td>
+                <td>{m.score}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      {boardError ? <p class="muted small">{boardError}</p> : null}
       <div class="practice">
         <button
           type="button"

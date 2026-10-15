@@ -19,6 +19,9 @@ pub struct AppSettings {
     /// Whether to commit and push the solutions repo after each star.
     #[serde(default)]
     pub commit_after_star: bool,
+    /// A private leaderboard to show, if the user has chosen one.
+    #[serde(default)]
+    pub leaderboard: Option<crate::aoc::LeaderboardId>,
 }
 
 impl AppSettings {
@@ -28,6 +31,7 @@ impl AppSettings {
             language: config.language_id.clone(),
             theme: ThemeSettings::default(),
             commit_after_star: false,
+            leaderboard: None,
         }
     }
 
@@ -89,6 +93,7 @@ mod tests {
             language: "python".into(),
             theme: ThemeSettings::default(),
             commit_after_star: true,
+            leaderboard: Some(crate::aoc::LeaderboardId::try_from("123456".to_owned()).unwrap()),
         };
         chosen.save(&paths).unwrap();
         assert_eq!(AppSettings::load(&config, &paths), chosen);

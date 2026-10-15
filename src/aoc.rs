@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use scraper::{ElementRef, Html, Node, Selector};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::language::Puzzle;
@@ -292,6 +292,32 @@ impl AocClient {
             }
         };
         Ok(parse_times(&html))
+    }
+
+    /// A private leaderboard, fetched at most once every 15 minutes.
+    pub async fn leaderboard(
+        &self,
+        year: u16,
+        id: &LeaderboardId,
+    ) -> Result<Vec<LeaderboardMember>> {
+        let path = self
+            .cache_dir
+            .join(year.to_string())
+            .join(format!("leaderboard-{}.json", id.0));
+        let json = match read_cache(&path, false, Some(LEADERBOARD_TTL))? {
+            Some(json) => json,
+            None => {
+                let json = self
+                    .get(&format!(
+                        "{}/{year}/leaderboard/private/view/{}.json",
+                        self.base_url, id.0
+                    ))
+                    .await?;
+                paths::write_atomic(&path, json.as_bytes())?;
+                json
+            }
+        };
+        parse_leaderboard(&json)
     }
 
     pub async fn submit(&self, puzzle: Puzzle, part: Part, answer: &str) -> Result<SubmitOutcome> {
@@ -663,6 +689,70 @@ fn escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// A private leaderboard's ID: the number at the end of its address on Advent of Code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct LeaderboardId(String);
+
+impl TryFrom<String> for LeaderboardId {
+    type Error = anyhow::Error;
+
+    fn try_from(id: String) -> Result<Self> {
+        let id = id.trim().to_owned();
+        if id.is_empty() || id.len() > 12 || !id.chars().all(|c| c.is_ascii_digit()) {
+            bail!("a leaderboard's ID is the number at the end of its address, such as 123456");
+        }
+        Ok(Self(id))
+    }
+}
+
+impl From<LeaderboardId> for String {
+    fn from(id: LeaderboardId) -> Self {
+        id.0
+    }
+}
+
+/// How often a private leaderboard may be fetched: Advent of Code asks for no more than once
+/// every 15 minutes.
+const LEADERBOARD_TTL: Duration = Duration::from_secs(15 * 60);
+
+/// One member of a private leaderboard.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LeaderboardMember {
+    pub name: String,
+    pub score: u64,
+    pub stars: u64,
+}
+
+/// A private leaderboard's members, best first.
+pub fn parse_leaderboard(json: &str) -> Result<Vec<LeaderboardMember>> {
+    #[derive(Deserialize)]
+    struct Board {
+        members: BTreeMap<String, Member>,
+    }
+    #[derive(Deserialize)]
+    struct Member {
+        id: u64,
+        name: Option<String>,
+        local_score: u64,
+        stars: u64,
+    }
+    let board: Board = serde_json::from_str(json).context("reading the leaderboard")?;
+    let mut members: Vec<LeaderboardMember> = board
+        .members
+        .into_values()
+        .map(|m| LeaderboardMember {
+            name: m
+                .name
+                .unwrap_or_else(|| format!("Anonymous user #{}", m.id)),
+            score: m.local_score,
+            stars: m.stars,
+        })
+        .collect();
+    members.sort_by(|a, b| b.score.cmp(&a.score).then(b.stars.cmp(&a.stars)));
+    Ok(members)
+}
+
 /// The time to each part's star, if it's been earned.
 pub type StarTimes = [Option<String>; 2];
 
@@ -750,6 +840,32 @@ pub fn parse_submit_response(html: &str) -> SubmitOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_private_leaderboards() {
+        // Invented members, as Advent of Code's leaderboard JSON lists them.
+        let json = r#"{"event":"2025","owner_id":1,"members":{
+            "1":{"id":1,"name":"Ada","local_score":40,"stars":6,"completion_day_level":{}},
+            "2":{"id":2,"name":null,"local_score":52,"stars":7,"completion_day_level":{}}}}"#;
+        let members = parse_leaderboard(json).unwrap();
+        assert_eq!(members[0].name, "Anonymous user #2");
+        assert_eq!(
+            members[1],
+            LeaderboardMember {
+                name: "Ada".into(),
+                score: 40,
+                stars: 6
+            }
+        );
+    }
+
+    #[test]
+    fn takes_only_numbers_as_leaderboard_ids() {
+        assert!(LeaderboardId::try_from(" 123456 ".to_owned()).is_ok());
+        for bad in ["", "abc", "12/../3", "1234567890123"] {
+            assert!(LeaderboardId::try_from(bad.to_owned()).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn reads_personal_times_in_both_layouts() {

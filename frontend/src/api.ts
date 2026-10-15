@@ -43,6 +43,14 @@ export interface Bootstrap {
   server_dictation: boolean;
   /** Where solutions are saved, as shown to the user. */
   solutions_dir: string;
+  /** The private leaderboard shown, if one is chosen. */
+  leaderboard: string | null;
+}
+
+export interface LeaderboardMember {
+  name: string;
+  score: number;
+  stars: number;
 }
 
 /** The time to each part's star, as Advent of Code gives it, or null if it's not been earned. */
@@ -466,6 +474,9 @@ export const api = {
   setTheme: (settings: ThemeSettings) => request<{ css: string | null }>("PUT", "/theme", settings),
   setLanguage: (language: string) => request<null>("PUT", "/setup/language", { language }),
   setAocSession: (session: string) => request<null>("POST", "/setup/aoc-session", { session }),
+  leaderboard: (year: number) =>
+    request<LeaderboardMember[] | null>("GET", `/years/${year}/leaderboard`),
+  setLeaderboard: (id: string | null) => request<null>("PUT", "/leaderboard", { id }),
   times: (year: number, refresh = false) =>
     request<Record<string, StarTimes>>("GET", `/years/${year}/times?refresh=${refresh}`),
   stars: (year: number, refresh = false) =>
