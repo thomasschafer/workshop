@@ -129,8 +129,8 @@ export function Help() {
           asks for the link once more there, as the app doesn't share Safari's login.
         </p>
         <p>
-          In December, Workshop can tell you when each puzzle unlocks: turn it on in Settings,
-          under Notifications, on each device you'd like to hear on.
+          In December, Workshop can tell you when each puzzle unlocks: turn it on in Settings, under
+          Notifications, on each device you'd like to hear on.
         </p>
       </section>
     </div>
