@@ -74,7 +74,7 @@ const theme = EditorView.theme({
   ".cm-content": { caretColor: "var(--accent)", paddingBottom: "40vh" },
   ".cm-cursor": { borderLeft: "2px solid var(--accent)" },
   "&.cm-focused .cm-cursor": { borderLeftColor: "var(--accent)" },
-  ".cm-gutters": { background: "transparent", border: "none", color: "var(--faint)" },
+  ".cm-gutters": { background: "transparent", border: "none", color: "var(--muted)" },
   ".cm-activeLine": { background: "var(--active-line)" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
     background: "var(--selection) !important",
@@ -162,6 +162,8 @@ export class CodeEditor {
       doc: options.doc,
       selection: EditorSelection.cursor(cursor),
       extensions: [
+        // So screen readers say what the text box is.
+        EditorView.contentAttributes.of({ "aria-label": "Code" }),
         lineNumbers(),
         history(),
         drawSelection(),

@@ -825,6 +825,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   return (
     <div class={`app ${split ? "split" : ""}`}>
       <header class="top">
+        <h1 class="visually-hidden">Workshop</h1>
         {showPicker ? (
           puzzle ? (
             <button type="button" class="puzzle-button" onClick={() => setPicking(false)}>

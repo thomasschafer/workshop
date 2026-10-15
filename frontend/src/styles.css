@@ -1698,3 +1698,13 @@ code {
 .app.split .talk {
   flex: 0 1 360px;
 }
+
+/* For screen readers only. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
