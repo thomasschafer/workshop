@@ -1,0 +1,5 @@
+# Unix line endings everywhere, including Windows checkouts: templates are built into the binary
+# as they are, and tests read files expecting them.
+* text=auto eol=lf
+# Windows batch files need their own line endings.
+*.cmd text eol=crlf
