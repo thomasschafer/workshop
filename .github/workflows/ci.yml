@@ -81,8 +81,6 @@ jobs:
     name: Windows
     runs-on: windows-2025
     timeout-minutes: 45
-    # Reported without failing the run until it's known to pass.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
         with:
