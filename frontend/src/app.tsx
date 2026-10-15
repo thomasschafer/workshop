@@ -1003,6 +1003,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               });
             }}
             commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
+            solutionsDir={boot.solutions_dir}
             keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
             onKeepScreenOn={(enabled) => {
               preferences.keepScreenOn.set(enabled);

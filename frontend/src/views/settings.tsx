@@ -22,6 +22,8 @@ interface Props {
   /** Opens the comparison of speech recognition on this device and the server. */
   onBench: () => void;
   commitMessage: string;
+  /** Where solutions are saved, as shown to the user. */
+  solutionsDir: string;
   commitAfterStar: boolean;
   onCommitAfterStar: (enabled: boolean) => void;
   onInsertSnippet: (snippet: Snippet) => void;
@@ -253,7 +255,7 @@ function DisplayPage({ lineWrapping, onLineWrapping, keepScreenOn, onKeepScreenO
   );
 }
 
-function RepoPage({ commitMessage, commitAfterStar, onCommitAfterStar }: Props) {
+function RepoPage({ commitMessage, solutionsDir, commitAfterStar, onCommitAfterStar }: Props) {
   const [sync, setSync] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const commit = async () => {
@@ -268,6 +270,9 @@ function RepoPage({ commitMessage, commitAfterStar, onCommitAfterStar }: Props) 
   };
   return (
     <>
+      <p class="small">
+        Your solutions are in <code>{solutionsDir}</code> on the server.
+      </p>
       <button type="button" class="pill" onClick={commit} disabled={syncing}>
         {syncing ? "Committing…" : "Commit and push"}
       </button>

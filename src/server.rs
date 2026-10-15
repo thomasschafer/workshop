@@ -163,10 +163,9 @@ impl App {
         }
     }
 
+    /// Gets ready for the first edit. The solutions repo isn't created until a puzzle is
+    /// opened, so it isn't made somewhere the user hasn't seen yet.
     pub async fn warm_up(&self) {
-        if let Err(err) = self.workspace.ensure_repo().await {
-            tracing::warn!("couldn't set up the solutions repo: {err:#}");
-        }
         self.warm_edit_model().await;
     }
 }
@@ -437,6 +436,8 @@ struct Bootstrap {
     commit_after_star: bool,
     /// Whether Whisper on the server is ready to hear dictation.
     server_dictation: bool,
+    /// Where solutions are saved, as shown to the user.
+    solutions_dir: String,
 }
 
 #[derive(Serialize)]
@@ -493,6 +494,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         has_aoc_session: app.aoc.has_session(),
         theme_css: theme_css(&app),
         commit_after_star: app.settings().commit_after_star,
+        solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
         server_dictation: {
             let ready = speech_state(&app).ready;
             if ready {
@@ -991,6 +993,12 @@ async fn client_log(Json(body): Json<ClientLog>) -> ApiResult<()> {
 
 #[derive(Serialize)]
 struct SetupState {
+    /// Where solutions are saved, as shown to the user.
+    solutions_dir: String,
+    /// Whether that's a git repo yet, which it becomes when a puzzle is first opened.
+    solutions_repo_exists: bool,
+    /// The config file, where the solutions directory can be changed.
+    config_file: String,
     languages: Vec<LanguageOption>,
     language: String,
     has_aoc_session: bool,
@@ -1083,6 +1091,9 @@ async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupState> {
         .map(|base| format!("{base}/?token={}", app.token));
     let phone_qr_svg = phone_url.as_deref().map(qr_svg).transpose()?;
     Ok(Json(SetupState {
+        solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
+        solutions_repo_exists: app.config.solutions_dir.join(".git").exists(),
+        config_file: crate::paths::display_path(&app.paths.config_file()),
         languages,
         language: app.settings().language,
         has_aoc_session: app.aoc.has_session(),

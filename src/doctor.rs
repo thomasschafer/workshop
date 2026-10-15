@@ -59,7 +59,7 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
     let mut checks = Vec::new();
     checks.push(Check::ok(
         "Config",
-        format!("Using {}", paths.config_file().display()),
+        format!("Using {}", crate::paths::display_path(&paths.config_file())),
     ));
 
     // The providers chosen in the app, which may differ from the config's defaults.
@@ -136,17 +136,21 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
             "Install git.",
         ),
     });
+    let solutions = crate::paths::display_path(&config.solutions_dir);
     checks.push(if config.solutions_dir.join(".git").exists() {
-        Check::ok(
+        Check::ok("Solutions repo", solutions)
+    } else if config.solutions_dir.exists() && !config.solutions_dir.is_dir() {
+        Check::problem(
+            Status::Fail,
             "Solutions repo",
-            format!("{}", config.solutions_dir.display()),
+            format!("{solutions} isn't a folder"),
+            "Set `dir` under [solutions] in your config to a folder for your solutions.",
         )
     } else {
-        Check::problem(
-            Status::Warn,
+        // Made when a puzzle is first opened, so nothing's wrong yet.
+        Check::ok(
             "Solutions repo",
-            format!("{} isn't a git repo yet", config.solutions_dir.display()),
-            "Workshop will create it the first time you open a puzzle, or set `solutions.dir` in your config.",
+            format!("{solutions}, made when you open your first puzzle"),
         )
     });
 

@@ -41,6 +41,8 @@ export interface Bootstrap {
   commit_after_star: boolean;
   /** Whether Whisper on the server is ready to hear dictation. */
   server_dictation: boolean;
+  /** Where solutions are saved, as shown to the user. */
+  solutions_dir: string;
 }
 
 export interface SpeechState {
@@ -132,6 +134,12 @@ export interface ThemesState {
 }
 
 export interface SetupState {
+  /** Where solutions are saved, as shown to the user. */
+  solutions_dir: string;
+  /** Whether that's a git repo yet, which it becomes when a puzzle is first opened. */
+  solutions_repo_exists: boolean;
+  /** The config file, where the solutions folder can be changed. */
+  config_file: string;
   languages: {
     id: string;
     name: string;

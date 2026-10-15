@@ -72,7 +72,7 @@ export function PackagesSection({
         </p>
       ) : null}
       {state.packages.length > 0 ? (
-        <div class="snippets">
+        <div class="snippets wrap">
           {state.packages.map((p) => (
             <span key={p} class="chip static">
               {p}

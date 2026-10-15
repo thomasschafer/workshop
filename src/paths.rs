@@ -100,6 +100,15 @@ pub fn expand_home(path: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(path))
 }
 
+/// A path as it's shown to the user: under the home directory, written from `~`.
+pub fn display_path(path: &Path) -> String {
+    match dirs::home_dir().and_then(|home| path.strip_prefix(home).ok().map(Path::to_owned)) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 /// Writes via a temporary file and rename so an interrupted write never leaves a truncated file.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
     write_atomic_with_mode(path, contents, None)
@@ -160,6 +169,14 @@ fn write_atomic_with_mode(path: &Path, contents: &[u8], mode: Option<u32>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shows_paths_from_home() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(display_path(&home.join("aoc")), "~/aoc");
+        assert_eq!(display_path(&home), "~");
+        assert_eq!(display_path(Path::new("/srv/aoc")), "/srv/aoc");
+    }
 
     #[test]
     fn writes_atomically_and_leaves_no_temporary_files() {

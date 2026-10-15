@@ -1033,6 +1033,9 @@ code {
 /* Packages */
 
 .chip.static {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
   font-size: 13px;
   padding: 4px 10px;
 }

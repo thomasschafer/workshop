@@ -56,6 +56,7 @@ export function Setup({
         (n) => (
           <LanguageStep key="language" n={n} state={state} onState={setState} onRefresh={load} />
         ),
+        (n) => <SolutionsStep key="solutions" n={n} state={state} />,
         (n) => <ModelStep key="model" n={n} state={state} models={models} onModels={onModels} />,
         packages.state ? (n) => <PackagesStep key="packages" n={n} packages={packages} /> : null,
         (n) => <SpeechStep key="speech" n={n} onServerSpeech={onServerSpeech} />,
@@ -228,6 +229,21 @@ function LanguageStep({
         </p>
       ) : null}
       {error ? <p class="error-text">{error}</p> : null}
+    </Step>
+  );
+}
+
+function SolutionsStep({ n, state }: { n: number; state: SetupState }) {
+  return (
+    <Step title={`${n}. Your solutions`} done={true}>
+      <p class="small">
+        Saved in <code>{state.solutions_dir}</code>, a git repo of your own
+        {state.solutions_repo_exists ? "" : ", made when you open your first puzzle"}.
+      </p>
+      <p class="muted small">
+        To keep them somewhere else, set <code>dir</code> under <code>[solutions]</code> in{" "}
+        <code>{state.config_file}</code>, then restart Workshop.
+      </p>
     </Step>
   );
 }
