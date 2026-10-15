@@ -1737,3 +1737,23 @@ code {
     font-size: 16px;
   }
 }
+
+/* A phone on its side: smaller controls leave room for the code. */
+@media (max-height: 500px) {
+  .controls {
+    padding-top: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  }
+
+  .round {
+    height: 44px;
+  }
+
+  .talk {
+    height: 48px;
+  }
+
+  .tabs button {
+    padding: 4px 0;
+  }
+}
