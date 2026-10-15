@@ -1822,7 +1822,8 @@ async fn bench_transcribe(
     // One at a time, so the timings aren't skewed by models competing for the GPU.
     for (model, _) in &whisper.models {
         for prompt in [None, Some(query.prompt.as_str())] {
-            transcripts.push(whisper.transcribe(&path, model, prompt).await?);
+            // As each model hears it, without help telling speech from silence.
+            transcripts.push(whisper.transcribe(&path, model, prompt, false).await?);
         }
     }
     Ok(Json(transcripts))
@@ -1889,13 +1890,19 @@ async fn download_speech_model(State(app): State<Shared>) -> ApiResult<SpeechSta
         |app| &app.speech_install,
         AfterInstall::Nothing,
         |app, running| async move {
-            crate::whisper::download_model(
-                &app.paths.cache_dir,
-                crate::whisper::DICTATION_MODEL,
-                &running.cancel,
-                &running.log,
-            )
-            .await
+            for source in [
+                &crate::whisper::DICTATION_SOURCE,
+                &crate::whisper::VAD_SOURCE,
+            ] {
+                crate::whisper::download_model(
+                    &app.paths.cache_dir,
+                    source,
+                    &running.cancel,
+                    &running.log,
+                )
+                .await?;
+            }
+            anyhow::Ok(())
         },
     )
     .await?;

@@ -24,8 +24,25 @@ pub const DICTATION_MODEL: &str = "small.en";
 /// Its size, for saying how big the download is.
 pub const DICTATION_MODEL_MB: u64 = 488;
 
-/// Where whisper.cpp's models are published.
-const MODELS_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+/// A model to download, and where from.
+pub struct ModelSource {
+    /// Its file name, which whisper.cpp's models start with `ggml-`.
+    pub file: &'static str,
+    pub url: &'static str,
+}
+
+pub const DICTATION_SOURCE: ModelSource = ModelSource {
+    file: "ggml-small.en.bin",
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+};
+
+/// Silero's voice activity detection, which tells speech from other sound, so a recording of a
+/// quiet room isn't heard as words: Whisper invents some, such as "Silence." or "Thank you.", for
+/// sound that isn't speech. About 1 MB.
+pub const VAD_SOURCE: ModelSource = ModelSource {
+    file: "ggml-silero-v5.1.2.bin",
+    url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+};
 
 pub const INSTALL_HINT: &str = "Install whisper.cpp on the server, for its whisper-cli program: `brew install whisper-cpp` on macOS, or see https://github.com/ggml-org/whisper.cpp for other systems.";
 
@@ -34,6 +51,8 @@ pub struct Whisper {
     program: PathBuf,
     /// Model names, such as `small.en`, with their files.
     pub models: Vec<(String, PathBuf)>,
+    /// The voice activity detection model, if it's been downloaded.
+    pub vad: Option<PathBuf>,
 }
 
 /// Where Whisper models live: `ggml-<name>.bin` files, as whisper.cpp names them.
@@ -44,12 +63,22 @@ pub fn models_dir(cache_dir: &Path) -> PathBuf {
 impl Whisper {
     /// Whisper, if the program is installed; it may have no models yet.
     pub fn find(cache_dir: &Path) -> Option<Self> {
-        let program = crate::doctor::find_program(PROGRAM)?;
+        Some(Self::with_program(
+            crate::doctor::find_program(PROGRAM)?,
+            cache_dir,
+        ))
+    }
+
+    /// Whisper with a given program, and the models in the cache.
+    fn with_program(program: PathBuf, cache_dir: &Path) -> Self {
         let mut models: Vec<(String, PathBuf)> = std::fs::read_dir(models_dir(cache_dir))
             .into_iter()
             .flatten()
             .filter_map(|entry| {
                 let path = entry.ok()?.path();
+                if path.file_name()? == VAD_SOURCE.file {
+                    return None;
+                }
                 let name = path
                     .file_name()?
                     .to_str()?
@@ -61,7 +90,12 @@ impl Whisper {
             .collect();
         // Smallest first, so results read from fastest to most capable.
         models.sort_by_key(|(_, path)| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
-        Some(Self { program, models })
+        let vad = Some(models_dir(cache_dir).join(VAD_SOURCE.file)).filter(|p| p.is_file());
+        Self {
+            program,
+            models,
+            vad,
+        }
     }
 
     /// The model dictation uses, if it's been downloaded.
@@ -79,11 +113,14 @@ impl Whisper {
             .map(|(_, path)| path.as_path())
     }
 
+    /// Hears a recording with a model. With `detect_speech`, and the voice activity detection
+    /// model downloaded, only what's speech is heard.
     pub async fn transcribe(
         &self,
         wav: &Path,
         model: &str,
         prompt: Option<&str>,
+        detect_speech: bool,
     ) -> Result<Transcript> {
         let (name, path) = self
             .models
@@ -102,6 +139,9 @@ impl Whisper {
             .stderr(Stdio::piped());
         if let Some(prompt) = prompt {
             command.arg("--prompt").arg(prompt);
+        }
+        if let Some(vad) = self.vad.as_ref().filter(|_| detect_speech) {
+            command.arg("--vad").arg("--vad-model").arg(vad);
         }
         let started = Instant::now();
         let mut child = command
@@ -176,15 +216,15 @@ pub fn spoken_text(transcript: &str) -> String {
 /// once it's complete.
 pub async fn download_model(
     cache_dir: &Path,
-    name: &str,
+    source: &ModelSource,
     cancel: &CancellationToken,
     log: &InstallLog,
 ) -> Result<()> {
     let dir = models_dir(cache_dir);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let file = dir.join(format!("ggml-{name}.bin"));
-    let partial = dir.join(format!("ggml-{name}.bin.part"));
-    let url = format!("{MODELS_URL}/ggml-{name}.bin");
+    let file = dir.join(source.file);
+    let partial = dir.join(format!("{}.part", source.file));
+    let url = source.url;
     log.push(format!("Downloading {url}"));
     let http = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
@@ -192,7 +232,7 @@ pub async fn download_model(
         .read_timeout(Duration::from_secs(60))
         .build()?;
     let mut response = http
-        .get(&url)
+        .get(url)
         .send()
         .await
         .context("couldn't reach Hugging Face to download the model")?
@@ -290,6 +330,7 @@ struct RunningServer {
     process: process::GroupedChild,
     url: String,
     model: PathBuf,
+    vad: Option<PathBuf>,
 }
 
 impl RunningServer {
@@ -308,10 +349,27 @@ impl Dictation {
         let Some(model) = whisper.model_path(DICTATION_MODEL) else {
             return;
         };
+        // Small enough to fetch without asking, for installs that had the model before it.
+        if whisper.vad.is_none() {
+            let downloaded = download_model(
+                cache_dir,
+                &VAD_SOURCE,
+                &CancellationToken::new(),
+                &InstallLog::default(),
+            )
+            .await;
+            match downloaded {
+                Ok(()) => tracing::info!("downloaded the voice activity detection model"),
+                Err(err) => {
+                    tracing::warn!("couldn't download the voice activity detection model: {err:#}")
+                }
+            }
+        }
+        let vad = Some(models_dir(cache_dir).join(VAD_SOURCE.file)).filter(|p| p.is_file());
         if crate::doctor::find_program(SERVER_PROGRAM).is_none() || self.server_failed_lately() {
             return;
         }
-        if let Err(err) = self.server_url(model, http).await {
+        if let Err(err) = self.server_url(model, vad.as_deref(), http).await {
             *lock(&self.server_failed) = Some(Instant::now());
             tracing::warn!("couldn't start {SERVER_PROGRAM}: {err:#}");
         }
@@ -330,7 +388,10 @@ impl Dictation {
             .model_path(DICTATION_MODEL)
             .with_context(|| format!("Whisper's {DICTATION_MODEL} model isn't downloaded yet"))?;
         if crate::doctor::find_program(SERVER_PROGRAM).is_some() && !self.server_failed_lately() {
-            match self.transcribe_with_server(model, &wav, http).await {
+            match self
+                .transcribe_with_server(model, whisper.vad.as_deref(), &wav, http)
+                .await
+            {
                 Ok(text) => return Ok(text),
                 Err(err) => {
                     *lock(&self.server_failed) = Some(Instant::now());
@@ -350,13 +411,14 @@ impl Dictation {
     async fn transcribe_with_server(
         self: &std::sync::Arc<Self>,
         model: &Path,
+        vad: Option<&Path>,
         wav: &[u8],
         http: &reqwest::Client,
     ) -> Result<String> {
         // Once more if the server had stopped, such as having crashed, since it was started.
         let mut last_error = None;
         for _ in 0..2 {
-            let url = self.server_url(model, http).await?;
+            let url = self.server_url(model, vad, http).await?;
             match ask_server(&url, wav, http).await {
                 Ok(text) => return Ok(text),
                 Err(err) => {
@@ -380,7 +442,7 @@ impl Dictation {
             .with_context(|| format!("creating {}", scratch.display()))?;
         let path = scratch.join(format!("{}-{n}.wav", std::process::id()));
         crate::paths::write_atomic(&path, wav)?;
-        let transcript = whisper.transcribe(&path, DICTATION_MODEL, None).await;
+        let transcript = whisper.transcribe(&path, DICTATION_MODEL, None, true).await;
         let _ = std::fs::remove_file(&path);
         Ok(transcript?.text)
     }
@@ -396,17 +458,19 @@ impl Dictation {
     async fn server_url(
         self: &std::sync::Arc<Self>,
         model: &Path,
+        vad: Option<&Path>,
         http: &reqwest::Client,
     ) -> Result<String> {
         let mut server = self.server.lock().await;
         if let Some(running) = server.as_mut()
             && !running.exited()
             && running.model == model
+            && running.vad.as_deref() == vad
         {
             return Ok(running.url.clone());
         }
         *server = None;
-        let running = start_server(model, http).await?;
+        let running = start_server(model, vad, http).await?;
         let url = running.url.clone();
         *server = Some(running);
         drop(server);
@@ -442,7 +506,11 @@ impl Dictation {
 }
 
 /// Starts whisper-server on a free port, and waits until it's ready.
-async fn start_server(model: &Path, http: &reqwest::Client) -> Result<RunningServer> {
+async fn start_server(
+    model: &Path,
+    vad: Option<&Path>,
+    http: &reqwest::Client,
+) -> Result<RunningServer> {
     let program = crate::doctor::find_program(SERVER_PROGRAM)
         .with_context(|| format!("{SERVER_PROGRAM} isn't installed"))?;
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -450,8 +518,12 @@ async fn start_server(model: &Path, http: &reqwest::Client) -> Result<RunningSer
         .context("finding a free port for Whisper")?
         .port();
     let started = Instant::now();
+    let mut command = process::command(&program);
+    if let Some(vad) = vad {
+        command.arg("--vad").arg("--vad-model").arg(vad);
+    }
     let mut process = process::GroupedChild::spawn(
-        process::command(&program)
+        command
             .arg("--model")
             .arg(model)
             .args([
@@ -494,6 +566,7 @@ async fn start_server(model: &Path, http: &reqwest::Client) -> Result<RunningSer
                 process,
                 url,
                 model: model.to_owned(),
+                vad: vad.map(Path::to_owned),
             });
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -578,6 +651,18 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_speech_detection_model_apart_from_whisper_models() {
+        let dir = tempfile::tempdir().unwrap();
+        let models = models_dir(dir.path());
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::write(models.join("ggml-small.en.bin"), "lmgg").unwrap();
+        std::fs::write(models.join(VAD_SOURCE.file), "lmgg").unwrap();
+        let whisper = Whisper::with_program(PROGRAM.into(), dir.path());
+        assert_eq!(whisper.models.len(), 1);
+        assert_eq!(whisper.vad, Some(models.join(VAD_SOURCE.file)));
+    }
+
+    #[test]
     fn checks_downloaded_models() {
         let dir = tempfile::tempdir().unwrap();
         let model = dir.path().join("ggml-tiny.bin");
@@ -615,9 +700,10 @@ mod tests {
         let whisper = Whisper {
             program,
             models: vec![("tiny".into(), dir.path().join("ggml-tiny.bin"))],
+            vad: Some(dir.path().join("vad.bin")),
         };
         let transcript = whisper
-            .transcribe(Path::new("a.wav"), "tiny", Some("names: part1"))
+            .transcribe(Path::new("a.wav"), "tiny", Some("names: part1"), false)
             .await
             .unwrap();
         assert!(
@@ -632,9 +718,19 @@ mod tests {
         );
         assert!(transcript.prompted);
         assert_eq!(transcript.load_ms, Some(12));
+        let detecting = whisper
+            .transcribe(Path::new("a.wav"), "tiny", None, true)
+            .await
+            .unwrap();
+        assert!(
+            detecting.text.contains("--vad --vad-model"),
+            "{}",
+            detecting.text
+        );
+        assert!(!transcript.text.contains("--vad"), "{}", transcript.text);
         assert!(
             whisper
-                .transcribe(Path::new("a.wav"), "huge", None)
+                .transcribe(Path::new("a.wav"), "huge", None, false)
                 .await
                 .is_err()
         );
