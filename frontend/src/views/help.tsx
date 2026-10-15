@@ -45,6 +45,11 @@ export function Help() {
           changed. You don't have to wait: keep talking, and later edits queue up behind earlier
           ones. Tap Cancel on a card to drop it before it changes anything.
         </p>
+        <p>
+          The button turns green once it's listening; start speaking then. If what's heard often
+          isn't what you said, try another way of hearing it in Settings, under Talking: Whisper on
+          the server is the most accurate, and your keyboard's dictation works on any phone.
+        </p>
       </section>
 
       <section>
@@ -69,7 +74,8 @@ export function Help() {
           Code you use in many puzzles, such as parsing numbers or grid neighbours, can go in your
           helpers module, in the <code>lib</code> folder of your solutions repo. It starts with a
           few, and every solution can import it. When an error says a module is missing, Workshop
-          offers to install the package that provides it; Settings lists the packages you have.
+          offers to install the package that provides it. Settings, under Packages, lists the
+          packages you have.
         </p>
       </section>
 
@@ -87,9 +93,9 @@ export function Help() {
         <h2>Running and submitting</h2>
         <p>
           Your program reads the input on stdin and prints part 1's answer on the first line and
-          part 2's on the second. Press ▶ to run on the sample. When it matches, run on your real
-          input, then submit the answer it gives. Some older puzzles have no usable example; then
-          run on your real input straight away.
+          part 2's on the second. Press ▶, then Run sample. When it matches, run on your real input,
+          then submit the answer it gives. Some older puzzles have no usable example; then run on
+          your real input straight away.
         </p>
       </section>
 
@@ -106,7 +112,17 @@ export function Help() {
         <h2>Saving</h2>
         <p>
           Everything saves as you go, so you can put your phone down at any point. Solutions live in
-          a git repo on the server; commit and push from Settings.
+          a git repo on the server; commit and push from Settings, under Solutions repo, where
+          Workshop can also do it after each star.
+        </p>
+      </section>
+
+      <section>
+        <h2>On your phone</h2>
+        <p>
+          Add Workshop to your home screen from the browser's menu ("Add to Home screen", or Share
+          then "Add to Home Screen" on an iPhone), and it opens full screen like an app. An iPhone
+          asks for the link once more there, as the app doesn't share Safari's login.
         </p>
       </section>
     </div>
