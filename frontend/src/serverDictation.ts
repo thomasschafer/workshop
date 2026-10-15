@@ -56,7 +56,8 @@ export class ServerDictation implements Listener {
     const { wav, peak, report } = await audio.stop();
     const log = { heldMs, sessions: [], recording: report };
     if (this.cancelled) return heard("", null, log);
-    if (asked && peak < SILENT_PEAK) {
+    // Recording only started once the button had been let go, so nothing said is in it.
+    if (asked) {
       return {
         ...heard("", null, log),
         hint: "Microphone allowed. Now hold the button while you speak.",
