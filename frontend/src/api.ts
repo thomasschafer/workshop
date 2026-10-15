@@ -266,6 +266,14 @@ export interface Check {
   fix: string | null;
 }
 
+/**
+ * A message from the server as a sentence. Its errors start in lower case, as they're often
+ * written into longer messages there, but are shown on their own here.
+ */
+export function sentence(message: string): string {
+  return message.charAt(0).toUpperCase() + message.slice(1);
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -365,7 +373,7 @@ async function send(
       json && typeof json === "object" && "error" in json && typeof json.error === "string"
         ? json.error
         : `Request failed with ${response.status}`;
-    throw new ApiError(message, response.status, json);
+    throw new ApiError(sentence(message), response.status, json);
   }
   return response;
 }
@@ -479,7 +487,7 @@ export const api = {
       const event = line as DiscussEvent;
       if ("delta" in event) onDelta(event.delta);
       else if ("done" in event) reply.value = event.done;
-      else throw new Error(event.error);
+      else throw new Error(sentence(event.error));
     });
     if (reply.value === null) throw new Error("The reply stopped before it was finished.");
     return reply.value;

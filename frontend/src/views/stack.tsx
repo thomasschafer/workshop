@@ -94,7 +94,7 @@ export function Stack({
             <span>{delay ?? (text || LIVE_PROMPT[phase])}</span>
           </div>
           {phase === "listening" && level !== null ? <LevelMeter level={level} /> : null}
-          {phase === "hearing" ? (
+          {phase === "transcribing" ? (
             <button type="button" class="card-cancel" onClick={() => onCancelLive(id)}>
               Cancel
             </button>
@@ -127,7 +127,7 @@ const METER_BARS = [0.55, 0.8, 1, 0.85, 0.6];
 const LIVE_PROMPT: Record<TalkPhase, string> = {
   starting: "Starting the microphone…",
   listening: "Listening…",
-  hearing: "Hearing…",
+  transcribing: "Transcribing…",
 };
 
 function CardView({

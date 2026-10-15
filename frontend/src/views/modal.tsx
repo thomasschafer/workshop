@@ -10,16 +10,19 @@ export type ModalShape = "card" | "full" | "sheet";
 
 /**
  * A dialog above everything else, over a dimmed, blurred background, closed by tapping outside,
- * Escape or going back.
+ * Escape or going back. With `onBack`, it's showing a page within itself: the header has a back
+ * button, and Escape goes back rather than closing.
  */
 export function Modal({
   title,
   onClose,
+  onBack,
   shape = "card",
   children,
 }: {
   title: string;
   onClose: () => void;
+  onBack?: (() => void) | undefined;
   shape?: ModalShape;
   children: ComponentChildren;
 }) {
@@ -28,11 +31,11 @@ export function Modal({
   // Before the dialog is shown, so Escape works as soon as it can be seen.
   useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") (onBack ?? onClose)();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, onBack]);
 
   return (
     <div class={`modal-backdrop ${shape}`}>
@@ -46,6 +49,11 @@ export function Modal({
       />
       <div class="modal" role="dialog" aria-modal="true" aria-label={title}>
         <div class="sheet-header">
+          {onBack ? (
+            <button type="button" class="icon-button back" aria-label="Back" onClick={onBack}>
+              ‹
+            </button>
+          ) : null}
           <h1>{title}</h1>
           <button type="button" class="icon-button" aria-label="Close" onClick={onClose}>
             ✕

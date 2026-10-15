@@ -31,6 +31,18 @@ const card = (status: "waiting" | "working" | "done" | "asked" | "problem") =>
 
 const editor = () => page.locator(".cm-content");
 
+/** Opens a page of settings, from the list of them. */
+async function openSettings(title: string): Promise<void> {
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator(".settings-row", { hasText: title }).getByRole("button").click();
+  await expect(page.getByRole("dialog", { name: title })).toBeVisible();
+}
+
+async function closeSettings(): Promise<void> {
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+}
+
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ baseURL: `http://127.0.0.1:${PORT}` });
   await page.addInitScript(installSimulatedSpeech, 20);
@@ -200,12 +212,30 @@ test("closes settings when going back, staying in the app", async () => {
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
 });
 
+test("opens a page of settings from the list, and goes back to the list", async () => {
+  await openSettings("Display");
+  await expect(page.getByLabel("Wrap long lines of code")).toBeVisible();
+  // Back from a page, by gesture, button or Escape, is the list; back again leaves settings.
+  await page.goBack();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await expect(page.locator(".settings-row", { hasText: "Talking" })).toBeVisible();
+  await page.locator(".settings-row", { hasText: "Models" }).getByRole("button").click();
+  await page.getByRole("dialog").getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.locator(".settings-row", { hasText: "Talking" }).getByRole("button").click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
+});
+
 test("wraps long lines only when chosen", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await expect(editor()).not.toHaveClass(/cm-lineWrapping/);
-  await page.getByRole("button", { name: "Settings" }).click();
+  await openSettings("Display");
   await page.getByLabel("Wrap long lines of code").check();
-  await page.keyboard.press("Escape");
+  await closeSettings();
   await expect(editor()).toHaveClass(/cm-lineWrapping/);
   await page.reload();
   await expect(editor()).toHaveClass(/cm-lineWrapping/);
@@ -231,10 +261,10 @@ test("offers to install a missing package, and uses it", async () => {
   await expect(page.locator(".run-result")).toContainText("Part 1: 3 ✓");
   await page.getByRole("button", { name: "Close" }).click();
 
-  await page.getByRole("button", { name: "Settings" }).click();
+  await openSettings("Packages");
   await expect(page.locator(".packages")).toContainText("lanterns");
   await expect(page.locator(".packages")).toContainText("Installed.");
-  await page.keyboard.press("Escape");
+  await closeSettings();
 });
 
 test("installs what's listed after the list is edited elsewhere", async () => {
@@ -245,13 +275,13 @@ test("installs what's listed after the list is edited elsewhere", async () => {
   await page.locator(".banner").getByRole("button", { name: "Install" }).click();
   await expect(page.locator(".banner")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Settings" }).click();
+  await openSettings("Packages");
   await expect(page.locator(".packages")).toContainText("lanterns_extra");
   await page.getByRole("button", { name: "Remove lanterns_extra" }).click();
   await expect(page.locator(".packages")).not.toContainText("lanterns_extra");
   await expect(page.locator(".packages")).toContainText("Installed.");
   expect(readFileSync(manifest, "utf8")).not.toContain("lanterns_extra");
-  await page.keyboard.press("Escape");
+  await closeSettings();
 });
 
 test("plays the practice puzzle through, with no Advent of Code login needed", async () => {
@@ -309,9 +339,9 @@ if __name__ == "__main__":
       await page.getByRole("button", { name: "Start part 2" }).click();
       await expect(page.locator(".cm-content")).toContainText("    print(part2(data))");
       await expect(page.locator(".cm-content")).not.toContainText("# print(part2(data))");
-      await page.getByRole("button", { name: "Settings" }).click();
+      await openSettings("Solutions repo");
       await page.getByLabel("Commit and push after each star").check();
-      await page.keyboard.press("Escape");
+      await closeSettings();
     }
   }
   await expect(page.locator(".card", { hasText: "Committed." })).toBeVisible();
@@ -419,9 +449,9 @@ test("says to hold the button after a quick tap that heard nothing", async () =>
 
 test("dictates with the keyboard when chosen, on this device", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
-  await page.getByRole("button", { name: "Settings" }).click();
+  await openSettings("Talking");
   await page.getByRole("button", { name: "Keyboard", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await closeSettings();
 
   await page.getByRole("button", { name: "Tap to dictate" }).click();
   const box = page.locator(".composer textarea");
@@ -432,9 +462,9 @@ test("dictates with the keyboard when chosen, on this device", async () => {
   await expect(card("done").filter({ hasText: "“undo”" }).last()).toContainText("Undone");
   await expect(page.locator(".composer")).not.toHaveClass(/\bopen\b/);
 
-  await page.getByRole("button", { name: "Settings" }).click();
+  await openSettings("Talking");
   await page.getByRole("button", { name: "Automatic" }).click();
-  await page.keyboard.press("Escape");
+  await closeSettings();
   await expect(page.locator(".talk")).toHaveText("Hold to talk");
 });
 
@@ -522,7 +552,7 @@ test("hears what's said with Whisper on the server, once its model is there", as
   await expect(page.locator(".card.live .level-meter")).toBeVisible();
   await page.waitForTimeout(1500);
   await page.mouse.up();
-  await expect(page.locator(".card.live")).toContainText("Hearing…");
+  await expect(page.locator(".card.live")).toContainText("Transcribing…");
 
   // A short press while the long one is still being heard: it's heard first, but handed over
   // second, as it was said second.
@@ -564,9 +594,9 @@ test("hears what's said with Whisper on the server, once its model is there", as
   await expect(page.locator(".card", { hasText: "Couldn't hear" })).toHaveCount(0);
   await expect(page.locator(".card", { hasText: "Didn't catch" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Settings" }).click();
+  await openSettings("Talking");
   await expect(page.locator(".server-speech")).toContainText("Whisper is ready");
-  await page.keyboard.press("Escape");
+  await closeSettings();
   rmSync(model);
   await page.reload();
 });

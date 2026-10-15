@@ -45,12 +45,12 @@ const LEVEL_MS = 80;
 
 /**
  * Where a press is: waiting for the microphone, when words would be lost; listening while held;
- * then hearing the last of it once released.
+ * then transcribing the last of it once released.
  */
-export type TalkPhase = "starting" | "listening" | "hearing";
+export type TalkPhase = "starting" | "listening" | "transcribing";
 
 function phaseOf(press: Press): TalkPhase {
-  if (!press.held) return "hearing";
+  if (!press.held) return "transcribing";
   return press.listening ? "listening" : "starting";
 }
 

@@ -403,6 +403,13 @@ code {
 .sheet-header h1 {
   font-size: 15px;
   margin: 0;
+  flex: 1;
+}
+
+.sheet-header .back {
+  font-size: 24px;
+  line-height: 1;
+  margin-left: -10px;
 }
 
 .sheet-body {
@@ -513,6 +520,62 @@ code {
   font-weight: 600;
 }
 
+.settings-list {
+  list-style: none;
+  margin: 0 -16px;
+  padding: 0;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--border);
+}
+
+.settings-list button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+
+.settings-list button:active {
+  background: var(--surface);
+}
+
+.settings-row-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-row-title {
+  font-weight: 600;
+}
+
+.settings-row-summary {
+  color: var(--muted);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-row-chevron {
+  color: var(--muted);
+  font-size: 22px;
+}
+
+.settings .settings-subheading {
+  margin-top: 20px;
+}
+
 .settings section {
   padding: 16px 0;
   border-bottom: 1px solid var(--border);
@@ -556,6 +619,8 @@ code {
   gap: 10px;
   font-size: 13px;
   line-height: 1.45;
+  /* Paths are long and have no spaces to wrap at. */
+  overflow-wrap: anywhere;
 }
 
 .check .mark {
@@ -780,6 +845,11 @@ code {
   border-radius: 16px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   animation: modal-in 200ms ease-out;
+}
+
+/* Full on phones; elsewhere a steady size, so moving between pages within it doesn't jump. */
+.modal-backdrop.full .modal {
+  height: min(44rem, 100%);
 }
 
 /* Along the bottom, within reach of the thumb, sliding up into place. */
@@ -1056,6 +1126,12 @@ code {
   flex-basis: 100%;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* A calendar's width, rather than stretching days across a wide screen. */
+.picker {
+  max-width: 36rem;
+  margin: 0 auto;
 }
 
 .picker .practice {
@@ -1344,7 +1420,7 @@ code {
 }
 
 .card.live.starting,
-.card.live.hearing {
+.card.live.transcribing {
   border-color: var(--border);
   animation: none;
 }
@@ -1376,7 +1452,7 @@ code {
   padding-right: 52px;
 }
 
-.card.live.hearing .live-text {
+.card.live.transcribing .live-text {
   padding-right: 84px;
 }
 
@@ -1387,8 +1463,8 @@ code {
   transform: translateY(-50%);
 }
 
-/* Only once hearing it takes a while, so a quick one doesn't flash a button. */
-.card.live.hearing .card-cancel {
+/* Only once transcribing takes a while, so a quick one doesn't flash a button. */
+.card.live.transcribing .card-cancel {
   animation: card-content-in 200ms ease-out 700ms both;
 }
 

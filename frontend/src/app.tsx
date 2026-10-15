@@ -987,51 +987,50 @@ export function App({ boot }: { boot: Bootstrap }) {
           </Modal>
         ) : null}
         {sheet === "settings" ? (
-          <Modal title="Settings" onClose={() => setSheet(null)} shape="full">
-            <Settings
-              snippets={boot.snippets}
-              models={models}
-              onModels={setModels}
-              onSetup={() => setSheet("setup")}
-              onBench={() => setSheet("bench")}
-              commitAfterStar={commitAfterStar}
-              onCommitAfterStar={(enabled) => {
-                setCommitAfterStar(enabled);
-                api.setSolutionsRepo(enabled).catch((e: unknown) => {
-                  setCommitAfterStar(!enabled);
-                  notify("error", `Couldn't change that: ${message(e)}`);
-                });
-              }}
-              commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
-              keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
-              onKeepScreenOn={(enabled) => {
-                preferences.keepScreenOn.set(enabled);
-                setKeepScreenOn(enabled);
-              }}
-              packages={packages}
-              dictation={{
-                choice: dictationChoice,
-                method: dictationMethod,
-                support: dictationSupport,
-              }}
-              onServerSpeech={setServerSpeech}
-              onDictation={(choice) => {
-                preferences.dictation.set(choice);
-                setDictationChoice(choice);
-              }}
-              lineWrapping={lineWrapping}
-              onLineWrapping={(enabled) => {
-                preferences.lineWrapping.set(enabled);
-                setLineWrapping(enabled);
-                editor.current?.setLineWrapping(enabled);
-              }}
-              onInsertSnippet={(s) => {
-                editor.current?.insertSnippet(s.body);
-                setSheet(null);
-                setTab("code");
-              }}
-            />
-          </Modal>
+          <Settings
+            onClose={() => setSheet(null)}
+            snippets={boot.snippets}
+            models={models}
+            onModels={setModels}
+            onSetup={() => setSheet("setup")}
+            onBench={() => setSheet("bench")}
+            commitAfterStar={commitAfterStar}
+            onCommitAfterStar={(enabled) => {
+              setCommitAfterStar(enabled);
+              api.setSolutionsRepo(enabled).catch((e: unknown) => {
+                setCommitAfterStar(!enabled);
+                notify("error", `Couldn't change that: ${message(e)}`);
+              });
+            }}
+            commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
+            keepScreenOn={wakeLockSupported() ? keepScreenOn : null}
+            onKeepScreenOn={(enabled) => {
+              preferences.keepScreenOn.set(enabled);
+              setKeepScreenOn(enabled);
+            }}
+            packages={packages}
+            dictation={{
+              choice: dictationChoice,
+              method: dictationMethod,
+              support: dictationSupport,
+            }}
+            onServerSpeech={setServerSpeech}
+            onDictation={(choice) => {
+              preferences.dictation.set(choice);
+              setDictationChoice(choice);
+            }}
+            lineWrapping={lineWrapping}
+            onLineWrapping={(enabled) => {
+              preferences.lineWrapping.set(enabled);
+              setLineWrapping(enabled);
+              editor.current?.setLineWrapping(enabled);
+            }}
+            onInsertSnippet={(s) => {
+              editor.current?.insertSnippet(s.body);
+              setSheet(null);
+              setTab("code");
+            }}
+          />
         ) : null}
       </main>
 
