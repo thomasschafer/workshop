@@ -6,6 +6,7 @@ import {
   connection,
   type DayMeta,
   type Exchange,
+  loginNeeded,
   type Problem,
   type Puzzle,
   type Tab,
@@ -170,6 +171,20 @@ export function App({ boot }: { boot: Bootstrap }) {
     [],
   );
   const notify = (tone: "ok" | "info" | "warn" | "error", text: string) => queue.notify(tone, text);
+  // Offered once until it's done, however many requests find Advent of Code needs a login.
+  const loginOffered = useRef(false);
+  useEffect(
+    () =>
+      loginNeeded.subscribe((message) => {
+        if (loginOffered.current) return;
+        loginOffered.current = true;
+        queue.offer(message, "Log in", () => {
+          loginOffered.current = false;
+          setSheet("setup");
+        });
+      }),
+    [],
+  );
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
@@ -953,7 +968,10 @@ export function App({ boot }: { boot: Bootstrap }) {
                 setSheet(null);
                 openPuzzle(PRACTICE);
               }}
-              onLoggedIn={() => setHasSession(true)}
+              onLoggedIn={() => {
+                loginOffered.current = false;
+                setHasSession(true);
+              }}
               onServerSpeech={setServerSpeech}
               onDone={() => setSheet(null)}
             />

@@ -21,6 +21,22 @@ pub const BASE_URL: &str = "https://adventofcode.com";
 const MIN_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const CALENDAR_TTL: Duration = Duration::from_secs(15 * 60);
 
+/// Advent of Code needs the user to log in, for the first time or again: the app offers to.
+#[derive(Debug)]
+pub struct NeedsLogin(pub &'static str);
+
+impl std::fmt::Display for NeedsLogin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for NeedsLogin {}
+
+const SESSION_REJECTED: NeedsLogin = NeedsLogin(
+    "Advent of Code didn't accept your session cookie; it may have expired. Log in again in setup, or see `workshop doctor`.",
+);
+
 pub struct AocClient {
     http: reqwest::Client,
     /// Can be set while running, from the app's setup.
@@ -288,6 +304,9 @@ impl AocClient {
             .await?;
         let status = response.status();
         let body = response.text().await?;
+        if !status.is_success() && body.contains("log in") {
+            return Err(SESSION_REJECTED.into());
+        }
         if !status.is_success() {
             bail!("Advent of Code returned {status} when submitting");
         }
@@ -305,9 +324,9 @@ impl AocClient {
     }
 
     fn require_session(&self) -> Result<String> {
-        self.session().context(
-            "your Advent of Code session cookie isn't set; run `workshop doctor` for how to add it",
-        )
+        self.session().ok_or_else(|| {
+            NeedsLogin("Workshop isn't logged in to Advent of Code yet. Add your session cookie in setup, or see `workshop doctor`.").into()
+        })
     }
 
     async fn get(&self, url: &str) -> Result<String> {
@@ -334,9 +353,7 @@ impl AocClient {
         let body = response.text().await?;
         match status.as_u16() {
             200 => Ok(body),
-            400 | 500 if body.contains("log in") => bail!(
-                "Advent of Code didn't accept your session cookie; it may have expired. Run `workshop doctor` for how to update it."
-            ),
+            400 | 500 if body.contains("log in") => Err(SESSION_REJECTED.into()),
             404 => bail!("Advent of Code has no page at {url}; is the puzzle unlocked yet?"),
             _ => bail!("Advent of Code returned {status} for {url}"),
         }

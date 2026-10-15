@@ -395,6 +395,16 @@ struct ApiError(StatusCode, serde_json::Value);
 impl From<anyhow::Error> for ApiError {
     fn from(err: anyhow::Error) -> Self {
         tracing::warn!("{err:#}");
+        // So the app can offer to log in, rather than only saying so.
+        if let Some(login) = err
+            .chain()
+            .find_map(|e| e.downcast_ref::<crate::aoc::NeedsLogin>())
+        {
+            return Self(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({ "error": login.to_string(), "action": "login" }),
+            );
+        }
         Self(
             StatusCode::INTERNAL_SERVER_ERROR,
             serde_json::json!({ "error": format!("{err:#}") }),
@@ -1402,6 +1412,20 @@ mod tests {
             send(&router, request).await.status(),
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    #[tokio::test]
+    async fn offers_to_log_in_when_advent_of_code_needs_it() {
+        let (_dir, router) = test_app().await;
+        let request = Request::get("/api/puzzles/2017/4/input")
+            .header(header::COOKIE, "workshop_token=secret")
+            .body(Body::empty())
+            .unwrap();
+        let response = send(&router, request).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["action"], "login");
     }
 
     #[tokio::test]

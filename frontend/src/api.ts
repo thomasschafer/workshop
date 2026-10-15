@@ -292,6 +292,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Says when Advent of Code needs the user to log in, for the first time or again, as any request
+ * that needed it finds, so the app can offer to.
+ */
+export class LoginNeeded {
+  private readonly listeners = new Set<(message: string) => void>();
+
+  /** Calls `listener` with why, returning how to stop. */
+  subscribe(listener: (message: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  notify(message: string): void {
+    for (const listener of this.listeners) listener(message);
+  }
+}
+
+export const loginNeeded = new LoginNeeded();
+
 /** The server couldn't be reached at all, as opposed to answering with an error. */
 export class ConnectionError extends Error {}
 
@@ -381,6 +401,9 @@ async function send(
       json && typeof json === "object" && "error" in json && typeof json.error === "string"
         ? json.error
         : `Request failed with ${response.status}`;
+    if (json && typeof json === "object" && "action" in json && json.action === "login") {
+      loginNeeded.notify(sentence(message));
+    }
     throw new ApiError(sentence(message), response.status, json);
   }
   return response;

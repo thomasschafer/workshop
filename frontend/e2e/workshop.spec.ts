@@ -212,6 +212,30 @@ test("closes settings when going back, staying in the app", async () => {
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
 });
 
+test("offers to log in again when Advent of Code no longer accepts the cookie", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  // As the server answers once Advent of Code has turned the cookie away.
+  await page.route("**/api/puzzles/*/*/run", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "advent of Code didn't accept your session cookie; it may have expired.",
+        action: "login",
+      }),
+    }),
+  );
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByRole("button", { name: "Run real input" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+  const offer = page.locator(".card", { hasText: "didn't accept your session cookie" });
+  await expect(offer).toHaveCount(1);
+  await page.unroute("**/api/puzzles/*/*/run");
+  await offer.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("dialog", { name: "Set up Workshop" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+});
+
 test("opens a page of settings from the list, and goes back to the list", async () => {
   await openSettings("Display");
   await expect(page.getByLabel("Wrap long lines of code")).toBeVisible();
