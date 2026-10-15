@@ -67,6 +67,10 @@ pub struct HelpersProfile {
     /// directory unless the file is already there.
     #[serde(default)]
     pub lsp_config: Option<ConfigFile>,
+    /// A pattern matching a line that defines a helper, with its name as the only group, so the
+    /// edit model knows what the module offers and imports it when one is used.
+    #[serde(default)]
+    pub definition: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -99,6 +103,47 @@ impl HelpersProfile {
             }
         }
         Ok(())
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if let Some(pattern) = &self.definition {
+            let regex = regex::Regex::new(pattern)
+                .with_context(|| format!("invalid `helpers.definition` pattern {pattern:?}"))?;
+            if regex.captures_len() != 2 {
+                bail!("`helpers.definition` pattern {pattern:?} needs exactly one group");
+            }
+        }
+        Ok(())
+    }
+
+    /// The helpers the module defines, by name, from its text.
+    pub fn names_in(&self, text: &str) -> Vec<String> {
+        let Some(regex) = self
+            .definition
+            .as_deref()
+            .and_then(|p| regex::RegexBuilder::new(p).multi_line(true).build().ok())
+        else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = regex
+            .captures_iter(text)
+            .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+            .collect();
+        names.dedup();
+        names
+    }
+
+    /// The helpers the user's module defines now, or the ones it starts with if it hasn't been
+    /// made yet.
+    pub fn names(&self, solutions_dir: &Path) -> Result<Vec<String>> {
+        let path = solutions_dir.join(relative_inside(&self.file)?);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok(self.names_in(&text)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                Ok(self.names_in(&self.template))
+            }
+            Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
+        }
     }
 
     pub fn environment(&self, solutions_dir: &Path) -> Result<Vec<(String, String)>> {
@@ -250,6 +295,19 @@ impl LanguageProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_helpers_each_language_starts_with() {
+        for (id, profile) in builtin_profiles().unwrap() {
+            let helpers = profile.helpers.unwrap();
+            helpers.validate().unwrap();
+            assert_eq!(
+                helpers.names_in(&helpers.template),
+                ["ints", "grid", "neighbours4", "neighbours8"],
+                "{id}"
+            );
+        }
+    }
 
     #[test]
     fn creates_helpers_without_replacing_the_users_own() {

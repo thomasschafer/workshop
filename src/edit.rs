@@ -72,17 +72,44 @@ pub struct Utterance<'a> {
     pub pieces: &'a [String],
 }
 
+/// What the user's helpers module offers, for the model to import from when using it.
+pub struct Helpers<'a> {
+    /// The module's file, relative to the solutions directory.
+    pub file: &'a str,
+    pub names: &'a [String],
+}
+
 pub fn user_prompt(
     doc_with_cursor: &str,
     utterance: Utterance,
     recent: Option<&str>,
     earlier: &[Exchange],
+    helpers: Option<Helpers>,
 ) -> String {
     let Utterance {
         text: utterance,
         pieces,
     } = utterance;
     let mut prompt = format!("File:\n```\n{doc_with_cursor}\n```\n");
+    // Only the helpers the utterance names, as the rest are noise that can distract from it.
+    // Before the cursor and what "that" is, which belong with the utterance.
+    if let Some(Helpers { file, names }) = helpers {
+        let said: Vec<String> = utterance
+            .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '\'')
+            .map(str::to_lowercase)
+            .collect();
+        let named: Vec<&str> = names
+            .iter()
+            .filter(|name| said.contains(&name.to_lowercase()))
+            .map(String::as_str)
+            .collect();
+        if !named.is_empty() {
+            prompt.push_str(&format!(
+                "The user's helpers module, {file}, defines: {}\n",
+                named.join(", ")
+            ));
+        }
+    }
     if let Some((number, line)) = cursor_line(doc_with_cursor) {
         prompt.push_str(&format!(
             "The cursor is on line {number}, which without the marker reads: `{line}`\n"
@@ -591,6 +618,7 @@ mod tests {
             },
             None,
             &[],
+            None,
         );
         assert!(prompt.contains("Utterance: add filter greater than 100\n\nThe speech recogniser"));
         assert!(prompt.ends_with("1. add filter\n2. add filter greater than 100\n"));
@@ -599,7 +627,30 @@ mod tests {
     #[test]
     fn prompt_includes_earlier_questions() {
         let said = |text| Utterance { text, pieces: &[] };
-        let plain = user_prompt("a‸", said("add b"), None, &[]);
+        let plain = user_prompt("a‸", said("add b"), None, &[], None);
+        let names = ["ints".to_owned(), "grid".to_owned()];
+        let with_helpers = user_prompt(
+            "a‸",
+            said("sum of ints of data"),
+            None,
+            &[],
+            Some(Helpers {
+                file: "lib/Aoc.hs",
+                names: &names,
+            }),
+        );
+        assert!(with_helpers.contains("The user's helpers module, lib/Aoc.hs, defines: ints\n"));
+        let unnamed = user_prompt(
+            "a‸",
+            said("add b"),
+            None,
+            &[],
+            Some(Helpers {
+                file: "lib/Aoc.hs",
+                names: &names,
+            }),
+        );
+        assert!(!unnamed.contains("helpers module"));
         assert!(plain.ends_with("Utterance: add b"));
         let reply = user_prompt(
             "a‸",
@@ -609,6 +660,7 @@ mod tests {
                 said: "add it".into(),
                 asked: "Add b or c?".into(),
             }],
+            None,
         );
         assert!(reply.contains("Most recent insertion: `a`"));
         assert!(reply.contains("Utterance: add it\nYou asked: Add b or c?\nReply: the second one"));

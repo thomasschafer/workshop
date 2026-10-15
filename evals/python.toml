@@ -348,3 +348,32 @@ import sys
 
 def part1(data: str) -> int:
     ‸''']
+
+# Imports come with the code that needs them.
+
+[[case]]
+name = "imports-a-helper-it-uses"
+utterance = "replace this line with return sum of ints of data"
+before = """import sys
+
+
+def part1(data: str) -> int:
+    ‸raise NotImplementedError
+"""
+after = """import sys
+
+from aoc import ints
+
+
+def part1(data: str) -> int:
+    return sum(ints(data))‸
+"""
+also = [
+  """import sys
+from aoc import ints
+
+
+def part1(data: str) -> int:
+    return sum(ints(data))‸
+""",
+]

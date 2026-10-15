@@ -80,6 +80,13 @@ name = "mishearing-foldl-prime"
 utterance = "fold L prime plus zero"
 before = "total = ‸"
 after = "total = foldl' (+) 0‸"
+# Before GHC 9.10, foldl' needs importing, so adding it is fine too.
+also = ["""
+import Data.List (foldl')
+
+total = foldl' (+) 0‸""", """import Data.List (foldl')
+
+total = foldl' (+) 0‸"""]
 
 [[case]]
 name = "mishearing-mapm"
@@ -934,3 +941,145 @@ part1 = length . map read . lines
 
 part2 :: String -> Int
 part2 = filter (> 100)‸'''
+
+# Imports come with the code that needs them: nobody dictates them for every name they use.
+
+[[case]]
+name = "imports-a-helper-it-uses"
+utterance = "replace undefined with sum dot ints"
+before = """module Main where
+
+import Data.List (sort)
+
+main :: IO ()
+main = interact (show . part1)
+
+part1 :: String -> Int
+part1 = ‸undefined
+"""
+after = """module Main where
+
+import Aoc (ints)
+import Data.List (sort)
+
+main :: IO ()
+main = interact (show . part1)
+
+part1 :: String -> Int
+part1 = sum . ints‸
+"""
+also = [
+  """module Main where
+
+import Data.List (sort)
+import Aoc (ints)
+
+main :: IO ()
+main = interact (show . part1)
+
+part1 :: String -> Int
+part1 = sum . ints‸
+""",
+  """module Main where
+
+import Aoc
+import Data.List (sort)
+
+main :: IO ()
+main = interact (show . part1)
+
+part1 :: String -> Int
+part1 = sum . ints‸
+""",
+  """module Main where
+
+import Data.List (sort)
+import Aoc
+
+main :: IO ()
+main = interact (show . part1)
+
+part1 :: String -> Int
+part1 = sum . ints‸
+""",
+]
+
+[[case]]
+name = "imports-from-the-standard-library"
+utterance = "replace undefined with sum dot take three dot reverse dot sort dot ints"
+before = """module Main where
+
+import Aoc (ints)
+
+part1 :: String -> Int
+part1 = ‸undefined
+"""
+after = """module Main where
+
+import Aoc (ints)
+import Data.List (sort)
+
+part1 :: String -> Int
+part1 = sum . take 3 . reverse . sort . ints‸
+"""
+also = [
+  """module Main where
+
+import Data.List (sort)
+import Aoc (ints)
+
+part1 :: String -> Int
+part1 = sum . take 3 . reverse . sort . ints‸
+""",
+]
+
+[[case]]
+name = "conversational-import"
+utterance = "can you import hash map at the top"
+before = """module Main where
+
+import qualified Data.Map.Strict as M
+
+part1 :: String -> Int
+part1 = ‸undefined
+"""
+after = """module Main where
+
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Map.Strict as M
+
+part1 :: String -> Int
+part1 = ‸undefined
+"""
+also = [
+  """module Main where
+
+import qualified Data.Map.Strict as M
+import qualified Data.HashMap.Strict as HM
+
+part1 :: String -> Int
+part1 = ‸undefined
+""",
+  """module Main where
+
+import qualified Data.HashMap.Strict as HM‸
+import qualified Data.Map.Strict as M
+
+part1 :: String -> Int
+part1 = undefined
+""",
+  """module Main where
+
+import qualified Data.Map.Strict as M
+import qualified Data.HashMap.Strict as HM‸
+
+part1 :: String -> Int
+part1 = undefined
+""",
+]
+
+[[case]]
+name = "not-a-request"
+utterance = "This is the session."
+before = "part1 = ‸undefined"
+unsure = true

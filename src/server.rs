@@ -861,6 +861,17 @@ struct Edited {
 }
 
 async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> ApiResult<Edited> {
+    let language = app.language();
+    // Without them the edit still works, just without knowing to import a helper.
+    let helper_names = match &language.helpers {
+        Some(helpers) => helpers
+            .names(&app.config.solutions_dir)
+            .unwrap_or_else(|err| {
+                tracing::warn!("reading the helpers: {err:#}");
+                Vec::new()
+            }),
+        None => Vec::new(),
+    };
     let prompt = edit::user_prompt(
         &body.doc,
         edit::Utterance {
@@ -869,6 +880,10 @@ async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> Api
         },
         body.recent.as_deref(),
         &body.earlier,
+        language.helpers.as_ref().map(|h| edit::Helpers {
+            file: &h.file,
+            names: &helper_names,
+        }),
     );
     let (runner, spec) = app.edit_target();
     let result = edit::request(runner, &spec, &body.doc, &prompt, EDIT_TIMEOUT).await;

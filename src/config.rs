@@ -172,6 +172,11 @@ impl Config {
         let mut languages: BTreeMap<_, _> = language::builtin_profiles()?.into_iter().collect();
         languages.extend(raw.languages);
         for (id, profile) in &languages {
+            if let Some(helpers) = &profile.helpers {
+                helpers
+                    .validate()
+                    .with_context(|| format!("in the helpers of language {id}"))?;
+            }
             if let Some(packages) = &profile.packages {
                 packages
                     .validate()

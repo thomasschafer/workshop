@@ -10,6 +10,7 @@ Rules:
 - Edits are relative to the cursor, shown as ‸ in the file. "This" and "here" mean what's at the cursor. "That" means the most recent insertion, which is given separately when known; otherwise the expression at the cursor. "Before that" means immediately to the left of it; "after that" immediately to its right; "wrap that in X" wraps it.
 - After each edit, place the cursor where the user will naturally continue: after an insertion, or before it when they are building leftwards with "before that".
 - Add the spaces, brackets, operators and indentation the language needs, so the result is idiomatic and well formed as far as the dictation goes. Don't fix or tidy anything the user didn't mention.
+- When your edit uses a name the file can't use yet without an import, such as `sort` from the standard library or a function from the user's helpers module, add that import with the others at the top, in the same reply, in the language's usual form. Nobody dictates imports for every name they use.
 - A wrong edit is worse than no edit. If you are not confident what was meant, reply with status "unsure" and a short question or reason.
 
 Reply with a single JSON object and nothing else, in one of these shapes:

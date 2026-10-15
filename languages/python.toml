@@ -54,6 +54,8 @@ start_part_two = { find = """
 # it's already there.
 [helpers]
 file = "lib/aoc.py"
+# A line defining a helper, with its name: a function at the start of a line.
+definition = "^def ([A-Za-z_][A-Za-z0-9_]*)\\("
 environment = { PYTHONPATH = "{helpers}" }
 # Tells Pyright where the module is, unless you have a pyrightconfig.json already.
 lsp_config = { file = "pyrightconfig.json", text = """

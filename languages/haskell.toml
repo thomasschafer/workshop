@@ -56,6 +56,8 @@ start_part_two = { find = """
 # it's already there.
 [helpers]
 file = "lib/Aoc.hs"
+# A line defining a helper, with its name: a type signature at the start of a line.
+definition = "^([a-z][A-Za-z0-9_']*) ::"
 # Tells haskell-language-server where the module is, unless you have a hie.yaml already.
 lsp_config = { file = "hie.yaml", text = """
 cradle:

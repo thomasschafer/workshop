@@ -168,7 +168,17 @@ pub async fn run(
         let spec = provider.spec(Role::Edit, &choice.model, edit::system_prompt(profile));
         runner.warm(&spec).await?;
         for case in cases {
-            run_case(&runner, &spec, case, &mut totals).await;
+            // As a new user's helpers module starts.
+            let names = profile
+                .helpers
+                .as_ref()
+                .map(|h| h.names_in(&h.template))
+                .unwrap_or_default();
+            let helpers = profile.helpers.as_ref().map(|h| edit::Helpers {
+                file: &h.file,
+                names: &names,
+            });
+            run_case(&runner, &spec, case, helpers, &mut totals).await;
         }
     }
     if totals.cases == 0 {
@@ -212,7 +222,13 @@ fn eval_files(path: &Path) -> Result<Vec<std::path::PathBuf>> {
     Ok(files)
 }
 
-async fn run_case(runner: &ProviderRunner, spec: &CallSpec, case: &Case, totals: &mut Totals) {
+async fn run_case(
+    runner: &ProviderRunner,
+    spec: &CallSpec,
+    case: &Case,
+    helpers: Option<edit::Helpers<'_>>,
+    totals: &mut Totals,
+) {
     let prompt = edit::user_prompt(
         &case.before,
         edit::Utterance {
@@ -221,6 +237,7 @@ async fn run_case(runner: &ProviderRunner, spec: &CallSpec, case: &Case, totals:
         },
         case.recent.as_deref(),
         &case.earlier,
+        helpers,
     );
     let (outcome, elapsed_ms, retried) =
         match edit::request(runner, spec, &case.before, &prompt, Duration::from_secs(60)).await {
