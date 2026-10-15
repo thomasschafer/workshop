@@ -534,14 +534,59 @@ impl ProviderRunner {
         let status = child.wait().await?;
         process.finish();
         let stderr = stderr_task.await.unwrap_or_default();
-        match parsed {
-            Ok(reply) => Ok(reply),
-            Err(err) if !status.success() => {
-                Err(err.context(format!("model CLI exited with {status}: {}", stderr.trim())))
-            }
-            Err(err) => Err(err),
+        let Err(err) = parsed else {
+            return parsed;
+        };
+        let program = &self.provider.command[0];
+        let name = self.provider.name.as_deref().unwrap_or(program);
+        if let Some(explained) = explain_failure(name, program, &format!("{err:#}\n{stderr}")) {
+            return Err(anyhow::anyhow!(explained));
+        }
+        if status.success() {
+            Err(err)
+        } else {
+            Err(err.context(format!("{name} exited with {status}: {}", stderr.trim())))
         }
     }
+}
+
+/// What went wrong with a model CLI, as what to do about it, for failures that can be
+/// recognised from what it said.
+fn explain_failure(name: &str, program: &str, said: &str) -> Option<String> {
+    let lower = said.to_lowercase();
+    let mentions = |words: &[&str]| words.iter().any(|w| lower.contains(w));
+    let first_line = said
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
+    if mentions(&[
+        "not logged in",
+        "please run /login",
+        "log in",
+        "invalid api key",
+        "authenticat",
+        "unauthorized",
+    ]) {
+        return Some(format!(
+            "{name} isn't logged in. On the server, run `{program}` and log in, then try again."
+        ));
+    }
+    if mentions(&[
+        "usage limit",
+        "rate limit",
+        "quota",
+        "too many requests",
+        "limit reached",
+    ]) {
+        return Some(format!(
+            "{name} has reached its usage limit for now, so try again later, or choose another model in Settings. It said: {first_line}"
+        ));
+    }
+    if mentions(&["overloaded", "529", "503 service unavailable"]) {
+        return Some(format!("{name} is busy right now; try again in a moment."));
+    }
+    None
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -720,6 +765,35 @@ fn parse_claude_result(json: &str) -> Result<(String, Option<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explains_common_failures() {
+        let logged_out = explain_failure(
+            "Claude Code",
+            "claude",
+            "Invalid API key · Please run /login",
+        )
+        .unwrap();
+        assert!(
+            logged_out.contains("run `claude` and log in"),
+            "{logged_out}"
+        );
+        let limited = explain_failure(
+            "Codex",
+            "codex",
+            "\nYou've hit your usage limit. Try again at 3pm.",
+        )
+        .unwrap();
+        assert!(limited.contains("usage limit"), "{limited}");
+        assert!(
+            limited.ends_with("You've hit your usage limit. Try again at 3pm."),
+            "{limited}"
+        );
+        assert_eq!(
+            explain_failure("Codex", "codex", "segmentation fault"),
+            None
+        );
+    }
 
     #[test]
     fn builtin_providers_are_valid() {
