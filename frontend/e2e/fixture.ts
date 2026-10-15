@@ -89,7 +89,8 @@ models = ["fake"]
 bind = "127.0.0.1:${port}"
 
 [solutions]
-dir = "${join(home, "solutions")}"
+# Quoted as JSON quotes strings, which TOML reads the same, so Windows' backslashes survive.
+dir = ${JSON.stringify(join(home, "solutions"))}
 language = "python"
 
 # Nothing listens here, so no request ever reaches Advent of Code.
