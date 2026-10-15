@@ -49,3 +49,6 @@ export const lineWrapping = flag("workshop:line-wrapping", false);
 export const DICTATION_CHOICES = ["auto", "server", "browser", "keyboard"] as const;
 export type DictationChoice = (typeof DICTATION_CHOICES)[number];
 export const dictation = choice<DictationChoice>("workshop:dictation", DICTATION_CHOICES, "auto");
+
+/** The last day's puzzle offered on opening the app, as `year-day`, so it's offered only once. */
+export const puzzleOffered = new DevicePreference<string>("workshop:puzzle-offered", "", (s) => s);

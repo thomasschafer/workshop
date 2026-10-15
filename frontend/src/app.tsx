@@ -13,6 +13,7 @@ import {
   type UiState,
 } from "./api";
 import { prepareRecording, recordingSupported } from "./audio";
+import { nextUnlock, todaysPuzzle } from "./calendar";
 import { type LocalCommand, matchCommand } from "./commands";
 import { resolveDictation } from "./dictation";
 import {
@@ -87,6 +88,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** How often to look for changes made elsewhere while a puzzle is open. */
 const CHANGES_CHECK_MS = 10_000;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function App({ boot }: { boot: Bootstrap }) {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(boot.state.puzzle);
@@ -507,6 +510,35 @@ export function App({ boot }: { boot: Bootstrap }) {
       setTab("problem");
     }
   };
+
+  // While the event runs, a new puzzle is offered once on each device: when the app opens, or
+  // the moment it unlocks if the app's open then.
+  const openPuzzleRef = useRef(openPuzzle);
+  openPuzzleRef.current = openPuzzle;
+  useEffect(() => {
+    const offerToday = () => {
+      const today = todaysPuzzle();
+      const current = puzzleRef.current;
+      if (!today || (current?.year === today.year && current.day === today.day)) return;
+      const key = `${today.year}-${today.day}`;
+      if (preferences.puzzleOffered.get() === key) return;
+      preferences.puzzleOffered.set(key);
+      queue.offer(`Day ${today.day} is out.`, "Open it", () => openPuzzleRef.current(today));
+    };
+    offerToday();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waitForNext = () => {
+      const next = nextUnlock();
+      // Timers can't wait more than about 24 days; a day at a time is plenty.
+      if (next) timer = setTimeout(onUnlock, Math.min(next.at - Date.now() + 1000, DAY_MS));
+    };
+    const onUnlock = () => {
+      offerToday();
+      waitForNext();
+    };
+    waitForNext();
+    return () => clearTimeout(timer);
+  }, []);
 
   const packageFor = async (module: string): Promise<string | null> => {
     try {

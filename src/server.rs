@@ -206,6 +206,7 @@ pub fn router(app: Shared) -> Router {
         )
         .route("/bench/result", post(bench_result))
         .route("/years/{year}/stars", get(stars))
+        .route("/years/{year}/times", get(times))
         .route("/puzzles/{year}/{day}", get(open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(save_code))
         .route("/puzzles/{year}/{day}/notes", put(save_notes))
@@ -538,6 +539,14 @@ async fn run_doctor(State(app): State<Shared>) -> ApiResult<Vec<doctor::Check>> 
 struct RefreshQuery {
     #[serde(default)]
     refresh: bool,
+}
+
+async fn times(
+    State(app): State<Shared>,
+    Path(year): Path<u16>,
+    Query(query): Query<RefreshQuery>,
+) -> ApiResult<BTreeMap<u8, crate::aoc::StarTimes>> {
+    Ok(Json(app.aoc.times(year, query.refresh).await?))
 }
 
 async fn stars(

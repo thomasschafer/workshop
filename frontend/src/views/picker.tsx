@@ -1,16 +1,16 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, type Puzzle } from "../api";
+import { api, type Puzzle, type StarTimes } from "../api";
+import {
+  daysIn,
+  formatCountdown,
+  formatStarTime,
+  isUnlocked,
+  latestYear,
+  nextUnlock,
+  todaysPuzzle,
+} from "../calendar";
+import { useNow } from "../hooks/useNow";
 import { isPractice, PRACTICE } from "../puzzle";
-
-/** The most recent year with puzzles: the current year from December, otherwise the last. */
-export function latestYear(now = new Date()): number {
-  return now.getMonth() === 11 ? now.getFullYear() : now.getFullYear() - 1;
-}
-
-/** Advent of Code has 12 days from 2025 onwards, and 25 before that. */
-export function daysIn(year: number): number {
-  return year >= 2025 ? 12 : 25;
-}
 
 interface Props {
   current: Puzzle | null;
@@ -22,13 +22,25 @@ interface Props {
 const starsByYear = new Map<number, Record<string, number>>();
 
 export function Picker({ current, hasSession, onPick }: Props) {
-  const [year, setYear] = useState(current && !isPractice(current) ? current.year : latestYear());
+  // During the event, its year, as today's puzzle is the one most likely wanted; otherwise the
+  // year of the puzzle that's open.
+  const [year, setYear] = useState(
+    () => todaysPuzzle()?.year ?? (current && !isPractice(current) ? current.year : latestYear()),
+  );
   // Tagged with their year, so another year's stars are never shown while loading.
   const [loaded, setLoaded] = useState<{ year: number; stars: Record<string, number> } | null>(
     null,
   );
   const stars = loaded?.year === year ? loaded.stars : (starsByYear.get(year) ?? null);
   const [error, setError] = useState<string | null>(null);
+  const [times, setTimes] = useState<{ year: number; times: Record<string, StarTimes> } | null>(
+    null,
+  );
+  // A second at a time while counting down, so the next day opens the moment it unlocks.
+  const upcoming = nextUnlock();
+  const now = useNow(1000, upcoming !== null);
+  const next = nextUnlock(now);
+  const today = todaysPuzzle(now);
 
   useEffect(() => {
     if (!hasSession) return;
@@ -50,8 +62,22 @@ export function Picker({ current, hasSession, onPick }: Props) {
     };
   }, [year, hasSession]);
 
+  // Times are extra: without them the picker works just the same, so failing is quiet.
+  useEffect(() => {
+    if (!hasSession) return;
+    let cancelled = false;
+    api
+      .times(year)
+      .then((t) => !cancelled && setTimes({ year, times: t }))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [year, hasSession]);
+  const yearTimes = times?.year === year ? Object.entries(times.times) : [];
+
   const years: number[] = [];
-  for (let y = latestYear(); y >= 2015; y--) years.push(y);
+  for (let y = latestYear(now); y >= 2015; y--) years.push(y);
   const total = stars === null ? null : Object.values(stars).reduce((a, b) => a + b, 0);
   const status = !hasSession
     ? "Add your session cookie to see stars."
@@ -72,15 +98,24 @@ export function Picker({ current, hasSession, onPick }: Props) {
         ))}
       </div>
       <p class="muted">{status}</p>
+      {next && next.puzzle.year === year ? (
+        <p class="countdown">
+          Day {next.puzzle.day} unlocks in <strong>{formatCountdown(next.at - now)}</strong>
+        </p>
+      ) : null}
       <div class={`days ${hasSession && stars === null ? "loading" : ""}`}>
         {Array.from({ length: daysIn(year) }, (_, i) => i + 1).map((day) => {
           const count = stars?.[String(day)] ?? 0;
           const isCurrent = current?.year === year && current.day === day;
+          const locked = !isUnlocked(year, day, now);
+          const isToday = today?.year === year && today.day === day;
           return (
             <button
               type="button"
               key={day}
-              class={`day ${isCurrent ? "selected" : ""}`}
+              class={`day ${isCurrent ? "selected" : ""} ${locked ? "locked" : ""} ${isToday ? "today" : ""}`}
+              disabled={locked}
+              aria-label={locked ? `Day ${day}, not unlocked yet` : undefined}
               onClick={() => onPick({ year, day })}
             >
               <span>{day}</span>
@@ -89,6 +124,27 @@ export function Picker({ current, hasSession, onPick }: Props) {
           );
         })}
       </div>
+      {yearTimes.length > 0 ? (
+        <table class="star-times">
+          <caption>Your time to each star</caption>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              <th scope="col">Part 1</th>
+              <th scope="col">Part 2</th>
+            </tr>
+          </thead>
+          <tbody>
+            {yearTimes.map(([day, [first, second]]) => (
+              <tr key={day}>
+                <th scope="row">{day}</th>
+                <td>{first ? formatStarTime(first) : "–"}</td>
+                <td>{second ? formatStarTime(second) : "–"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
       <div class="practice">
         <button
           type="button"

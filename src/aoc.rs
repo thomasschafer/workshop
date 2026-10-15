@@ -277,6 +277,23 @@ impl AocClient {
         Ok(parse_calendar(&html))
     }
 
+    /// Your time to each star, by day, from your personal stats: how long after the puzzle
+    /// unlocked, as Advent of Code shows it, such as `01:05:02` or `>24h`.
+    pub async fn times(&self, year: u16, refresh: bool) -> Result<BTreeMap<u8, StarTimes>> {
+        let path = self.cache_dir.join(year.to_string()).join("times.html");
+        let html = match read_cache(&path, refresh, Some(CALENDAR_TTL))? {
+            Some(html) => html,
+            None => {
+                let html = self
+                    .get(&format!("{}/{year}/leaderboard/self", self.base_url))
+                    .await?;
+                paths::write_atomic(&path, html.as_bytes())?;
+                html
+            }
+        };
+        Ok(parse_times(&html))
+    }
+
     pub async fn submit(&self, puzzle: Puzzle, part: Part, answer: &str) -> Result<SubmitOutcome> {
         let answer = answer.trim();
         if answer.is_empty() || answer.contains('\n') {
@@ -314,11 +331,11 @@ impl AocClient {
         if outcome == SubmitOutcome::Correct {
             // The problem page now shows the next part and the accepted answer.
             let _ = std::fs::remove_file(self.day_dir(puzzle).join("problem.html"));
-            let _ = std::fs::remove_file(
-                self.cache_dir
-                    .join(puzzle.year.to_string())
-                    .join("calendar.html"),
-            );
+            // Both now show the new star.
+            for page in ["calendar.html", "times.html"] {
+                let _ =
+                    std::fs::remove_file(self.cache_dir.join(puzzle.year.to_string()).join(page));
+            }
         }
         Ok(outcome)
     }
@@ -646,6 +663,36 @@ fn escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// The time to each part's star, if it's been earned.
+pub type StarTimes = [Option<String>; 2];
+
+/// Times from the personal stats page. Its table lists a day, then for each part a time, which
+/// before 2025 is followed by a rank and score, and `-` for a star not yet earned.
+pub fn parse_times(html: &str) -> BTreeMap<u8, StarTimes> {
+    let document = Html::parse_document(html);
+    let text: String = document
+        .select(&selector("main"))
+        .next()
+        .map(|main| main.text().collect())
+        .unwrap_or_default();
+    let is_time = |token: &&str| token.contains(':') || token.starts_with('>') || *token == "-";
+    let mut times = BTreeMap::new();
+    for line in text.lines() {
+        let mut tokens = line.split_whitespace();
+        let Some(day) = tokens.next().and_then(|t| t.parse::<u8>().ok()) else {
+            continue;
+        };
+        let mut parts = tokens
+            .filter(is_time)
+            .map(|t| (t != "-").then(|| t.to_owned()));
+        let (Some(first), second) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        times.insert(day, [first, second.flatten()]);
+    }
+    times
+}
+
 pub fn parse_calendar(html: &str) -> BTreeMap<u8, u8> {
     let document = Html::parse_document(html);
     let label = regex::Regex::new(r"(?i)^Day (\d+)(?:, (one|two) stars?)?").expect("valid regex");
@@ -703,6 +750,33 @@ pub fn parse_submit_response(html: &str) -> SubmitOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_personal_times_in_both_layouts() {
+        // Invented times, laid out as Advent of Code lays out personal stats.
+        let before_2025 = "<main><pre>      --------Part 1---------   --------Part 2--------
+Day       Time    Rank  Score       Time   Rank  Score
+  2   00:31:10    4321      0          -      -      -
+  1       >24h  102464      0   00:10:00   9000      0
+</pre></main>";
+        let times = parse_times(before_2025);
+        assert_eq!(
+            times[&1],
+            [Some(">24h".to_owned()), Some("00:10:00".to_owned())]
+        );
+        assert_eq!(times[&2], [Some("00:31:10".to_owned()), None]);
+        let from_2025 = "<main><pre>Day   -Part 1-   -Part 2-
+ 12       >24h          -
+  3   00:59:46   01:19:33
+</pre></main>";
+        let times = parse_times(from_2025);
+        assert_eq!(times[&12], [Some(">24h".to_owned()), None]);
+        assert_eq!(
+            times[&3],
+            [Some("00:59:46".to_owned()), Some("01:19:33".to_owned())]
+        );
+        assert_eq!(times.len(), 2);
+    }
 
     // An invented puzzle in the shape of an Advent of Code page. Real puzzle text must never be
     // used in tests.

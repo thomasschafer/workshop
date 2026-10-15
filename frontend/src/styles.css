@@ -499,6 +499,59 @@ code {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* Today's puzzle, during the event. */
+.day.today {
+  border-color: var(--star);
+}
+
+.day.today.selected {
+  border-color: var(--accent);
+}
+
+/* Not unlocked yet: there, but not to be opened. */
+.day.locked {
+  background: transparent;
+  border-style: dashed;
+  color: var(--muted);
+  cursor: default;
+}
+
+.countdown {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.countdown strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--star);
+}
+
+.star-times {
+  width: 100%;
+  margin-top: 16px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.star-times caption {
+  text-align: left;
+  color: var(--muted);
+  padding-bottom: 6px;
+}
+
+.star-times th,
+.star-times td {
+  text-align: left;
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-weight: normal;
+}
+
+.star-times thead {
+  color: var(--muted);
+}
+
 .day .stars {
   font-size: 11px;
   min-height: 1em;

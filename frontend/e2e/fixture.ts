@@ -105,6 +105,11 @@ ${pythonProfile()}`,
   writeFileSync(join(cached, "problem.html"), puzzle);
   writeFileSync(join(cached, "input.txt"), input);
   writeFileSync(join(home, "cache", "aoc", String(year), "calendar.html"), calendar(year, stars));
+  // Invented times, laid out as Advent of Code lays out personal stats.
+  writeFileSync(
+    join(home, "cache", "aoc", String(year), "times.html"),
+    "<main><pre>Day   -Part 1-   -Part 2-\n  1   01:02:03   01:30:00\n</pre></main>",
+  );
 }
 
 /** A calendar page in the form Advent of Code uses, for the stars in the picker. */

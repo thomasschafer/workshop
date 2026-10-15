@@ -45,6 +45,9 @@ export interface Bootstrap {
   solutions_dir: string;
 }
 
+/** The time to each part's star, as Advent of Code gives it, or null if it's not been earned. */
+export type StarTimes = [string | null, string | null];
+
 export interface SpeechState {
   /** Whether dictation can use Whisper: the program and its model are both installed. */
   ready: boolean;
@@ -463,6 +466,8 @@ export const api = {
   setTheme: (settings: ThemeSettings) => request<{ css: string | null }>("PUT", "/theme", settings),
   setLanguage: (language: string) => request<null>("PUT", "/setup/language", { language }),
   setAocSession: (session: string) => request<null>("POST", "/setup/aoc-session", { session }),
+  times: (year: number, refresh = false) =>
+    request<Record<string, StarTimes>>("GET", `/years/${year}/times?refresh=${refresh}`),
   stars: (year: number, refresh = false) =>
     request<Record<string, number>>("GET", `/years/${year}/stars?refresh=${refresh}`),
   open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),
