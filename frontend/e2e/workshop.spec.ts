@@ -31,6 +31,9 @@ const card = (status: "waiting" | "working" | "done" | "asked" | "problem") =>
 
 const editor = () => page.locator(".cm-content");
 
+/** How long to wait for a run: a program's first start can be slow, such as on Windows. */
+const RUN = { timeout: 20_000 };
+
 /** Opens a page of settings, from the list of them. */
 async function openSettings(title: string): Promise<void> {
   await page.getByRole("button", { name: "Settings" }).click();
@@ -105,9 +108,9 @@ test("replies to the model's question", async () => {
 test("runs on the sample and the real input", async () => {
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await page.getByRole("button", { name: "Run sample" }).click();
-  await expect(page.locator(".run-result")).toContainText("Part 1: 3 ✓");
+  await expect(page.locator(".run-result")).toContainText("Part 1: 3 ✓", RUN);
   await page.getByRole("button", { name: "Run real input" }).click();
-  await expect(page.locator(".run-result")).toContainText("Part 1: 5");
+  await expect(page.locator(".run-result")).toContainText("Part 1: 5", RUN);
   await page.getByRole("button", { name: "Close" }).click();
 });
 
@@ -128,7 +131,7 @@ test("runs what was said, even when run before the edit is made", async () => {
   );
   expect(onTop).toBe(true);
   await page.getByRole("button", { name: "Run sample" }).click();
-  await expect(page.locator(".run-result")).toContainText("Part 1: 7");
+  await expect(page.locator(".run-result")).toContainText("Part 1: 7", RUN);
   await page.getByRole("button", { name: "Close" }).click();
   await say("undo");
   await expect(editor()).toContainText("return len(data.splitlines())");
@@ -281,7 +284,7 @@ test("offers to install a missing package, and uses it", async () => {
   await say("use the lanterns package");
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await page.getByRole("button", { name: "Run sample" }).click();
-  await expect(page.locator(".run-result")).toContainText("No module named 'lanterns'");
+  await expect(page.locator(".run-result")).toContainText("No module named 'lanterns'", RUN);
   await page.getByRole("button", { name: "Close" }).click();
 
   await expect(page.locator(".banner")).toContainText("lanterns isn't installed.");
@@ -294,7 +297,7 @@ test("offers to install a missing package, and uses it", async () => {
 
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await page.getByRole("button", { name: "Run sample" }).click();
-  await expect(page.locator(".run-result")).toContainText("Part 1: 3 ✓");
+  await expect(page.locator(".run-result")).toContainText("Part 1: 3 ✓", RUN);
   await page.getByRole("button", { name: "Close" }).click();
 
   await openSettings("Packages");
@@ -363,6 +366,7 @@ if __name__ == "__main__":
     await page.getByRole("button", { name: "Run sample" }).click();
     await expect(page.locator(".run-result")).toContainText(
       `Part ${part}: ${part === 1 ? 2 : 45} ✓`,
+      RUN,
     );
     await page.getByRole("button", { name: "Run real input" }).click();
     await page.getByRole("button", { name: new RegExp(`^Submit part ${part}: \\d+$`) }).click();
