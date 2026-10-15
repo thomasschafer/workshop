@@ -1,9 +1,16 @@
 import type { ComponentChildren } from "preact";
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, type ModelsState, type Snippet } from "../api";
 import type { DictationMethod, DictationSupport } from "../dictation";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
 import type { Packages } from "../hooks/usePackages";
+import {
+  notificationsOn,
+  notificationsUnavailable,
+  testNotification,
+  turnNotificationsOff,
+  turnNotificationsOn,
+} from "../notifications";
 import { isUpToDate } from "../packages";
 import type { DictationChoice } from "../preferences";
 import { Checks } from "./checks";
@@ -49,6 +56,7 @@ type Page =
   | "display"
   | "repo"
   | "leaderboard"
+  | "notifications"
   | "snippets"
   | "setup";
 
@@ -59,6 +67,7 @@ const TITLES: Record<Page, string> = {
   display: "Display",
   repo: "Solutions repo",
   leaderboard: "Leaderboard",
+  notifications: "Notifications",
   snippets: "Snippets",
   setup: "Setup and checks",
 };
@@ -153,6 +162,7 @@ function SettingsList(props: Props & { onOpen: (page: Page) => void }) {
       "repo",
       props.commitAfterStar ? "Commits and pushes after each star" : "Commit and push by hand",
     ],
+    ["notifications", "When each puzzle unlocks, if turned on for this device"],
     ["leaderboard", props.leaderboard ? `Private leaderboard ${props.leaderboard}` : "None chosen"],
     ["snippets", snippets.length === 0 ? "None yet" : `${snippets.length} to insert`],
     ["setup", "Run setup again, and check everything is working"],
@@ -194,6 +204,8 @@ function PageContent({ page, ...props }: Props & { page: Page }) {
       return <RepoPage {...props} />;
     case "leaderboard":
       return <LeaderboardPage {...props} />;
+    case "notifications":
+      return <NotificationsPage />;
     case "snippets":
       return <SnippetsPage {...props} />;
     case "setup":
@@ -300,6 +312,79 @@ function RepoPage({ commitMessage, solutionsDir, commitAfterStar, onCommitAfterS
         />
         Commit and push after each star
       </label>
+    </>
+  );
+}
+
+function NotificationsPage() {
+  const unavailable = notificationsUnavailable();
+  const [on, setOn] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  useEffect(() => {
+    if (unavailable !== null) return;
+    notificationsOn()
+      .then(setOn)
+      .catch(() => setOn(false));
+  }, [unavailable]);
+
+  const run = async (action: () => Promise<void>, done: string | null) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      await action();
+      if (done) setNote({ tone: "ok", text: done });
+    } catch (e) {
+      setNote({ tone: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setOn(await notificationsOn().catch(() => false));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <p class="small">
+        A notification on this device when each puzzle unlocks, at midnight US Eastern time. The
+        server needs to be running then to send it.
+      </p>
+      {unavailable !== null ? (
+        <p class="muted small">{unavailable}</p>
+      ) : (
+        <>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={on === true}
+              disabled={busy || on === null}
+              onChange={(e) =>
+                void run(
+                  (e.target as HTMLInputElement).checked
+                    ? turnNotificationsOn
+                    : turnNotificationsOff,
+                  null,
+                )
+              }
+            />
+            Notify me when puzzles unlock
+          </label>
+          {on ? (
+            <p class="small">
+              <button
+                type="button"
+                class="text-button"
+                disabled={busy}
+                onClick={() => void run(testNotification, "Sent: it should arrive in a moment.")}
+              >
+                Send a test notification
+              </button>
+            </p>
+          ) : null}
+        </>
+      )}
+      {note ? (
+        <p class={note.tone === "error" ? "error-text small" : "muted small"}>{note.text}</p>
+      ) : null}
     </>
   );
 }

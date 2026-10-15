@@ -8,6 +8,7 @@ mod eval;
 mod language;
 mod lsp;
 mod models;
+mod notify;
 mod packages;
 mod paths;
 mod practice;
@@ -259,6 +260,8 @@ async fn serve(
     }
     let warm = app.clone();
     tokio::spawn(async move { warm.warm_up().await });
+    let notifier = app.notifier.clone();
+    tokio::spawn(async move { notifier.run().await });
     // Stop straight away rather than waiting for connections to close: the editor's language
     // server websocket stays open indefinitely. Returning drops every task, which stops the
     // language servers and model CLIs they started.

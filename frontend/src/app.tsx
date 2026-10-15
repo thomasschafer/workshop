@@ -30,6 +30,7 @@ import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePackages } from "./hooks/usePackages";
 import { usePushToTalk } from "./hooks/usePushToTalk";
 import { useTalkKey } from "./hooks/useTalkKey";
+import { onNotificationOpen, puzzleToOpen } from "./notifications";
 import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleLabel, puzzleTitle } from "./puzzle";
@@ -516,6 +517,16 @@ export function App({ boot }: { boot: Bootstrap }) {
   // the moment it unlocks if the app's open then.
   const openPuzzleRef = useRef(openPuzzle);
   openPuzzleRef.current = openPuzzle;
+  // A tapped notification opens its puzzle: in a new window, through the address; in one
+  // already open, through a message from the service worker.
+  useEffect(() => {
+    const fromAddress = puzzleToOpen(location.search);
+    if (fromAddress) {
+      history.replaceState(history.state, "", location.pathname);
+      openPuzzleRef.current(fromAddress);
+    }
+    return onNotificationOpen((year, day) => openPuzzleRef.current({ year, day }));
+  }, []);
   useEffect(() => {
     const offerToday = () => {
       const today = todaysPuzzle();

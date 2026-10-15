@@ -59,6 +59,8 @@ pub struct App {
     /// Downloading Whisper's model for dictation.
     speech_install: Installs,
     dictation: Arc<crate::whisper::Dictation>,
+    /// Notifies devices that asked, as puzzles unlock.
+    pub notifier: Arc<crate::notify::Notifier>,
     /// Packages already found for missing modules, by language and module.
     resolutions: std::sync::Mutex<BTreeMap<(String, String), Resolution>>,
     http: reqwest::Client,
@@ -98,6 +100,7 @@ impl App {
             toolchain_install: Installs::default(),
             speech_install: Installs::default(),
             dictation: Arc::default(),
+            notifier: Arc::new(crate::notify::Notifier::load(&paths)?),
             resolutions: std::sync::Mutex::new(BTreeMap::new()),
             http: reqwest::Client::builder()
                 .user_agent(&config.aoc.user_agent)
@@ -192,6 +195,14 @@ pub fn router(app: Shared) -> Router {
         .route("/packages/cancel", post(cancel_install))
         .route("/packages/resolve", post(resolve_package))
         .route("/practice/reset", post(reset_practice))
+        .route("/notifications", get(notifications))
+        .route("/notifications/subscribed", post(notifications_subscribed))
+        .route("/notifications/subscribe", post(subscribe_notifications))
+        .route(
+            "/notifications/unsubscribe",
+            post(unsubscribe_notifications),
+        )
+        .route("/notifications/test", post(test_notification))
         .route("/speech", get(get_speech))
         .route("/speech/download", post(download_speech_model))
         .route("/speech/download/cancel", post(cancel_speech_download))
@@ -306,6 +317,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// Served without the token: see `auth`.
 const PUBLIC_ASSETS: &[&str] = &[
     "/manifest.webmanifest",
+    "/sw.js",
     "/icon-192.png",
     "/icon-512.png",
     "/icon-maskable-512.png",
@@ -1997,6 +2009,67 @@ async fn transcribe(State(app): State<Shared>, wav: axum::body::Bytes) -> ApiRes
     Ok(Json(Dictated {
         text: crate::whisper::spoken_text(&text),
     }))
+}
+
+#[derive(Serialize)]
+struct NotificationsState {
+    /// The key a browser subscribes with.
+    public_key: String,
+}
+
+async fn notifications(State(app): State<Shared>) -> ApiResult<NotificationsState> {
+    Ok(Json(NotificationsState {
+        public_key: app.notifier.public_key(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct EndpointBody {
+    endpoint: String,
+}
+
+/// Whether a device's subscription is known, as a browser can keep one the server has forgotten.
+async fn notifications_subscribed(
+    State(app): State<Shared>,
+    Json(body): Json<EndpointBody>,
+) -> ApiResult<bool> {
+    Ok(Json(app.notifier.is_subscribed(&body.endpoint)))
+}
+
+async fn subscribe_notifications(
+    State(app): State<Shared>,
+    Json(subscription): Json<crate::notify::Subscription>,
+) -> ApiResult<()> {
+    app.notifier
+        .subscribe(subscription)
+        .map_err(|e| bad_request(format!("{e:#}")))?;
+    Ok(Json(()))
+}
+
+async fn unsubscribe_notifications(
+    State(app): State<Shared>,
+    Json(body): Json<EndpointBody>,
+) -> ApiResult<()> {
+    app.notifier.unsubscribe(&body.endpoint)?;
+    Ok(Json(()))
+}
+
+/// Sends a notification straight away, so a device can check they arrive.
+async fn test_notification(
+    State(app): State<Shared>,
+    Json(subscription): Json<crate::notify::Subscription>,
+) -> ApiResult<()> {
+    let message = crate::notify::Message {
+        title: "Workshop".into(),
+        body: "Notifications work: you'll hear when each puzzle unlocks.".into(),
+        url: "/".into(),
+    };
+    match app.notifier.send(&subscription, &message).await? {
+        crate::notify::Delivery::Sent => Ok(Json(())),
+        crate::notify::Delivery::Gone => Err(bad_request(
+            "The browser has ended this device's notifications. Turn them off and on again.",
+        )),
+    }
 }
 
 /// Lets the app check the server can be reached, such as after it was asleep.

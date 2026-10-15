@@ -474,6 +474,15 @@ export const api = {
   setTheme: (settings: ThemeSettings) => request<{ css: string | null }>("PUT", "/theme", settings),
   setLanguage: (language: string) => request<null>("PUT", "/setup/language", { language }),
   setAocSession: (session: string) => request<null>("POST", "/setup/aoc-session", { session }),
+  notifications: () => request<{ public_key: string }>("GET", "/notifications"),
+  notificationsSubscribed: (endpoint: string) =>
+    request<boolean>("POST", "/notifications/subscribed", { endpoint }),
+  subscribeNotifications: (subscription: PushSubscriptionJSON) =>
+    request<null>("POST", "/notifications/subscribe", subscription),
+  unsubscribeNotifications: (endpoint: string) =>
+    request<null>("POST", "/notifications/unsubscribe", { endpoint }),
+  testNotification: (subscription: PushSubscriptionJSON) =>
+    request<null>("POST", "/notifications/test", subscription),
   leaderboard: (year: number) =>
     request<LeaderboardMember[] | null>("GET", `/years/${year}/leaderboard`),
   setLeaderboard: (id: string | null) => request<null>("PUT", "/leaderboard", { id }),

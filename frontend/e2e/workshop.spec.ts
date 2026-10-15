@@ -1,4 +1,7 @@
+import { createECDH, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { HOME, PORT } from "./fixture";
@@ -691,6 +694,79 @@ test("shows a private leaderboard once one is chosen", async () => {
   await page.getByRole("button", { name: "Stop showing it" }).click();
   await expect(page.getByRole("button", { name: "Stop showing it" })).toHaveCount(0);
   await closeSettings();
+});
+
+test("sends a test notification to a device that turns them on", async ({ browser }) => {
+  // A push service of the test's own, keeping what's sent to it.
+  const received: { headers: Record<string, string | string[] | undefined>; size: number }[] = [];
+  const service = createServer((request, response) => {
+    let size = 0;
+    request.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+    });
+    request.on("end", () => {
+      received.push({ headers: request.headers, size });
+      response.writeHead(201).end();
+    });
+  });
+  await new Promise<void>((resolve) => service.listen(0, "127.0.0.1", resolve));
+  const { port } = service.address() as AddressInfo;
+  // A device's keys, as a browser would make them.
+  const ecdh = createECDH("prime256v1");
+  ecdh.generateKeys();
+  const subscription = {
+    endpoint: `http://127.0.0.1:${port}/push/device`,
+    expirationTime: null,
+    keys: {
+      p256dh: ecdh.getPublicKey().toString("base64url"),
+      auth: randomBytes(16).toString("base64url"),
+    },
+  };
+
+  const context = await browser.newContext({ baseURL: `http://127.0.0.1:${PORT}` });
+  await context.grantPermissions(["notifications"]);
+  const device = await context.newPage();
+  // Test browsers can't subscribe to a real push service, so this stands in for one.
+  await device.addInitScript((json) => {
+    let current: PushSubscription | null = null;
+    const fake = {
+      endpoint: json.endpoint,
+      toJSON: () => json,
+      unsubscribe: async () => {
+        current = null;
+        return true;
+      },
+    } as unknown as PushSubscription;
+    PushManager.prototype.subscribe = async () => {
+      current = fake;
+      return fake;
+    };
+    PushManager.prototype.getSubscription = async () => current;
+    // Answers the browser's question about notifications as a tap on Allow would, which not
+    // every test browser lets the test do.
+    Object.defineProperty(Notification, "permission", { get: () => "granted" });
+    Notification.requestPermission = async () => "granted";
+  }, subscription);
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await device.goto(`/?token=${token}`);
+  await device.getByRole("button", { name: "Settings" }).click();
+  await device.locator(".settings-row", { hasText: "Notifications" }).getByRole("button").click();
+  const toggle = device.getByLabel("Notify me when puzzles unlock");
+  await expect(toggle).not.toBeChecked();
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+
+  await device.getByRole("button", { name: "Send a test notification" }).click();
+  await expect(device.getByText("Sent: it should arrive in a moment.")).toBeVisible();
+  expect(received).toHaveLength(1);
+  expect(received[0]?.headers["content-encoding"]).toBe("aes128gcm");
+  expect(String(received[0]?.headers.authorization)).toMatch(/^vapid t=/);
+
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await expect(device.getByRole("button", { name: "Send a test notification" })).toHaveCount(0);
+  await context.close();
+  service.close();
 });
 
 test("counts down to the next puzzle, and offers today's", async ({ browser }) => {

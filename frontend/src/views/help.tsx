@@ -128,6 +128,10 @@ export function Help() {
           then "Add to Home Screen" on an iPhone), and it opens full screen like an app. An iPhone
           asks for the link once more there, as the app doesn't share Safari's login.
         </p>
+        <p>
+          In December, Workshop can tell you when each puzzle unlocks: turn it on in Settings,
+          under Notifications, on each device you'd like to hear on.
+        </p>
       </section>
     </div>
   );
