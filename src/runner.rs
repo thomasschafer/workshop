@@ -252,6 +252,7 @@ mod tests {
             build: build.map(|b| b.iter().map(|s| (*s).to_owned()).collect()),
             run: run.iter().map(|s| (*s).to_owned()).collect(),
             lsp: None,
+            lsp_options: None,
             template: String::new(),
             dictation_hints: String::new(),
             packages: None,

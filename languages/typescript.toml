@@ -1,0 +1,120 @@
+name = "TypeScript"
+# Selects syntax highlighting in the editor.
+editor_mode = "typescript"
+lsp_language_id = "typescript"
+
+# Relative to the solutions directory.
+file = "{year}/day{day:02}/main.ts"
+
+# Deno runs TypeScript as it is, with no build step or project to set up, and fetches npm
+# packages the first time they're imported. A solution can't touch files or the network: the
+# puzzle input is passed on stdin. Each line of stdout is read as the answer to that part: line 1
+# for part 1, line 2 for part 2.
+run = ["deno", "run", "--quiet", "{file}"]
+
+lsp = ["deno", "lsp"]
+# Deno's language server stays off unless it's told otherwise. Its linter is left off, as it
+# objects to `npm:` imports, which are how packages are used here.
+lsp_options = { enable = true, lint = false, config = "./deno.json" }
+
+template = '''
+function part1(input: string): number {
+  throw new Error("not solved yet");
+}
+
+function part2(input: string): number {
+  throw new Error("not solved yet");
+}
+
+const input = await new Response(Deno.stdin.readable).text();
+console.log(part1(input));
+// When you start part 2, uncomment the next line.
+// console.log(part2(input));
+'''
+
+dictation_hints = '''
+- Names are camelCase: "count trees" is `countTrees`. Numbers in names are spoken as words but written as digits: "part one" is `part1`, unless a name in the file already says otherwise.
+- "const x equals ..." is `const x = ...;`, and "let x equals ..." is `let x = ...;`. Write `let` when the user says it, even if nothing reassigns it yet: they're about to. Statements end with a semicolon. A line ending in an opening brace opens a block, indented two spaces further; "close brace" or "end block" closes it.
+- "dot" between names is property access, `input.trim()`. "of" or "call" means a call: "parse int of s" is `parseInt(s)`, and "max of xs" is `Math.max(...xs)`, and "sum of xs" is `sum(xs)` from the helpers.
+- "x arrow x times two" or "lambda x arrow x times two" is `(x) => x * 2`. "map with ..." on an array is `.map(...)`; likewise filter, reduce, some, every, find.
+- "equals" is `=`, "triple equals" or "double equals" is `===`, "not equals" is `!==`, "plus equals" is `+=`. "and" and "or" in a condition are `&&` and `||`.
+- "number array" or "array of number" is `number[]`; "map from string to number" is `Map<string, number>`; "set of string" is `Set<string>`.
+- "template string" starts a template literal with backticks; "dollar brace x" inside one is `${x}`.
+- "for const x of xs" is `for (const x of xs) {`.
+- "Wrap that in f" applies f to the whole of the most recent expression: wrapping `input.trim()` in `parseInt` gives `parseInt(input.trim())`.
+- The user's own helpers module is `aoc`: "import ints from AOC" is `import { ints } from "aoc";`. Packages come from npm and are imported with an `npm:` prefix, "at" starting a scope: "import min priority queue from at data structures JS slash priority queue" is `import { MinPriorityQueue } from "npm:@datastructures-js/priority-queue";`. Only use a package the user names; otherwise use the standard library and the helpers. Imports go with the others at the top, wherever the cursor is.
+- Common mishearings: "in put" is `input`, "split lines" means `.split("\n")`, "const" may be heard as "cost" or "constant", "length" as "lengths".
+'''
+
+# When part 1 is solved, the template's part 2 line is offered to be turned on.
+start_part_two = { find = """
+// When you start part 2, uncomment the next line.
+// console.log(part2(input));""", replace = """
+console.log(part2(input));""" }
+
+# A module of your own that every solution can import, created with your first solution unless
+# it's already there.
+[helpers]
+file = "lib/aoc.ts"
+# A line defining a helper, with its name: an exported function or constant.
+definition = "^export (?:async )?(?:function\\*? ?|const |let )([A-Za-z_$][A-Za-z0-9_$]*)"
+# Maps `aoc` to the module, for running solutions and for the language server, unless you have a
+# deno.json already.
+lsp_config = { file = "deno.json", text = """
+{
+  "imports": {
+    "aoc": "./lib/aoc.ts"
+  },
+  "lock": false
+}
+""" }
+template = '''
+// Helpers your solutions can share: `import { ints } from "aoc";` to use them, and add your own.
+
+/** Every integer in the text, including negative ones: ints("x=-3, y=12") gives [-3, 12]. */
+export function ints(text: string): number[] {
+  return (text.match(/-?\d+/g) ?? []).map(Number);
+}
+
+/** A grid of characters by "row,column", from lines of text. */
+export function grid(text: string): Map<string, string> {
+  const cells = new Map<string, string>();
+  text.split("\n").forEach((line, r) => {
+    [...line].forEach((ch, c) => cells.set(`${r},${c}`, ch));
+  });
+  return cells;
+}
+
+/** The positions above, below, left and right. */
+export function neighbours4(r: number, c: number): [number, number][] {
+  return [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+}
+
+/** The positions around, diagonals included. */
+export function neighbours8(r: number, c: number): [number, number][] {
+  const around: [number, number][] = [];
+  for (const dr of [-1, 0, 1]) {
+    for (const dc of [-1, 0, 1]) {
+      if (dr !== 0 || dc !== 0) around.push([r + dr, c + dc]);
+    }
+  }
+  return around;
+}
+
+/** The numbers added up, as JavaScript has no `sum` of its own. */
+export function sum(xs: number[]): number {
+  return xs.reduce((a, b) => a + b, 0);
+}
+
+'''
+
+# Setup offers to install Deno with mise (https://mise.jdx.dev) when it's missing, into the
+# solutions directory only. This is the mise.toml it writes there, unless one is there already.
+# A Deno you have installed already is used as it is.
+[toolchain]
+mise = '''
+# The programs these solutions are run with, installed by mise for this directory only. Run
+# `mise install` to install them, and see https://mise.jdx.dev to use them in your shell.
+[tools]
+deno = "2"
+'''

@@ -56,6 +56,11 @@ description = "Check installing packages with the real toolchains (needs the net
 depends = ["build-frontend"]
 run = "cargo build && cd frontend && node scripts/check-packages.ts"
 
+[tasks.check-languages]
+description = "Check each language with its real toolchain and language server (needs each language's programs)"
+depends = ["build-frontend"]
+run = "cargo build && cd frontend && node scripts/check-languages.ts"
+
 [tasks.check-dictation]
 description = "Check dictation with Whisper on real recorded speech (needs whisper-cli, the small.en model, say and ffmpeg)"
 depends = ["build-frontend"]

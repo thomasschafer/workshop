@@ -483,6 +483,7 @@ struct LanguageInfo {
     lsp_language_id: String,
     has_lsp: bool,
     root_uri: String,
+    lsp_options: Option<serde_json::Value>,
     /// For recognising a missing package in errors, if the language has packages.
     packages: Option<PackageHints>,
     start_part_two: Option<crate::language::TextSwap>,
@@ -518,6 +519,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
             lsp_language_id: language.lsp_language_id.clone(),
             has_lsp,
             root_uri: file_uri(&app.config.solutions_dir),
+            lsp_options: language.lsp_options.clone(),
             packages: language.packages.as_ref().map(|p| PackageHints {
                 missing_module: p.missing_module.clone(),
                 missing_package: p.missing_package.clone(),

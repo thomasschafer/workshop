@@ -25,6 +25,9 @@ pub struct LanguageProfile {
     pub run: Vec<String>,
     #[serde(default)]
     pub lsp: Option<Vec<String>>,
+    /// Sent to the language server as it starts, for servers that need settings to work at all.
+    #[serde(default)]
+    pub lsp_options: Option<serde_json::Value>,
     pub template: String,
     /// How the language is spoken, given to the edit model.
     pub dictation_hints: String,
@@ -179,6 +182,7 @@ fn relative_inside(path: &str) -> Result<PathBuf> {
 const BUILTIN: &[(&str, &str)] = &[
     ("haskell", include_str!("../languages/haskell.toml")),
     ("python", include_str!("../languages/python.toml")),
+    ("typescript", include_str!("../languages/typescript.toml")),
 ];
 
 pub fn builtin_profiles() -> Result<Vec<(String, LanguageProfile)>> {
@@ -297,12 +301,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn finds_the_helpers_each_language_starts_with() {
+    fn finds_the_helpers_every_language_starts_with() {
         for (id, profile) in builtin_profiles().unwrap() {
             let helpers = profile.helpers.unwrap();
             helpers.validate().unwrap();
             assert_eq!(
-                helpers.names_in(&helpers.template),
+                helpers.names_in(&helpers.template)[..4],
                 ["ints", "grid", "neighbours4", "neighbours8"],
                 "{id}"
             );

@@ -153,7 +153,11 @@ export function App({ boot }: { boot: Bootstrap }) {
   const lsp = useMemo(
     () =>
       boot.language.has_lsp
-        ? new LanguageServerConnection(boot.language.root_uri, setLspStatus)
+        ? new LanguageServerConnection(
+            boot.language.root_uri,
+            boot.language.lsp_options,
+            setLspStatus,
+          )
         : null,
     [boot],
   );

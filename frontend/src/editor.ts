@@ -14,8 +14,11 @@ import {
   StreamLanguage,
   syntaxHighlighting,
 } from "@codemirror/language";
+import { go } from "@codemirror/legacy-modes/mode/go";
 import { haskell } from "@codemirror/legacy-modes/mode/haskell";
+import { typescript } from "@codemirror/legacy-modes/mode/javascript";
 import { python } from "@codemirror/legacy-modes/mode/python";
+import { rust } from "@codemirror/legacy-modes/mode/rust";
 import {
   forEachDiagnostic,
   nextDiagnostic,
@@ -41,10 +44,14 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { markCursor, minimalChange, unmarkCursor } from "./diff";
+import { withoutPullDiagnostics } from "./lsp";
 
 const LANGUAGES: Record<string, () => Extension> = {
   haskell: () => StreamLanguage.define(haskell),
   python: () => StreamLanguage.define(python),
+  typescript: () => StreamLanguage.define(typescript),
+  go: () => StreamLanguage.define(go),
+  rust: () => StreamLanguage.define(rust),
 };
 
 const highlightStyle = HighlightStyle.define([
@@ -423,7 +430,7 @@ class SocketTransport implements Transport {
 
   send(message: string): void {
     if (this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(message);
+      this.socket.send(withoutPullDiagnostics(message));
     }
   }
 
@@ -455,10 +462,12 @@ export class LanguageServerConnection {
 
   constructor(
     rootUri: string,
+    initializationOptions: unknown,
     private readonly onStatus: (status: LanguageServerStatus) => void,
   ) {
     this.client = new LSPClient({
       rootUri,
+      initializationOptions,
       timeout: 30_000,
       extensions: [serverDiagnostics()],
     });

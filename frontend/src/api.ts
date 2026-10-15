@@ -27,6 +27,8 @@ export interface Bootstrap {
     lsp_language_id: string;
     has_lsp: boolean;
     root_uri: string;
+    /** Sent to the language server as it starts. */
+    lsp_options: unknown;
     /** For recognising a missing package in errors, if the language has packages. */
     packages: PackageHints | null;
     /** Turns on the template's part 2 code once part 1 is solved. */

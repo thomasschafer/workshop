@@ -1,0 +1,341 @@
+# Edit eval cases for TypeScript: see haskell.toml for the format. All code here is invented.
+
+language = "typescript"
+
+[[case]]
+name = "const-camel-case"
+utterance = "const count trees equals zero"
+before = '''
+function part1(input: string): number {
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  const countTrees = 0;‸
+}'''
+
+[[case]]
+name = "let-camel-case"
+utterance = "let total equals zero"
+before = '''
+function part1(input: string): number {
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  let total = 0;‸
+}'''
+
+[[case]]
+name = "split-and-map"
+utterance = "const lines equals input dot trim dot split on new line"
+before = '''
+function part1(input: string): number {
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  const lines = input.trim().split("\n");‸
+}'''
+also = ['''
+function part1(input: string): number {
+  const lines = input.trim().split('\n');‸
+}''']
+
+[[case]]
+name = "arrow-function"
+utterance = "const numbers equals lines dot map with line arrow number of line"
+before = '''
+function part1(input: string): number {
+  const lines = input.trim().split("\n");
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  const lines = input.trim().split("\n");
+  const numbers = lines.map((line) => Number(line));‸
+}'''
+also = ['''
+function part1(input: string): number {
+  const lines = input.trim().split("\n");
+  const numbers = lines.map(line => Number(line));‸
+}''']
+
+[[case]]
+name = "for-of-opens-block"
+utterance = "for const line of lines"
+before = '''
+function part1(input: string): number {
+  const lines = input.trim().split("\n");
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  const lines = input.trim().split("\n");
+  for (const line of lines) {
+    ‸
+  }
+}'''
+
+[[case]]
+name = "plus-equals"
+utterance = "total plus equals number of line"
+before = '''
+function part1(input: string): number {
+  let total = 0;
+  for (const line of lines) {
+    ‸
+  }
+}'''
+after = '''
+function part1(input: string): number {
+  let total = 0;
+  for (const line of lines) {
+    total += Number(line);‸
+  }
+}'''
+
+[[case]]
+name = "if-triple-equals"
+utterance = "if x equals equals zero continue"
+before = '''
+function part1(input: string): number {
+  for (const x of numbers) {
+    ‸
+  }
+}'''
+after = '''
+function part1(input: string): number {
+  for (const x of numbers) {
+    if (x === 0) continue;‸
+  }
+}'''
+also = ['''
+function part1(input: string): number {
+  for (const x of numbers) {
+    if (x === 0) {
+      continue;
+    }‸
+  }
+}''', '''
+function part1(input: string): number {
+  for (const x of numbers) {
+    if (x === 0) {
+      continue;‸
+    }
+  }
+}''']
+
+[[case]]
+name = "typed-map"
+utterance = "const counts equals new map from string to number"
+before = '''
+function part1(input: string): number {
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  const counts = new Map<string, number>();‸
+}'''
+
+[[case]]
+name = "max-of-array"
+utterance = "return max of numbers"
+before = '''
+function part1(input: string): number {
+  const numbers = ints(input);
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  const numbers = ints(input);
+  return Math.max(...numbers);‸
+}'''
+
+[[case]]
+name = "wrap-in-call"
+utterance = "wrap that in number"
+before = '''
+function part1(input: string): number {
+  const first = input.trim()‸
+}'''
+recent = "input.trim()"
+after = '''
+function part1(input: string): number {
+  const first = Number(input.trim())‸
+}'''
+
+[[case]]
+name = "template-string"
+utterance = "console dot log template string total is dollar brace total"
+before = '''
+function part1(input: string): number {
+  ‸
+}'''
+after = '''
+function part1(input: string): number {
+  console.log(`total is ${total}`);‸
+}'''
+
+[[case]]
+name = "replace-placeholder"
+utterance = "replace this line with return input dot split new line dot length"
+before = '''
+function part1(input: string): number {
+  ‸throw new Error("not solved yet");
+}'''
+after = '''
+function part1(input: string): number {
+  return input.split("\n").length;‸
+}'''
+also = ['''
+function part1(input: string): number {
+  return input.split('\n').length;‸
+}''']
+
+[[case]]
+name = "uncomment-part-two"
+utterance = "uncomment the last line"
+before = '''
+function part1(input: string): number {
+  return 1;
+}
+
+function part2(input: string): number {
+  throw new Error("not solved yet");
+}
+
+const input = await new Response(Deno.stdin.readable).text();
+console.log(part1(input));‸
+// When you start part 2, uncomment the next line.
+// console.log(part2(input));'''
+after = '''
+function part1(input: string): number {
+  return 1;
+}
+
+function part2(input: string): number {
+  throw new Error("not solved yet");
+}
+
+const input = await new Response(Deno.stdin.readable).text();
+console.log(part1(input));
+// When you start part 2, uncomment the next line.
+console.log(part2(input));‸'''
+also = ['''
+function part1(input: string): number {
+  return 1;
+}
+
+function part2(input: string): number {
+  throw new Error("not solved yet");
+}
+
+const input = await new Response(Deno.stdin.readable).text();
+console.log(part1(input));‸
+// When you start part 2, uncomment the next line.
+console.log(part2(input));''', '''
+function part1(input: string): number {
+  return 1;
+}
+
+function part2(input: string): number {
+  throw new Error("not solved yet");
+}
+
+const input = await new Response(Deno.stdin.readable).text();
+console.log(part1(input));
+// When you start part 2, uncomment the next line.
+‸console.log(part2(input));''']
+
+[[case]]
+name = "import-helpers-from-the-body"
+utterance = "import ints from AOC"
+before = '''
+function part1(input: string): number {
+  return ‸;
+}'''
+after = '''
+import { ints } from "aoc";‸
+
+function part1(input: string): number {
+  return ;
+}'''
+also = ['''
+import { ints } from "aoc";
+
+function part1(input: string): number {
+  return ‸;
+}''']
+
+[[case]]
+name = "imports-a-helper-it-uses"
+utterance = "replace this line with return the sum of ints of input"
+before = '''
+function part1(input: string): number {
+  ‸throw new Error("not solved yet");
+}'''
+after = '''
+import { ints, sum } from "aoc";
+
+function part1(input: string): number {
+  return sum(ints(input));‸
+}'''
+also = ['''
+import { ints } from "aoc";
+
+function part1(input: string): number {
+  return ints(input).reduce((a, b) => a + b, 0);‸
+}''', '''
+import { ints } from "aoc";
+
+function part1(input: string): number {
+  return ints(input).reduce((a, b) => a + b);‸
+}''']
+
+[[case]]
+name = "npm-package"
+utterance = "import grid from at puzzles slash grids"
+before = '''
+‸
+function part1(input: string): number {
+  return 0;
+}'''
+after = '''
+import { Grid } from "npm:@puzzles/grids";‸
+
+function part1(input: string): number {
+  return 0;
+}'''
+also = ['''
+import { Grid } from "npm:@puzzles/grids";
+‸
+function part1(input: string): number {
+  return 0;
+}''', '''
+import { grid } from "npm:@puzzles/grids";‸
+
+function part1(input: string): number {
+  return 0;
+}''', '''
+import { grid } from "npm:@puzzles/grids";
+‸
+function part1(input: string): number {
+  return 0;
+}''']
+
+[[case]]
+name = "refuse-write-function"
+utterance = "write a function that finds the shortest path through the grid"
+before = '''
+‸'''
+unsure = true
+
+[[case]]
+name = "refuse-finish"
+utterance = "finish part two for me"
+before = '''
+function part2(input: string): number {
+  ‸
+}'''
+unsure = true

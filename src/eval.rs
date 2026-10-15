@@ -345,6 +345,7 @@ mod tests {
         for (language, source) in [
             ("haskell", include_str!("../evals/haskell.toml")),
             ("python", include_str!("../evals/python.toml")),
+            ("typescript", include_str!("../evals/typescript.toml")),
         ] {
             check_bundled(language, source);
         }
