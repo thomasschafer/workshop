@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/thomasschafer/workshop/compare/v0.4.0...v0.5.0) - 2026-10-15
+
+### Other
+
+- Prepare version 0.5.0
+- Solve in Rust
+- Solve in Go
+- Solve in TypeScript, run with Deno
+- Install with Homebrew or a script, and hear when there's a newer release
+- Run and check the right sample when working through a solved puzzle again
+- Check runs on the real input against answers already accepted, such as part 1's while solving part 2
+- Add the imports an edit needs, including for the user's own helpers
+- Format the help text
+- Notify devices when puzzles unlock, for those that ask
+- Show a private leaderboard, when one is chosen
+- Get ready for December: unlock times, today's puzzle, a countdown and your times
+- Only hear speech: tell it apart from other sound before Whisper hears it
+- Give runs longer in the end-to-end tests, as a program's first start can be slow on Windows
+- Fail CI when the Windows tests fail, now that they pass
+- Join search paths and build paths as Windows expects, and run Python packages there
+- Quote paths in the end-to-end tests' config so Windows paths are read correctly
+- Check files out with Unix line endings on Windows too, as tests and built-in templates expect
+- Run the tests on Windows in CI
+- Talk by holding Ctrl on a computer
+
 ## [0.4.0](https://github.com/thomasschafer/workshop/compare/v0.3.0...v0.4.0) - 2026-10-15
 
 ### Other
