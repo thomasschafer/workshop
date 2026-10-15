@@ -78,13 +78,28 @@ export function usePushToTalk(options: Options) {
   };
   const held = () => current.current.find((p) => p.held);
 
+  /** Starts a press of the button, keeping hold of the pointer until it's let go. */
   const start = (event: PointerEvent) => {
     event.preventDefault();
     if (held()) return;
+    try {
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    } catch (e) {
+      latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+      return;
+    }
+    begin();
+  };
+
+  /** Starts a press made with a key held down rather than the button. */
+  const startHeld = () => {
+    if (!held()) begin();
+  };
+
+  const begin = () => {
     let listener: Listener;
     let id: number;
     try {
-      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
       listener = latest.current.method() === "server" ? new ServerDictation() : new PushToTalk();
       id = latest.current.onStart();
     } catch (e) {
@@ -194,6 +209,18 @@ export function usePushToTalk(options: Options) {
     press.listener.cancel();
   };
 
+  /**
+   * Abandons the press being held, keeping nothing it heard: the key held for it turned out to be
+   * part of a shortcut.
+   */
+  const abandonHeld = async () => {
+    const press = held();
+    if (!press) return;
+    update((presses) => presses.map((p) => (p.id === press.id ? { ...p, cancelled: true } : p)));
+    press.listener.cancel();
+    await stop();
+  };
+
   const heldPress = presses.find((p) => p.held);
   return {
     /** The held press's phase, if the button is held. */
@@ -207,7 +234,9 @@ export function usePushToTalk(options: Options) {
       delay: press.delay,
     })),
     start,
+    startHeld,
     stop,
+    abandonHeld,
     cancel,
   };
 }

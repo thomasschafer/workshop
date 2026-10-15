@@ -28,6 +28,7 @@ import { useDiscussion } from "./hooks/useDiscussion";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePackages } from "./hooks/usePackages";
 import { usePushToTalk } from "./hooks/usePushToTalk";
+import { useTalkKey } from "./hooks/useTalkKey";
 import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleLabel, puzzleTitle } from "./puzzle";
@@ -812,6 +813,9 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   // The picker is the home screen until a puzzle is open, and can be reopened from the header.
   const showPicker = picking || puzzle === null;
+  // The talk button's state, and where it's hidden, apply to the Ctrl key just the same.
+  const controlsHidden = showPicker || shownTab === "problem";
+  useTalkKey(dictationMethod !== "keyboard" && !controlsHidden && sheet === null, talk);
 
   const problemView = puzzle ? (
     <ProblemView
@@ -1070,7 +1074,7 @@ export function App({ boot }: { boot: Bootstrap }) {
 
       <Controls
         // Nothing to do with them while reading the puzzle: speech would edit code out of sight.
-        hidden={showPicker || shownTab === "problem"}
+        hidden={controlsHidden}
         method={dictationMethod}
         talk={talk.held}
         showTyped={showTyped}

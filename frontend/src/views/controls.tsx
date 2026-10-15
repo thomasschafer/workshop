@@ -127,6 +127,7 @@ export function Controls(props: Props) {
           <button
             type="button"
             class={`talk ${talk ?? ""}`}
+            title="Or hold Ctrl"
             onPointerDown={props.onTalkStart}
             onPointerUp={props.onTalkEnd}
             onPointerCancel={props.onTalkEnd}

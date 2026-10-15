@@ -46,6 +46,10 @@ export function Help() {
           ones. Tap Cancel on a card to drop it before it changes anything.
         </p>
         <p>
+          On a computer, you can hold Ctrl instead of the button: on its own, rather than with
+          another key as for a shortcut.
+        </p>
+        <p>
           The button turns green once it's listening; start speaking then. If what's heard often
           isn't what you said, try another way of hearing it in Settings, under Talking: Whisper on
           the server is the most accurate, and your keyboard's dictation works on any phone.

@@ -444,6 +444,35 @@ test("keeps what's being said still while a card above it leaves", async () => {
   expect(moves.filter((m) => m.includes("live"))).toEqual([]);
 });
 
+test("talks while Ctrl is held on its own, but not when it's part of a shortcut", async () => {
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  const say = (text: string) =>
+    page.evaluate((t) => {
+      (window as unknown as { demoSpeech: { text: string } }).demoSpeech.text = t;
+    }, text);
+
+  await say("go to line two");
+  await page.keyboard.down("Control");
+  await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
+  await page.waitForTimeout(800);
+  await page.keyboard.up("Control");
+  await expect(card("done").filter({ hasText: "“go to line two”" }).last()).toBeVisible();
+
+  // Ctrl with another key is a shortcut, even once it's been held long enough to listen.
+  await say("go to line three");
+  await page.keyboard.down("Control");
+  await expect(page.locator(".talk")).toHaveClass(/\blistening\b/);
+  await page.keyboard.press("KeyK");
+  await expect(page.locator(".talk")).not.toHaveClass(/\blistening\b/);
+  await page.keyboard.up("Control");
+  // A quick tap isn't long enough to listen.
+  await page.keyboard.press("Control");
+  await page.waitForTimeout(1500);
+  await expect(page.locator(".card", { hasText: "go to line three" })).toHaveCount(0);
+  await expect(page.locator(".card.live")).toHaveCount(0);
+  await expect(page.locator(".card", { hasText: "Didn't catch" })).toHaveCount(0);
+});
+
 test("finishes a press when the page is left mid-press, keeping what was said", async () => {
   await page.evaluate(() => {
     (window as unknown as { demoSpeech: { text: string } }).demoSpeech.text = "go to line two";
