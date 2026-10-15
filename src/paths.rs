@@ -100,6 +100,9 @@ pub fn expand_home(path: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(path))
 }
 
+/// What separates the directories in a search path such as `PATH`.
+pub const SEARCH_PATH_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
+
 /// A path as it's shown to the user: under the home directory, written from `~`.
 pub fn display_path(path: &Path) -> String {
     match dirs::home_dir().and_then(|home| path.strip_prefix(home).ok().map(Path::to_owned)) {

@@ -125,10 +125,12 @@ defaults = []
 # {packages} becomes one argument per package.
 install = [
   ["python3", "-m", "venv", "{env}/venv"],
-  ["{env}/venv/bin/python", "-m", "pip", "install", "{packages}"],
+  ["{env}/venv/{venv_bin}/python", "-m", "pip", "install", "{packages}"],
 ]
-# {PATH} is Workshop's own PATH.
-environment = { PATH = "{env}/venv/bin:{PATH}", VIRTUAL_ENV = "{env}/venv" }
+# {PATH} is Workshop's own PATH. For what differs on Windows, {path_sep} separates directories in
+# PATH (`:`, or `;` on Windows), and {venv_bin} is where a Python virtual environment keeps its
+# programs (bin, or Scripts on Windows).
+environment = { PATH = "{env}/venv/{venv_bin}{path_sep}{PATH}", VIRTUAL_ENV = "{env}/venv" }
 # Each pattern has one group: the missing module.
 missing_module = ["No module named '([A-Za-z0-9_.]+)'"]
 # Patterns for compilers that name the package itself, with the package as their only group.

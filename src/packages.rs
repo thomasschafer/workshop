@@ -38,7 +38,8 @@ pub struct PackagesProfile {
     #[serde(default)]
     pub update: Option<UpdateStep>,
     /// Environment variables for building, running and the language server, once the packages
-    /// are installed. `{env}` is as above, and `{PATH}` is Workshop's own `PATH`.
+    /// are installed. `{env}` is as above, `{PATH}` is Workshop's own `PATH`, and the
+    /// placeholders for the system are as in `system_vars`.
     #[serde(default)]
     pub environment: BTreeMap<String, String>,
     /// Patterns that find a missing module in an error, with the module as their only group.
@@ -408,7 +409,7 @@ impl Packages<'_> {
             Some(path) => path.to_owned(),
             None => std::env::var("PATH").unwrap_or_default(),
         };
-        let vars = Vars::new()
+        let vars = system_vars()
             .set("env", env.to_string_lossy())
             .set("PATH", path);
         self.profile
@@ -533,7 +534,7 @@ impl Packages<'_> {
     }
 
     fn render(&self, command: &[String], env: &Path, packages: &[String]) -> Result<Vec<String>> {
-        let vars = Vars::new().set("env", env.to_string_lossy());
+        let vars = system_vars().set("env", env.to_string_lossy());
         let mut args = Vec::new();
         for arg in command {
             if arg == "{packages}" {
@@ -575,6 +576,14 @@ impl Packages<'_> {
             LookupService::Hoogle => hoogle(lookup.url.as_deref(), module, http).await,
         }
     }
+}
+
+/// Placeholders for what differs between systems: `{path_sep}`, which separates the directories
+/// in `PATH`, and `{venv_bin}`, where a Python virtual environment keeps its programs.
+fn system_vars() -> Vars<'static> {
+    Vars::new()
+        .set("path_sep", crate::paths::SEARCH_PATH_SEPARATOR.to_string())
+        .set("venv_bin", if cfg!(windows) { "Scripts" } else { "bin" })
 }
 
 fn now_secs() -> u64 {

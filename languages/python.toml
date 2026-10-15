@@ -110,9 +110,9 @@ defaults = []
 # same way.
 install = [
   ["python3", "-m", "venv", "{env}/venv"],
-  ["{env}/venv/bin/python", "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "{packages}"],
+  ["{env}/venv/{venv_bin}/python", "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "{packages}"],
 ]
-environment = { PATH = "{env}/venv/bin:{PATH}", VIRTUAL_ENV = "{env}/venv" }
+environment = { PATH = "{env}/venv/{venv_bin}{path_sep}{PATH}", VIRTUAL_ENV = "{env}/venv" }
 missing_module = [
   "No module named '([A-Za-z0-9_.]+)'",
   "Import \"([A-Za-z0-9_.]+)\" could not be resolved",

@@ -137,11 +137,14 @@ impl<'a> Solutions<'a> {
 
 /// `text` with paths inside `dir` written relative to it.
 fn relative_paths(text: &str, dir: &std::path::Path) -> String {
-    text.replace(&format!("{}/", dir.display()), "")
+    text.replace(
+        &format!("{}{}", dir.display(), std::path::MAIN_SEPARATOR),
+        "",
+    )
 }
 
-/// Joins environment variables, giving one set more than once all its values, separated by `:`
-/// as search paths are.
+/// Joins environment variables, giving one set more than once all its values, separated as
+/// search paths are: by `:`, or `;` on Windows.
 fn merge_environment(
     variables: impl IntoIterator<Item = (String, String)>,
 ) -> Vec<(String, String)> {
@@ -149,7 +152,7 @@ fn merge_environment(
     for (name, value) in variables {
         match environment.iter_mut().find(|(n, _)| *n == name) {
             Some((_, existing)) => {
-                existing.push(':');
+                existing.push(crate::paths::SEARCH_PATH_SEPARATOR);
                 existing.push_str(&value);
             }
             None => environment.push((name, value)),
@@ -165,12 +168,16 @@ mod tests {
     #[test]
     fn shortens_paths_in_output() {
         let dir = std::path::Path::new("/home/me/aoc");
+        let file = std::path::Path::new("2024").join("day01").join("main.py");
         assert_eq!(
             relative_paths(
-                "File \"/home/me/aoc/2024/day01/main.py\", line 2\n/home/me/aocx/y",
+                &format!(
+                    "File \"{}\", line 2\n/home/me/aocx/y",
+                    dir.join(&file).display()
+                ),
                 dir
             ),
-            "File \"2024/day01/main.py\", line 2\n/home/me/aocx/y"
+            format!("File \"{}\", line 2\n/home/me/aocx/y", file.display())
         );
     }
 
@@ -184,7 +191,10 @@ mod tests {
         assert_eq!(
             merged,
             [
-                ("PYTHONPATH".to_owned(), "/lib:/site".to_owned()),
+                (
+                    "PYTHONPATH".to_owned(),
+                    format!("/lib{}/site", crate::paths::SEARCH_PATH_SEPARATOR)
+                ),
                 ("A".to_owned(), "1".to_owned())
             ]
         );

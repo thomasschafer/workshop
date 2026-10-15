@@ -112,12 +112,19 @@ impl HelpersProfile {
 }
 
 /// A path that must stay inside the solutions directory.
-fn relative_inside(path: &str) -> Result<&Path> {
-    let relative = Path::new(path);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
+/// A path that must stay inside the solutions directory. It's written with `/`, as in a profile,
+/// and made with the system's own separator, so it reads as one path on Windows too.
+fn relative_inside(path: &str) -> Result<PathBuf> {
+    let relative: PathBuf = path.split('/').filter(|part| !part.is_empty()).collect();
+    if path.starts_with('/')
+        || relative.has_root()
+        || relative.is_absolute()
+        || relative.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
+        })
     {
         bail!("{path} must stay inside the solutions directory");
     }
