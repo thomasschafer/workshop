@@ -197,6 +197,12 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
   const [serverSpeech, setServerSpeech] = useState(boot.server_dictation);
+  const [part2Started, setPart2Started] = useState(false);
+  /** Whether code has started part 2: the template's part 2 line is no longer turned off. */
+  const hasStartedPart2 = (text: string) => {
+    const swap = boot.language.start_part_two;
+    return swap === null || !text.includes(swap.find);
+  };
   const [leaderboard, setLeaderboard] = useState(boot.leaderboard);
   const hasSpeech = useMemo(speechSupported, []);
   const canRecord = useMemo(recordingSupported, []);
@@ -335,8 +341,10 @@ export function App({ boot }: { boot: Bootstrap }) {
         const notesText = notes.recover();
         latest.current.notes = notesText;
         setNotes(notesText);
+        const doc = codeSaver.recover();
+        setPart2Started(hasStartedPart2(doc));
         const created = new CodeEditor(host, {
-          doc: codeSaver.recover(),
+          doc,
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
           lineWrapping: preferences.lineWrapping.get(),
@@ -347,7 +355,10 @@ export function App({ boot }: { boot: Bootstrap }) {
                 languageId: boot.language.lsp_language_id,
               }
             : null,
-          onChange: (text) => codeSaver.schedule(text),
+          onChange: (text) => {
+            codeSaver.schedule(text);
+            setPart2Started(hasStartedPart2(text));
+          },
           onCursor: (pos) => {
             if (metaRef.current.cursor !== pos) updateMeta({ ...metaRef.current, cursor: pos });
             lookUpType(pos);
@@ -429,7 +440,10 @@ export function App({ boot }: { boot: Bootstrap }) {
   }, [stateSaver]);
 
   const part = problem ? (problem.stars >= 2 ? null : problem.stars + 1) : 1;
-  const expected = part === null ? null : (meta.sample_answers[part - 1] ?? null);
+  // The part being worked on: the next one to solve, or for a solved puzzle being worked through
+  // again, the one the code has got to.
+  const workingPart = part ?? (part2Started ? 2 : 1);
+  const expected = meta.sample_answers[workingPart - 1] ?? null;
 
   /**
    * Runs the solution. From the Run sheet it first waits for edits still being made from
@@ -439,7 +453,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     const p = puzzleRef.current;
     if (!p) return;
     setSheet("run");
-    const runPart = part ?? 2;
+    const runPart = workingPart;
     if (input === "sample" && sampleInput(metaRef.current, runPart === 1 ? 0 : 1) === null) {
       setRun((r) => ({
         ...r,
@@ -1055,6 +1069,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             <RunSheet
               state={run}
               part={part}
+              workingPart={workingPart}
               expected={expected}
               accepted={problem?.answers ?? []}
               onRun={(input) => void doRun(input, true)}
@@ -1063,7 +1078,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               onSubmit={(answer) => void doSubmit(answer)}
               onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}
               finalStar={problem?.final_star ?? null}
-              hasSample={sampleInput(meta, part === 1 ? 0 : 1) !== null}
+              hasSample={sampleInput(meta, workingPart === 1 ? 0 : 1) !== null}
               onClaimFinalStar={() => void doSubmit("0")}
             />
           </Modal>

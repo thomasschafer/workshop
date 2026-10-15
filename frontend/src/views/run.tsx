@@ -24,6 +24,9 @@ interface Props {
   state: RunState;
   /** 1 or 2, or null once both stars are earned. */
   part: number | null;
+  /** The part whose sample is run and checked: as `part`, or for a solved puzzle the one the code
+   * has got to. */
+  workingPart: number;
   expected: string | null;
   /** The answers Advent of Code has accepted, by part, to check runs on the real input against. */
   accepted: string[];
@@ -67,6 +70,7 @@ function describeSubmission(outcome: SubmitOutcome): string {
 export function RunSheet({
   state,
   part,
+  workingPart,
   expected,
   accepted,
   onRun,
@@ -80,9 +84,14 @@ export function RunSheet({
 }: Props) {
   const last = state.last;
   const partIndex = part === null ? null : part - 1;
+  const sampleIndex = workingPart - 1;
   const answer = last && partIndex !== null ? (last.result.answers[partIndex] ?? null) : null;
+  const sampleAnswer = last ? (last.result.answers[sampleIndex] ?? null) : null;
   const sampleMatches =
-    last?.input === "sample" && expected !== null && answer !== null && answer === expected;
+    last?.input === "sample" &&
+    expected !== null &&
+    sampleAnswer !== null &&
+    sampleAnswer === expected;
   const canSubmit =
     last?.input === "real" && answer !== null && part !== null && last.result.phase === "run";
 
@@ -153,7 +162,7 @@ export function RunSheet({
               {last.result.answers.slice(0, 2).map((a, i) => (
                 <li key={i}>
                   Part {i + 1}: <code>{a}</code>
-                  {last.input === "sample" && i === partIndex && expected !== null
+                  {last.input === "sample" && i === sampleIndex && expected !== null
                     ? a === expected
                       ? " ✓"
                       : ` ✗ (expected ${expected})`
