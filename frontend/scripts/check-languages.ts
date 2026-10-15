@@ -55,6 +55,35 @@ print(sum(ints(sys.stdin.read())))
 `,
   },
   {
+    language: "go",
+    file: "main.go",
+    broken: `package main
+
+func main() {
+	var answer int = "not a number"
+	_ = answer
+}
+`,
+    working: `package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+
+	"solutions/aoc"
+)
+
+func main() {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(aoc.Sum(aoc.Ints(string(data))))
+}
+`,
+  },
+  {
     language: "typescript",
     file: "main.ts",
     broken: `const answer: number = "not a number";

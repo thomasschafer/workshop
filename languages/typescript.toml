@@ -34,7 +34,7 @@ console.log(part1(input));
 
 dictation_hints = '''
 - Names are camelCase: "count trees" is `countTrees`. Numbers in names are spoken as words but written as digits: "part one" is `part1`, unless a name in the file already says otherwise.
-- "const x equals ..." is `const x = ...;`, and "let x equals ..." is `let x = ...;`. Write `let` when the user says it, even if nothing reassigns it yet: they're about to. Statements end with a semicolon. A line ending in an opening brace opens a block, indented two spaces further; "close brace" or "end block" closes it.
+- "const x equals ..." is `const x = ...;`, and "let x equals ..." is `let x = ...;`. Write the keyword the user says, `const` or `let`, even when the other looks better. Statements end with a semicolon. A line ending in an opening brace opens a block, indented two spaces further; "close brace" or "end block" closes it.
 - "dot" between names is property access, `input.trim()`. "of" or "call" means a call: "parse int of s" is `parseInt(s)`, and "max of xs" is `Math.max(...xs)`, and "sum of xs" is `sum(xs)` from the helpers.
 - "x arrow x times two" or "lambda x arrow x times two" is `(x) => x * 2`. "map with ..." on an array is `.map(...)`; likewise filter, reduce, some, every, find.
 - "equals" is `=`, "triple equals" or "double equals" is `===`, "not equals" is `!==`, "plus equals" is `+=`. "and" and "or" in a condition are `&&` and `||`.

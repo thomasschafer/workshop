@@ -344,6 +344,7 @@ mod tests {
     fn bundled_cases_are_valid() {
         for (language, source) in [
             ("haskell", include_str!("../evals/haskell.toml")),
+            ("go", include_str!("../evals/go.toml")),
             ("python", include_str!("../evals/python.toml")),
             ("typescript", include_str!("../evals/typescript.toml")),
         ] {

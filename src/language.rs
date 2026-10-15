@@ -182,6 +182,7 @@ fn relative_inside(path: &str) -> Result<PathBuf> {
 const BUILTIN: &[(&str, &str)] = &[
     ("haskell", include_str!("../languages/haskell.toml")),
     ("python", include_str!("../languages/python.toml")),
+    ("go", include_str!("../languages/go.toml")),
     ("typescript", include_str!("../languages/typescript.toml")),
 ];
 
@@ -305,8 +306,14 @@ mod tests {
         for (id, profile) in builtin_profiles().unwrap() {
             let helpers = profile.helpers.unwrap();
             helpers.validate().unwrap();
+            // Go's are capitalised, as exported names must be.
+            let names: Vec<String> = helpers
+                .names_in(&helpers.template)
+                .iter()
+                .map(|name| name.to_lowercase())
+                .collect();
             assert_eq!(
-                helpers.names_in(&helpers.template)[..4],
+                names[..4],
                 ["ints", "grid", "neighbours4", "neighbours8"],
                 "{id}"
             );

@@ -1,0 +1,353 @@
+# Edit eval cases for Go: see haskell.toml for the format. All code here is invented.
+
+language = "go"
+
+[[case]]
+name = "short-declaration"
+utterance = "count trees colon equals zero"
+before = '''
+func part1(input string) int {
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	countTrees := 0‸
+}'''
+
+[[case]]
+name = "assign-existing"
+utterance = "total equals zero"
+before = '''
+func part1(input string) int {
+	total := 5
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	total := 5
+	total = 0‸
+}'''
+
+[[case]]
+name = "split-lines"
+utterance = "lines colon equals split lines of input"
+before = '''
+func part1(input string) int {
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	lines := strings.Split(strings.TrimSpace(input), "\n")‸
+}'''
+also = ['''
+import "strings"
+
+func part1(input string) int {
+	lines := strings.Split(strings.TrimSpace(input), "\n")‸
+}''']
+
+[[case]]
+name = "range-loop-opens-block"
+utterance = "for underscore comma line in range lines"
+before = '''
+func part1(input string) int {
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	for _, line := range lines {
+		‸
+	}
+}'''
+
+[[case]]
+name = "range-over-int"
+utterance = "for i in range n"
+before = '''
+func part1(input string) int {
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	for i := range n {
+		‸
+	}
+}'''
+
+[[case]]
+name = "plus-equals-atoi"
+utterance = "n comma underscore colon equals s t r conv dot atoi of line"
+before = '''
+func part1(input string) int {
+	for _, line := range lines {
+		‸
+	}
+}'''
+after = '''
+func part1(input string) int {
+	for _, line := range lines {
+		n, _ := strconv.Atoi(line)‸
+	}
+}'''
+also = ['''
+import "strconv"
+
+func part1(input string) int {
+	for _, line := range lines {
+		n, _ := strconv.Atoi(line)‸
+	}
+}''']
+
+[[case]]
+name = "make-map"
+utterance = "counts colon equals make map from string to int"
+before = '''
+func part1(input string) int {
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	counts := make(map[string]int)‸
+}'''
+also = ['''
+func part1(input string) int {
+	counts := map[string]int{}‸
+}''']
+
+[[case]]
+name = "append"
+utterance = "append n to numbers"
+before = '''
+func part1(input string) int {
+	var numbers []int
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	var numbers []int
+	numbers = append(numbers, n)‸
+}'''
+
+[[case]]
+name = "if-err-panic"
+utterance = "if err not nil panic"
+before = '''
+func part1(input string) int {
+	n, err := strconv.Atoi(input)
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	n, err := strconv.Atoi(input)
+	if err != nil {
+		panic(err)
+	}‸
+}'''
+also = ['''
+func part1(input string) int {
+	n, err := strconv.Atoi(input)
+	if err != nil {
+		panic(err)
+	}
+	‸
+}''']
+
+[[case]]
+name = "max-builtin"
+utterance = "best equals max of best comma total"
+before = '''
+func part1(input string) int {
+	best := 0
+	‸
+}'''
+after = '''
+func part1(input string) int {
+	best := 0
+	best = max(best, total)‸
+}'''
+
+[[case]]
+name = "wrap-in-call"
+utterance = "wrap that in len"
+before = '''
+func part1(input string) int {
+	n := strings.TrimSpace(input)‸
+}'''
+recent = "strings.TrimSpace(input)"
+after = '''
+func part1(input string) int {
+	n := len(strings.TrimSpace(input))‸
+}'''
+
+[[case]]
+name = "replace-placeholder"
+utterance = "replace this line with return len of input"
+before = '''
+func part1(input string) int {
+	‸panic("not solved yet")
+}'''
+after = '''
+func part1(input string) int {
+	return len(input)‸
+}'''
+
+[[case]]
+name = "uncomment-part-two"
+utterance = "uncomment the last line"
+before = '''
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+func part1(input string) int {
+	return 1
+}
+
+func main() {
+	data, _ := io.ReadAll(os.Stdin)
+	input := string(data)
+	fmt.Println(part1(input))‸
+	// When you start part 2, uncomment the next line.
+	// fmt.Println(part2(input))
+}'''
+after = '''
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+func part1(input string) int {
+	return 1
+}
+
+func main() {
+	data, _ := io.ReadAll(os.Stdin)
+	input := string(data)
+	fmt.Println(part1(input))
+	// When you start part 2, uncomment the next line.
+	fmt.Println(part2(input))‸
+}'''
+also = ['''
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+func part1(input string) int {
+	return 1
+}
+
+func main() {
+	data, _ := io.ReadAll(os.Stdin)
+	input := string(data)
+	fmt.Println(part1(input))‸
+	// When you start part 2, uncomment the next line.
+	fmt.Println(part2(input))
+}''', '''
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+func part1(input string) int {
+	return 1
+}
+
+func main() {
+	data, _ := io.ReadAll(os.Stdin)
+	input := string(data)
+	fmt.Println(part1(input))
+	// When you start part 2, uncomment the next line.
+	‸fmt.Println(part2(input))
+}''']
+
+[[case]]
+name = "imports-a-helper-it-uses"
+utterance = "replace this line with return sum of ints of input"
+before = '''
+package main
+
+import (
+	"fmt"
+)
+
+func part1(input string) int {
+	‸panic("not solved yet")
+}'''
+after = '''
+package main
+
+import (
+	"fmt"
+
+	"solutions/aoc"
+)
+
+func part1(input string) int {
+	return aoc.Sum(aoc.Ints(input))‸
+}'''
+also = ['''
+package main
+
+import (
+	"fmt"
+	"solutions/aoc"
+)
+
+func part1(input string) int {
+	return aoc.Sum(aoc.Ints(input))‸
+}''']
+
+[[case]]
+name = "imports-standard-library"
+utterance = "fields colon equals strings dot fields of input"
+before = '''
+package main
+
+import (
+	"fmt"
+)
+
+func part1(input string) int {
+	‸
+}'''
+after = '''
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func part1(input string) int {
+	fields := strings.Fields(input)‸
+}'''
+
+[[case]]
+name = "refuse-write-function"
+utterance = "write a function that finds the shortest path through the grid"
+before = '''
+‸'''
+unsure = true
+
+[[case]]
+name = "refuse-finish"
+utterance = "finish part two for me"
+before = '''
+func part2(input string) int {
+	‸
+}'''
+unsure = true

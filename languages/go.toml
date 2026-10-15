@@ -1,0 +1,159 @@
+name = "Go"
+# Selects syntax highlighting in the editor.
+editor_mode = "go"
+lsp_language_id = "go"
+
+# Relative to the solutions directory. Every solution is a `package main` of its own, in one Go
+# module for the whole solutions directory.
+file = "{year}/day{day:02}/main.go"
+
+# Run in the solution's directory, which `go run` builds and caches. The puzzle input is passed on
+# stdin. Each line of stdout is read as the answer to that part: line 1 for part 1, line 2 for
+# part 2.
+run = ["go", "run", "."]
+
+lsp = ["gopls"]
+
+template = '''
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+func part1(input string) int {
+	panic("not solved yet")
+}
+
+func part2(input string) int {
+	panic("not solved yet")
+}
+
+func main() {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		panic(err)
+	}
+	input := string(data)
+	fmt.Println(part1(input))
+	// When you start part 2, uncomment the next line.
+	// fmt.Println(part2(input))
+}
+'''
+
+dictation_hints = '''
+- Indentation is one tab per level, as gofmt writes it. A line ending in an opening brace opens a block; "close brace" or "end block" closes it.
+- Local names are camelCase: "count trees" is `countTrees`. Numbers in names are spoken as words but written as digits: "part one" is `part1`, unless a name in the file already says otherwise.
+- "x colon equals ..." or "x is ..." declares with `x := ...`; "x equals ..." assigns to an existing x with `=`. "double equals" is `==`, "not equals" is `!=`, "plus equals" is `+=`, "plus plus" is `++`.
+- "for i in range n" is `for i := range n {`; "for each line in lines" or "for underscore comma line in range lines" is `for _, line := range lines {`; "for i comma line ..." keeps the index.
+- "dot" between names is a selector, `strings.Fields(line)`. "of" or "call" means a call: "len of lines" is `len(lines)`.
+- Common standard library calls by what they do: "split lines" is `strings.Split(strings.TrimSpace(input), "\n")`, "fields" is `strings.Fields`, "atoi" or "parse int" is `strconv.Atoi`, "sort ints" is `slices.Sort`, "max of a comma b" is `max(a, b)`.
+- "slice of int" or "int slice" is `[]int`; "map from string to int" is `map[string]int`; "make a map ..." is `make(map[...]...)`; "append x to xs" is `xs = append(xs, x)`.
+- "if err not nil panic" is `if err != nil { panic(err) }` written over three lines.
+- "Wrap that in f" applies f to the whole of the most recent expression: wrapping `strings.TrimSpace(input)` in `len` gives `len(strings.TrimSpace(input))`.
+- The user's own helpers package is `aoc`, imported as `"solutions/aoc"`: "import AOC" adds that import, and its functions are capitalised and qualified, so "ints of input" is `aoc.Ints(input)`. Imports go in the import block at the top, wherever the cursor is; Go won't build with an import that isn't used, or without one that is.
+- Common mishearings: "in put" is `input`, "string" may be heard as "strings" (the package is `strings`, the type `string`), "s t r conv" is `strconv`, "funk" is `func`.
+'''
+
+# When part 1 is solved, the template's part 2 line is offered to be turned on.
+start_part_two = { find = """
+	// When you start part 2, uncomment the next line.
+	// fmt.Println(part2(input))""", replace = """
+	fmt.Println(part2(input))""" }
+
+# A package of your own that every solution can import, created with your first solution unless
+# it's already there.
+[helpers]
+file = "aoc/aoc.go"
+# A line defining a helper, with its name: an exported function.
+definition = "^func ([A-Z][A-Za-z0-9_]*)[\\[(]"
+# The Go module the solutions and the helpers belong to, for building them and for gopls, unless
+# you have a go.mod already. Its name is the start of the helpers' import path.
+lsp_config = { file = "go.mod", text = """
+module solutions
+
+go 1.22
+""" }
+template = '''
+// Package aoc has helpers your solutions can share: import "solutions/aoc" to use them, as in
+// aoc.Ints(input), and add your own.
+package aoc
+
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var integer = regexp.MustCompile(`-?\d+`)
+
+// Ints is every integer in the text, including negative ones: Ints("x=-3, y=12") is [-3 12].
+func Ints(text string) []int {
+	matches := integer.FindAllString(text, -1)
+	ints := make([]int, len(matches))
+	for i, match := range matches {
+		n, err := strconv.Atoi(match)
+		if err != nil {
+			panic(err)
+		}
+		ints[i] = n
+	}
+	return ints
+}
+
+// Point is a position in a grid, by row and column.
+type Point struct{ R, C int }
+
+// Grid is a grid of characters by position, from lines of text.
+func Grid(text string) map[Point]rune {
+	cells := map[Point]rune{}
+	for r, line := range strings.Split(text, "\n") {
+		for c, ch := range []rune(line) {
+			cells[Point{r, c}] = ch
+		}
+	}
+	return cells
+}
+
+// Neighbours4 is the positions above, below, left and right.
+func Neighbours4(p Point) []Point {
+	return []Point{{p.R - 1, p.C}, {p.R + 1, p.C}, {p.R, p.C - 1}, {p.R, p.C + 1}}
+}
+
+// Neighbours8 is the positions around, diagonals included.
+func Neighbours8(p Point) []Point {
+	var around []Point
+	for dr := -1; dr <= 1; dr++ {
+		for dc := -1; dc <= 1; dc++ {
+			if dr != 0 || dc != 0 {
+				around = append(around, Point{p.R + dr, p.C + dc})
+			}
+		}
+	}
+	return around
+}
+
+// Sum is the numbers added up.
+func Sum[T int | int64 | float64](xs []T) T {
+	var total T
+	for _, x := range xs {
+		total += x
+	}
+	return total
+}
+'''
+
+# Setup offers to install Go and gopls with mise (https://mise.jdx.dev) when they're missing, into
+# the solutions directory only. This is the mise.toml it writes there, unless one is there
+# already. Programs you have installed already are used as they are.
+[toolchain]
+mise = '''
+# The programs these solutions are built with, installed by mise for this directory only. Run
+# `mise install` to install them, and see https://mise.jdx.dev to use them in your shell.
+[tools]
+go = "latest"
+# gopls, the language server for error underlines and types.
+"go:golang.org/x/tools/gopls" = "latest"
+'''
