@@ -1,27 +1,41 @@
 //! Reaching Workshop from a phone over Tailscale, which also provides the HTTPS that browsers
 //! require for microphone access.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 
 use anyhow::{Context, Result, bail};
 use tokio::process::Command;
 
+/// The tailscale CLI: on the PATH, or inside the macOS app, which doesn't put it there.
+pub fn program() -> Option<PathBuf> {
+    crate::doctor::find_program("tailscale").or_else(|| {
+        let app = PathBuf::from("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
+        (cfg!(target_os = "macos") && app.is_file()).then_some(app)
+    })
+}
+
 /// Serves the local port over HTTPS on the tailnet, returning the base URL.
 pub async fn serve(port: u16) -> Result<String> {
-    if crate::doctor::find_program("tailscale").is_none() {
-        bail!("`--tailscale` needs the tailscale CLI, which isn't on your PATH");
-    }
+    let Some(tailscale) = program() else {
+        bail!("`--tailscale` needs Tailscale, which isn't installed");
+    };
     let target = format!("http://127.0.0.1:{port}");
     println!("Setting up `tailscale serve`…");
     // Tailscale's output is shown rather than captured, because it can ask the user to do
     // something first, such as enabling Serve for their tailnet, and waits until they have.
-    let status = Command::new("tailscale")
+    let status = Command::new(&tailscale)
         .args(["serve", "--bg", &target])
         .stdin(Stdio::null())
         .status()
         .await
         .context("running tailscale")?;
     if !status.success() {
+        if cfg!(target_os = "linux") {
+            bail!(
+                "`tailscale serve` failed ({status}). Is Tailscale running and logged in? On Linux, it also needs permission first: run `sudo tailscale set --operator=$USER`, then start Workshop again."
+            );
+        }
         bail!("`tailscale serve` failed ({status}); is Tailscale running and logged in?");
     }
     let status = run(&["status", "--json"]).await?;
@@ -31,7 +45,7 @@ pub async fn serve(port: u16) -> Result<String> {
 
 /// The HTTPS address Tailscale is already serving `port` at, without changing anything.
 pub async fn serving_url(port: u16) -> Option<String> {
-    crate::doctor::find_program("tailscale")?;
+    program()?;
     let status = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         run(&["serve", "status"]),
@@ -53,7 +67,7 @@ fn serving_url_from_status(status: &str, port: u16) -> Option<String> {
 }
 
 async fn run(args: &[&str]) -> Result<String> {
-    let output = Command::new("tailscale")
+    let output = Command::new(program().context("Tailscale isn't installed")?)
         .args(args)
         .stdin(Stdio::null())
         .output()

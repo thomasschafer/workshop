@@ -377,7 +377,7 @@ async fn check_https(config: &Config) -> Check {
     let port = config.server.bind.port();
     let name = "Phone access";
     let fix = "Browsers only allow the microphone over HTTPS. If you use Tailscale, start Workshop with `workshop serve --tailscale` and open the link it prints on your phone.";
-    if find_program("tailscale").is_none() {
+    if crate::tailscale::program().is_none() {
         return Check::problem(Status::Warn, name, "Tailscale isn't installed", fix);
     }
     match crate::tailscale::serving_url(port).await {

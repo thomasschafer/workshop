@@ -1108,7 +1108,7 @@ async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupState> {
         language: app.settings().language,
         has_aoc_session: app.aoc.has_session(),
         providers,
-        tailscale_installed: doctor::find_program("tailscale").is_some(),
+        tailscale_installed: crate::tailscale::program().is_some(),
         mise_installed: doctor::find_program("mise").is_some(),
         toolchain_problem,
         toolchain_install: app.toolchain_install.status(),
