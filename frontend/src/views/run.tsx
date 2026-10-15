@@ -158,6 +158,13 @@ export function RunSheet({
                 </li>
               ))}
             </ol>
+          ) : last.result.phase === "run" &&
+            last.result.ending.status === "exited" &&
+            last.result.ending.code === 0 ? (
+            <p class="muted">
+              Nothing was printed. Print part 1's answer on the first line, and part 2's on the
+              second.
+            </p>
           ) : null}
           {last.input === "sample" && expected === null && part !== null ? (
             <p class="muted">Tap the sample's answer in the puzzle to check it automatically.</p>

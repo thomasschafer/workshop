@@ -103,7 +103,7 @@ impl<'a> Solutions<'a> {
             .build_dir()
             .join(puzzle.year_label())
             .join(format!("{:02}", puzzle.day));
-        runner::run(runner::RunRequest {
+        let result = runner::run(runner::RunRequest {
             profile,
             file: &file,
             build_dir: &build_dir,
@@ -115,8 +115,23 @@ impl<'a> Solutions<'a> {
             helpers: self.helpers_dir()?.as_deref(),
         })
         .await
-        .with_context(|| format!("running {puzzle}"))
+        .with_context(|| format!("running {puzzle}"))?;
+        Ok(self.shorten_paths(result))
     }
+
+    /// Shows paths in the solutions directory relative to it, as compilers and tracebacks give
+    /// them in full, which takes much of a phone's width.
+    fn shorten_paths(&self, mut result: RunResult) -> RunResult {
+        let dir = &self.config.solutions_dir;
+        result.stdout = relative_paths(&result.stdout, dir);
+        result.stderr = relative_paths(&result.stderr, dir);
+        result
+    }
+}
+
+/// `text` with paths inside `dir` written relative to it.
+fn relative_paths(text: &str, dir: &std::path::Path) -> String {
+    text.replace(&format!("{}/", dir.display()), "")
 }
 
 /// Joins environment variables, giving one set more than once all its values, separated by `:`
@@ -140,6 +155,18 @@ fn merge_environment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortens_paths_in_output() {
+        let dir = std::path::Path::new("/home/me/aoc");
+        assert_eq!(
+            relative_paths(
+                "File \"/home/me/aoc/2024/day01/main.py\", line 2\n/home/me/aocx/y",
+                dir
+            ),
+            "File \"2024/day01/main.py\", line 2\n/home/me/aocx/y"
+        );
+    }
 
     #[test]
     fn merges_search_paths() {
