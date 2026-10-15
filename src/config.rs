@@ -28,6 +28,8 @@ struct RawConfig {
 #[serde(deny_unknown_fields, default)]
 pub struct ServerConfig {
     pub bind: SocketAddr,
+    /// Whether to check GitHub once a day for a newer release.
+    pub check_for_updates: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -84,6 +86,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: SocketAddr::from(([127, 0, 0, 1], 7878)),
+            check_for_updates: true,
         }
     }
 }

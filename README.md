@@ -28,12 +28,28 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 
 ## Getting started
 
-Download a binary from the [releases page](https://github.com/thomasschafer/workshop/releases) and put it somewhere on your PATH. On macOS, a binary downloaded in a browser is blocked until you allow it, either in System Settings, Privacy & Security, or with `xattr -d com.apple.quarantine workshop`. Then:
+Install Workshop with [Homebrew](https://brew.sh), on macOS or Linux:
+
+```sh
+brew install thomasschafer/tap/workshop
+```
+
+Or with the install script, which puts it in `~/.local/bin`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/thomasschafer/workshop/main/install.sh | sh
+```
+
+Or download a binary from the [releases page](https://github.com/thomasschafer/workshop/releases) and put it somewhere on your PATH. On macOS, a binary downloaded in a browser is blocked until you allow it, either in System Settings, Privacy & Security, or with `xattr -d com.apple.quarantine workshop`.
+
+Then:
 
 ```sh
 workshop doctor   # check your setup, with fixes for anything missing
 workshop          # start the server and print the link to open
 ```
+
+Workshop checks once a day for a newer release, and says in Settings how to update when there is one. To stop it checking, set `check_for_updates = false` under `[server]` in its config.
 
 To use it from your phone over Tailscale, start it with:
 

@@ -5,6 +5,8 @@
 # default. To reach it from your phone, use `tailscale serve` (see the README), which also gives
 # you the HTTPS that browsers require for microphone access.
 bind = "127.0.0.1:7878"
+# Check GitHub once a day for a newer release of Workshop, and say so in Settings when there is.
+check_for_updates = true
 
 [solutions]
 # A git repo for your solutions. Created on first use if it doesn't exist.

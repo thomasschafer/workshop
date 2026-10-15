@@ -29,6 +29,8 @@ interface Props {
   /** Opens the comparison of speech recognition on this device and the server. */
   onBench: () => void;
   commitMessage: string;
+  /** A newer release, if one is out. */
+  update: { version: string; how: string } | null;
   /** The private leaderboard shown in the puzzle list, if one is chosen. */
   leaderboard: string | null;
   onLeaderboard: (id: string | null) => Promise<void>;
@@ -170,6 +172,11 @@ function SettingsList(props: Props & { onOpen: (page: Page) => void }) {
 
   return (
     <>
+      {props.update ? (
+        <p class="update-notice">
+          Workshop {props.update.version} is out. <WithCode text={props.update.how} />
+        </p>
+      ) : null}
       <ul class="settings-list">
         {rows.map(([page, summary]) => (
           <li key={page} class="settings-row">
@@ -186,6 +193,18 @@ function SettingsList(props: Props & { onOpen: (page: Page) => void }) {
         ))}
       </ul>
       <p class="muted small">Workshop is unofficial and not affiliated with Advent of Code.</p>
+    </>
+  );
+}
+
+/** Text with `backticked` parts shown as code. */
+function WithCode({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("`").map((part, i) =>
+        // Every other part was between backticks.
+        i % 2 === 1 ? <code key={part}>{part}</code> : part,
+      )}
     </>
   );
 }

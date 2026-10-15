@@ -45,6 +45,8 @@ export interface Bootstrap {
   solutions_dir: string;
   /** The private leaderboard shown, if one is chosen. */
   leaderboard: string | null;
+  /** A newer release, if one is out, and what to do to update. */
+  update: { version: string; how: string } | null;
 }
 
 export interface LeaderboardMember {

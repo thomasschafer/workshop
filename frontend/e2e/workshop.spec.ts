@@ -255,6 +255,9 @@ test("picks up code changed at the server while the app stays open", async () =>
 });
 
 test("opens a page of settings from the list, and goes back to the list", async () => {
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator(".update-notice")).toContainText("Workshop 999.0.0 is out.");
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
   await openSettings("Display");
   await expect(page.getByLabel("Wrap long lines of code")).toBeVisible();
   // Back from a page, by gesture, button or Escape, is the list; back again leaves settings.

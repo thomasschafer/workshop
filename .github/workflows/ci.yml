@@ -75,6 +75,12 @@ jobs:
         working-directory: frontend
         run: npm run e2e:webkit
 
+      # Installs the latest release as the README says to, on Linux.
+      - name: Install script
+        run: |
+          WORKSHOP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/workshop" --version
+
   # The server can run on Windows, so its tests and the app's run there too: the end-to-end tests
   # run solutions in Python, so they show whether running them works.
   windows:

@@ -57,6 +57,21 @@ impl Check {
 
 pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<Check> {
     let mut checks = Vec::new();
+    checks.push(
+        match crate::updates::Updates::load(paths, config.server.check_for_updates).available() {
+            Some(update) => Check::problem(
+                Status::Warn,
+                "Version",
+                format!(
+                    "Workshop {} is running, and {} is out",
+                    env!("CARGO_PKG_VERSION"),
+                    update.version
+                ),
+                update.how,
+            ),
+            None => Check::ok("Version", format!("Workshop {}", env!("CARGO_PKG_VERSION"))),
+        },
+    );
     checks.push(Check::ok(
         "Config",
         format!("Using {}", crate::paths::display_path(&paths.config_file())),

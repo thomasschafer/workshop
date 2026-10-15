@@ -22,6 +22,7 @@ mod tailscale;
 mod template;
 mod theme;
 mod toolchain;
+mod updates;
 mod whisper;
 mod workspace;
 
@@ -262,6 +263,8 @@ async fn serve(
     tokio::spawn(async move { warm.warm_up().await });
     let notifier = app.notifier.clone();
     tokio::spawn(async move { notifier.run().await });
+    let updates = app.updates.clone();
+    tokio::spawn(async move { updates.run().await });
     // Stop straight away rather than waiting for connections to close: the editor's language
     // server websocket stays open indefinitely. Returning drops every task, which stops the
     // language servers and model CLIs they started.

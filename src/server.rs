@@ -61,6 +61,8 @@ pub struct App {
     dictation: Arc<crate::whisper::Dictation>,
     /// Notifies devices that asked, as puzzles unlock.
     pub notifier: Arc<crate::notify::Notifier>,
+    /// Whether a newer release is out.
+    pub updates: Arc<crate::updates::Updates>,
     /// Packages already found for missing modules, by language and module.
     resolutions: std::sync::Mutex<BTreeMap<(String, String), Resolution>>,
     http: reqwest::Client,
@@ -101,6 +103,10 @@ impl App {
             speech_install: Installs::default(),
             dictation: Arc::default(),
             notifier: Arc::new(crate::notify::Notifier::load(&paths)?),
+            updates: Arc::new(crate::updates::Updates::load(
+                &paths,
+                config.server.check_for_updates,
+            )),
             resolutions: std::sync::Mutex::new(BTreeMap::new()),
             http: reqwest::Client::builder()
                 .user_agent(&config.aoc.user_agent)
@@ -465,6 +471,8 @@ struct Bootstrap {
     solutions_dir: String,
     /// The private leaderboard shown, if one is chosen.
     leaderboard: Option<crate::aoc::LeaderboardId>,
+    /// A newer release, if one is out.
+    update: Option<crate::updates::Update>,
 }
 
 #[derive(Serialize)]
@@ -523,6 +531,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         commit_after_star: app.settings().commit_after_star,
         solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
         leaderboard: app.settings().leaderboard,
+        update: app.updates.available(),
         server_dictation: {
             let ready = speech_state(&app).ready;
             if ready {

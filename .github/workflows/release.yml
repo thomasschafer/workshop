@@ -215,3 +215,41 @@ jobs:
         run: |
           gh release upload "$TAG" assets/* --clobber
           gh release edit "$TAG" --draft=false
+
+  homebrew:
+    name: Update the Homebrew formula
+    if: ${{ !inputs.dry_run }}
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Pushing to the tap needs a token with write access to it, HOMEBREW_TAP_TOKEN. Without
+      # one, this says so rather than failing the release.
+      - name: Update thomasschafer/homebrew-tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN isn't set, so the Homebrew formula wasn't updated."
+            exit 0
+          fi
+          version="${TAG#v}"
+          scripts/homebrew-formula.sh "$version" > workshop.rb
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/thomasschafer/homebrew-tap.git" tap
+          cp workshop.rb tap/Formula/workshop.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/workshop.rb
+          if git diff --cached --quiet; then
+            echo "The formula is already up to date."
+            exit 0
+          fi
+          git commit -m "workshop ${version} (automated)"
+          git push

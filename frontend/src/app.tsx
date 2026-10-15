@@ -1102,6 +1102,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}
             solutionsDir={boot.solutions_dir}
             leaderboard={leaderboard}
+            update={boot.update}
             onLeaderboard={async (id) => {
               await api.setLeaderboard(id);
               setLeaderboard(id);

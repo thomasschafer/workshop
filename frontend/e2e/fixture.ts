@@ -100,6 +100,12 @@ ${models}
 ${pythonProfile()}`,
   );
   writeFileSync(join(home, "config", "aoc-session"), "not-a-real-session");
+  // A newer release, as if just checked for, so the server doesn't ask GitHub during the tests.
+  mkdirSync(join(home, "data"), { recursive: true });
+  writeFileSync(
+    join(home, "data", "latest-release.json"),
+    JSON.stringify({ latest: "999.0.0", checked_at: Math.floor(Date.now() / 1000) }),
+  );
   const cached = join(home, "cache", "aoc", String(year), String(day).padStart(2, "0"));
   mkdirSync(cached, { recursive: true });
   writeFileSync(join(cached, "problem.html"), puzzle);
