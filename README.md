@@ -11,7 +11,7 @@ Workshop runs on a server you control, such as your laptop, a desktop or a VPS, 
 - Edits relative to the cursor: tap to place it, then "before that", "wrap that in parens", and so on. Misheard words like "fold are" for `foldr` are fixed from context.
 - Run on the sample and your input, then submit, all from the phone, with inline errors and types from your language server.
 - A discuss mode: a coach that sees the puzzle and your code, and won't give the answer away unless you ask.
-- Haskell and Python built in, with packages and a helpers module of your own. Other languages can be added in your config.
+- Haskell, Python, TypeScript, Go and Rust built in, with a helpers module of your own, and packages for Haskell and Python. Other languages can be added in your config.
 - Instant commands like "undo" and "run the sample", notes, snippets, and committing your solutions, all saved as you go.
 
 Workshop is voice editing, not code generation. "Write a function to sort a list" won't do anything. "Function solve from String to Int", then "solve equals lines", "before that map read dot" and "before that sum dot" gives you `solve = sum . map read . lines`. If Workshop isn't sure what you meant, it makes no edit and tells you why.
@@ -21,7 +21,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 ## Requirements
 
 - A model CLI that you're logged in to, used through your existing subscription: [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex). Workshop sets itself up for whichever you have.
-- [mise](https://mise.jdx.dev), which setup uses to install your language's toolchain for your solutions repo only. If you already have it (GHC and cabal, or Python 3, and optionally haskell-language-server or pyright for error underlines and types), you don't need mise.
+- [mise](https://mise.jdx.dev), which setup uses to install your language's toolchain for your solutions repo only. If you already have your language's toolchain (GHC and cabal, Python 3, Deno for TypeScript, Go, or Rust), and optionally its language server for error underlines and types, you don't need mise.
 - Your Advent of Code session cookie.
 - Optionally, [whisper.cpp](https://github.com/ggml-org/whisper.cpp) on the server (`brew install whisper-cpp` on macOS), which hears code more accurately than phones' own speech recognition. Setup downloads its model.
 - A way to reach the server from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
@@ -75,7 +75,7 @@ bind = "127.0.0.1:7878"
 
 [solutions]
 dir = "~/aoc"          # a git repo, created on first use
-language = "haskell"   # or "python"
+language = "haskell"   # or "python", "typescript", "go" or "rust"
 
 [models.edit]
 provider = "claude"    # or "codex"

@@ -163,7 +163,11 @@ pub async fn install(
             .await?;
         }
     }
-    add_to_gitignore(solutions_dir, &profile.gitignore)?;
+    add_to_gitignore(
+        solutions_dir,
+        "Programs installed by mise for these solutions",
+        &profile.gitignore,
+    )?;
     run_logged(
         &[mise.clone(), "install".to_owned()],
         solutions_dir,
@@ -184,8 +188,8 @@ pub async fn install(
     Ok(())
 }
 
-/// Adds lines to the solutions repo's `.gitignore`, unless they're there already.
-fn add_to_gitignore(solutions_dir: &Path, lines: &[String]) -> Result<()> {
+/// Adds lines to the solutions repo's `.gitignore` under a comment, unless they're there already.
+pub fn add_to_gitignore(solutions_dir: &Path, comment: &str, lines: &[String]) -> Result<()> {
     let path = solutions_dir.join(".gitignore");
     let mut text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -202,7 +206,7 @@ fn add_to_gitignore(solutions_dir: &Path, lines: &[String]) -> Result<()> {
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
-    text.push_str("# Programs installed by mise for these solutions\n");
+    text.push_str(&format!("# {comment}\n"));
     for line in missing {
         text.push_str(line);
         text.push('\n');
@@ -274,11 +278,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".gitignore"), "*.o").unwrap();
         let lines = vec![".toolchain/".to_owned()];
-        add_to_gitignore(dir.path(), &lines).unwrap();
-        add_to_gitignore(dir.path(), &lines).unwrap();
+        add_to_gitignore(dir.path(), "Installed", &lines).unwrap();
+        add_to_gitignore(dir.path(), "Installed", &lines).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
-            "*.o\n# Programs installed by mise for these solutions\n.toolchain/\n"
+            "*.o\n# Installed\n.toolchain/\n"
         );
     }
 }

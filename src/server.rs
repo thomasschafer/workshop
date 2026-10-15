@@ -874,9 +874,9 @@ struct Edited {
 async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> ApiResult<Edited> {
     let language = app.language();
     // Without them the edit still works, just without knowing to import a helper.
-    let helper_names = match &language.helpers {
+    let helper_definitions = match &language.helpers {
         Some(helpers) => helpers
-            .names(&app.config.solutions_dir)
+            .definitions(&app.config.solutions_dir)
             .unwrap_or_else(|err| {
                 tracing::warn!("reading the helpers: {err:#}");
                 Vec::new()
@@ -893,7 +893,7 @@ async fn edit_code(State(app): State<Shared>, Json(body): Json<EditBody>) -> Api
         &body.earlier,
         language.helpers.as_ref().map(|h| edit::Helpers {
             file: &h.file,
-            names: &helper_names,
+            definitions: &helper_definitions,
         }),
     );
     let (runner, spec) = app.edit_target();
@@ -1342,6 +1342,14 @@ async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) -> Response {
         return (StatusCode::NOT_FOUND, "No language server is configured").into_response();
     };
     upgrade.on_upgrade(move |socket| async move {
+        // Without them, a new user's language server complains there's no project.
+        let project = async {
+            app.workspace.ensure_repo().await?;
+            app.workspace.ensure_project(app.language())
+        };
+        if let Err(err) = project.await {
+            tracing::warn!("language server: {err:#}");
+        }
         let environment = match app.solutions().await.and_then(|s| s.environment()) {
             Ok(environment) => environment,
             Err(err) => {

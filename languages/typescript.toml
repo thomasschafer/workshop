@@ -38,6 +38,7 @@ dictation_hints = '''
 - "dot" between names is property access, `input.trim()`. "of" or "call" means a call: "parse int of s" is `parseInt(s)`, and "max of xs" is `Math.max(...xs)`, and "sum of xs" is `sum(xs)` from the helpers.
 - "x arrow x times two" or "lambda x arrow x times two" is `(x) => x * 2`. "map with ..." on an array is `.map(...)`; likewise filter, reduce, some, every, find.
 - "equals" is `=`, "triple equals" or "double equals" is `===`, "not equals" is `!==`, "plus equals" is `+=`. "and" and "or" in a condition are `&&` and `||`.
+- A block is written with its closing brace as soon as it opens. "Back out", "close brace" or "end block" moves the cursor past the closing brace that's there already, onto a new line after it; add a brace only when one is missing.
 - "number array" or "array of number" is `number[]`; "map from string to number" is `Map<string, number>`; "set of string" is `Set<string>`.
 - "template string" starts a template literal with backticks; "dollar brace x" inside one is `${x}`.
 - "for const x of xs" is `for (const x of xs) {`.
@@ -52,8 +53,8 @@ start_part_two = { find = """
 // console.log(part2(input));""", replace = """
 console.log(part2(input));""" }
 
-# A module of your own that every solution can import, created with your first solution unless
-# it's already there.
+# A module of your own that every solution can import, created by
+# Workshop unless it's already there.
 [helpers]
 file = "lib/aoc.ts"
 # A line defining a helper, with its name: an exported function or constant.

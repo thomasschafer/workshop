@@ -23,10 +23,19 @@ export default defineConfig({
     // A desktop pointer shows the box for typing what you'd say, which stands in for speech.
     hasTouch: false,
     isMobile: false,
-    launchOptions: process.env.PLAYWRIGHT_CHROMIUM
-      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM }
-      : {},
   },
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        browserName: "chromium",
+        launchOptions: process.env.PLAYWRIGHT_CHROMIUM
+          ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM }
+          : {},
+      },
+    },
+    { name: "webkit", use: { browserName: "webkit" } },
+  ],
   webServer: {
     command: `${binary} serve`,
     env: {

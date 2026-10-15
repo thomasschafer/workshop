@@ -1,0 +1,351 @@
+# Edit eval cases for Rust: see haskell.toml for the format. All code here is invented.
+
+language = "rust"
+
+[[case]]
+name = "let-snake-case"
+utterance = "let count trees equals zero"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    let count_trees = 0;‸
+}'''
+
+[[case]]
+name = "let-mut"
+utterance = "let mut total equals zero"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    let mut total = 0;‸
+}'''
+
+[[case]]
+name = "for-lines-opens-block"
+utterance = "for line in input dot lines"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    for line in input.lines() {
+        ‸
+    }
+}'''
+
+[[case]]
+name = "parse-int"
+utterance = "total plus equals line dot parse as i sixty four dot unwrap"
+before = '''
+fn part1(input: &str) -> i64 {
+    let mut total = 0;
+    for line in input.lines() {
+        ‸
+    }
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    let mut total = 0;
+    for line in input.lines() {
+        total += line.parse::<i64>().unwrap();‸
+    }
+}'''
+
+[[case]]
+name = "iterator-chain"
+utterance = "input dot lines dot map with closure line arrow line dot len dot sum"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    input.lines().map(|line| line.len()).sum()‸
+}'''
+also = ['''
+fn part1(input: &str) -> i64 {
+    input.lines().map(|line| line.len()).sum::<i64>()‸
+}''', '''
+fn part1(input: &str) -> i64 {
+    input.lines().map(|line| line.len() as i64).sum()‸
+}''', '''
+fn part1(input: &str) -> i64 {
+    input.lines().map(|line| line.len() as i64).sum::<i64>()‸
+}''']
+
+[[case]]
+name = "collect-vec"
+utterance = "let words equals input dot split whitespace collect into a vec"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    let words = input.split_whitespace().collect::<Vec<_>>();‸
+}'''
+also = ['''
+fn part1(input: &str) -> i64 {
+    let words: Vec<_> = input.split_whitespace().collect();‸
+}''', '''
+fn part1(input: &str) -> i64 {
+    let words: Vec<&str> = input.split_whitespace().collect();‸
+}''', '''
+fn part1(input: &str) -> i64 {
+    let words = input.split_whitespace().collect::<Vec<&str>>();‸
+}''']
+
+[[case]]
+name = "hash-map-new"
+utterance = "let mut counts equals hash map new"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+after = '''
+use std::collections::HashMap;
+
+fn part1(input: &str) -> i64 {
+    let mut counts = HashMap::new();‸
+}'''
+
+[[case]]
+name = "max-method"
+utterance = "best equals best dot max of total"
+before = '''
+fn part1(input: &str) -> i64 {
+    let mut best = 0;
+    ‸
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    let mut best = 0;
+    best = best.max(total);‸
+}'''
+
+[[case]]
+name = "wrap-in-call"
+utterance = "wrap that in some"
+before = '''
+fn part1(input: &str) -> i64 {
+    let first = input.trim()‸
+}'''
+recent = "input.trim()"
+after = '''
+fn part1(input: &str) -> i64 {
+    let first = Some(input.trim())‸
+}'''
+
+[[case]]
+name = "replace-placeholder"
+utterance = "replace this line with input dot lines dot count as i sixty four"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸todo!()
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    input.lines().count() as i64‸
+}'''
+
+[[case]]
+name = "uncomment-part-two"
+utterance = "uncomment the last line"
+before = '''
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    1
+}
+
+fn main() {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    println!("{}", part1(&input));‸
+    // When you start part 2, uncomment the next line.
+    // println!("{}", part2(&input));
+}'''
+after = '''
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    1
+}
+
+fn main() {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    println!("{}", part1(&input));
+    // When you start part 2, uncomment the next line.
+    println!("{}", part2(&input));‸
+}'''
+also = ['''
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    1
+}
+
+fn main() {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    println!("{}", part1(&input));‸
+    // When you start part 2, uncomment the next line.
+    println!("{}", part2(&input));
+}''', '''
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    1
+}
+
+fn main() {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    println!("{}", part1(&input));
+    // When you start part 2, uncomment the next line.
+    ‸println!("{}", part2(&input));
+}''']
+
+[[case]]
+name = "imports-a-helper-it-uses"
+utterance = "replace this line with ints of input dot iter dot sum"
+before = '''
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    ‸todo!()
+}'''
+after = '''
+use std::io::Read;
+
+use aoc::ints;
+
+fn part1(input: &str) -> i64 {
+    ints(input).iter().sum()‸
+}'''
+also = ['''
+use std::io::Read;
+use aoc::ints;
+
+fn part1(input: &str) -> i64 {
+    ints(input).iter().sum()‸
+}''', '''
+use std::io::Read;
+
+use aoc::ints;
+
+fn part1(input: &str) -> i64 {
+    ints(input).iter().sum::<i64>()‸
+}''', '''
+use std::io::Read;
+use aoc::ints;
+
+fn part1(input: &str) -> i64 {
+    ints(input).iter().sum::<i64>()‸
+}''', '''
+use aoc::ints;
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    ints(input).iter().sum()‸
+}''', '''
+use aoc::ints;
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    ints(input).iter().sum::<i64>()‸
+}''']
+
+[[case]]
+name = "use-from-helpers"
+utterance = "use AOC grid"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+after = '''
+use aoc::grid;
+
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+also = ['''
+use aoc::grid;‸
+
+fn part1(input: &str) -> i64 {
+    
+}''']
+
+[[case]]
+name = "crate-not-in-cargo"
+utterance = "use itertools and call tuple windows on the lines"
+before = '''
+fn part1(input: &str) -> i64 {
+    ‸
+}'''
+unsure = true
+
+[[case]]
+name = "refuse-write-function"
+utterance = "write a function that finds the shortest path through the grid"
+before = '''
+‸'''
+unsure = true
+
+[[case]]
+name = "refuse-finish"
+utterance = "finish part two for me"
+before = '''
+fn part2(input: &str) -> i64 {
+    ‸
+}'''
+unsure = true
+
+# Code with backslashes in it, which the reply has to escape exactly once.
+
+[[case]]
+name = "escapes-split-on-blank-lines"
+utterance = "for group in input split on blank lines"
+before = '''
+fn part1(input: &str) -> i64 {
+    let mut best = 0;
+    ‸
+}'''
+after = '''
+fn part1(input: &str) -> i64 {
+    let mut best = 0;
+    for group in input.split("\n\n") {
+        ‸
+    }
+}'''
+also = ['''
+fn part1(input: &str) -> i64 {
+    let mut best = 0;
+    for group in input.trim().split("\n\n") {
+        ‸
+    }
+}''']
+
+[[case]]
+name = "escapes-print-tab"
+utterance = "print line with a tab between a and b"
+before = '''
+fn main() {
+    ‸
+}'''
+after = '''
+fn main() {
+    println!("{}\t{}", a, b);‸
+}'''
+also = ['''
+fn main() {
+    println!("{a}\t{b}");‸
+}''']

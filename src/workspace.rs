@@ -217,16 +217,28 @@ impl Workspace {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
         if !path.exists() {
             paths::write_atomic(&path, profile.template.as_bytes())?;
-            // Along with the first solution, unless the user has them already.
-            if let Some(helpers) = &profile.helpers {
-                helpers.create(&self.solutions_dir)?;
-            }
+            self.ensure_project(profile)?;
+            crate::toolchain::add_to_gitignore(
+                &self.solutions_dir,
+                "Build output",
+                &profile.gitignore,
+            )?;
             let readme = self.solutions_dir.join("README.md");
             if !readme.exists() {
                 paths::write_atomic(&readme, solutions_readme(profile)?.as_bytes())?;
             }
         }
         read_versioned(&path)
+    }
+
+    /// Writes the helpers and the files that make the solutions a project, such as a Cargo.toml,
+    /// unless the user has them already. They're needed before the language server starts, which
+    /// otherwise complains that there's no project, as well as with the first solution.
+    pub fn ensure_project(&self, profile: &LanguageProfile) -> Result<()> {
+        match &profile.helpers {
+            Some(helpers) => helpers.create(&self.solutions_dir),
+            None => Ok(()),
+        }
     }
 
     pub fn save_code(

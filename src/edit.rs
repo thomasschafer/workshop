@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::language::LanguageProfile;
+use crate::language::{HelperDefinition, LanguageProfile};
 use crate::provider::{CallSpec, ProviderRunner};
 
 /// Marks the cursor in documents exchanged with the model and the frontend.
@@ -76,7 +76,7 @@ pub struct Utterance<'a> {
 pub struct Helpers<'a> {
     /// The module's file, relative to the solutions directory.
     pub file: &'a str,
-    pub names: &'a [String],
+    pub definitions: &'a [HelperDefinition],
 }
 
 pub fn user_prompt(
@@ -93,21 +93,20 @@ pub fn user_prompt(
     let mut prompt = format!("File:\n```\n{doc_with_cursor}\n```\n");
     // Only the helpers the utterance names, as the rest are noise that can distract from it.
     // Before the cursor and what "that" is, which belong with the utterance.
-    if let Some(Helpers { file, names }) = helpers {
+    if let Some(Helpers { file, definitions }) = helpers {
         let said: Vec<String> = utterance
             .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '\'')
             .map(str::to_lowercase)
             .collect();
-        let named: Vec<&str> = names
+        let named: Vec<&HelperDefinition> = definitions
             .iter()
-            .filter(|name| said.contains(&name.to_lowercase()))
-            .map(String::as_str)
+            .filter(|d| said.contains(&d.name.to_lowercase()))
             .collect();
         if !named.is_empty() {
-            prompt.push_str(&format!(
-                "The user's helpers module, {file}, defines: {}\n",
-                named.join(", ")
-            ));
+            prompt.push_str(&format!("The user's helpers module, {file}, defines:\n"));
+            for definition in named {
+                prompt.push_str(&format!("- `{}`\n", definition.line));
+            }
         }
     }
     if let Some((number, line)) = cursor_line(doc_with_cursor) {
@@ -245,6 +244,14 @@ pub async fn request(
             .map_err(anyhow::Error::from)
             .and_then(|r| apply(doc_with_cursor, r));
         match applied {
+            Ok(outcome)
+                if replies.len() == 1 && adds_double_backslashes(doc_with_cursor, &outcome) =>
+            {
+                attempt = format!(
+                    "{prompt}\n\nYour previous reply was:\n{}\n\n{DOUBLE_BACKSLASH_HINT}",
+                    reply.text
+                );
+            }
             Ok(outcome) => {
                 return Ok(Response {
                     outcome,
@@ -277,6 +284,20 @@ pub async fn request(
                 None => return Err(failed(format!("{err:#}"), &replies)),
             },
         }
+    }
+}
+
+/// Said to the model when its edit adds two backslashes in a row to the code. Code rarely needs
+/// them, and they're the mark of a backslash escaped twice in the JSON, which turns `"\n"` into
+/// a backslash and an `n` and makes for a wrong answer rather than an error.
+const DOUBLE_BACKSLASH_HINT: &str = r#"It adds `\\`, two backslashes in a row, to the code, which usually means a backslash was escaped twice: in the JSON, the code `"\n"` is written `"\"\\n\""`. Reply again with the JSON for the code you mean. If two backslashes are what you meant, reply as before."#;
+
+fn adds_double_backslashes(doc_with_cursor: &str, outcome: &EditOutcome) -> bool {
+    match outcome {
+        EditOutcome::Applied { doc, .. } => {
+            doc.matches(r"\\").count() > doc_with_cursor.matches(r"\\").count()
+        }
+        EditOutcome::Unsure { .. } => false,
     }
 }
 
@@ -562,6 +583,47 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn asks_again_when_a_backslash_looks_escaped_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let twice = r#"{"status":"edit","edits":[{"find":"‸","replace":"split(\"\\\\n\")‸"}],"summary":"s"}"#;
+        let once =
+            r#"{"status":"edit","edits":[{"find":"‸","replace":"split(\"\\n\")‸"}],"summary":"s"}"#;
+        let model = scripted_model(dir.path(), &[twice, once]);
+        let response = request(&model, &test_spec(), "x.‸", "p", Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(response.replies.len(), 2);
+        assert!(
+            matches!(response.outcome, EditOutcome::Applied { ref doc, .. } if doc == r#"x.split("\n")‸"#)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn keeps_two_backslashes_the_model_stands_by() {
+        let dir = tempfile::tempdir().unwrap();
+        let regex =
+            r#"{"status":"edit","edits":[{"find":"‸","replace":"\"\\\\d+\"‸"}],"summary":"s"}"#;
+        let model = scripted_model(dir.path(), &[regex, regex, regex]);
+        let response = request(&model, &test_spec(), "r = ‸", "p", Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(response.replies.len(), 2);
+        assert!(
+            matches!(response.outcome, EditOutcome::Applied { ref doc, .. } if doc == r#"r = "\\d+"‸"#)
+        );
+    }
+
+    fn test_spec() -> CallSpec {
+        CallSpec {
+            model: "m".into(),
+            system_prompt: String::new(),
+            effort: None,
+        }
+    }
+
     #[test]
     fn points_at_the_line_the_model_meant() {
         let doc = "part2 = solve 0\n  where\n    solve :: Int -> Set Int -‸> [Int] -> Int\n    solve freq seen (nxt:rest)";
@@ -628,7 +690,16 @@ mod tests {
     fn prompt_includes_earlier_questions() {
         let said = |text| Utterance { text, pieces: &[] };
         let plain = user_prompt("a‸", said("add b"), None, &[], None);
-        let names = ["ints".to_owned(), "grid".to_owned()];
+        let definitions = [
+            HelperDefinition {
+                name: "ints".to_owned(),
+                line: "ints :: String -> [Int]".to_owned(),
+            },
+            HelperDefinition {
+                name: "grid".to_owned(),
+                line: "grid :: String -> M.Map (Int, Int) Char".to_owned(),
+            },
+        ];
         let with_helpers = user_prompt(
             "a‸",
             said("sum of ints of data"),
@@ -636,10 +707,13 @@ mod tests {
             &[],
             Some(Helpers {
                 file: "lib/Aoc.hs",
-                names: &names,
+                definitions: &definitions,
             }),
         );
-        assert!(with_helpers.contains("The user's helpers module, lib/Aoc.hs, defines: ints\n"));
+        assert!(with_helpers.contains(
+            "The user's helpers module, lib/Aoc.hs, defines:\n- `ints :: String -> [Int]`\n"
+        ));
+        assert!(!with_helpers.contains("grid"));
         let unnamed = user_prompt(
             "a‸",
             said("add b"),
@@ -647,7 +721,7 @@ mod tests {
             &[],
             Some(Helpers {
                 file: "lib/Aoc.hs",
-                names: &names,
+                definitions: &definitions,
             }),
         );
         assert!(!unnamed.contains("helpers module"));

@@ -322,6 +322,14 @@ import { grid } from "npm:@puzzles/grids";
 ‸
 function part1(input: string): number {
   return 0;
+}''', '''
+import { Grid } from "npm:@puzzles/grids";‸
+function part1(input: string): number {
+  return 0;
+}''', '''
+import { grid } from "npm:@puzzles/grids";‸
+function part1(input: string): number {
+  return 0;
 }''']
 
 [[case]]

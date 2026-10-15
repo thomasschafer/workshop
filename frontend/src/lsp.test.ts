@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withoutPullDiagnostics } from "./lsp";
+import { quietMessage, withoutPullDiagnostics } from "./lsp";
 
 describe("withoutPullDiagnostics", () => {
   it("stops the client offering pull diagnostics", () => {
@@ -23,5 +23,14 @@ describe("withoutPullDiagnostics", () => {
   it("leaves other messages as they are", () => {
     const change = '{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"diagnostic":{}}}';
     expect(withoutPullDiagnostics(change)).toBe(change);
+  });
+});
+
+describe("quietMessage", () => {
+  it("shows errors, and keeps the rest out of the way", () => {
+    expect(quietMessage({ type: 1, message: "Failed to load the project" })).toBe(false);
+    for (const type of [2, 3, 4]) {
+      expect(quietMessage({ type, message: "Finished loading packages." })).toBe(true);
+    }
   });
 });

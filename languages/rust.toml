@@ -1,0 +1,153 @@
+name = "Rust"
+# Selects syntax highlighting in the editor.
+editor_mode = "rust"
+lsp_language_id = "rust"
+
+# Relative to the solutions directory. The solutions are one Cargo package, each solution one of
+# its binaries, which Cargo finds in src/bin by itself.
+file = "src/bin/{year}-day{day:02}.rs"
+
+# Built with optimisations, as many puzzles need them to finish in good time. The puzzle input is
+# passed on stdin. Each line of stdout is read as the answer to that part: line 1 for part 1,
+# line 2 for part 2.
+build = ["cargo", "build", "--release", "--quiet", "--bin", "{year}-day{day:02}"]
+run = ["cargo", "run", "--release", "--quiet", "--bin", "{year}-day{day:02}"]
+
+lsp = ["rust-analyzer"]
+
+gitignore = ["/target/"]
+
+template = '''
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    todo!()
+}
+
+fn part2(input: &str) -> i64 {
+    todo!()
+}
+
+fn main() {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    println!("{}", part1(&input));
+    // When you start part 2, uncomment the next line.
+    // println!("{}", part2(&input));
+}
+'''
+
+dictation_hints = '''
+- Names are snake_case: "count trees" is `count_trees`. Numbers in names are spoken as words but written as digits: "part one" is `part1`, unless a name in the file already says otherwise.
+- "let x equals ..." is `let x = ...;` and "let mut x equals ..." is `let mut x = ...;`. Statements end with a semicolon, except an expression the block returns. A line ending in an opening brace opens a block, indented four spaces further; "close brace" or "end block" closes it.
+- A block is written with its closing brace as soon as it opens. "Back out", "close brace" or "end block" moves the cursor past the closing brace that's there already, onto a new line after it; add a brace only when one is missing.
+- "dot" between names is a method call or field, `input.lines()`; "colon colon" or "path" is `::`, as in `HashMap::new()`. "of" or "call" means a call: "max of a comma b" is `a.max(b)` for numbers.
+- Iterators are chained: "input dot lines dot map with line arrow ..." is `input.lines().map(|line| ...)`; "pipe x pipe" or "closure x" is `|x|`. "collect into a vec" is `.collect::<Vec<_>>()`, and "sum" at the end of a chain is `.sum::<i64>()` unless the type is known.
+- "parse as i64" or "parse int" is `.parse::<i64>().unwrap()`. "unwrap" is `.unwrap()`; "question mark" is `?`.
+- "for line in input dot lines" is `for line in input.lines() {`. "vec of i64" is `Vec<i64>`; "hash map from string to i64" is `HashMap<String, i64>`, "hash set" is `HashSet`; "ref" or "borrow" is `&`, "ref mut" is `&mut`.
+- "equals" is `=`, "double equals" is `==`, "not equals" is `!=`, "plus equals" is `+=`.
+- "Wrap that in f" applies f to the whole of the most recent expression: wrapping `input.trim()` in `Some` gives `Some(input.trim())`.
+- The user's own helpers are the `aoc` crate, this package's library: "use AOC ints" or "import ints from AOC" is `use aoc::ints;`. `use` lines go with the others at the top, wherever the cursor is; `HashMap` and friends come from `std::collections`.
+- Only the standard library and the crates in Cargo.toml can be used. Asked to use another crate, say it needs adding to Cargo.toml first.
+- Common mishearings: "in put" is `input`, "use" may be heard as "youse", "vec" as "vector" or "veck", "i sixty four" is `i64`, "u size" is `usize`, "mute" is `mut`.
+'''
+
+# When part 1 is solved, the template's part 2 line is offered to be turned on.
+start_part_two = { find = """
+    // When you start part 2, uncomment the next line.
+    // println!("{}", part2(&input));""", replace = """
+    println!("{}", part2(&input));""" }
+
+# A library of your own that every solution can use, created by Workshop unless
+# it's already there.
+[helpers]
+file = "src/lib.rs"
+# A line defining a helper, with its name: a public function.
+definition = "^pub fn ([a-z_][a-z0-9_]*)"
+# The Cargo package the solutions and the helpers belong to, for building them and for
+# rust-analyzer, unless you have a Cargo.toml already. Its name is the helpers' crate name. Add
+# crates to its dependencies to use them.
+lsp_config = { file = "Cargo.toml", text = """
+[package]
+name = "aoc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+# Unfinished solutions are full of code that isn't used yet, such as part 2 before it's started.
+[lints.rust]
+dead_code = "allow"
+unused_variables = "allow"
+
+[profile.release]
+# A number too big for its type stops the solution, rather than wrapping round to a wrong answer.
+overflow-checks = true
+""" }
+template = '''
+//! Helpers your solutions can share: `use aoc::ints;` to use them, and add your own.
+
+use std::collections::HashMap;
+
+/// Every integer in the text, including negative ones: `ints("x=-3, y=12")` is `[-3, 12]`.
+pub fn ints(text: &str) -> Vec<i64> {
+    let mut numbers = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_digit() || (ch == '-' && current.is_empty()) {
+            current.push(ch);
+        } else {
+            if current != "-" && !current.is_empty() {
+                numbers.push(current.parse().unwrap());
+            }
+            current.clear();
+            if ch == '-' {
+                current.push(ch);
+            }
+        }
+    }
+    numbers
+}
+
+/// A grid of characters by (row, column), from lines of text.
+pub fn grid(text: &str) -> HashMap<(i64, i64), char> {
+    let mut cells = HashMap::new();
+    for (r, line) in text.lines().enumerate() {
+        for (c, ch) in line.chars().enumerate() {
+            cells.insert((r as i64, c as i64), ch);
+        }
+    }
+    cells
+}
+
+/// The positions above, below, left and right.
+pub fn neighbours4((r, c): (i64, i64)) -> [(i64, i64); 4] {
+    [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+}
+
+/// The positions around, diagonals included.
+pub fn neighbours8((r, c): (i64, i64)) -> Vec<(i64, i64)> {
+    let mut around = Vec::new();
+    for dr in -1..=1 {
+        for dc in -1..=1 {
+            if (dr, dc) != (0, 0) {
+                around.push((r + dr, c + dc));
+            }
+        }
+    }
+    around
+}
+'''
+
+# Setup offers to install Rust and rust-analyzer with mise (https://mise.jdx.dev) when they're
+# missing. mise installs Rust with rustup, where Rust is usually kept. This is the mise.toml it
+# writes to the solutions directory, unless one is there already. Programs you have installed
+# already are used as they are.
+[toolchain]
+mise = '''
+# The programs these solutions are built with, installed by mise. Run `mise install` to install
+# them, and see https://mise.jdx.dev to use them in your shell.
+[tools]
+# rust-analyzer is the language server for error underlines and types.
+rust = { version = "stable", components = "rust-analyzer" }
+'''

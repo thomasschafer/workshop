@@ -44,6 +44,10 @@ pub struct LanguageProfile {
     /// How to install the programs above with mise, for setup to offer when they're missing.
     #[serde(default)]
     pub toolchain: Option<ToolchainProfile>,
+    /// Lines added to the solutions repo's `.gitignore` with the first solution, for what
+    /// building writes inside it.
+    #[serde(default)]
+    pub gitignore: Vec<String>,
 }
 
 /// Text to replace with other text.
@@ -74,6 +78,14 @@ pub struct HelpersProfile {
     /// edit model knows what the module offers and imports it when one is used.
     #[serde(default)]
     pub definition: Option<String>,
+}
+
+/// One helper in the user's module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelperDefinition {
+    pub name: String,
+    /// The line that defines it, such as its signature, which says how to call it.
+    pub line: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -119,8 +131,8 @@ impl HelpersProfile {
         Ok(())
     }
 
-    /// The helpers the module defines, by name, from its text.
-    pub fn names_in(&self, text: &str) -> Vec<String> {
+    /// The helpers the module defines, from its text.
+    pub fn definitions_in(&self, text: &str) -> Vec<HelperDefinition> {
         let Some(regex) = self
             .definition
             .as_deref()
@@ -128,22 +140,28 @@ impl HelpersProfile {
         else {
             return Vec::new();
         };
-        let mut names: Vec<String> = regex
+        let mut definitions: Vec<HelperDefinition> = regex
             .captures_iter(text)
-            .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+            .filter_map(|c| {
+                let name = c.get(1)?.as_str().to_owned();
+                let start = c.get(0)?.start();
+                let end = text[start..].find('\n').map_or(text.len(), |i| start + i);
+                let line = text[start..end].trim().to_owned();
+                Some(HelperDefinition { name, line })
+            })
             .collect();
-        names.dedup();
-        names
+        definitions.dedup_by(|a, b| a.name == b.name);
+        definitions
     }
 
     /// The helpers the user's module defines now, or the ones it starts with if it hasn't been
     /// made yet.
-    pub fn names(&self, solutions_dir: &Path) -> Result<Vec<String>> {
+    pub fn definitions(&self, solutions_dir: &Path) -> Result<Vec<HelperDefinition>> {
         let path = solutions_dir.join(relative_inside(&self.file)?);
         match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(self.names_in(&text)),
+            Ok(text) => Ok(self.definitions_in(&text)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                Ok(self.names_in(&self.template))
+                Ok(self.definitions_in(&self.template))
             }
             Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
         }
@@ -182,6 +200,7 @@ fn relative_inside(path: &str) -> Result<PathBuf> {
 const BUILTIN: &[(&str, &str)] = &[
     ("haskell", include_str!("../languages/haskell.toml")),
     ("python", include_str!("../languages/python.toml")),
+    ("rust", include_str!("../languages/rust.toml")),
     ("go", include_str!("../languages/go.toml")),
     ("typescript", include_str!("../languages/typescript.toml")),
 ];
@@ -308,9 +327,9 @@ mod tests {
             helpers.validate().unwrap();
             // Go's are capitalised, as exported names must be.
             let names: Vec<String> = helpers
-                .names_in(&helpers.template)
+                .definitions_in(&helpers.template)
                 .iter()
-                .map(|name| name.to_lowercase())
+                .map(|definition| definition.name.to_lowercase())
                 .collect();
             assert_eq!(
                 names[..4],
@@ -318,6 +337,32 @@ mod tests {
                 "{id}"
             );
         }
+    }
+
+    #[test]
+    fn reads_how_each_helper_is_defined() {
+        let rust = builtin_profiles()
+            .unwrap()
+            .into_iter()
+            .find(|(id, _)| id == "rust")
+            .and_then(|(_, p)| p.helpers)
+            .unwrap();
+        assert_eq!(
+            rust.definitions_in("pub fn ints(text: &str) -> Vec<i64> {\n    todo!()\n}\n")[0],
+            HelperDefinition {
+                name: "ints".to_owned(),
+                line: "pub fn ints(text: &str) -> Vec<i64> {".to_owned(),
+            }
+        );
+        let haskell = haskell().helpers.unwrap();
+        assert_eq!(
+            haskell
+                .definitions_in("ints :: String -> [Int]\nints = undefined\n")
+                .iter()
+                .map(|d| d.line.as_str())
+                .collect::<Vec<_>>(),
+            ["ints :: String -> [Int]"]
+        );
     }
 
     #[test]

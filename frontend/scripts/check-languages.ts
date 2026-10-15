@@ -1,6 +1,6 @@
 // Checks each language against its real toolchain, through the app: opening a puzzle creates the
-// solution and the helpers, the language server reports an error and then sees it fixed, and a
-// solution using the helpers runs on the sample. Needs each language's programs installed, so it
+// solution and the helpers, the language server reports an error and then sees it fixed with the
+// helpers in use, and the solution runs on the sample. Needs each language's programs installed, so it
 // isn't part of CI.
 //
 // Run with `mise run check-languages`, after building the server and frontend. Name languages to
@@ -17,7 +17,6 @@ const ROOT = resolve(import.meta.dirname, "..", "..");
 
 interface Case {
   language: string;
-  file: string;
   /** A solution with one type error in it. */
   broken: string;
   /** Sums the integers in the input with the helpers' `ints`. */
@@ -27,7 +26,6 @@ interface Case {
 const CASES: Case[] = [
   {
     language: "haskell",
-    file: "Main.hs",
     broken: `module Main where
 
 main :: IO ()
@@ -43,7 +41,6 @@ main = getContents >>= print . sum . ints
   },
   {
     language: "python",
-    file: "main.py",
     broken: `answer: int = "not a number"
 print(answer)
 `,
@@ -56,7 +53,6 @@ print(sum(ints(sys.stdin.read())))
   },
   {
     language: "go",
-    file: "main.go",
     broken: `package main
 
 func main() {
@@ -84,8 +80,25 @@ func main() {
 `,
   },
   {
+    language: "rust",
+    broken: `fn main() {
+    let answer: i64 = "not a number";
+    println!("{answer}");
+}
+`,
+    working: `use std::io::Read;
+
+use aoc::ints;
+
+fn main() {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    println!("{}", ints(&input).iter().sum::<i64>());
+}
+`,
+  },
+  {
     language: "typescript",
-    file: "main.ts",
     broken: `const answer: number = "not a number";
 console.log(answer);
 `,
@@ -108,36 +121,28 @@ const PUZZLE = `<html><body><main><article class="day-desc"><h2>--- Day 4: Sums 
 </code></pre></article></main></body></html>`;
 const SAMPLE_ANSWER = "9";
 
-async function check(
-  page: Page,
-  test: Case,
-  solution: string,
-  log: (message: string) => void,
-): Promise<void> {
+async function check(page: Page, test: Case, log: (message: string) => void): Promise<void> {
   const status = page.locator(".status-line");
-  const open = async () => {
-    await page.getByRole("button", { name: "2017" }).click();
-    await page.locator(".day", { hasText: /^4$/ }).click();
-    await page.getByRole("button", { name: "Code", exact: true }).click();
-    await page.locator(".cm-line").first().waitFor();
+  await page.getByRole("button", { name: "2017" }).click();
+  await page.locator(".day", { hasText: /^4$/ }).click();
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await page.locator(".cm-line").first().waitFor();
+  // Opening the puzzle created the solution and the helpers, with their project files, after the
+  // language server had started; the rest happens without reloading, so it must have seen them.
+  const write = async (code: string) => {
+    await page.locator(".cm-content").click();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.insertText(code);
   };
-  // Opening the puzzle creates the solution and the helpers; each version after that is written
-  // as if dictated.
-  await open();
-  const reopen = async (code: string) => {
-    writeFileSync(solution, code);
-    await page.reload();
-    await open();
-  };
-  await reopen(test.broken);
+  await write(test.broken);
   await status.getByText(/\b1 error\b/).waitFor({ timeout: 300_000 });
   log("the language server reports the error");
-  await reopen(test.working);
+  await write(test.working);
   await status.getByText("no errors").waitFor({ timeout: 300_000 });
-  // "no errors" shows as soon as the server is ready, so this waits for it to have had a look.
-  await page.waitForTimeout(5000);
+  // The helpers are only found once the server has seen the project, which can take a while.
+  await page.waitForTimeout(10_000);
   await status.getByText("no errors").waitFor();
-  log("and sees it fixed");
+  log("and sees the helpers, and the error fixed");
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await page.getByRole("button", { name: "Run sample" }).click();
   await page
@@ -145,6 +150,9 @@ async function check(
     .getByText(`Part 1: ${SAMPLE_ANSWER}`)
     .waitFor({ timeout: 300_000 });
   log("the solution runs");
+  // Messages from the language server, such as that it couldn't find the project.
+  const messages = await page.locator(".cm-dialog").allInnerTexts();
+  if (messages.length > 0) throw new Error(`The language server said: ${messages.join("\n")}`);
 }
 
 async function run(test: Case): Promise<void> {
@@ -168,7 +176,6 @@ async function run(test: Case): Promise<void> {
       .slice(0, text.indexOf("[languages.python]"))
       .replace('language = "python"', `language = "${test.language}"`),
   );
-  const solution = join(home, "solutions", "2017", "day04", test.file);
 
   // Before the server starts, so a browser that won't launch doesn't leave it running.
   const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
@@ -186,7 +193,7 @@ async function run(test: Case): Promise<void> {
     const page = await browser.newPage({ ...devices["Pixel 7"] });
     await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`);
     try {
-      await check(page, test, solution, log);
+      await check(page, test, log);
     } catch (err) {
       const screenshot = join(home, "failure.png");
       await page.screenshot({ path: screenshot });

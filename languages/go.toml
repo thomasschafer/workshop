@@ -47,6 +47,7 @@ dictation_hints = '''
 - Indentation is one tab per level, as gofmt writes it. A line ending in an opening brace opens a block; "close brace" or "end block" closes it.
 - Local names are camelCase: "count trees" is `countTrees`. Numbers in names are spoken as words but written as digits: "part one" is `part1`, unless a name in the file already says otherwise.
 - "x colon equals ..." or "x is ..." declares with `x := ...`; "x equals ..." assigns to an existing x with `=`. "double equals" is `==`, "not equals" is `!=`, "plus equals" is `+=`, "plus plus" is `++`.
+- A block is written with its closing brace as soon as it opens. "Back out", "close brace" or "end block" moves the cursor past the closing brace that's there already, onto a new line after it; add a brace only when one is missing.
 - "for i in range n" is `for i := range n {`; "for each line in lines" or "for underscore comma line in range lines" is `for _, line := range lines {`; "for i comma line ..." keeps the index.
 - "dot" between names is a selector, `strings.Fields(line)`. "of" or "call" means a call: "len of lines" is `len(lines)`.
 - Common standard library calls by what they do: "split lines" is `strings.Split(strings.TrimSpace(input), "\n")`, "fields" is `strings.Fields`, "atoi" or "parse int" is `strconv.Atoi`, "sort ints" is `slices.Sort`, "max of a comma b" is `max(a, b)`.
@@ -63,8 +64,8 @@ start_part_two = { find = """
 	// fmt.Println(part2(input))""", replace = """
 	fmt.Println(part2(input))""" }
 
-# A package of your own that every solution can import, created with your first solution unless
-# it's already there.
+# A package of your own that every solution can import, created by
+# Workshop unless it's already there.
 [helpers]
 file = "aoc/aoc.go"
 # A line defining a helper, with its name: an exported function.

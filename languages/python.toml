@@ -50,8 +50,8 @@ start_part_two = { find = """
     # print(part2(data))""", replace = """
     print(part2(data))""" }
 
-# A module of your own that every solution can import, created with your first solution unless
-# it's already there.
+# A module of your own that every solution can import, created by
+# Workshop unless it's already there.
 [helpers]
 file = "lib/aoc.py"
 # A line defining a helper, with its name: a function at the start of a line.

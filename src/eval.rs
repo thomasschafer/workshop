@@ -169,14 +169,14 @@ pub async fn run(
         runner.warm(&spec).await?;
         for case in cases {
             // As a new user's helpers module starts.
-            let names = profile
+            let definitions = profile
                 .helpers
                 .as_ref()
-                .map(|h| h.names_in(&h.template))
+                .map(|h| h.definitions_in(&h.template))
                 .unwrap_or_default();
             let helpers = profile.helpers.as_ref().map(|h| edit::Helpers {
                 file: &h.file,
-                names: &names,
+                definitions: &definitions,
             });
             run_case(&runner, &spec, case, helpers, &mut totals).await;
         }
@@ -346,6 +346,7 @@ mod tests {
             ("haskell", include_str!("../evals/haskell.toml")),
             ("go", include_str!("../evals/go.toml")),
             ("python", include_str!("../evals/python.toml")),
+            ("rust", include_str!("../evals/rust.toml")),
             ("typescript", include_str!("../evals/typescript.toml")),
         ] {
             check_bundled(language, source);

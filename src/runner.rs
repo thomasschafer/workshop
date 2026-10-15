@@ -79,7 +79,7 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
         .set("file", request.file.to_string_lossy())
         .set("dir", dir.to_string_lossy())
         .set("build_dir", request.build_dir.to_string_lossy())
-        .set("year", request.puzzle.year.to_string())
+        .set("year", request.puzzle.year_label())
         .set("day", request.puzzle.day.to_string());
     if let Some(helpers) = request.helpers {
         vars = vars.set("helpers", helpers.to_string_lossy());
@@ -259,6 +259,7 @@ mod tests {
             helpers: None,
             start_part_two: None,
             toolchain: None,
+            gitignore: Vec::new(),
         }
     }
 

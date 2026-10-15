@@ -44,7 +44,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { markCursor, minimalChange, unmarkCursor } from "./diff";
-import { withoutPullDiagnostics } from "./lsp";
+import { quietMessage, withoutPullDiagnostics } from "./lsp";
 
 const LANGUAGES: Record<string, () => Extension> = {
   haskell: () => StreamLanguage.define(haskell),
@@ -470,6 +470,7 @@ export class LanguageServerConnection {
       initializationOptions,
       timeout: 30_000,
       extensions: [serverDiagnostics()],
+      notificationHandlers: { "window/showMessage": (_client, params) => quietMessage(params) },
     });
     document.addEventListener("visibilitychange", this.onVisibility);
     this.open();

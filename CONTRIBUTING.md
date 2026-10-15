@@ -76,9 +76,12 @@ Then:
 
 1. Register the file in `BUILTIN` in `src/language.rs`.
 2. Add the syntax mode to `LANGUAGES` in `frontend/src/editor.ts`. CodeMirror's `@codemirror/legacy-modes` has modes for most languages, and some have a dedicated `@codemirror/lang-*` package.
-3. Check it works: `workshop doctor` should find the runner, and running the template on a sample should print two lines (or a clear error).
+3. Add edit eval cases in `evals/`, registered in `src/eval.rs`, and check them with `mise run eval`.
+4. Check it works with the real toolchain: add a case to `frontend/scripts/check-languages.ts` and run `mise run check-languages -- <id>`.
 
-Commands are lists of arguments, not shell strings. The placeholders are `{file}`, `{dir}` (the solution's directory), `{build_dir}` (a scratch directory outside the solutions repo, for build output), `{year}` and `{day}`; `{day:02}` pads with zeros. An unknown placeholder is an error.
+Commands are lists of arguments, not shell strings. The placeholders are `{file}`, `{dir}` (the solution's directory), `{build_dir}` (a scratch directory outside the solutions repo, for build output), `{year}` (`practice` for the practice puzzle) and `{day}`; `{day:02}` pads with zeros. An unknown placeholder is an error. Commands run in the solution's directory.
+
+`lsp_options` is sent to the language server as it starts, for servers that need settings to work at all, such as Deno's `{ enable = true }`. `gitignore` lists lines added to the solutions repo's `.gitignore` with the first solution, for build output written inside it, such as Cargo's `/target/`.
 
 ### Starting part 2
 
@@ -95,11 +98,14 @@ start_part_two = { find = """
 
 ### Helpers
 
-A `[helpers]` table gives solutions a module of the user's own to share. Workshop creates it with the first solution, along with any settings the language server needs to find it, but never replaces files the user already has. Commands can use its directory as `{helpers}`, such as `-i{helpers}` for GHC.
+A `[helpers]` table gives solutions a module of the user's own to share. Workshop creates it, along with any settings the language server needs to find it, before the language server first starts, but never replaces files the user already has. Those settings can also make the solutions a project, as `go.mod` and `Cargo.toml` do. Commands can use its directory as `{helpers}`, such as `-i{helpers}` for GHC.
+
+`definition` is a pattern matching a line that defines a helper, with the helper's name as its only group. When the user names a helper, the edit model is shown that line, so it knows how to call the helper and imports it.
 
 ```toml
 [helpers]
 file = "lib/aoc.py"
+definition = "^def ([A-Za-z_][A-Za-z0-9_]*)\\("
 environment = { PYTHONPATH = "{helpers}" }
 lsp_config = { file = "pyrightconfig.json", text = """
 {

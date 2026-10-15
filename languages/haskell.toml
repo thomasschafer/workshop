@@ -52,8 +52,8 @@ start_part_two = { find = """
   -- print (part2 input)""", replace = """
   print (part2 input)""" }
 
-# A module of your own that every solution can import, created with your first solution unless
-# it's already there.
+# A module of your own that every solution can import, created by
+# Workshop unless it's already there.
 [helpers]
 file = "lib/Aoc.hs"
 # A line defining a helper, with its name: a type signature at the start of a line.
