@@ -11,6 +11,9 @@ on:
         description: Tag of the existing GitHub release, e.g. v0.1.0
         required: true
         type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -236,7 +239,7 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           if [ -z "$TAP_TOKEN" ]; then
-            echo "::notice::HOMEBREW_TAP_TOKEN isn't set, so the Homebrew formula wasn't updated."
+            echo "::warning::HOMEBREW_TAP_TOKEN isn't set, so the Homebrew formula wasn't updated."
             exit 0
           fi
           version="${TAG#v}"
