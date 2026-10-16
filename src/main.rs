@@ -7,6 +7,7 @@ mod edit;
 mod eval;
 mod language;
 mod lsp;
+mod manifest;
 mod models;
 mod notify;
 mod packages;

@@ -1,7 +1,8 @@
 // Checks packages and helpers against the real toolchains: a solution imports the shared helpers
 // and a module that isn't installed, the language server reports the missing one, Workshop finds
-// its package online and installs it, the error clears and the solution runs. Needs the network, cabal, GHC and
-// haskell-language-server, and Python with pyright, so it isn't part of CI.
+// its package online and installs it, the error clears and the solution runs. Needs the network
+// and each language's programs, so it isn't part of CI. Name languages to check only those:
+// `mise run check-packages -- rust go`.
 //
 // Run with `mise run check-packages`, after building the server and frontend.
 import { spawn } from "node:child_process";
@@ -15,7 +16,8 @@ const PORT = 7896;
 const ROOT = resolve(import.meta.dirname, "..", "..");
 
 interface Case {
-  language: "python" | "haskell";
+  language: "python" | "haskell" | "rust" | "go" | "typescript";
+  /** Relative to the solutions directory. */
   file: string;
   /** Imports a module whose package isn't in the profile's own list, so it's looked up. */
   code: string;
@@ -25,7 +27,7 @@ interface Case {
 const CASES: Case[] = [
   {
     language: "python",
-    file: "main.py",
+    file: "2017/day04/main.py",
     code: `import sys
 
 import more_itertools
@@ -43,7 +45,7 @@ if __name__ == "__main__":
   },
   {
     language: "haskell",
-    file: "Main.hs",
+    file: "2017/day04/Main.hs",
     code: `module Main where
 
 import Aoc (ints)
@@ -53,6 +55,59 @@ main :: IO ()
 main = getContents >>= print . (+ length (ints "")) . length . lines . trim
 `,
     package: "extra",
+  },
+  {
+    language: "rust",
+    file: "src/bin/2017-day04.rs",
+    code: `use std::io::Read;
+
+use aoc::ints;
+use itertools::Itertools;
+
+fn main() {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    println!("{}", input.lines().sorted().count() + ints("").len());
+}
+`,
+    package: "itertools",
+  },
+  {
+    language: "go",
+    file: "2017/day04/main.go",
+    code: `package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"golang.org/x/exp/slices"
+	"solutions/aoc"
+)
+
+func main() {
+	data, _ := io.ReadAll(os.Stdin)
+	lines := strings.Fields(string(data))
+	if slices.Contains(lines, "z") {
+		panic("unexpected")
+	}
+	fmt.Println(len(lines) + len(aoc.Ints("")))
+}
+`,
+    package: "golang.org/x/exp/slices",
+  },
+  {
+    language: "typescript",
+    file: "2017/day04/main.ts",
+    code: `import { ints } from "aoc";
+import { sum } from "lodash-es";
+
+const input = await new Response(Deno.stdin.readable).text();
+console.log(sum(input.trim().split("\\n").map(() => 1)) + ints("").length);
+`,
+    package: "lodash-es",
   },
 ];
 
@@ -121,7 +176,7 @@ async function run(test: Case): Promise<void> {
       .slice(0, text.indexOf("[languages.python]"))
       .replace('language = "python"', `language = "${test.language}"`),
   );
-  const solution = join(home, "solutions", "2017", "day04", test.file);
+  const solution = join(home, "solutions", test.file);
 
   // Before the server starts, so a browser that won't launch doesn't leave it running.
   const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
@@ -153,4 +208,9 @@ async function run(test: Case): Promise<void> {
   }
 }
 
-for (const test of CASES) await run(test);
+const chosen = process.argv.slice(2);
+const unknown = chosen.filter((language) => !CASES.some((c) => c.language === language));
+if (unknown.length > 0) throw new Error(`No check for ${unknown.join(", ")}.`);
+for (const test of CASES) {
+  if (chosen.length === 0 || chosen.includes(test.language)) await run(test);
+}

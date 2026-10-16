@@ -22,7 +22,7 @@ use crate::doctor;
 use crate::edit::{self, EditOutcome};
 use crate::language::{LanguageProfile, Puzzle};
 use crate::models::{self, ModelSettings, ProviderOption};
-use crate::packages::{InstallLog, Packages, PackagesState, Resolution};
+use crate::packages::{Change, InstallLog, Packages, PackagesState, Resolution};
 use crate::paths::Paths;
 use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::runner::RunResult;
@@ -1737,22 +1737,14 @@ async fn add_package(
     State(app): State<Shared>,
     Json(body): Json<PackageBody>,
 ) -> ApiResult<PackagesResponse> {
-    require_packages(&app)
-        .await?
-        .add(&body.package)
-        .map_err(|e| bad_request(format!("{e:#}")))?;
-    install_packages(State(app)).await
+    change_packages(app, Some(Change::Add(body.package))).await
 }
 
 async fn remove_package(
     State(app): State<Shared>,
     Json(body): Json<PackageBody>,
 ) -> ApiResult<PackagesResponse> {
-    require_packages(&app)
-        .await?
-        .remove(&body.package)
-        .map_err(|e| bad_request(format!("{e:#}")))?;
-    install_packages(State(app)).await
+    change_packages(app, Some(Change::Remove(body.package))).await
 }
 
 async fn cancel_install(State(app): State<Shared>) -> ApiResult<()> {
@@ -1784,8 +1776,20 @@ async fn resolve_package(
 
 /// Installs the manifest's packages.
 async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesResponse> {
-    require_packages(&app).await?;
-    let installed = install_with(
+    change_packages(app, None).await
+}
+
+/// Adds or removes a package, if asked to, then installs what's listed.
+async fn change_packages(app: Shared, change: Option<Change>) -> ApiResult<PackagesResponse> {
+    if let Some(change) = &change {
+        require_packages(&app)
+            .await?
+            .check(change)
+            .map_err(|e| bad_request(format!("{e:#}")))?;
+    } else {
+        require_packages(&app).await?;
+    }
+    let installed: Vec<String> = install_with(
         &app,
         |app| &app.packages_install,
         AfterInstall::RestartLanguageServers,
@@ -1795,7 +1799,9 @@ async fn install_packages(State(app): State<Shared>) -> ApiResult<PackagesRespon
                 .await?
                 .packages()
                 .context("the language has no packages")?;
-            packages.install(&running.cancel, &running.log).await
+            packages
+                .apply(change.as_ref(), &running.cancel, &running.log)
+                .await
         },
     )
     .await?;

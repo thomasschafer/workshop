@@ -302,32 +302,32 @@ function part1(input: string): number {
   return 0;
 }'''
 after = '''
-import { Grid } from "npm:@puzzles/grids";‸
+import { Grid } from "@puzzles/grids";‸
 
 function part1(input: string): number {
   return 0;
 }'''
 also = ['''
-import { Grid } from "npm:@puzzles/grids";
+import { Grid } from "@puzzles/grids";
 ‸
 function part1(input: string): number {
   return 0;
 }''', '''
-import { grid } from "npm:@puzzles/grids";‸
+import { grid } from "@puzzles/grids";‸
 
 function part1(input: string): number {
   return 0;
 }''', '''
-import { grid } from "npm:@puzzles/grids";
+import { grid } from "@puzzles/grids";
 ‸
 function part1(input: string): number {
   return 0;
 }''', '''
-import { Grid } from "npm:@puzzles/grids";‸
+import { Grid } from "@puzzles/grids";‸
 function part1(input: string): number {
   return 0;
 }''', '''
-import { grid } from "npm:@puzzles/grids";‸
+import { grid } from "@puzzles/grids";‸
 function part1(input: string): number {
   return 0;
 }''']

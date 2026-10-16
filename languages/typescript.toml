@@ -7,14 +7,14 @@ lsp_language_id = "typescript"
 file = "{year}/day{day:02}/main.ts"
 
 # Deno runs TypeScript as it is, with no build step or project to set up, and fetches npm
-# packages the first time they're imported. A solution can't touch files or the network: the
+# packages as it needs them. A solution can't touch files or the network: the
 # puzzle input is passed on stdin. Each line of stdout is read as the answer to that part: line 1
 # for part 1, line 2 for part 2.
 run = ["deno", "run", "--quiet", "{file}"]
 
 lsp = ["deno", "lsp"]
-# Deno's language server stays off unless it's told otherwise. Its linter is left off, as it
-# objects to `npm:` imports, which are how packages are used here.
+# Deno's language server stays off unless it's told otherwise. Its linter is left off, as its
+# style rules aren't errors in a puzzle solution.
 lsp_options = { enable = true, lint = false, config = "./deno.json" }
 
 template = '''
@@ -43,7 +43,7 @@ dictation_hints = '''
 - "template string" starts a template literal with backticks; "dollar brace x" inside one is `${x}`.
 - "for const x of xs" is `for (const x of xs) {`.
 - "Wrap that in f" applies f to the whole of the most recent expression: wrapping `input.trim()` in `parseInt` gives `parseInt(input.trim())`.
-- The user's own helpers module is `aoc`: "import ints from AOC" is `import { ints } from "aoc";`. Packages come from npm and are imported with an `npm:` prefix, "at" starting a scope: "import min priority queue from at data structures JS slash priority queue" is `import { MinPriorityQueue } from "npm:@datastructures-js/priority-queue";`. Only use a package the user names; otherwise use the standard library and the helpers. Imports go with the others at the top, wherever the cursor is.
+- The user's own helpers module is `aoc`: "import ints from AOC" is `import { ints } from "aoc";`. Packages come from npm and are imported by name, "at" starting a scope: "import min priority queue from at data structures JS slash priority queue" is `import { MinPriorityQueue } from "@datastructures-js/priority-queue";`. Workshop offers to add a package that deno.json doesn't have yet. Only use a package the user names; otherwise use the standard library and the helpers. Imports go with the others at the top, wherever the cursor is.
 - Common mishearings: "in put" is `input`, "split lines" means `.split("\n")`, "const" may be heard as "cost" or "constant", "length" as "lengths".
 '''
 
@@ -119,3 +119,14 @@ mise = '''
 [tools]
 deno = "2"
 '''
+
+[packages]
+# deno.json's import map, which `deno add` and `deno remove` change, and Deno fetches what it
+# lists as it runs.
+manifest = "deno.json"
+format = "deno"
+add = [["deno", "add", "npm:{package}"]]
+remove = [["deno", "remove", "{package}"]]
+# Deno names the npm package for an import that isn't in the import map.
+missing_module = ['Import "([^"]+)" not a dependency']
+missing_package = ['deno add npm:([^`\s]+)']

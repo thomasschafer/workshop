@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio_util::sync::CancellationToken;
 
+use crate::manifest::ManifestFormat;
 use crate::paths;
 use crate::process::{self, ProcessGroup};
 use crate::template::{self, Vars};
@@ -24,15 +25,28 @@ use crate::toolchain::Toolchain;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackagesProfile {
-    /// The manifest, relative to the solutions directory: one package per line, with `#`
-    /// comments.
+    /// The manifest, relative to the solutions directory.
     pub manifest: String,
+    /// How the manifest lists packages: by default, one per line with `#` comments, installed by
+    /// Workshop. Otherwise it's the language's own manifest, such as Cargo.toml, which its tools
+    /// change and fetch.
+    #[serde(default)]
+    pub format: ManifestFormat,
     /// What a new manifest starts with.
     #[serde(default)]
     pub defaults: Vec<String>,
     /// Commands that install every package in the manifest into an empty `{env}` directory, run
-    /// in order. An argument that is exactly `{packages}` becomes one argument per package.
+    /// in order. An argument that is exactly `{packages}` becomes one argument per package. For
+    /// the language's own manifest, they're run in the solutions directory after a change, and
+    /// can be left out when building fetches what's listed.
+    #[serde(default)]
     pub install: Vec<Vec<String>>,
+    /// For the language's own manifest, the commands that add a package and remove one, run in
+    /// the solutions directory. `{package}` is the package.
+    #[serde(default)]
+    pub add: Vec<Vec<String>>,
+    #[serde(default)]
+    pub remove: Vec<Vec<String>>,
     /// Refreshes the installer's list of available packages, when it's older than `every_hours`
     /// or an install fails without it.
     #[serde(default)]
@@ -84,13 +98,41 @@ pub enum LookupService {
     Hoogle,
     /// Checks the package named after the module exists on PyPI, and fetches its summary.
     Pypi,
+    /// Looks up the crate named after the module on crates.io, which reads `_` and `-` alike.
+    CratesIo,
 }
 
 impl PackagesProfile {
     /// Checks the parts of the profile that could otherwise fail only once used.
     pub fn validate(&self) -> Result<()> {
-        if self.install.iter().any(Vec::is_empty) || self.install.is_empty() {
-            bail!("`packages.install` needs at least one command, and no empty commands");
+        let commands = [
+            ("install", &self.install),
+            ("add", &self.add),
+            ("remove", &self.remove),
+        ];
+        if let Some((field, _)) = commands.iter().find(|(_, c)| c.iter().any(Vec::is_empty)) {
+            bail!("`packages.{field}` can't have empty commands");
+        }
+        if self.format.is_native() {
+            if self.add.is_empty() || self.remove.is_empty() {
+                bail!(
+                    "`packages.add` and `packages.remove` need a command each, to change the language's own manifest"
+                );
+            }
+            if !self.defaults.is_empty() || !self.environment.is_empty() || self.update.is_some() {
+                bail!(
+                    "`packages.defaults`, `environment` and `update` are only for Workshop's own list of packages"
+                );
+            }
+        } else {
+            if self.install.is_empty() {
+                bail!("`packages.install` needs at least one command");
+            }
+            if !self.add.is_empty() || !self.remove.is_empty() {
+                bail!(
+                    "`packages.add` and `packages.remove` are only for the language's own manifest"
+                );
+            }
         }
         if self.update.as_ref().is_some_and(|u| u.command.is_empty()) {
             bail!("`packages.update.command` can't be empty");
@@ -108,7 +150,7 @@ impl PackagesProfile {
             }
         }
         for package in self.defaults.iter().chain(self.providers.values()) {
-            check_name(package)?;
+            self.format.check_name(package)?;
         }
         Ok(())
     }
@@ -119,6 +161,8 @@ impl PackagesProfile {
             .iter()
             .map(|u| &u.command)
             .chain(&self.install)
+            .chain(&self.add)
+            .chain(&self.remove)
             .filter_map(|command| command.first())
             .filter(|program| !program.contains('{'))
             .map(String::as_str)
@@ -141,40 +185,6 @@ impl PackagesProfile {
     }
 }
 
-/// Package names are passed to installers as arguments, so they're kept to plain names: nothing
-/// an installer could read as an option, a path or a URL.
-fn check_name(name: &str) -> Result<()> {
-    let valid = name
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_alphanumeric())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    if !valid {
-        bail!(
-            "{name:?} isn't a package name; use letters, digits, `-`, `_` and `.`, starting with a letter or digit"
-        );
-    }
-    Ok(())
-}
-
-/// The packages in a manifest's text.
-pub fn parse_manifest(text: &str) -> Result<Vec<String>> {
-    let mut packages: Vec<String> = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-        let name = line.split('#').next().unwrap_or("").trim();
-        if name.is_empty() {
-            continue;
-        }
-        check_name(name).with_context(|| format!("line {}", i + 1))?;
-        if !packages.iter().any(|p| p == name) {
-            packages.push(name.to_owned());
-        }
-    }
-    Ok(packages)
-}
-
 fn new_manifest(language_name: &str, packages: &[String]) -> String {
     let mut text = format!(
         "# Packages your {language_name} solutions can use, one per line. Workshop installs them\n\
@@ -185,6 +195,13 @@ fn new_manifest(language_name: &str, packages: &[String]) -> String {
         text.push('\n');
     }
     text
+}
+
+/// A change to the packages, made before installing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Change {
+    Add(String),
+    Remove(String),
 }
 
 /// What was last installed, kept next to the installations.
@@ -302,8 +319,13 @@ impl Packages<'_> {
         let path = self.manifest_path();
         match std::fs::read_to_string(&path) {
             Ok(text) => Ok(text),
+            // The language's own manifest is made along with the helpers, if at all.
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                Ok(new_manifest(self.language_name, &self.profile.defaults))
+                Ok(if self.profile.format.is_native() {
+                    String::new()
+                } else {
+                    new_manifest(self.language_name, &self.profile.defaults)
+                })
             }
             Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
         }
@@ -319,16 +341,22 @@ impl Packages<'_> {
 
     pub fn state(&self) -> Result<PackagesState> {
         let text = self.manifest_text()?;
-        let (packages, problem) = match parse_manifest(&text) {
+        let (packages, problem) = match self.profile.format.packages(&text) {
             Ok(packages) => (packages, None),
             Err(err) => (Vec::new(), Some(format!("{err:#}"))),
+        };
+        // The language's own tools fetch what's listed as they build.
+        let installed = if self.profile.format.is_native() {
+            Some(packages.clone())
+        } else {
+            self.installed()?.map(|i| i.packages)
         };
         Ok(PackagesState {
             manifest: self.profile.manifest.clone(),
             packages,
             problem,
             text,
-            installed: self.installed()?.map(|i| i.packages),
+            installed,
             missing_programs: self
                 .profile
                 .required_programs()
@@ -339,17 +367,80 @@ impl Packages<'_> {
         })
     }
 
-    /// Replaces the manifest, after checking every line is a package name.
+    /// Replaces the manifest, after checking it lists packages as it should.
     pub fn save_manifest(&self, text: &str) -> Result<()> {
-        parse_manifest(text)?;
+        self.profile.format.packages(text)?;
         self.write_manifest(text)
     }
 
-    /// Adds a package to the end of the manifest, unless it's already there.
-    pub fn add(&self, package: &str) -> Result<()> {
-        check_name(package)?;
+    /// Checks a change could be made, before anything is run to make it.
+    pub fn check(&self, change: &Change) -> Result<()> {
+        match change {
+            Change::Add(package) => self.profile.format.check_name(package),
+            Change::Remove(package) => {
+                let text = self.manifest_text()?;
+                if !self.profile.format.packages(&text)?.contains(package) {
+                    bail!("{package} isn't in {}", self.profile.manifest);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Makes a change to the packages, if there is one, then installs everything listed.
+    /// Returns what's listed.
+    pub async fn apply(
+        &self,
+        change: Option<&Change>,
+        cancel: &CancellationToken,
+        log: &InstallLog,
+    ) -> Result<Vec<String>> {
+        if let Some(change) = change {
+            self.check(change)?;
+        }
+        if !self.profile.format.is_native() {
+            match change {
+                Some(Change::Add(package)) => self.add(package)?,
+                Some(Change::Remove(package)) => self.remove(package)?,
+                None => {}
+            }
+            return self.install(cancel, log).await;
+        }
+        let (commands, package) = match change {
+            Some(Change::Add(package)) => (self.profile.add.as_slice(), Some(package.as_str())),
+            Some(Change::Remove(package)) => {
+                (self.profile.remove.as_slice(), Some(package.as_str()))
+            }
+            None => (&[][..], None),
+        };
+        for command in commands.iter().chain(&self.profile.install) {
+            let mut vars = system_vars();
+            if let Some(package) = package {
+                vars = vars.set("package", package);
+            }
+            let args = template::render_all(command, &vars)?;
+            run_logged(
+                &args,
+                self.solutions_dir,
+                self.toolchain.variables(),
+                cancel,
+                log,
+            )
+            .await?;
+        }
+        self.profile.format.packages(&self.manifest_text()?)
+    }
+
+    /// Adds a package to the end of Workshop's own list, unless it's already there.
+    fn add(&self, package: &str) -> Result<()> {
         let mut text = self.manifest_text()?;
-        if parse_manifest(&text)?.iter().any(|p| p == package) {
+        if self
+            .profile
+            .format
+            .packages(&text)?
+            .iter()
+            .any(|p| p == package)
+        {
             return Ok(());
         }
         if !text.is_empty() && !text.ends_with('\n') {
@@ -360,10 +451,10 @@ impl Packages<'_> {
         self.write_manifest(&text)
     }
 
-    /// Removes a package from the manifest, keeping its other lines and comments as they are.
-    pub fn remove(&self, package: &str) -> Result<()> {
+    /// Removes a package from Workshop's own list, keeping its other lines and comments as they
+    /// are.
+    fn remove(&self, package: &str) -> Result<()> {
         let text = self.manifest_text()?;
-        parse_manifest(&text)?;
         let mut found = false;
         let kept: Vec<&str> = text
             .lines()
@@ -398,6 +489,9 @@ impl Packages<'_> {
     /// The environment variables for building, running and the language server: none until
     /// packages have been installed.
     pub fn environment(&self) -> Result<Vec<(String, String)>> {
+        if self.profile.format.is_native() {
+            return Ok(Vec::new());
+        }
         let Some(installed) = self.installed()? else {
             return Ok(Vec::new());
         };
@@ -419,15 +513,11 @@ impl Packages<'_> {
             .collect()
     }
 
-    /// Installs everything in the manifest into a new directory, switching to it only once the
-    /// install succeeds, so a failed install leaves the previous packages working.
-    pub async fn install(
-        &self,
-        cancel: &CancellationToken,
-        log: &InstallLog,
-    ) -> Result<Vec<String>> {
+    /// Installs everything in Workshop's own list into a new directory, switching to it only
+    /// once the install succeeds, so a failed install leaves the previous packages working.
+    async fn install(&self, cancel: &CancellationToken, log: &InstallLog) -> Result<Vec<String>> {
         let text = self.manifest_text()?;
-        let packages = parse_manifest(&text)?;
+        let packages = self.profile.format.packages(&text)?;
         // So what was installed is there to see and edit.
         if !self.manifest_path().exists() {
             self.write_manifest(&text)?;
@@ -558,7 +648,7 @@ impl Packages<'_> {
             .profile
             .package_named_after_module
             .then(|| module.split('.').next().unwrap_or(module).to_owned())
-            .filter(|name| check_name(name).is_ok());
+            .filter(|name| self.profile.format.check_name(name).is_ok());
         let Some(lookup) = &self.profile.lookup else {
             return Ok(
                 named_after.map_or(Resolution::NotFound, |package| Resolution::Guessed {
@@ -574,6 +664,7 @@ impl Packages<'_> {
                 pypi(lookup.url.as_deref(), &package, http).await
             }
             LookupService::Hoogle => hoogle(lookup.url.as_deref(), module, http).await,
+            LookupService::CratesIo => crates_io(lookup.url.as_deref(), module, http).await,
         }
     }
 }
@@ -636,7 +727,7 @@ async fn pypi(base: Option<&str>, package: &str, http: &reqwest::Client) -> Resu
         .bytes()
         .await?;
     let response: Response = serde_json::from_slice(&body).context("reading PyPI's answer")?;
-    check_name(&response.info.name)?;
+    ManifestFormat::Lines.check_name(&response.info.name)?;
     Ok(Resolution::Found {
         package: response.info.name,
         summary: response.info.summary.as_deref().and_then(summarise),
@@ -681,11 +772,47 @@ async fn hoogle(base: Option<&str>, module: &str, http: &reqwest::Client) -> Res
         .filter(|i| i.kind == "module" && i.item == wanted)
         .find_map(|i| Some((i.package?.name?, i.docs)));
     Ok(match found {
-        Some((package, docs)) if check_name(&package).is_ok() => Resolution::Found {
-            package,
-            summary: summarise(&docs),
-        },
+        Some((package, docs)) if ManifestFormat::Lines.check_name(&package).is_ok() => {
+            Resolution::Found {
+                package,
+                summary: summarise(&docs),
+            }
+        }
         _ => Resolution::NotFound,
+    })
+}
+
+async fn crates_io(base: Option<&str>, module: &str, http: &reqwest::Client) -> Result<Resolution> {
+    #[derive(Deserialize)]
+    struct Response {
+        #[serde(rename = "crate")]
+        krate: Crate,
+    }
+    #[derive(Deserialize)]
+    struct Crate {
+        name: String,
+        description: Option<String>,
+    }
+    ManifestFormat::Cargo.check_name(module)?;
+    let base = base.unwrap_or("https://crates.io");
+    let response = http
+        .get(format!("{base}/api/v1/crates/{module}"))
+        .send()
+        .await
+        .context("couldn't reach crates.io to look up the crate")?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Resolution::NotFound);
+    }
+    let body = response
+        .error_for_status()
+        .context("crates.io couldn't look up the crate")?
+        .bytes()
+        .await?;
+    let response: Response = serde_json::from_slice(&body).context("reading crates.io's answer")?;
+    ManifestFormat::Cargo.check_name(&response.krate.name)?;
+    Ok(Resolution::Found {
+        package: response.krate.name,
+        summary: response.krate.description.as_deref().and_then(summarise),
     })
 }
 
@@ -787,6 +914,9 @@ mod tests {
     fn profile(install: &[&[&str]]) -> PackagesProfile {
         PackagesProfile {
             manifest: "packages.txt".into(),
+            format: ManifestFormat::Lines,
+            add: vec![],
+            remove: vec![],
             defaults: vec!["alpha".into()],
             install: install
                 .iter()
@@ -827,13 +957,16 @@ mod tests {
     #[test]
     fn parses_manifests() {
         let text = "# comment\nalpha\n\n  beta-2  # why\nalpha\n";
-        assert_eq!(parse_manifest(text).unwrap(), ["alpha", "beta-2"]);
+        assert_eq!(
+            ManifestFormat::Lines.packages(text).unwrap(),
+            ["alpha", "beta-2"]
+        );
     }
 
     #[test]
     fn rejects_anything_but_package_names() {
         for line in ["--index-url=x", "../evil", "a b", "https://x", "pkg>=1"] {
-            let err = parse_manifest(line).unwrap_err();
+            let err = ManifestFormat::Lines.packages(line).unwrap_err();
             assert!(format!("{err:#}").contains("line 1"), "{line}: {err:#}");
         }
     }
@@ -848,6 +981,72 @@ mod tests {
         p.missing_package = vec!["(two)(groups)".into()];
         assert!(p.validate().is_err());
         assert!(profile(&[]).validate().is_err());
+
+        let mut cargo = cargo_profile();
+        cargo.validate().unwrap();
+        cargo.remove.clear();
+        assert!(cargo.validate().is_err());
+        let mut cargo = cargo_profile();
+        cargo.defaults = vec!["itertools".into()];
+        assert!(cargo.validate().is_err());
+        let mut lines = profile(&[&["true"]]);
+        lines.add = vec![vec!["true".into()]];
+        assert!(lines.validate().is_err());
+    }
+
+    /// Stands in for Cargo, editing the dependencies as `cargo add` and `cargo remove` would.
+    fn cargo_profile() -> PackagesProfile {
+        let command =
+            |script: &str| vec![vec!["sh".to_owned(), "-c".to_owned(), script.to_owned()]];
+        PackagesProfile {
+            manifest: "Cargo.toml".into(),
+            format: ManifestFormat::Cargo,
+            add: command("printf '%s = \"1\"\\n' {package} >> Cargo.toml"),
+            remove: command(
+                "grep -v '^{package} ' Cargo.toml > Cargo.new; mv Cargo.new Cargo.toml",
+            ),
+            install: vec![],
+            defaults: vec![],
+            update: None,
+            environment: BTreeMap::new(),
+            missing_module: vec![],
+            missing_package: vec![],
+            providers: BTreeMap::new(),
+            package_named_after_module: false,
+            lookup: None,
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn changes_the_languages_own_manifest_with_its_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"aoc\"\n\n[dependencies]\n",
+        )
+        .unwrap();
+        let p = cargo_profile();
+        let packages = packages(&p, dir.path());
+        let cancel = CancellationToken::new();
+        let log = InstallLog::default();
+        let listed = packages
+            .apply(Some(&Change::Add("itertools".into())), &cancel, &log)
+            .await
+            .unwrap();
+        assert_eq!(listed, ["itertools"]);
+        let state = packages.state().unwrap();
+        // Building fetches what's listed, so it counts as installed.
+        assert_eq!(state.installed.unwrap(), ["itertools"]);
+        assert!(packages.environment().unwrap().is_empty());
+
+        assert!(packages.check(&Change::Remove("regex".into())).is_err());
+        assert!(packages.check(&Change::Add("-x".into())).is_err());
+        let listed = packages
+            .apply(Some(&Change::Remove("itertools".into())), &cancel, &log)
+            .await
+            .unwrap();
+        assert!(listed.is_empty());
     }
 
     #[test]
@@ -869,7 +1068,7 @@ mod tests {
         packages.add("beta").unwrap();
         packages.add("beta").unwrap();
         assert_eq!(packages.state().unwrap().packages, ["alpha", "beta"]);
-        assert!(packages.add("-x").is_err());
+        assert!(packages.check(&Change::Add("-x".into())).is_err());
 
         packages.remove("alpha").unwrap();
         let state = packages.state().unwrap();
@@ -1016,6 +1215,14 @@ mod tests {
         use axum::routing::get;
         let app = axum::Router::new()
             .route(
+                "/api/v1/crates/num_integer",
+                get(|| async {
+                    axum::Json(serde_json::json!({
+                        "crate": { "name": "num-integer", "description": "Integer traits and functions" }
+                    }))
+                }),
+            )
+            .route(
                 "/pypi/numpy/json",
                 get(|| async {
                     axum::Json(serde_json::json!({
@@ -1079,6 +1286,24 @@ mod tests {
         // A module of the solution's own isn't taken for a package that doesn't exist.
         assert_eq!(
             checking.resolve("helpers", &http).await.unwrap(),
+            Resolution::NotFound
+        );
+
+        let mut rust = cargo_profile();
+        rust.lookup = Some(Lookup {
+            service: LookupService::CratesIo,
+            url: Some(base.clone()),
+        });
+        let crates = packages(&rust, dir.path());
+        assert_eq!(
+            crates.resolve("num_integer", &http).await.unwrap(),
+            Resolution::Found {
+                package: "num-integer".into(),
+                summary: Some("Integer traits and functions".into()),
+            }
+        );
+        assert_eq!(
+            crates.resolve("not_a_crate", &http).await.unwrap(),
             Resolution::NotFound
         );
 

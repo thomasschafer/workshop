@@ -54,7 +54,7 @@ dictation_hints = '''
 - "slice of int" or "int slice" is `[]int`; "map from string to int" is `map[string]int`; "make a map ..." is `make(map[...]...)`; "append x to xs" is `xs = append(xs, x)`.
 - "if err not nil panic" is `if err != nil { panic(err) }` written over three lines.
 - "Wrap that in f" applies f to the whole of the most recent expression: wrapping `strings.TrimSpace(input)` in `len` gives `len(strings.TrimSpace(input))`.
-- The user's own helpers package is `aoc`, imported as `"solutions/aoc"`: "import AOC" adds that import, and its functions are capitalised and qualified, so "ints of input" is `aoc.Ints(input)`. Imports go in the import block at the top, wherever the cursor is; Go won't build with an import that isn't used, or without one that is.
+- The user's own helpers package is `aoc`, imported as `"solutions/aoc"`: "import AOC" adds that import, and its functions are capitalised and qualified, so "ints of input" is `aoc.Ints(input)`. Imports go in the import block at the top, wherever the cursor is; Go won't build with an import that isn't used, or without one that is. Packages beyond the standard library are imported by their full path, such as `"golang.org/x/exp/maps"`; Workshop offers to add any that go.mod doesn't have yet.
 - Common mishearings: "in put" is `input`, "string" may be heard as "strings" (the package is `strings`, the type `string`), "s t r conv" is `strconv`, "funk" is `func`.
 '''
 
@@ -158,3 +158,13 @@ go = "latest"
 # gopls, the language server for error underlines and types.
 "go:golang.org/x/tools/gopls" = "latest"
 '''
+
+[packages]
+# go.mod's requirements, which `go get` adds to, and Go fetches as it builds.
+manifest = "go.mod"
+format = "go-mod"
+add = [["go", "get", "{package}"]]
+remove = [["go", "mod", "edit", "-droprequire={package}"]]
+# Go names the package that's missing, and `go get` adds the module that has it.
+missing_module = ['no required module provides package "?([A-Za-z0-9._~/-]+)']
+missing_package = ['no required module provides package "?([A-Za-z0-9._~/-]+)']

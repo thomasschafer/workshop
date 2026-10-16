@@ -48,7 +48,7 @@ dictation_hints = '''
 - "equals" is `=`, "double equals" is `==`, "not equals" is `!=`, "plus equals" is `+=`.
 - "Wrap that in f" applies f to the whole of the most recent expression: wrapping `input.trim()` in `Some` gives `Some(input.trim())`.
 - The user's own helpers are the `aoc` crate, this package's library: "use AOC ints" or "import ints from AOC" is `use aoc::ints;`. `use` lines go with the others at the top, wherever the cursor is; `HashMap` and friends come from `std::collections`.
-- Only the standard library and the crates in Cargo.toml can be used. Asked to use another crate, say it needs adding to Cargo.toml first.
+- Crates beyond the standard library are used the same way: "use itertools" is `use itertools::Itertools;`. Workshop offers to add a crate that isn't in Cargo.toml yet, so write the `use` line when asked.
 - Common mishearings: "in put" is `input`, "use" may be heard as "youse", "vec" as "vector" or "veck", "i sixty four" is `i64`, "u size" is `usize`, "mute" is `mut`.
 '''
 
@@ -151,3 +151,17 @@ mise = '''
 # rust-analyzer is the language server for error underlines and types.
 rust = { version = "stable", components = "rust-analyzer" }
 '''
+
+[packages]
+# Cargo.toml's dependencies, which `cargo add` and `cargo remove` change, and Cargo fetches as it
+# builds.
+manifest = "Cargo.toml"
+format = "cargo"
+add = [["cargo", "add", "{package}"]]
+remove = [["cargo", "remove", "{package}"]]
+# A crate that isn't in Cargo.toml, as rustc and rust-analyzer say.
+missing_module = [
+  "unresolved import `([A-Za-z0-9_]+)`",
+  "unlinked crate `([A-Za-z0-9_]+)`",
+]
+lookup = { service = "crates_io" }

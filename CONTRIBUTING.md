@@ -144,7 +144,8 @@ missing_package = []
 # Whether `numpy.linalg` comes from the package `numpy` when no provider below says otherwise.
 package_named_after_module = true
 # Where to look up a package for a module with no provider listed: "pypi" checks the package
-# named after the module exists, and "hoogle" searches Hackage for the module.
+# named after the module exists, "hoogle" searches Hackage for the module, and "crates_io" looks
+# up the crate named after it.
 lookup = { service = "pypi" }
 # Optional: refreshes the installer's package index when it's older than this, or when an
 # install fails without it.
@@ -154,9 +155,23 @@ lookup = { service = "pypi" }
 "yaml" = "pyyaml"
 ```
 
+When the language has a manifest of its own that its tools keep, and fetch what's in it as they build, use that instead, so there's one list and it's where the language's users expect it. `format` says how to read it (`cargo`, `go-mod` or `deno`), and `add` and `remove` are the commands that change it, run in the solutions directory with the package as `{package}`. There's no `{env}` and nothing to install, so `defaults`, `environment` and `update` don't apply:
+
+```toml
+[packages]
+manifest = "Cargo.toml"
+format = "cargo"
+add = [["cargo", "add", "{package}"]]
+remove = [["cargo", "remove", "{package}"]]
+missing_module = ["unresolved import `([A-Za-z0-9_]+)`"]
+lookup = { service = "crates_io" }
+```
+
+A manifest like this usually makes the solutions a project, so write it with the helpers' `lsp_config`, which exists before the language server starts.
+
 The patterns are matched in the browser too, so keep to regex syntax that Rust and JavaScript share. Make sure the language server picks up the environment. Installer output is shown as it happens and kept for the user to read, so a failure should explain itself there.
 
-`mise run check-packages` checks the built-in profiles against the real toolchains: a missing module is found, looked up, installed, and then seen by the language server and the solution. It needs the network, so it isn't part of CI; run it when you change how packages work.
+`mise run check-packages [-- <id>...]` checks the built-in profiles against the real toolchains: a missing module is found, looked up, installed, and then seen by the language server and the solution. It needs the network, so it isn't part of CI; run it when you change how packages work.
 
 ### Toolchain
 

@@ -285,13 +285,54 @@ fn part1(input: &str) -> i64 {
 }''']
 
 [[case]]
-name = "crate-not-in-cargo"
-utterance = "use itertools and call tuple windows on the lines"
+name = "uses-a-crate-not-added-yet"
+utterance = "use itertools"
 before = '''
+use std::io::Read;
+
 fn part1(input: &str) -> i64 {
     ‸
 }'''
-unsure = true
+after = '''
+use std::io::Read;
+
+use itertools::Itertools;‸
+
+fn part1(input: &str) -> i64 {
+    
+}'''
+also = ['''
+use std::io::Read;
+
+use itertools::Itertools;
+
+fn part1(input: &str) -> i64 {
+    ‸
+}''', '''
+use std::io::Read;
+use itertools::Itertools;‸
+
+fn part1(input: &str) -> i64 {
+    
+}''', '''
+use std::io::Read;
+use itertools::Itertools;
+
+fn part1(input: &str) -> i64 {
+    ‸
+}''', '''
+use itertools::Itertools;‸
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    
+}''', '''
+use itertools::Itertools;
+use std::io::Read;
+
+fn part1(input: &str) -> i64 {
+    ‸
+}''']
 
 [[case]]
 name = "refuse-write-function"
