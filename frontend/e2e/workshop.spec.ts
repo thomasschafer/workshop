@@ -385,7 +385,10 @@ if __name__ == "__main__":
     await page.getByRole("button", { name: "Close" }).click();
     await expect(page.locator(".top")).toContainText("★".repeat(part));
     if (part === 1) {
-      // Offered straight after the first star, as the template has part 2 commented out.
+      // Offered straight after the first star, as the template has part 2 commented out, and
+      // again on coming back to the puzzle without having started it.
+      await expect(page.getByRole("button", { name: "Start part 2" })).toBeVisible();
+      await page.reload();
       await page.getByRole("button", { name: "Start part 2" }).click();
       await expect(page.locator(".cm-content")).toContainText("    print(part2(data))");
       await expect(page.locator(".cm-content")).not.toContainText("# print(part2(data))");

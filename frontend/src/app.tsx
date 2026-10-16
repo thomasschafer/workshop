@@ -201,7 +201,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
   const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
   const [serverSpeech, setServerSpeech] = useState(boot.server_dictation);
-  const [part2Started, setPart2Started] = useState(false);
+  /** Null until the open puzzle's code has loaded. */
+  const [part2Started, setPart2Started] = useState<boolean | null>(null);
   /** Whether code has started part 2: the template's part 2 line is no longer turned off. */
   const hasStartedPart2 = (text: string) => {
     const swap = boot.language.start_part_two;
@@ -307,6 +308,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     setSaveStatus("saved");
     setDiagnostics({ errors: 0, warnings: 0 });
     setHover(null);
+    setPart2Started(null);
 
     (async () => {
       try {
@@ -446,7 +448,21 @@ export function App({ boot }: { boot: Bootstrap }) {
   const part = problem ? (problem.stars >= 2 ? null : problem.stars + 1) : 1;
   // The part being worked on: the next one to solve, or for a solved puzzle being worked through
   // again, the one the code has got to.
-  const workingPart = part ?? (part2Started ? 2 : 1);
+  const workingPart = part ?? (part2Started === true ? 2 : 1);
+
+  // Offered once per puzzle whenever part 1 is solved and the code hasn't started part 2: just
+  // after submitting, or on coming back to the puzzle later.
+  const offeredPartTwo = useRef<string | null>(null);
+  useEffect(() => {
+    if (!puzzle || part !== 2 || part2Started !== false) return;
+    const key = `${puzzle.year}-${puzzle.day}`;
+    if (offeredPartTwo.current === key) return;
+    offeredPartTwo.current = key;
+    queue.offer("Part 1 solved. Start part 2?", "Start part 2", () => {
+      const started = startPartTwo();
+      if (started.kind === "problem") notify(started.tone, started.text);
+    });
+  }, [puzzle, part, part2Started]);
   const expected = meta.sample_answers[workingPart - 1] ?? null;
 
   /**
@@ -495,15 +511,6 @@ export function App({ boot }: { boot: Bootstrap }) {
         updateMeta(withSuggestions(metaRef.current, refreshed));
       }
       if (committed) notify(committed.succeeded ? "info" : "error", committed.summary);
-      const swap = boot.language.start_part_two;
-      if (outcome.result === "correct" && part === 1 && swap) {
-        if (editor.current?.text().includes(swap.find)) {
-          queue.offer("Part 1 solved. Start part 2?", "Start part 2", () => {
-            const started = startPartTwo();
-            if (started.kind === "problem") notify(started.tone, started.text);
-          });
-        }
-      }
     } catch (e) {
       setRun((r) => ({ ...r, submitting: false, confirmSubmit: false, error: message(e) }));
     }

@@ -821,7 +821,7 @@ async fn submit(
     let part = Part::from_number(body.part)?;
     let outcome = app.aoc.submit(puzzle, part, &body.answer).await?;
     let correct = outcome == SubmitOutcome::Correct;
-    let problem = if correct {
+    let problem = if outcome.shows_progress() {
         Some(app.aoc.problem(puzzle, true).await?)
     } else {
         None

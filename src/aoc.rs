@@ -37,6 +37,39 @@ const SESSION_REJECTED: NeedsLogin = NeedsLogin(
     "Advent of Code didn't accept your session cookie; it may have expired. Log in again in setup, or see `workshop doctor`.",
 );
 
+/// Whether someone is waiting on a request, such as for a puzzle they've opened, or it's for
+/// something shown alongside, such as the calendar's stars. Requests are spaced apart either way,
+/// but one someone is waiting on goes first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Priority {
+    Now,
+    Background,
+}
+
+/// A request someone is waiting on, counted while it's queued or being made.
+struct WaitingNow<'a>(&'a AocClient);
+
+impl<'a> WaitingNow<'a> {
+    fn new(client: &'a AocClient) -> Self {
+        client
+            .waiting_now
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self(client)
+    }
+}
+
+impl Drop for WaitingNow<'_> {
+    fn drop(&mut self) {
+        let before = self
+            .0
+            .waiting_now
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        if before == 1 {
+            self.0.now_done.notify_waiters();
+        }
+    }
+}
+
 pub struct AocClient {
     http: reqwest::Client,
     /// Can be set while running, from the app's setup.
@@ -45,6 +78,10 @@ pub struct AocClient {
     base_url: String,
     min_request_interval: Duration,
     last_request: Mutex<Option<Instant>>,
+    /// How many requests someone is waiting on are queued, which background ones give way to.
+    waiting_now: std::sync::atomic::AtomicUsize,
+    /// Wakes background requests once no request someone is waiting on is queued.
+    now_done: tokio::sync::Notify,
     /// Serves the practice puzzle, which never touches Advent of Code.
     practice: Option<Practice>,
 }
@@ -127,6 +164,14 @@ pub enum SubmitOutcome {
     },
 }
 
+impl SubmitOutcome {
+    /// Whether Advent of Code has the part solved, so the pages Workshop keeps are out of date:
+    /// just now, or already, such as from another device.
+    pub fn shows_progress(&self) -> bool {
+        matches!(self, Self::Correct | Self::AlreadySolved { .. })
+    }
+}
+
 impl AocClient {
     pub fn with_base_url(
         session: Option<String>,
@@ -154,6 +199,8 @@ impl AocClient {
             },
             base_url,
             last_request: Mutex::new(None),
+            waiting_now: std::sync::atomic::AtomicUsize::new(0),
+            now_done: tokio::sync::Notify::new(),
             practice: None,
         })
     }
@@ -196,7 +243,7 @@ impl AocClient {
     pub async fn check_session(&self, session: &str) -> Result<()> {
         let url = format!("{}/2015", self.base_url);
         let response = self
-            .throttled(|| {
+            .throttled(Priority::Now, || {
                 self.http
                     .get(&url)
                     .header(reqwest::header::COOKIE, format!("session={session}"))
@@ -230,7 +277,7 @@ impl AocClient {
             Some(html) => html,
             None => {
                 let url = format!("{}/{}/day/{}", self.base_url, puzzle.year, puzzle.day);
-                let html = self.get(&url).await?;
+                let html = self.get(&url, Priority::Now).await?;
                 paths::write_atomic(&path, html.as_bytes())?;
                 html
             }
@@ -258,7 +305,7 @@ impl AocClient {
             return Ok(input);
         }
         let url = format!("{}/{}/day/{}/input", self.base_url, puzzle.year, puzzle.day);
-        let input = self.get(&url).await?;
+        let input = self.get(&url, Priority::Now).await?;
         paths::write_atomic(&path, input.as_bytes())?;
         Ok(input)
     }
@@ -269,7 +316,9 @@ impl AocClient {
         let html = match read_cache(&path, refresh, Some(CALENDAR_TTL))? {
             Some(html) => html,
             None => {
-                let html = self.get(&format!("{}/{year}", self.base_url)).await?;
+                let html = self
+                    .get(&format!("{}/{year}", self.base_url), Priority::Background)
+                    .await?;
                 paths::write_atomic(&path, html.as_bytes())?;
                 html
             }
@@ -285,7 +334,10 @@ impl AocClient {
             Some(html) => html,
             None => {
                 let html = self
-                    .get(&format!("{}/{year}/leaderboard/self", self.base_url))
+                    .get(
+                        &format!("{}/{year}/leaderboard/self", self.base_url),
+                        Priority::Background,
+                    )
                     .await?;
                 paths::write_atomic(&path, html.as_bytes())?;
                 html
@@ -308,10 +360,13 @@ impl AocClient {
             Some(json) => json,
             None => {
                 let json = self
-                    .get(&format!(
-                        "{}/{year}/leaderboard/private/view/{}.json",
-                        self.base_url, id.0
-                    ))
+                    .get(
+                        &format!(
+                            "{}/{year}/leaderboard/private/view/{}.json",
+                            self.base_url, id.0
+                        ),
+                        Priority::Background,
+                    )
                     .await?;
                 paths::write_atomic(&path, json.as_bytes())?;
                 json
@@ -334,7 +389,7 @@ impl AocClient {
         );
         let session = self.require_session()?;
         let response = self
-            .throttled(|| {
+            .throttled(Priority::Now, || {
                 self.http
                     .post(&url)
                     .header(reqwest::header::COOKIE, format!("session={session}"))
@@ -354,7 +409,7 @@ impl AocClient {
             bail!("Advent of Code returned {status} when submitting");
         }
         let outcome = parse_submit_response(&body);
-        if outcome == SubmitOutcome::Correct {
+        if outcome.shows_progress() {
             // The problem page now shows the next part and the accepted answer.
             let _ = std::fs::remove_file(self.day_dir(puzzle).join("problem.html"));
             // Both now show the new star.
@@ -372,13 +427,10 @@ impl AocClient {
         })
     }
 
-    async fn get(&self, url: &str) -> Result<String> {
-        self.get_with(url, &self.require_session()?).await
-    }
-
-    async fn get_with(&self, url: &str, session: &str) -> Result<String> {
+    async fn get(&self, url: &str, priority: Priority) -> Result<String> {
+        let session = self.require_session()?;
         let response = match self
-            .throttled(|| {
+            .throttled(priority, || {
                 self.http
                     .get(url)
                     .header(reqwest::header::COOKIE, format!("session={session}"))
@@ -402,19 +454,41 @@ impl AocClient {
         }
     }
 
-    async fn throttled<F, Fut>(&self, request: F) -> Result<reqwest::Response>
+    async fn throttled<F, Fut>(&self, priority: Priority, request: F) -> Result<reqwest::Response>
     where
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = reqwest::Result<reqwest::Response>>,
     {
-        let mut last = self.last_request.lock().await;
-        if let Some(previous) = *last {
-            let wait = self.min_request_interval.saturating_sub(previous.elapsed());
-            tokio::time::sleep(wait).await;
-        }
-        let result = request().await;
-        *last = Some(Instant::now());
+        use std::sync::atomic::Ordering;
+        // Counted until it's made, or abandoned, such as when the app stops waiting for it.
+        let _waiting = (priority == Priority::Now).then(|| WaitingNow::new(self));
+        let result = loop {
+            let mut last = self.last_request.lock().await;
+            if let Some(previous) = *last {
+                let wait = self.min_request_interval.saturating_sub(previous.elapsed());
+                tokio::time::sleep(wait).await;
+            }
+            if priority == Priority::Background && self.waiting_now.load(Ordering::SeqCst) > 0 {
+                drop(last);
+                self.until_nothing_waiting_now().await;
+                continue;
+            }
+            let result = request().await;
+            *last = Some(Instant::now());
+            break result;
+        };
         Ok(result?)
+    }
+
+    async fn until_nothing_waiting_now(&self) {
+        loop {
+            // Made before checking, so a notification in between isn't missed.
+            let done = self.now_done.notified();
+            if self.waiting_now.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                return;
+            }
+            done.await;
+        }
     }
 }
 
@@ -817,6 +891,12 @@ pub fn parse_submit_response(html: &str) -> SubmitOutcome {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
+    // Links back to the site, such as "[Return to Day 1]", which mean nothing in Workshop.
+    let message = regex::Regex::new(r"\s*\[[^\]]*\]")
+        .expect("valid regex")
+        .replace_all(&message, "")
+        .trim()
+        .to_owned();
     if message.contains("That's the right answer") {
         SubmitOutcome::Correct
     } else if message.contains("not the right answer") {
@@ -1074,12 +1154,16 @@ Day       Time    Rank  Score       Time   Rank  Score
             )),
             SubmitOutcome::TooSoon { .. }
         ));
-        assert!(matches!(
+        assert_eq!(
             parse_submit_response(&wrap(
-                "You don't seem to be solving the right level. Did you already complete it?"
+                "You don't seem to be solving the right level. Did you already complete it? <a href=\"/2021/day/1\">[Return to Day 1]</a>"
             )),
-            SubmitOutcome::AlreadySolved { .. }
-        ));
+            SubmitOutcome::AlreadySolved {
+                message:
+                    "You don't seem to be solving the right level. Did you already complete it?"
+                        .into()
+            }
+        );
         assert!(matches!(
             parse_submit_response(&wrap("Something new")),
             SubmitOutcome::Unknown { .. }
@@ -1152,6 +1236,101 @@ Day       Time    Rank  Score       Time   Rank  Score
         assert!(!client.has_session());
         client.set_session("good".into());
         assert!(client.has_session());
+    }
+
+    #[tokio::test]
+    async fn fetches_what_someone_is_waiting_for_first() {
+        let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = order.clone();
+        let app = axum::Router::new().fallback(move |uri: axum::http::Uri| {
+            let seen = seen.clone();
+            async move {
+                seen.lock().unwrap().push(uri.path().to_owned());
+                "<html><body><main></main></body></html>"
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = AocClient::with_base_url(
+            Some("good".into()),
+            "test",
+            dir.path().to_owned(),
+            format!("http://{address}"),
+        )
+        .unwrap();
+        client.min_request_interval = Duration::from_millis(300);
+        let puzzle = Puzzle::new(2017, 4).unwrap();
+
+        client.stars(2017, false).await.unwrap();
+        // The times are queued first, but someone is waiting on the input.
+        let times = client.times(2017, false);
+        let input = async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            client.input(puzzle).await
+        };
+        let (times, input) = tokio::join!(times, input);
+        times.unwrap();
+        input.unwrap();
+        assert_eq!(
+            *order.lock().unwrap(),
+            ["/2017", "/2017/day/4/input", "/2017/leaderboard/self"]
+        );
+    }
+
+    #[tokio::test]
+    async fn background_requests_carry_on_when_one_waited_on_is_abandoned() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut client =
+            AocClient::with_base_url(None, "test", dir.path().to_owned(), fake_aoc().await)
+                .unwrap();
+        client.min_request_interval = Duration::from_millis(200);
+        client.check_session("good").await.unwrap();
+        // Given up on while it waits its turn.
+        let abandoned =
+            tokio::time::timeout(Duration::from_millis(20), client.check_session("good")).await;
+        assert!(abandoned.is_err());
+        assert_eq!(
+            client.waiting_now.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn forgets_pages_that_are_out_of_date_once_a_part_is_solved_elsewhere() {
+        let app = axum::Router::new().route(
+            "/2017/day/4/answer",
+            axum::routing::post(|| async {
+                "<main><article><p>You don't seem to be solving the right level. Did you already complete it? <a href=\"/2017/day/4\">[Return to Day 4]</a></p></article></main>"
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let client = AocClient::with_base_url(
+            Some("good".into()),
+            "test",
+            dir.path().to_owned(),
+            format!("http://{address}"),
+        )
+        .unwrap();
+        let puzzle = Puzzle::new(2017, 4).unwrap();
+        let pages = [
+            client.day_dir(puzzle).join("problem.html"),
+            dir.path().join("2017").join("calendar.html"),
+            dir.path().join("2017").join("times.html"),
+        ];
+        for page in &pages {
+            std::fs::create_dir_all(page.parent().unwrap()).unwrap();
+            std::fs::write(page, "old").unwrap();
+        }
+        let outcome = client.submit(puzzle, Part::One, "12").await.unwrap();
+        assert!(matches!(outcome, SubmitOutcome::AlreadySolved { .. }));
+        for page in &pages {
+            assert!(!page.exists(), "{}", page.display());
+        }
     }
 
     #[tokio::test]
