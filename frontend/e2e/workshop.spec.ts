@@ -275,6 +275,29 @@ test("opens a page of settings from the list, and goes back to the list", async 
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
 });
 
+test("keeps the code scrolled where it was when an edit makes a line long, unless typing", async () => {
+  const scrolledSideways = () => page.locator(".cm-scroller").evaluate((e) => e.scrollLeft);
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  const before = readFileSync(solution, "utf8");
+  await say("add a long comment");
+  await expect(editor()).toContainText("well past the right edge");
+  await page.waitForTimeout(300);
+  expect(await scrolledSideways()).toBe(0);
+  // Coming back puts the cursor where it was, at the end of the long line.
+  await page.reload();
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(editor()).toContainText("well past the right edge");
+  await page.waitForTimeout(300);
+  expect(await scrolledSideways()).toBe(0);
+  // Moving along the line with keys follows the cursor.
+  await page.locator(".cm-line", { hasText: "well past" }).click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("End");
+  await expect.poll(scrolledSideways).toBeGreaterThan(0);
+  await expect.poll(() => readFileSync(solution, "utf8")).toContain("well past the right edge");
+  writeFileSync(solution, before);
+  await expect(editor()).not.toContainText("well past the right edge", { timeout: 15_000 });
+});
+
 test("wraps long lines only when chosen", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await expect(editor()).not.toHaveClass(/cm-lineWrapping/);

@@ -32,6 +32,7 @@ import {
   type Extension,
   StateEffect,
   StateField,
+  type Transaction,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -160,6 +161,8 @@ export class CodeEditor {
   private nextAnchor = 1;
   /** How many times the user has moved the cursor themselves, by tapping or with keys. */
   private userMoves = 0;
+  /** Whether the latest change was typing or moving with keys, which the view follows sideways. */
+  private followSideways = false;
 
   constructor(parent: HTMLElement, options: EditorOptions) {
     const language = LANGUAGES[options.mode];
@@ -186,7 +189,21 @@ export class CodeEditor {
         language ? language() : [],
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],
         this.inputMode.of(EditorView.contentAttributes.of({ inputmode: "none" })),
+        // Keeping the cursor in view only scrolls up and down, unless the user is typing: a long
+        // line otherwise leaves every line's start out of sight until they scroll back.
+        EditorView.scrollHandler.of((view) => {
+          if (this.followSideways) return false;
+          const left = view.scrollDOM.scrollLeft;
+          // After CodeMirror has scrolled, and before anything is drawn.
+          queueMicrotask(() => {
+            view.scrollDOM.scrollLeft = left;
+          });
+          return false;
+        }),
         EditorView.updateListener.of((update) => {
+          if (update.transactions.length > 0) {
+            this.followSideways = update.transactions.some(followsSideways);
+          }
           if (update.docChanged) {
             for (const [id, pos] of this.anchors) {
               this.anchors.set(id, update.changes.mapPos(pos, 1));
@@ -406,6 +423,17 @@ export class CodeEditor {
     window.clearTimeout(this.flashTimer);
     this.view.destroy();
   }
+}
+
+/** Typing, deleting and moving with keys, rather than tapping or edits made by voice. */
+function followsSideways(tr: Transaction): boolean {
+  return (
+    tr.isUserEvent("input.type") ||
+    tr.isUserEvent("input.paste") ||
+    tr.isUserEvent("input.complete") ||
+    tr.isUserEvent("delete") ||
+    (tr.isUserEvent("select") && !tr.isUserEvent("select.pointer"))
+  );
 }
 
 function countDiagnostics(view: EditorView): Diagnostics {

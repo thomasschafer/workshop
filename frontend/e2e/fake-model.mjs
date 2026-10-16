@@ -62,6 +62,17 @@ const replies = {
     ],
     summary: "returned the number of lines",
   },
+  "add a long comment": {
+    status: "edit",
+    edits: [
+      {
+        find: "import sys",
+        replace:
+          "import sys  # a comment long enough to run well past the right edge of a phone's screen‸",
+      },
+    ],
+    summary: "added a long comment",
+  },
   "change it": { status: "unsure", message: "Change what: part 1 or part 2?" },
   "part two, make it return zero": {
     status: "edit",
