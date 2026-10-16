@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/thomasschafer/workshop/compare/v0.5.0...v0.6.0) - 2026-10-16
+
+### Other
+
+- Keep the request priority test steady on slow machines
+- Prepare version 0.6.0
+- Install packages for Rust, Go and TypeScript
+- Get to an opened puzzle sooner, and catch up when a part was solved elsewhere
+- Fail the release when the Homebrew tap token is missing or can't push
+- Give the release workflow the Homebrew tap token when release-plz calls it
+
 ## [0.5.0](https://github.com/thomasschafer/workshop/compare/v0.4.0...v0.5.0) - 2026-10-15
 
 ### Other
