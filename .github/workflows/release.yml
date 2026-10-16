@@ -230,8 +230,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # Pushing to the tap needs a token with write access to it, HOMEBREW_TAP_TOKEN. Without
-      # one, this says so rather than failing the release.
+      # Pushing to the tap needs a token with write access to it, HOMEBREW_TAP_TOKEN. A missing
+      # or expired token fails the release, so it's noticed and renewed, even when the formula is
+      # already up to date.
       - name: Update thomasschafer/homebrew-tap
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -239,8 +240,8 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           if [ -z "$TAP_TOKEN" ]; then
-            echo "::warning::HOMEBREW_TAP_TOKEN isn't set, so the Homebrew formula wasn't updated."
-            exit 0
+            echo "::error::HOMEBREW_TAP_TOKEN isn't set, so the Homebrew formula can't be updated."
+            exit 1
           fi
           version="${TAG#v}"
           scripts/homebrew-formula.sh "$version" > workshop.rb
@@ -251,8 +252,15 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/workshop.rb
           if git diff --cached --quiet; then
+            if ! git push --dry-run origin HEAD; then
+              echo "::error::HOMEBREW_TAP_TOKEN can't push to thomasschafer/homebrew-tap; it may have expired."
+              exit 1
+            fi
             echo "The formula is already up to date."
             exit 0
           fi
           git commit -m "workshop ${version} (automated)"
-          git push
+          if ! git push; then
+            echo "::error::HOMEBREW_TAP_TOKEN can't push to thomasschafer/homebrew-tap; it may have expired."
+            exit 1
+          fi
