@@ -1260,10 +1260,13 @@ Day       Time    Rank  Score       Time   Rank  Score
             format!("http://{address}"),
         )
         .unwrap();
-        client.min_request_interval = Duration::from_millis(300);
+        // Long enough that the input is asked for well before the times' turn comes, however
+        // slowly the test runs.
+        client.min_request_interval = Duration::from_secs(1);
         let puzzle = Puzzle::new(2017, 4).unwrap();
 
-        client.stars(2017, false).await.unwrap();
+        // As if a request was made just now, so the next waits its turn.
+        *client.last_request.lock().await = Some(Instant::now());
         // The times are queued first, but someone is waiting on the input.
         let times = client.times(2017, false);
         let input = async {
@@ -1275,7 +1278,7 @@ Day       Time    Rank  Score       Time   Rank  Score
         input.unwrap();
         assert_eq!(
             *order.lock().unwrap(),
-            ["/2017", "/2017/day/4/input", "/2017/leaderboard/self"]
+            ["/2017/day/4/input", "/2017/leaderboard/self"]
         );
     }
 
