@@ -14,6 +14,9 @@ build = ["ghc", "-O2", "-v0", "-i{helpers}", "-outputdir", "{build_dir}", "-o", 
 run = ["{build_dir}/main"]
 
 lsp = ["haskell-language-server-wrapper", "--lsp"]
+# The notes plugin, which links to notes in GHC's own source, has nothing to offer solutions and
+# reports internal errors as code changes, which would cover the code.
+lsp_options = { haskell = { plugin = { notes = { globalOn = false } } } }
 
 template = '''
 module Main where

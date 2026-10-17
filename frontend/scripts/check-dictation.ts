@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, devices, type Page } from "@playwright/test";
-import { writeHome } from "../e2e/fixture.ts";
+import { serverToken, writeHome } from "../e2e/fixture.ts";
 
 const PORT = 7897;
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -179,8 +179,7 @@ async function main(): Promise<void> {
     stdio: ["ignore", "ignore", "inherit"],
   });
   try {
-    await new Promise((r) => setTimeout(r, 1500));
-    const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+    const token = await serverToken(HOME, PORT);
     for (const [i, test] of CASES.entries()) {
       await check(test, recordings[i] as string, token);
     }

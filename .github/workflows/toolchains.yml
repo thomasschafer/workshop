@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:
+    inputs:
+      languages:
+        description: 'Languages to check, as JSON, such as ["haskell"]. Leave empty for all.'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [haskell, python, typescript, go, rust]
+        language: ${{ fromJSON(inputs.languages || '["haskell", "python", "typescript", "go", "rust"]') }}
     steps:
       - uses: actions/checkout@v7
         with:

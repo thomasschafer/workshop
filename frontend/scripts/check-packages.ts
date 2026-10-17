@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, devices, type Page } from "@playwright/test";
-import { writeHome } from "../e2e/fixture.ts";
+import { serverToken, writeHome } from "../e2e/fixture.ts";
 
 const PORT = 7896;
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -189,8 +189,7 @@ async function run(test: Case): Promise<void> {
   const log = (message: string) =>
     console.log(`${test.language} ${((Date.now() - started) / 1000).toFixed(1)}s: ${message}`);
   try {
-    await new Promise((r) => setTimeout(r, 1500));
-    const token = readFileSync(join(home, "config", "token"), "utf8").trim();
+    const token = await serverToken(home, PORT);
     const page = await browser.newPage({ ...devices["Pixel 7"] });
     await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`);
     try {

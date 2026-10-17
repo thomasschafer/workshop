@@ -149,3 +149,24 @@ export function createHome(): void {
     model: "fake",
   });
 }
+
+/**
+ * Waits for a server started on `home` to answer, then returns its login token. A freshly built
+ * server can take a while to start, such as while macOS checks it the first time.
+ */
+export async function serverToken(home: string, port: number, timeoutMs = 60_000): Promise<string> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await fetch(`http://127.0.0.1:${port}/`);
+      return readFileSync(join(home, "config", "token"), "utf8").trim();
+    } catch (err) {
+      if (Date.now() > until) {
+        throw new Error(`The server on port ${port} didn't start within ${timeoutMs / 1000}s.`, {
+          cause: err,
+        });
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+}
