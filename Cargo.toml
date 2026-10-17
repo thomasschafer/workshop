@@ -1,6 +1,6 @@
 [package]
 name = "workshop"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 description = "Solve Advent of Code puzzles by voice, from your phone"
 license = "MIT OR Apache-2.0"
