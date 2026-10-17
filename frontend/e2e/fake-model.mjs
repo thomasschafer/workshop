@@ -19,6 +19,12 @@ async function reply(parts, pauseMs = 0) {
   );
 }
 
+// Asked for a part's example: the one in the invented puzzle the tests write inline.
+if (prompt.includes("Find part 1's example.") && prompt.includes("+2, -5, +4")) {
+  await reply([JSON.stringify({ input: "+2\n-5\n+4", answer: "1" })]);
+  process.exit(0);
+}
+
 // A discussion prompt lists the conversation, with the user's turns as "Them: ...".
 const asked = prompt.match(/^Them: .*$/gm);
 if (asked) {

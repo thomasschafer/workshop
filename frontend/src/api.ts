@@ -18,6 +18,12 @@ export interface Snippet {
   body: string;
 }
 
+/** A part's example, found by the edit model when the puzzle's page doesn't make it clear. */
+export interface FoundSample {
+  input: string;
+  answer: string;
+}
+
 export interface Bootstrap {
   state: UiState;
   language: {
@@ -504,6 +510,8 @@ export const api = {
   problem: (p: Puzzle, refresh = false) =>
     request<Problem>("GET", `${day(p)}/problem?refresh=${refresh}`),
   input: (p: Puzzle) => request<{ text: string; lines: number }>("GET", `${day(p)}/input`),
+  findSample: (p: Puzzle, part: number) =>
+    request<FoundSample | null>("POST", `${day(p)}/sample/${part}`),
   run: (p: Puzzle, input: "sample" | "real", part: number) =>
     request<RunResult>("POST", `${day(p)}/run`, { input, part }),
   cancelRun: () => request<null>("POST", "/run/cancel"),

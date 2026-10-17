@@ -12,6 +12,8 @@ interface Props {
   onRefresh: () => void;
   /** Clears progress, for puzzles that can be played again, such as the practice puzzle. */
   onStartAgain: (() => void) | null;
+  /** Parts whose example is being looked for. */
+  findingSamples: readonly PartIndex[];
 }
 
 /** Code the user tapped in the puzzle, waiting for them to say what it is. */
@@ -21,16 +23,16 @@ interface Picked {
   block: number | null;
 }
 
-function describeSample(meta: DayMeta, part: PartIndex): string {
+function describeSample(meta: DayMeta, part: PartIndex, finding: boolean): string {
   const block = meta.sample_blocks[part];
   if (block !== null) return `code block ${block + 1}`;
   const text = meta.sample_inputs[part];
   if (text !== null) {
     const lines = text.trimEnd().split("\n").length;
-    return lines === 1 ? `"${text.trim()}"` : `your own (${lines} lines)`;
+    return lines === 1 ? `"${text.trim()}"` : `${lines} lines`;
   }
   if (part === 1 && meta.sample_inputs[0] !== null) return "same as part 1";
-  return "none chosen";
+  return finding ? "looking for the example…" : "none chosen";
 }
 
 export function ProblemView({
@@ -42,6 +44,7 @@ export function ProblemView({
   onMeta,
   onRefresh,
   onStartAgain,
+  findingSamples,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -114,8 +117,8 @@ export function ProblemView({
           return (
             <div key={i} class="sample-row">
               <span>
-                Part {i + 1} sample: {describeSample(meta, part)} · expects{" "}
-                {meta.sample_answers[part] ?? "–"}
+                Part {i + 1} sample: {describeSample(meta, part, findingSamples.includes(part))} ·
+                expects {meta.sample_answers[part] ?? "–"}
               </span>
               <button
                 type="button"

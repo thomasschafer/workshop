@@ -275,6 +275,27 @@ test("opens a page of settings from the list, and goes back to the list", async 
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
 });
 
+test("finds an example the puzzle writes inline, rather than in a code block", async () => {
+  // Invented, in the style of older puzzles.
+  const cached = join(HOME, "cache", "aoc", "2017", "05");
+  mkdirSync(cached, { recursive: true });
+  writeFileSync(
+    join(cached, "problem.html"),
+    `<html><body><main><article class="day-desc"><h2>--- Day 5: Dials ---</h2>
+<p>For example, if the turns are <code>+2, -5, +4</code>, the dial ends at <code>1</code>.</p>
+</article></main></body></html>`,
+  );
+  writeFileSync(join(cached, "input.txt"), "+1\n-1\n");
+  await page.locator(".puzzle-button").click();
+  await page.getByRole("button", { name: "2017", exact: true }).click();
+  await page.locator(".day", { hasText: /^5$/ }).click();
+  await page.getByRole("button", { name: "Problem", exact: true }).click();
+  await expect(page.locator(".sample-summary")).toContainText("Part 1 sample: 3 lines · expects 1");
+  await page.locator(".puzzle-button").click();
+  await page.locator(".day", { hasText: /^4$/ }).click();
+  await expect(page.locator(".puzzle-button")).toContainText("day 4");
+});
+
 test("keeps the code scrolled where it was when an edit makes a line long, unless typing", async () => {
   const scrolledSideways = () => page.locator(".cm-scroller").evaluate((e) => e.scrollLeft);
   await page.getByRole("button", { name: "Code", exact: true }).click();

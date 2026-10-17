@@ -190,6 +190,13 @@ struct Spare {
 }
 
 /// Runs one provider, keeping a pre-started process ready when the provider supports it.
+/// Whether a call uses the process kept ready for the next call, and readies another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Spares {
+    Use,
+    Leave,
+}
+
 pub struct ProviderRunner {
     provider: ProviderConfig,
     working_dir: PathBuf,
@@ -314,13 +321,41 @@ impl ProviderRunner {
         timeout: Duration,
         partial: Option<&mpsc::UnboundedSender<String>>,
     ) -> Result<Reply> {
+        self.call_with(spec, prompt, timeout, partial, Spares::Use)
+            .await
+    }
+
+    /// Like `call`, for an occasional request with its own instructions: it leaves the process
+    /// kept ready for the usual ones alone, rather than replacing it with one for this.
+    pub async fn call_aside(
+        &self,
+        spec: &CallSpec,
+        prompt: &str,
+        timeout: Duration,
+    ) -> Result<Reply> {
+        self.call_with(spec, prompt, timeout, None, Spares::Leave)
+            .await
+    }
+
+    async fn call_with(
+        &self,
+        spec: &CallSpec,
+        prompt: &str,
+        timeout: Duration,
+        partial: Option<&mpsc::UnboundedSender<String>>,
+        spares: Spares,
+    ) -> Result<Reply> {
         let started = std::time::Instant::now();
         let spec = &self.resolve(spec).await;
-        let process = match self.take_spare(spec).await? {
+        let spare = match spares {
+            Spares::Use => self.take_spare(spec).await?,
+            Spares::Leave => None,
+        };
+        let process = match spare {
             Some(process) => process,
             None => self.spawn(spec, Some(prompt))?,
         };
-        if self.provider.prespawn {
+        if self.provider.prespawn && spares == Spares::Use {
             // Failing to warm only costs latency on the next call, so it mustn't fail this one.
             if let Err(err) = self.warm(spec).await {
                 tracing::warn!("could not start a spare model process: {err:#}");

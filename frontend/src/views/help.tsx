@@ -91,6 +91,11 @@ export function Help() {
           blue. It guesses them for you; to change them, tap any code in the puzzle, or use Edit at
           the top of the Problem tab to type your own.
         </p>
+        <p>
+          When a puzzle writes its example in a sentence rather than a block, as older ones often
+          do, your edit model finds it. Workshop only uses what it finds if every part of it is in
+          the puzzle.
+        </p>
       </section>
 
       <section>

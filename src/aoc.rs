@@ -119,6 +119,9 @@ pub struct Problem {
     pub parts_html: Vec<String>,
     /// Plain text of the visible parts, for the discussion model.
     pub text: String,
+    /// The same, part by part.
+    #[serde(skip)]
+    pub parts_text: Vec<String>,
     /// The answers the user has already had accepted, by part.
     pub answers: Vec<String>,
     /// Stars earned on this puzzle.
@@ -260,6 +263,12 @@ impl AocClient {
             );
         }
         Ok(())
+    }
+
+    /// Where the example found for a part is kept, next to the puzzle it came from.
+    pub fn sample_path(&self, puzzle: Puzzle, part: Part) -> PathBuf {
+        self.day_dir(puzzle)
+            .join(format!("sample-{}.json", part.number()))
     }
 
     fn day_dir(&self, puzzle: Puzzle) -> PathBuf {
@@ -542,6 +551,7 @@ pub fn parse_problem(html: &str) -> Result<Problem> {
     let mut sanitiser = Sanitiser::default();
     let mut parts_html = Vec::new();
     let mut text = String::new();
+    let mut parts_text = Vec::new();
     let mut suggested_sample_answers = Vec::new();
     let mut suggested_sample_blocks = Vec::new();
     for (part, article) in articles.iter().enumerate() {
@@ -566,8 +576,10 @@ pub fn parse_problem(html: &str) -> Result<Problem> {
                 .map(|e| e.text().collect::<String>().trim().to_owned())
                 .filter(|a| !a.is_empty() && !a.contains(char::is_whitespace)),
         );
-        text.push_str(&article_text(*article));
+        let part_text = article_text(*article);
+        text.push_str(&part_text);
         text.push_str("\n\n");
+        parts_text.push(part_text);
     }
 
     let title = document
@@ -629,6 +641,7 @@ pub fn parse_problem(html: &str) -> Result<Problem> {
         title,
         parts_html,
         text: text.trim_end().to_owned(),
+        parts_text,
         answers,
         stars,
         final_star,
@@ -659,7 +672,7 @@ fn article_text(article: ElementRef) -> String {
         if let Node::Text(text) = node.value() {
             out.push_str(text);
         } else if let Node::Element(el) = node.value()
-            && matches!(el.name(), "p" | "pre" | "li" | "h2")
+            && matches!(el.name(), "p" | "pre" | "li" | "h2" | "br")
             && !out.ends_with('\n')
             && !out.is_empty()
         {
@@ -1236,6 +1249,19 @@ Day       Time    Rank  Score       Time   Rank  Score
         assert!(!client.has_session());
         client.set_session("good".into());
         assert!(client.has_session());
+    }
+
+    #[test]
+    fn keeps_line_breaks_in_the_text() {
+        // Invented, with an example written across two lines.
+        let html = r#"<main><article class="day-desc"><h2>--- Day 3: Paths ---</h2>
+<p>For example, <code>R2,U1<br>L4,D2</code> gives <code><em>7</em></code>.</p></article></main>"#;
+        let problem = parse_problem(html).unwrap();
+        assert!(
+            problem.parts_text[0].contains("R2,U1\nL4,D2 gives 7."),
+            "{:?}",
+            problem.parts_text
+        );
     }
 
     #[tokio::test]

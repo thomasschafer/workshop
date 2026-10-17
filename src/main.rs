@@ -16,6 +16,7 @@ mod practice;
 mod process;
 mod provider;
 mod runner;
+mod samples;
 mod server;
 mod settings;
 mod solutions;

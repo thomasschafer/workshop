@@ -34,7 +34,14 @@ import { onNotificationOpen, puzzleToOpen } from "./notifications";
 import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleLabel, puzzleTitle } from "./puzzle";
-import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
+import {
+  EMPTY_META,
+  needsSample,
+  type PartIndex,
+  sampleInput,
+  withFoundSample,
+  withSuggestions,
+} from "./samples";
 import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
 import {
   type Job,
@@ -277,6 +284,49 @@ export function App({ boot }: { boot: Bootstrap }) {
     [],
   );
 
+  /** Parts whose example the edit model is looking for, for the puzzle open now. */
+  const [findingSamples, setFindingSamples] = useState<readonly PartIndex[]>([]);
+  /** Puzzle parts already looked for in this session, by "year-day-part". */
+  const soughtSamples = useRef(new Set<string>());
+  /**
+   * Asks the edit model for the example of each part that's still missing one, as older puzzles
+   * often give theirs inline rather than in a code block. One part at a time, as part 2's
+   * example is often part 1's.
+   */
+  const findSamples = useCallback(
+    async (p: Puzzle, loaded: Problem) => {
+      // Before 2020, puzzles often emphasise something other than the example's answer, so what
+      // the page's structure suggests is checked too. Since then it has been reliable.
+      const distrust = !isPractice(p) && p.year < 2020;
+      const parts = ([0, 1] as const).slice(0, loaded.parts_html.length);
+      for (const part of parts) {
+        const key = `${p.year}-${p.day}-${part}`;
+        if (
+          soughtSamples.current.has(key) ||
+          !needsSample(metaRef.current, loaded, part, distrust)
+        ) {
+          continue;
+        }
+        soughtSamples.current.add(key);
+        setFindingSamples((f) => [...f, part]);
+        try {
+          const found = await api.findSample(p, part + 1);
+          if (found && puzzleRef.current === p) {
+            const updated = withFoundSample(metaRef.current, loaded, part, found, distrust);
+            if (updated !== metaRef.current) updateMeta(updated);
+          }
+        } catch (e) {
+          // Asked again next time; the sample can still be chosen by hand meanwhile.
+          soughtSamples.current.delete(key);
+          console.warn(`Couldn't find part ${part + 1}'s example: ${message(e)}`);
+        } finally {
+          setFindingSamples((f) => f.filter((x) => x !== part));
+        }
+      }
+    },
+    [updateMeta],
+  );
+
   const loadProblem = useCallback(
     async (p: Puzzle, refresh: boolean) => {
       setProblemLoading(true);
@@ -287,13 +337,14 @@ export function App({ boot }: { boot: Bootstrap }) {
         setProblem(loaded);
         const suggested = withSuggestions(metaRef.current, loaded);
         if (suggested !== metaRef.current) updateMeta(suggested);
+        void findSamples(p, loaded);
       } catch (e) {
         if (puzzleRef.current === p) setProblemError(message(e));
       } finally {
         if (puzzleRef.current === p) setProblemLoading(false);
       }
     },
-    [updateMeta],
+    [updateMeta, findSamples],
   );
 
   // Open the selected puzzle: load its code, notes and state, and create the editor.
@@ -309,6 +360,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     setDiagnostics({ errors: 0, warnings: 0 });
     setHover(null);
     setPart2Started(null);
+    setFindingSamples([]);
 
     (async () => {
       try {
@@ -509,6 +561,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       if (refreshed) {
         setProblem(refreshed);
         updateMeta(withSuggestions(metaRef.current, refreshed));
+        void findSamples(p, refreshed);
       }
       if (committed) notify(committed.succeeded ? "info" : "error", committed.summary);
     } catch (e) {
@@ -894,6 +947,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       loading={problemLoading}
       meta={meta}
       onMeta={updateMeta}
+      findingSamples={findingSamples}
       onRefresh={() => puzzle && void loadProblem(puzzle, true)}
       onStartAgain={
         puzzle && isPractice(puzzle)

@@ -234,6 +234,7 @@ pub fn router(app: Shared) -> Router {
         .route("/puzzles/{year}/{day}/input", get(input))
         .route("/puzzles/{year}/{day}/run", post(run))
         .route("/puzzles/{year}/{day}/submit", post(submit))
+        .route("/puzzles/{year}/{day}/sample/{part}", post(find_sample))
         .route("/run/cancel", post(cancel_run))
         .route("/edit", post(edit_code))
         .route("/discuss", post(discuss))
@@ -447,6 +448,51 @@ fn bad_request(message: impl Into<String>) -> ApiError {
         StatusCode::BAD_REQUEST,
         serde_json::json!({ "error": message.into() }),
     )
+}
+
+/// Asks the edit model for a part's example, for when the page's structure doesn't give it away.
+/// What it finds, or that it found nothing, is kept, so each part is only asked about once.
+async fn find_sample(
+    State(app): State<Shared>,
+    Path((year, day, part)): Path<(u16, u8, u8)>,
+) -> ApiResult<Option<crate::samples::Sample>> {
+    let puzzle = puzzle(year, day)?;
+    let part = Part::from_number(part).map_err(|e| bad_request(e.to_string()))?;
+    let path = app.aoc.sample_path(puzzle, part);
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        match serde_json::from_str(&text) {
+            Ok(found) => return Ok(Json(found)),
+            Err(err) => tracing::warn!("reading {}: {err}", path.display()),
+        }
+    }
+    let problem = app.aoc.problem(puzzle, false).await?;
+    let shown = usize::from(part.number());
+    if problem.parts_text.len() < shown {
+        return Err(bad_request(format!(
+            "Part {} isn't open yet.",
+            part.number()
+        )));
+    }
+    let input = app.aoc.input(puzzle).await?;
+    let choice = app.model_settings().edit;
+    let spec = app.config.providers[&choice.provider].spec(
+        Role::Edit,
+        &choice.model,
+        crate::samples::system_prompt().to_owned(),
+    );
+    let prompt = crate::samples::user_prompt(part.number(), &problem.parts_text[..shown], &input);
+    let reply = app.runners[&choice.provider]
+        .call_aside(&spec, &prompt, crate::samples::TIMEOUT)
+        .await?;
+    let found = crate::samples::read_reply(&reply.text, &problem.text)?;
+    tracing::info!(
+        "sample for {puzzle} part {}: {found:?} in {}ms",
+        part.number(),
+        reply.elapsed_ms
+    );
+    let json = serde_json::to_string(&found).map_err(anyhow::Error::from)?;
+    crate::paths::write_atomic(&path, json.as_bytes())?;
+    Ok(Json(found))
 }
 
 fn puzzle(year: u16, day: u8) -> Result<Puzzle, ApiError> {
