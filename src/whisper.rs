@@ -15,6 +15,13 @@ use crate::process::{self, ProcessGroup};
 
 /// The Whisper command-line program, from whisper.cpp.
 const PROGRAM: &str = "whisper-cli";
+
+/// How repetitive a transcript can be before Whisper takes it for decoding stuck in a loop and
+/// drops it: lower than its default of 2.4, as dictated code often repeats itself. At 2.4,
+/// "1 plus 2 plus 3 plus … plus 20" after a pause was dropped whole, while 2.0 kept it in every
+/// voice tried. The benchmark's dictation and noise came out the same either way.
+const ENTROPY_THRESHOLD: &str = "1.8";
+
 const TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The model dictation uses. In the benchmark it heard code best for its speed: about half a
@@ -134,6 +141,7 @@ impl Whisper {
             .arg("--file")
             .arg(wav)
             .arg("--no-timestamps")
+            .args(["--entropy-thold", ENTROPY_THRESHOLD])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -536,6 +544,7 @@ async fn start_server(
             // As whisper-cli decodes by default, which the benchmark measured, rather than the
             // server's quicker but less accurate greedy decoding.
             .args(["--beam-size", "5", "--best-of", "5"])
+            .args(["--entropy-thold", ENTROPY_THRESHOLD])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
@@ -713,6 +722,11 @@ mod tests {
         );
         assert!(
             transcript.text.ends_with("--prompt names: part1"),
+            "{}",
+            transcript.text
+        );
+        assert!(
+            transcript.text.contains("--entropy-thold 1.8"),
             "{}",
             transcript.text
         );
