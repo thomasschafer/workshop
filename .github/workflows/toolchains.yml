@@ -1,0 +1,107 @@
+# Checks each language against the latest release of its real toolchain and language server,
+# which change under Workshop: the language server reports an error and sees it fixed, the
+# solution runs, and a missing package is found and installed. Weekly, as they need the network
+# and take a while, and on demand.
+name: Toolchains
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [haskell, python, typescript, go, rust]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Workshop itself, built with Rust whatever the language being checked.
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          components: ${{ matrix.language == 'rust' && 'rust-analyzer' || '' }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Haskell
+        if: matrix.language == 'haskell'
+        # The runner comes with ghcup.
+        run: |
+          ghcup install ghc recommended --set
+          ghcup install cabal recommended --set
+          ghcup install hls recommended --set
+          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
+
+      - name: Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Pyright
+        if: matrix.language == 'python'
+        run: npm install --global pyright
+
+      - name: Deno
+        if: matrix.language == 'typescript'
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+
+      - name: Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+
+      - name: gopls
+        if: matrix.language == 'go'
+        run: |
+          go install golang.org/x/tools/gopls@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: |
+          (cd frontend && npm ci && npm run build)
+          cargo build
+
+      - name: Browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Language server and running
+        working-directory: frontend
+        run: node scripts/check-languages.ts "${{ matrix.language }}"
+
+      - name: Packages
+        working-directory: frontend
+        run: node scripts/check-packages.ts "${{ matrix.language }}"
+
+      - name: Screenshots of what failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: failure-${{ matrix.language }}
+          path: /tmp/workshop-check-*/failure.png
+          if-no-files-found: ignore

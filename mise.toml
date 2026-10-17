@@ -40,16 +40,20 @@ description = "Build the release binary with the frontend embedded"
 depends = ["build-frontend"]
 run = "cargo build --release"
 
-[tasks.check]
-description = "Run all the checks CI runs"
+[tasks.check-fast]
+description = "Run the checks that take seconds: formatting, lints, types and unit tests"
 depends = ["install"]
 run = [
   "cargo fmt --check",
   "cargo clippy --all-targets -- -D warnings",
   "cargo test",
-  "cd frontend && npm run typecheck && npm run lint && npm test && npm run build",
-  "cargo build && cd frontend && npm run e2e && npm run e2e:webkit",
+  "cd frontend && npm run typecheck && npm run lint && npm test",
 ]
+
+[tasks.check]
+description = "Run all the checks CI runs, including the browser tests"
+depends = ["check-fast", "build-frontend"]
+run = "cargo build && cd frontend && npm run e2e && npm run e2e:webkit"
 
 [tasks.check-packages]
 description = "Check installing packages with the real toolchains (needs the network)"

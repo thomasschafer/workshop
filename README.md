@@ -129,7 +129,7 @@ With [mise](https://mise.jdx.dev) installed:
 ```sh
 mise run dev     # rebuild and restart on every change; refresh the page to see it
 mise run serve   # an optimised build, for when you're just using Workshop
-mise run check   # everything CI runs
+mise run check   # everything CI runs; check-fast skips the browser tests
 mise run build   # a release binary with the frontend embedded
 ```
 
