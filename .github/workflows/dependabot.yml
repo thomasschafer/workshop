@@ -1,5 +1,6 @@
-# Merges Dependabot's pull requests once CI passes, unless they include a major version, which
-# waits for a person. Required checks on main are what make the merge wait for CI.
+# Enables auto-merge on Dependabot's patch and minor pull requests, so they merge once
+# required checks pass. Majors, and anything whose update type can't be determined,
+# wait for review. Without required checks on the default branch this merges immediately.
 name: Dependabot
 
 on: pull_request
@@ -19,7 +20,9 @@ jobs:
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
       - name: Merge when CI passes
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        if: >-
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.html_url }}
