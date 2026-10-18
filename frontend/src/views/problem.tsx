@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, type DayMeta, type Problem, type Puzzle } from "../api";
-import { type PartIndex, setAnswer, setSampleText, toggleSample } from "../samples";
+import {
+  answerCode,
+  type PartIndex,
+  sameValues,
+  setAnswer,
+  setSampleText,
+  toggleSample,
+} from "../samples";
 
 interface Props {
   puzzle: Puzzle;
@@ -61,11 +68,30 @@ export function ProblemView({
       const index = Number(part.dataset.part) === 0 ? 0 : 1;
       const answer = meta.sample_answers[index];
       const input = meta.sample_blocks[index] === null ? meta.sample_inputs[index] : null;
-      for (const code of part.querySelectorAll<HTMLElement>("code[data-code]")) {
-        const text = code.textContent?.trim();
-        code.classList.toggle("is-answer", answer !== null && text === answer);
-        code.classList.toggle("is-sample", input !== null && text === input.trim());
+      const codes = [...part.querySelectorAll<HTMLElement>("code[data-code]")];
+      for (const code of codes) {
+        code.classList.toggle(
+          "is-sample",
+          input !== null && sameValues(code.textContent ?? "", input),
+        );
       }
+      const sample = part.querySelector(".is-sample");
+      const chosen =
+        answer === null
+          ? null
+          : answerCode(
+              codes.map((code) => ({
+                text: code.textContent ?? "",
+                emphasised: code.closest("em") !== null || code.querySelector("em") !== null,
+                afterSample:
+                  sample !== null &&
+                  (sample.compareDocumentPosition(code) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+              })),
+              answer,
+            );
+      codes.forEach((code, i) => {
+        code.classList.toggle("is-answer", i === chosen);
+      });
     }
   });
 

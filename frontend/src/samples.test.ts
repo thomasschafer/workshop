@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { DayMeta, Problem } from "./api";
 import {
+  answerCode,
   EMPTY_META,
   needsSample,
+  sameValues,
   sampleInput,
   setAnswer,
   setSampleText,
@@ -135,5 +137,41 @@ describe("found samples", () => {
     expect(meta.sample_answers).toEqual(["1", "-3"]);
     const own = withFoundSample(partOne, none, 1, { input: "+1\n-1\n", answer: "0" }, false);
     expect(own.sample_inputs).toEqual([found.input, "+1\n-1\n"]);
+  });
+});
+
+describe("marking the sample in the puzzle", () => {
+  it("matches an inline example to its sample written one value per line", () => {
+    expect(sameValues("+1, -2, +3, +1", "+1\n-2\n+3\n+1\n")).toBe(true);
+    expect(sameValues("+1, -2", "+1\n-2\n+3\n")).toBe(false);
+    expect(sameValues("", "")).toBe(false);
+  });
+
+  const code = (text: string, afterSample: boolean, emphasised = false) => ({
+    text,
+    afterSample,
+    emphasised,
+  });
+
+  it("marks the answer that ends the worked example, not every copy of it", () => {
+    const codes = [
+      code("3", false), // "decreases by 3", before the example
+      code("+1, -2, +3, +1", false),
+      code("2", true),
+      code("3", true), // the walkthrough's result
+      code("3", true), // "In this example, the result is 3"
+      code("+1, +1, +1", true),
+      code("3", true),
+    ];
+    expect(answerCode(codes, "3")).toBe(3);
+  });
+
+  it("marks the emphasised answer when the puzzle emphasises it", () => {
+    expect(answerCode([code("7", true), code("7", true, true), code("7", true)], "7")).toBe(1);
+  });
+
+  it("marks the last copy when the sample isn't in this part", () => {
+    expect(answerCode([code("2", false), code("2", false), code("0", false)], "2")).toBe(1);
+    expect(answerCode([code("4", false)], "2")).toBeNull();
   });
 });

@@ -122,6 +122,36 @@ export function withFoundSample(
     : meta;
 }
 
+/** The values in a sample, so one written inline, as "+1, -2", matches it written one per line. */
+const values = (text: string) => text.split(/[\s,]+/).filter((v) => v !== "");
+
+/** Whether `text`, such as inline code in the puzzle, is the sample written another way. */
+export function sameValues(text: string, sample: string): boolean {
+  const a = values(text);
+  const b = values(sample);
+  return a.length > 0 && a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** A piece of inline code in the puzzle, in the order it appears. */
+export interface PuzzleCode {
+  text: string;
+  emphasised: boolean;
+  /** Whether it comes after the part's sample input in the puzzle. */
+  afterSample: boolean;
+}
+
+/**
+ * Which of a part's inline code is its expected answer, where the same value often appears more
+ * than once: the emphasised one if the puzzle emphasises it, or else the first after the sample
+ * input, which ends its worked example, or else the last.
+ */
+export function answerCode(codes: readonly PuzzleCode[], answer: string): number | null {
+  const matches = codes.flatMap((c, i) => (c.text.trim() === answer ? [i] : []));
+  const emphasised = matches.filter((i) => codes[i]?.emphasised);
+  if (emphasised.length > 0) return emphasised.at(-1) ?? null;
+  return matches.find((i) => codes[i]?.afterSample) ?? matches.at(-1) ?? null;
+}
+
 /** Makes `block` the part's sample, or clears it if it already was. */
 export function toggleSample(
   meta: DayMeta,
