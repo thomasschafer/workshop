@@ -51,7 +51,7 @@ pub const VAD_SOURCE: ModelSource = ModelSource {
     url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
 };
 
-pub const INSTALL_HINT: &str = "Install whisper.cpp on the server, for its whisper-cli program: `brew install whisper-cpp` on macOS, or see https://github.com/ggml-org/whisper.cpp for other systems.";
+pub const INSTALL_HINT: &str = "Install whisper.cpp on the server, for its whisper-cli program: `brew install whisper.cpp` on macOS, or see https://github.com/ggml-org/whisper.cpp for other systems.";
 
 /// Whisper on this machine: the program, and the models downloaded for it.
 pub struct Whisper {
