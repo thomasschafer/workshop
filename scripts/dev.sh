@@ -1,7 +1,8 @@
 #!/bin/sh
 # Runs Workshop for development. The frontend and server rebuild when their sources change, and
 # the server restarts only once a new build succeeds, so refreshing the page picks up changes.
-# With Tailscale running, it's served to your other devices too, and macOS is kept awake.
+# With Tailscale running, it's served to your other devices too, and macOS is kept awake unless
+# WORKSHOP_KEEP_AWAKE is 0, such as when it runs in the background all the time.
 set -eu
 
 # Stop everything this script started, whichever way it ends.
@@ -24,7 +25,7 @@ if command -v tailscale >/dev/null 2>&1; then
   target/debug/workshop token --tailscale
 fi
 
-if command -v caffeinate >/dev/null 2>&1; then
+if [ "${WORKSHOP_KEEP_AWAKE:-1}" != 0 ] && command -v caffeinate >/dev/null 2>&1; then
   caffeinate -i -w $$ &
 fi
 
