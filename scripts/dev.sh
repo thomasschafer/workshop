@@ -15,7 +15,9 @@ touch "$marker"
 
 (cd frontend && npm run dev -- --logLevel warn) &
 
-watchexec --quiet --postpone \
+# Commands run in sh, not $SHELL: a login shell such as zsh can reset PATH from the system's
+# profile, losing programs this script was started with, such as the model CLIs.
+watchexec --quiet --postpone --shell sh \
   --watch src --watch prompts --watch languages --watch providers \
   --watch Cargo.toml --watch Cargo.lock --watch config.example.toml \
   -- "cargo build && touch $marker" &
@@ -31,5 +33,5 @@ fi
 
 # In the background with `wait`, because a shell only runs its traps once a foreground command
 # has finished.
-watchexec --quiet --restart --watch "$marker" -- target/debug/workshop serve &
+watchexec --quiet --restart --shell sh --watch "$marker" -- target/debug/workshop serve &
 wait
