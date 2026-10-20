@@ -16,9 +16,10 @@ pub struct AppSettings {
     pub language: String,
     #[serde(default)]
     pub theme: ThemeSettings,
-    /// Whether to commit and push the solutions repo after each star.
-    #[serde(default)]
-    pub commit_after_star: bool,
+    /// Whether to commit and push the solutions repo after each star, if chosen in the app;
+    /// otherwise the config decides. See [`AppSettings::commit_after_star`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_after_star: Option<bool>,
     /// A private leaderboard to show, if the user has chosen one.
     #[serde(default)]
     pub leaderboard: Option<crate::aoc::LeaderboardId>,
@@ -30,9 +31,14 @@ impl AppSettings {
             models: ModelSettings::defaults(config),
             language: config.language_id.clone(),
             theme: ThemeSettings::default(),
-            commit_after_star: false,
+            commit_after_star: None,
             leaderboard: None,
         }
+    }
+
+    /// Whether to commit and push the solutions repo after each star.
+    pub fn commit_after_star(&self, config: &Config) -> bool {
+        self.commit_after_star.unwrap_or(config.commit_after_star)
     }
 
     /// The saved choices, or the config's defaults if there are none or they no longer fit the
@@ -92,7 +98,7 @@ mod tests {
             },
             language: "python".into(),
             theme: ThemeSettings::default(),
-            commit_after_star: true,
+            commit_after_star: Some(true),
             leaderboard: Some(crate::aoc::LeaderboardId::try_from("123456".to_owned()).unwrap()),
         };
         chosen.save(&paths).unwrap();
@@ -107,5 +113,31 @@ mod tests {
             AppSettings::load(&config, &paths),
             AppSettings::defaults(&config)
         );
+    }
+
+    #[test]
+    fn commits_after_a_star_as_configured_until_chosen_in_the_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::under(dir.path());
+        let config = Config::parse("[solutions]\ncommit_after_star = true").unwrap();
+        assert!(AppSettings::load(&config, &paths).commit_after_star(&config));
+
+        // Saved before the choice existed, as settings from older versions are.
+        std::fs::create_dir_all(paths.settings_file().parent().unwrap()).unwrap();
+        std::fs::write(
+            paths.settings_file(),
+            r#"{"models":{"edit":{"provider":"claude","model":"haiku"},"discuss_provider":"claude"},"language":"haskell"}"#,
+        )
+        .unwrap();
+        let saved = AppSettings::load(&config, &paths);
+        assert_eq!(saved.commit_after_star, None);
+        assert!(saved.commit_after_star(&config));
+
+        let turned_off = AppSettings {
+            commit_after_star: Some(false),
+            ..saved
+        };
+        turned_off.save(&paths).unwrap();
+        assert!(!AppSettings::load(&config, &paths).commit_after_star(&config));
     }
 }

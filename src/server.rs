@@ -576,7 +576,7 @@ async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap> {
         models: models_state(&app),
         has_aoc_session: app.aoc.has_session(),
         theme_css: theme_css(&app),
-        commit_after_star: app.settings().commit_after_star,
+        commit_after_star: app.settings().commit_after_star(&app.config),
         solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
         leaderboard: app.settings().leaderboard,
         update: app.updates.available(),
@@ -872,7 +872,7 @@ async fn submit(
     } else {
         None
     };
-    let committed = if correct && app.settings().commit_after_star {
+    let committed = if correct && app.settings().commit_after_star(&app.config) {
         let message = format!("{}, part {}", puzzle.title(), part.number());
         // The star is earned either way, so a failed push is reported rather than an error.
         Some(match app.workspace.commit_and_push(&message).await {
@@ -2172,6 +2172,6 @@ async fn set_solutions_repo(
     State(app): State<Shared>,
     Json(body): Json<SolutionsRepoBody>,
 ) -> ApiResult<()> {
-    app.update_settings(|s| s.commit_after_star = body.commit_after_star)?;
+    app.update_settings(|s| s.commit_after_star = Some(body.commit_after_star))?;
     Ok(Json(()))
 }

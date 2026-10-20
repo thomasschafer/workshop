@@ -13,6 +13,8 @@ check_for_updates = true
 dir = "~/aoc"
 # "haskell", "python", "typescript", "go" or "rust", or a language you add below.
 language = "haskell"
+# Commit, and push if the repo has a remote, after each star. Can be changed in Settings.
+commit_after_star = false
 
 [aoc]
 # Your session cookie is read from the AOC_SESSION environment variable, or from the

@@ -37,6 +37,7 @@ pub struct ServerConfig {
 struct RawSolutionsConfig {
     dir: String,
     language: String,
+    commit_after_star: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -96,6 +97,7 @@ impl Default for RawSolutionsConfig {
         Self {
             dir: "~/aoc".into(),
             language: "haskell".into(),
+            commit_after_star: false,
         }
     }
 }
@@ -139,6 +141,8 @@ pub struct Config {
     pub server: ServerConfig,
     pub solutions_dir: PathBuf,
     pub language_id: String,
+    /// Whether to commit and push the solutions repo after each star, until chosen in the app.
+    pub commit_after_star: bool,
     pub aoc: AocConfig,
     pub run: RunConfig,
     pub models: ModelsConfig,
@@ -216,6 +220,7 @@ impl Config {
             server: raw.server,
             solutions_dir: paths::expand_home(&raw.solutions.dir)?,
             language_id: raw.solutions.language,
+            commit_after_star: raw.solutions.commit_after_star,
             aoc: raw.aoc,
             run: raw.run,
             models: raw.models,
