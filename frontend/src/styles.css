@@ -635,8 +635,8 @@ code {
   font-weight: 600;
 }
 
-.settings-row-summary {
-  color: var(--muted);
+.settings-row-attention {
+  color: var(--warn);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;

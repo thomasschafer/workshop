@@ -74,12 +74,6 @@ const TITLES: Record<Page, string> = {
   setup: "Setup and checks",
 };
 
-const METHOD_NAMES: Record<DictationMethod, string> = {
-  server: "Whisper on the server",
-  browser: "This browser's speech recognition",
-  keyboard: "Keyboard dictation",
-};
-
 const METHOD_DESCRIPTIONS: Record<DictationMethod, string> = {
   server:
     "Hold the button and speak; Whisper on the server hears you once you let go, which is the most accurate.",
@@ -129,46 +123,21 @@ function SettingsPage({ onBack, children }: { onBack: () => void; children: Comp
 }
 
 function SettingsList(props: Props & { onOpen: (page: Page) => void }) {
-  const { models, dictation, packages, snippets } = props;
-  const edit = models.settings.edit;
-  const provider = models.providers.find((p) => p.id === edit.provider);
-  const packagesState = packages.state;
-
-  const rows: [Page, string][] = [
-    ["models", `${provider?.name ?? edit.provider}, ${edit.model} for edits`],
-    [
-      "talking",
-      `${METHOD_NAMES[dictation.method]}${dictation.choice === "auto" ? ", chosen automatically" : ""}`,
-    ],
-    ...(packagesState
-      ? [
-          [
-            "packages",
-            packagesState.packages.length === 0
-              ? "None listed"
-              : `${packagesState.packages.length} listed${isUpToDate(packagesState) ? "" : ", not all installed"}`,
-          ] satisfies [Page, string],
-        ]
-      : []),
-    [
-      "display",
-      [
-        "Colours",
-        props.lineWrapping ? "long lines wrap" : "long lines scroll",
-        props.keepScreenOn ? "screen stays on" : null,
-      ]
-        .filter((part) => part !== null)
-        .join(", "),
-    ],
-    [
-      "repo",
-      props.commitAfterStar ? "Commits and pushes after each star" : "Commit and push by hand",
-    ],
-    ["notifications", "When each puzzle unlocks, if turned on for this device"],
-    ["leaderboard", props.leaderboard ? `Private leaderboard ${props.leaderboard}` : "None chosen"],
-    ["snippets", snippets.length === 0 ? "None yet" : `${snippets.length} to insert`],
-    ["setup", "Run setup again, and check everything is working"],
+  const packagesState = props.packages.state;
+  const pages: Page[] = [
+    "models",
+    "talking",
+    ...(packagesState ? (["packages"] as const) : []),
+    "display",
+    "repo",
+    "notifications",
+    "leaderboard",
+    "snippets",
+    "setup",
   ];
+  // Only what needs doing is shown under a title; the pages themselves show the rest.
+  const attention: Partial<Record<Page, string>> =
+    packagesState && !isUpToDate(packagesState) ? { packages: "Not all installed" } : {};
 
   return (
     <>
@@ -178,12 +147,14 @@ function SettingsList(props: Props & { onOpen: (page: Page) => void }) {
         </p>
       ) : null}
       <ul class="settings-list">
-        {rows.map(([page, summary]) => (
+        {pages.map((page) => (
           <li key={page} class="settings-row">
             <button type="button" onClick={() => props.onOpen(page)}>
               <span class="settings-row-text">
                 <span class="settings-row-title">{TITLES[page]}</span>
-                <span class="settings-row-summary">{summary}</span>
+                {attention[page] ? (
+                  <span class="settings-row-attention">{attention[page]}</span>
+                ) : null}
               </span>
               <span class="settings-row-chevron" aria-hidden="true">
                 ›
