@@ -1,3 +1,5 @@
+import { errorMessage } from "./errors";
+
 /** Where an utterance is up to, or a notice from elsewhere in the app. */
 export type CardStatus =
   | { kind: "waiting" }
@@ -26,6 +28,11 @@ export type Outcome =
   /** Cancelled by the user: the card just leaves. */
   | { kind: "cancelled" };
 
+/** An utterance carried out, with what was done. */
+export const done = (text: string): Outcome => ({ kind: "done", tone: "ok", text });
+/** An utterance that couldn't be carried out, with why. */
+export const warn = (text: string): Outcome => ({ kind: "problem", tone: "warn", text });
+
 export interface Job<T> {
   id: number;
   text: string;
@@ -48,8 +55,6 @@ export interface Timing {
 }
 
 export const TIMING: Timing = { lingerMs: 2500, leaveMs: 220 };
-
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * Utterances, handled one at a time in the order they were spoken, each shown as a card. New
@@ -190,7 +195,7 @@ export class UtteranceQueue<T> {
           this.setStatus(job.id, { kind: "working", label, since: performance.now() });
         }
       },
-    }).catch((e: unknown): Outcome => ({ kind: "problem", tone: "error", text: message(e) }));
+    }).catch((e: unknown): Outcome => ({ kind: "problem", tone: "error", text: errorMessage(e) }));
     let outcome = await Promise.race([handled, cancelled]);
     if (controller.signal.aborted) {
       outcome = { kind: "cancelled" };

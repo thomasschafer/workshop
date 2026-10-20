@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, type PackagesResponse, type PackagesState, type Resolution } from "../api";
+import { errorMessage } from "../errors";
 
 /** What this page asked for, while it's under way. */
 export type PackagesActivity =
@@ -30,8 +31,6 @@ export interface Packages {
   resolve: (module: string) => Promise<Resolution>;
 }
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
 /** How often to check on an install, for its progress. */
 const PROGRESS_MS = 1000;
 
@@ -47,7 +46,7 @@ export function usePackages(available: boolean): Packages {
     api
       .packages()
       .then(setResponse)
-      .catch((e: unknown) => setError(message(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
 
   useEffect(() => {
     if (available) void refresh();
@@ -69,7 +68,7 @@ export function usePackages(available: boolean): Packages {
       setResponse(await request());
       return true;
     } catch (e) {
-      setError(message(e));
+      setError(errorMessage(e));
       await refresh();
       return false;
     } finally {
@@ -90,7 +89,7 @@ export function usePackages(available: boolean): Packages {
     add: (pkg) => installWith({ kind: "add", package: pkg }, () => api.addPackage(pkg)),
     remove: (pkg) => installWith({ kind: "remove", package: pkg }, () => api.removePackage(pkg)),
     cancel: () => {
-      api.cancelInstall().catch((e: unknown) => setError(message(e)));
+      api.cancelInstall().catch((e: unknown) => setError(errorMessage(e)));
     },
     save: async (text) => setResponse(await api.savePackages(text)),
     resolve: (module) => {

@@ -1,103 +1,60 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import {
-  api,
-  type Bootstrap,
-  ConnectionError,
-  connection,
-  type DayMeta,
-  type Exchange,
-  loginNeeded,
-  type Problem,
-  type Puzzle,
-  type Tab,
-  type UiState,
-} from "./api";
-import { prepareRecording, recordingSupported } from "./audio";
-import { nextUnlock, todaysPuzzle } from "./calendar";
+import { api, type Bootstrap, loginNeeded, type Problem, type Puzzle, type Tab } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
-import { resolveDictation } from "./dictation";
-import {
-  type Anchor,
-  CodeEditor,
-  type Diagnostics,
-  hoverText,
-  LanguageServerConnection,
-  type LanguageServerStatus,
-} from "./editor";
+import { CodeEditor, type Diagnostics, hoverText } from "./editor";
+import { errorMessage } from "./errors";
 import { useConnection } from "./hooks/useConnection";
+import { useDayMeta } from "./hooks/useDayMeta";
+import { useDictation } from "./hooks/useDictation";
 import { useDiscussion } from "./hooks/useDiscussion";
+import { type UtteranceDetail, useEditing } from "./hooks/useEditing";
+import { useFileSync } from "./hooks/useFileSync";
+import { useLanguageServer } from "./hooks/useLanguageServer";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePackages } from "./hooks/usePackages";
+import { usePartTwoOffer } from "./hooks/usePartTwoOffer";
 import { usePushToTalk } from "./hooks/usePushToTalk";
+import { usePuzzleOffers } from "./hooks/usePuzzleOffers";
+import { useRun } from "./hooks/useRun";
+import { useSampleFinding } from "./hooks/useSampleFinding";
 import { useTalkKey } from "./hooks/useTalkKey";
-import { onNotificationOpen, puzzleToOpen } from "./notifications";
+import { useUiStateSaver } from "./hooks/useUiStateSaver";
 import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
-import { isPractice, PRACTICE, puzzleLabel, puzzleTitle } from "./puzzle";
+import { isPractice, PRACTICE, puzzleTitle } from "./puzzle";
+import { sampleInput, withSuggestions } from "./samples";
+import { debounced, type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
 import {
-  EMPTY_META,
-  needsSample,
-  type PartIndex,
-  sampleInput,
-  withFoundSample,
-  withSuggestions,
-} from "./samples";
-import { debounced, type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
-import {
+  done,
   type Job,
   type JobContext,
   type Outcome,
   type Card as UtteranceCard,
   UtteranceQueue,
+  warn,
 } from "./utterances";
 import { SpeechBench } from "./views/bench";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
+import { Header, Tabs } from "./views/header";
 import { Help } from "./views/help";
 import { Modal } from "./views/modal";
 import { MissingPackageBanner, OutdatedPackagesBanner } from "./views/packages";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
-import {
-  describeEnding,
-  type InputKind,
-  initialRunState,
-  RunSheet,
-  type RunState,
-} from "./views/run";
+import { describeEnding, initialRunState, RunSheet } from "./views/run";
 import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
 import { Stack } from "./views/stack";
-import { speechSupported, speechUnavailableReason } from "./voice";
+import { StatusLine } from "./views/status";
+import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
 type Sheet = "run" | "settings" | "help" | "setup" | "bench" | null;
 
-const TABS = ["problem", "code", "notes", "discuss"] as const;
-
-/** How long an utterance waits for a puzzle's editor that's still loading. */
-const EDITOR_WAIT_MS = 10_000;
-
 /** The space kept clear below the code for the cards floating over it. */
 const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
-
-/** What an utterance needs besides its words. */
-interface UtteranceDetail {
-  /** The speech recogniser's own pieces, when it revised what it heard. */
-  pieces: string[];
-  /** The edit model's earlier questions, when this answers one. */
-  earlier: Exchange[] | null;
-  /** Where the cursor was when it was spoken. */
-  anchor: { editor: CodeEditor; anchor: Anchor } | null;
-}
-
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** How often to look for changes made elsewhere while a puzzle is open. */
-const CHANGES_CHECK_MS = 10_000;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function App({ boot }: { boot: Bootstrap }) {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(boot.state.puzzle);
@@ -118,7 +75,6 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [picking, setPicking] = useState(false);
 
   const [openError, setOpenError] = useState<string | null>(null);
-  const [meta, setMeta] = useState<DayMeta>(EMPTY_META);
   const [notes, setNotes] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
   const [problemError, setProblemError] = useState<string | null>(null);
@@ -132,7 +88,6 @@ export function App({ boot }: { boot: Bootstrap }) {
   const [codeConflict, setCodeConflict] = useState<FileVersion | null>(null);
   const [notesConflict, setNotesConflict] = useState<FileVersion | null>(null);
   const [keyboard, setKeyboard] = useState(false);
-  const [run, setRun] = useState<RunState>(initialRunState);
   const packages = usePackages(boot.language.packages !== null);
   const discussion = useDiscussion(puzzle, discussModel, () => {
     const last = latest.current.run.last;
@@ -144,10 +99,6 @@ export function App({ boot }: { boot: Bootstrap }) {
         : "",
     };
   });
-  // The edit model's latest question: its card, and the requests that led to it. Replying to it
-  // sends the next utterance as the answer, rather than starting afresh.
-  const [question, setQuestion] = useState<{ card: number; exchanges: Exchange[] } | null>(null);
-  const [replying, setReplying] = useState(false);
 
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<CodeEditor | null>(null);
@@ -156,24 +107,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   const stackHeightRef = useRef(0);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
-  const [lspStatus, setLspStatus] = useState<LanguageServerStatus>("connecting");
-  const lsp = useMemo(
-    () =>
-      boot.language.has_lsp
-        ? new LanguageServerConnection(
-            boot.language.root_uri,
-            boot.language.lsp_options,
-            setLspStatus,
-          )
-        : null,
-    [boot],
-  );
-  useEffect(() => () => lsp?.close(), [lsp]);
-  useEffect(() => {
-    if (lspStatus === "reconnecting") editor.current?.clearDiagnostics();
-  }, [lspStatus]);
+  const { lsp, lspStatus } = useLanguageServer(boot, editor);
   const fileUri = useRef<string | null>(null);
-  const metaRef = useRef(meta);
   const puzzleRef = useRef(puzzle);
   // Utterances are handled one at a time, in the order they were spoken. The handler is set
   // each render, so it sees the latest state.
@@ -190,6 +125,38 @@ export function App({ boot }: { boot: Bootstrap }) {
     [],
   );
   const notify = (tone: "ok" | "info" | "warn" | "error", text: string) => queue.notify(tone, text);
+  const { meta, setMeta, metaRef, metaSavers, updateMeta } = useDayMeta(puzzleRef, notify);
+  const { findingSamples, setFindingSamples, findSamples } = useSampleFinding(
+    puzzleRef,
+    metaRef,
+    updateMeta,
+  );
+  /** Null until the open puzzle's code has loaded. */
+  const [part2Started, setPart2Started] = useState<boolean | null>(null);
+  const part = problem ? (problem.stars >= 2 ? null : problem.stars + 1) : 1;
+  // The part being worked on: the next one to solve, or for a solved puzzle being worked through
+  // again, the one the code has got to.
+  const workingPart = part ?? (part2Started === true ? 2 : 1);
+  const { run, setRun, doRun, doSubmit } = useRun({
+    puzzleRef,
+    part,
+    workingPart,
+    metaRef,
+    metaSavers,
+    saver,
+    queue,
+    setSheet,
+    setProblem,
+    updateMeta,
+    findSamples,
+    notify,
+  });
+  const { question, setQuestion, replying, setReplying, doEdit, enqueue } = useEditing({
+    queue,
+    editor,
+    puzzleRef,
+    editorWaiters,
+  });
   // Offered once until it's done, however many requests find Advent of Code needs a login.
   const loginOffered = useRef(false);
   useEffect(
@@ -206,50 +173,20 @@ export function App({ boot }: { boot: Bootstrap }) {
   );
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
-  const [dictationChoice, setDictationChoice] = useState(() => preferences.dictation.get());
-  const [serverSpeech, setServerSpeech] = useState(boot.server_dictation);
-  /** Null until the open puzzle's code has loaded. */
-  const [part2Started, setPart2Started] = useState<boolean | null>(null);
   /** Whether code has started part 2: the template's part 2 line is no longer turned off. */
   const hasStartedPart2 = (text: string) => {
     const swap = boot.language.start_part_two;
     return swap === null || !text.includes(swap.find);
   };
   const [leaderboard, setLeaderboard] = useState(boot.leaderboard);
-  const hasSpeech = useMemo(speechSupported, []);
-  const canRecord = useMemo(recordingSupported, []);
   const [commitAfterStar, setCommitAfterStar] = useState(boot.commit_after_star);
   const wakeLock = useMemo(() => new ScreenWakeLock(), []);
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
   useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
   // Queued utterances run after later renders, so they read the latest state through refs.
-  const latest = useRef({ tab: shownTab, notes, run, question, replying });
-  latest.current = { tab: shownTab, notes, run, question, replying };
+  const latest = useRef({ tab: shownTab, notes, run });
+  latest.current = { tab: shownTab, notes, run };
   puzzleRef.current = puzzle;
-
-  // One saver per puzzle, so switching puzzles never drops the previous one's unsaved changes.
-  const metaSavers = useRef(new Map<string, LatestSaver<DayMeta>>());
-  const saveMetaSoon = useCallback(({ p, m }: { p: Puzzle; m: DayMeta }) => {
-    const key = `${p.year}-${p.day}`;
-    let saver = metaSavers.current.get(key);
-    if (!saver) {
-      saver = new LatestSaver<DayMeta>(
-        (meta, keepalive) => api.saveMeta(p, meta, keepalive),
-        600,
-        (e) => notify("error", `Couldn't save, retrying: ${e}`),
-      );
-      metaSavers.current.set(key, saver);
-    }
-    saver.schedule(m);
-  }, []);
-  const updateMeta = useCallback(
-    (next: DayMeta) => {
-      metaRef.current = next;
-      setMeta(next);
-      if (puzzleRef.current) saveMetaSoon({ p: puzzleRef.current, m: next });
-    },
-    [saveMetaSoon],
-  );
 
   const updateNotes = (text: string) => {
     latest.current.notes = text;
@@ -257,19 +194,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     notesSaver.current?.schedule(text);
   };
 
-  // Remember where the user is, so a reload reopens the same view.
-  const stateSaver = useMemo(
-    () =>
-      new LatestSaver<UiState>(
-        (state, keepalive) => api.saveState(state, keepalive),
-        500,
-        () => {},
-      ),
-    [],
-  );
-  useEffect(() => {
-    stateSaver.schedule({ puzzle, tab, discuss_model: discussModel });
-  }, [puzzle, tab, discussModel, stateSaver]);
+  const stateSaver = useUiStateSaver({ puzzle, tab, discuss_model: discussModel });
 
   const lookUpType = useMemo(
     () =>
@@ -284,49 +209,6 @@ export function App({ boot }: { boot: Bootstrap }) {
     [],
   );
 
-  /** Parts whose example the edit model is looking for, for the puzzle open now. */
-  const [findingSamples, setFindingSamples] = useState<readonly PartIndex[]>([]);
-  /** Puzzle parts already looked for in this session, by "year-day-part". */
-  const soughtSamples = useRef(new Set<string>());
-  /**
-   * Asks the edit model for the example of each part that's still missing one, as older puzzles
-   * often give theirs inline rather than in a code block. One part at a time, as part 2's
-   * example is often part 1's.
-   */
-  const findSamples = useCallback(
-    async (p: Puzzle, loaded: Problem) => {
-      // Before 2020, puzzles often emphasise something other than the example's answer, so what
-      // the page's structure suggests is checked too. Since then it has been reliable.
-      const distrust = !isPractice(p) && p.year < 2020;
-      const parts = ([0, 1] as const).slice(0, loaded.parts_html.length);
-      for (const part of parts) {
-        const key = `${p.year}-${p.day}-${part}`;
-        if (
-          soughtSamples.current.has(key) ||
-          !needsSample(metaRef.current, loaded, part, distrust)
-        ) {
-          continue;
-        }
-        soughtSamples.current.add(key);
-        setFindingSamples((f) => [...f, part]);
-        try {
-          const found = await api.findSample(p, part + 1);
-          if (found && puzzleRef.current === p) {
-            const updated = withFoundSample(metaRef.current, loaded, part, found, distrust);
-            if (updated !== metaRef.current) updateMeta(updated);
-          }
-        } catch (e) {
-          // Asked again next time; the sample can still be chosen by hand meanwhile.
-          soughtSamples.current.delete(key);
-          console.warn(`Couldn't find part ${part + 1}'s example: ${message(e)}`);
-        } finally {
-          setFindingSamples((f) => f.filter((x) => x !== part));
-        }
-      }
-    },
-    [updateMeta],
-  );
-
   const loadProblem = useCallback(
     async (p: Puzzle, refresh: boolean) => {
       setProblemLoading(true);
@@ -339,7 +221,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         if (suggested !== metaRef.current) updateMeta(suggested);
         void findSamples(p, loaded);
       } catch (e) {
-        if (puzzleRef.current === p) setProblemError(message(e));
+        if (puzzleRef.current === p) setProblemError(errorMessage(e));
       } finally {
         if (puzzleRef.current === p) setProblemLoading(false);
       }
@@ -430,7 +312,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         editor.current = created;
         for (const waiter of editorWaiters.current.splice(0)) waiter(created);
       } catch (e) {
-        if (!cancelled) setOpenError(message(e));
+        if (!cancelled) setOpenError(errorMessage(e));
       }
     })();
 
@@ -445,129 +327,25 @@ export function App({ boot }: { boot: Bootstrap }) {
     };
   }, [puzzle, boot, lsp, loadProblem, updateMeta, lookUpType]);
 
-  // Save when the phone is put down, and pick up changes made elsewhere, such as at the server
-  // in an editor of one's own: when the app comes back, and every so often while it's open, as a
-  // phone kept awake beside the keyboard never goes away.
-  useEffect(() => {
-    const onHide = () => {
-      saver.current?.flushOnExit();
-      notesSaver.current?.flushOnExit();
-      for (const metaSaver of metaSavers.current.values()) metaSaver.flushOnExit();
-      stateSaver.flushOnExit();
-    };
-    let checking = false;
-    const pickUpChanges = async () => {
-      const p = puzzleRef.current;
-      const current = editor.current;
-      if (!p || !current || checking || document.visibilityState === "hidden") return;
-      checking = true;
-      try {
-        const opened = await api.open(p);
-        if (puzzleRef.current !== p || editor.current !== current) return;
-        // Each saver only takes the version from elsewhere if there are no local changes;
-        // otherwise it saves them, which reports a conflict if the file changed.
-        if (saver.current?.adopt(opened.code)) {
-          current.replaceAll(opened.code.text);
-          notify("info", "Loaded code changed elsewhere.");
-        }
-        if (notesSaver.current?.adopt(opened.notes)) {
-          latest.current.notes = opened.notes.text;
-          setNotes(opened.notes.text);
-        }
-      } catch {
-        // Offline or the server restarted; the next save will report any real problem.
-      } finally {
-        checking = false;
-      }
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") onHide();
-      else void pickUpChanges();
-    };
-    const onFocus = () => void pickUpChanges();
-    const timer = setInterval(() => void pickUpChanges(), CHANGES_CHECK_MS);
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [stateSaver]);
+  useFileSync({
+    puzzleRef,
+    editor,
+    saver,
+    notesSaver,
+    metaSavers,
+    stateSaver,
+    notify,
+    onNotes: (text) => {
+      latest.current.notes = text;
+      setNotes(text);
+    },
+  });
 
-  const part = problem ? (problem.stars >= 2 ? null : problem.stars + 1) : 1;
-  // The part being worked on: the next one to solve, or for a solved puzzle being worked through
-  // again, the one the code has got to.
-  const workingPart = part ?? (part2Started === true ? 2 : 1);
-
-  // Offered once per puzzle whenever part 1 is solved and the code hasn't started part 2: just
-  // after submitting, or on coming back to the puzzle later.
-  const offeredPartTwo = useRef<string | null>(null);
-  useEffect(() => {
-    if (!puzzle || part !== 2 || part2Started !== false) return;
-    const key = `${puzzle.year}-${puzzle.day}`;
-    if (offeredPartTwo.current === key) return;
-    offeredPartTwo.current = key;
-    queue.offer("Part 1 solved. Start part 2?", "Start part 2", () => {
-      const started = startPartTwo();
-      if (started.kind === "problem") notify(started.tone, started.text);
-    });
-  }, [puzzle, part, part2Started]);
+  usePartTwoOffer(queue, puzzle, part, part2Started, () => {
+    const started = startPartTwo();
+    if (started.kind === "problem") notify(started.tone, started.text);
+  });
   const expected = meta.sample_answers[workingPart - 1] ?? null;
-
-  /**
-   * Runs the solution. From the Run sheet it first waits for edits still being made from
-   * earlier utterances, so it runs what was said; a spoken "run" is already queued after them.
-   */
-  const doRun = async (input: InputKind, waitForEdits: boolean) => {
-    const p = puzzleRef.current;
-    if (!p) return;
-    setSheet("run");
-    const runPart = workingPart;
-    if (input === "sample" && sampleInput(metaRef.current, runPart === 1 ? 0 : 1) === null) {
-      setRun((r) => ({
-        ...r,
-        error: "Choose the sample input first: tap a code block in the puzzle.",
-      }));
-      return;
-    }
-    setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
-    try {
-      if (waitForEdits) await queue.idle();
-      try {
-        // The run reads the code and the chosen sample from the server.
-        await saver.current?.flush();
-        await metaSavers.current.get(`${p.year}-${p.day}`)?.flush();
-      } catch (e) {
-        setRun((r) => ({ ...r, running: null, error: `Not run: ${message(e)}` }));
-        return;
-      }
-      const result = await api.run(p, input, runPart);
-      setRun((r) => ({ ...r, running: null, last: { input, result } }));
-    } catch (e) {
-      setRun((r) => ({ ...r, running: null, error: message(e) }));
-    }
-  };
-
-  const doSubmit = async (answer: string) => {
-    const p = puzzleRef.current;
-    if (!p || part === null) return;
-    setRun((r) => ({ ...r, submitting: true }));
-    try {
-      const { outcome, problem: refreshed, committed } = await api.submit(p, part, answer);
-      setRun((r) => ({ ...r, submitting: false, submitted: outcome, confirmSubmit: false }));
-      if (refreshed) {
-        setProblem(refreshed);
-        updateMeta(withSuggestions(metaRef.current, refreshed));
-        void findSamples(p, refreshed);
-      }
-      if (committed) notify(committed.succeeded ? "info" : "error", committed.summary);
-    } catch (e) {
-      setRun((r) => ({ ...r, submitting: false, confirmSubmit: false, error: message(e) }));
-    }
-  };
 
   // A module the language server or the last run says is missing.
   const missing = useMemo(() => {
@@ -590,45 +368,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       setTab("problem");
     }
   };
-
-  // While the event runs, a new puzzle is offered once on each device: when the app opens, or
-  // the moment it unlocks if the app's open then.
-  const openPuzzleRef = useRef(openPuzzle);
-  openPuzzleRef.current = openPuzzle;
-  // A tapped notification opens its puzzle: in a new window, through the address; in one
-  // already open, through a message from the service worker.
-  useEffect(() => {
-    const fromAddress = puzzleToOpen(location.search);
-    if (fromAddress) {
-      history.replaceState(history.state, "", location.pathname);
-      openPuzzleRef.current(fromAddress);
-    }
-    return onNotificationOpen((year, day) => openPuzzleRef.current({ year, day }));
-  }, []);
-  useEffect(() => {
-    const offerToday = () => {
-      const today = todaysPuzzle();
-      const current = puzzleRef.current;
-      if (!today || (current?.year === today.year && current.day === today.day)) return;
-      const key = `${today.year}-${today.day}`;
-      if (preferences.puzzleOffered.get() === key) return;
-      preferences.puzzleOffered.set(key);
-      queue.offer(`Day ${today.day} is out.`, "Open it", () => openPuzzleRef.current(today));
-    };
-    offerToday();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const waitForNext = () => {
-      const next = nextUnlock();
-      // Timers can't wait more than about 24 days; a day at a time is plenty.
-      if (next) timer = setTimeout(onUnlock, Math.min(next.at - Date.now() + 1000, DAY_MS));
-    };
-    const onUnlock = () => {
-      offerToday();
-      waitForNext();
-    };
-    waitForNext();
-    return () => clearTimeout(timer);
-  }, []);
+  usePuzzleOffers(queue, puzzleRef, openPuzzle);
 
   const packageFor = async (module: string): Promise<string | null> => {
     try {
@@ -646,9 +386,6 @@ export function App({ boot }: { boot: Bootstrap }) {
       notify("error", `Couldn't install ${pkg}; see Settings, Packages.`);
     }
   };
-
-  const done = (text: string): Outcome => ({ kind: "done", tone: "ok", text });
-  const warn = (text: string): Outcome => ({ kind: "problem", tone: "warn", text });
 
   /** Turns on the template's part 2 code, such as by uncommenting the line printing its answer. */
   const startPartTwo = (): Outcome => {
@@ -732,81 +469,6 @@ export function App({ boot }: { boot: Bootstrap }) {
     }
   };
 
-  /** The editor, waiting for it if a puzzle is open but its editor is still loading. */
-  const editorReady = (): Promise<CodeEditor | null> => {
-    if (editor.current) return Promise.resolve(editor.current);
-    if (puzzleRef.current === null) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      const waiter = (ready: CodeEditor) => {
-        clearTimeout(timer);
-        resolve(ready);
-      };
-      const timer = setTimeout(() => {
-        editorWaiters.current = editorWaiters.current.filter((w) => w !== waiter);
-        resolve(null);
-      }, EDITOR_WAIT_MS);
-      editorWaiters.current.push(waiter);
-    });
-  };
-
-  /**
-   * Makes a request, and if the server can't be reached, waits until it can and tries again,
-   * so what was said while it was away isn't lost.
-   */
-  const untilReached = async <T,>(
-    context: JobContext,
-    label: string,
-    request: () => Promise<T>,
-  ): Promise<T> => {
-    for (;;) {
-      context.working(label);
-      try {
-        return await request();
-      } catch (e) {
-        if (!(e instanceof ConnectionError)) throw e;
-        context.working("Waiting for the server");
-        await connection.whenOnline(context.signal);
-      }
-    }
-  };
-
-  const doEdit = async (
-    job: Job<UtteranceDetail>,
-    earlier: Exchange[],
-    context: JobContext,
-  ): Promise<Outcome> => {
-    const current = await editorReady();
-    if (!current) return warn("Open a puzzle first.");
-    const { anchor, pieces } = job.detail;
-    if (anchor?.editor === current) current.restore(anchor.anchor);
-    const marked = current.markedText();
-    const before = current.text();
-    try {
-      const result = await untilReached(context, "Editing", () =>
-        api.edit(marked, job.text, pieces, current.recentInsertion, earlier, context.signal),
-      );
-      if (context.signal.aborted) return { kind: "cancelled" };
-      if (editor.current !== current || current.text() !== before) {
-        return warn("The code changed while I was thinking, so I left it alone.");
-      }
-      const seconds = `${(result.elapsed_ms / 1000).toFixed(1)}s`;
-      if (result.status === "applied") {
-        current.applyMarked(result.doc, result.inserted);
-        const model = result.model ? ` · ${result.model.replace(/^claude-/, "")}` : "";
-        return done(`${result.summary} · ${seconds}${model}`);
-      }
-      setQuestion({
-        card: job.id,
-        exchanges: [...earlier, { said: job.text, asked: result.message }],
-      });
-      return { kind: "asked", question: result.message };
-    } catch (e) {
-      if (context.signal.aborted) return { kind: "cancelled" };
-      api.log("error", `edit ${JSON.stringify(job.text)}: ${message(e)}`);
-      return { kind: "problem", tone: "error", text: message(e) };
-    }
-  };
-
   handleUtterance.current = async (job, context) => {
     const { earlier, anchor } = job.detail;
     if (earlier) {
@@ -844,30 +506,14 @@ export function App({ boot }: { boot: Bootstrap }) {
     return doEdit(job, [], context);
   };
 
-  /** Queues what was said or typed. `card` is the card already shown while it was said. */
-  const enqueue = (text: string, pieces: string[] = [], card?: number) => {
-    const { replying, question } = latest.current;
-    // Whether answering the question or starting afresh, the question's card has had its turn.
-    if (question) queue.dismiss(question.card);
-    setQuestion(null);
-    setReplying(false);
-    const current = editor.current;
-    const detail: UtteranceDetail = {
-      pieces,
-      earlier: replying && question ? question.exchanges : null,
-      anchor: current ? { editor: current, anchor: current.anchor() } : null,
-    };
-    queue.enqueue(text, detail, card);
-  };
-
-  const dictationSupport = {
-    server: serverSpeech && canRecord,
-    browser: hasSpeech,
-  };
-  const dictationMethod = resolveDictation(dictationChoice, dictationSupport);
-  useEffect(() => {
-    if (dictationMethod === "server") prepareRecording();
-  }, [dictationMethod]);
+  const {
+    dictationChoice,
+    setDictationChoice,
+    setServerSpeech,
+    hasSpeech,
+    dictationSupport,
+    dictationMethod,
+  } = useDictation(boot.server_dictation);
   const talk = usePushToTalk({
     method: () => (dictationMethod === "server" ? "server" : "browser"),
     vocabulary: () => editor.current?.identifiers() ?? [],
@@ -920,18 +566,6 @@ export function App({ boot }: { boot: Bootstrap }) {
   };
 
   const stars = problem ? "★".repeat(problem.stars) : "";
-  const statusParts: string[] = [];
-  if (lsp && lspStatus !== "ready") {
-    statusParts.push("starting checks");
-  } else if (lsp) {
-    statusParts.push(
-      diagnostics.errors || diagnostics.warnings
-        ? `${diagnostics.errors} error${diagnostics.errors === 1 ? "" : "s"}${diagnostics.warnings ? `, ${diagnostics.warnings} warning${diagnostics.warnings === 1 ? "" : "s"}` : ""}`
-        : "no errors",
-    );
-  }
-  if (saveStatus === "error") statusParts.push("not saved");
-  else if (saveStatus !== "saved" && saveStatus !== "conflict") statusParts.push("saving");
 
   // The picker is the home screen until a puzzle is open, and can be reopened from the header.
   const showPicker = picking || puzzle === null;
@@ -955,7 +589,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               api
                 .resetPractice()
                 .then(setProblem)
-                .catch((e: unknown) => setProblemError(message(e)));
+                .catch((e: unknown) => setProblemError(errorMessage(e)));
             }
           : null
       }
@@ -965,62 +599,21 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   return (
     <div class={`app ${split ? "split" : ""}`}>
-      <header class="top">
-        <h1 class="visually-hidden">Workshop</h1>
-        {showPicker ? (
-          puzzle ? (
-            <button type="button" class="puzzle-button" onClick={() => setPicking(false)}>
-              ‹ Back to {puzzleLabel(puzzle)}
-            </button>
-          ) : (
-            <h1 class="app-title">Workshop</h1>
-          )
-        ) : (
-          <button
-            type="button"
-            class="puzzle-button"
-            onClick={() => {
-              setSheet(null);
-              setPicking(true);
-            }}
-          >
-            {puzzle ? puzzleLabel(puzzle) : ""}
-            {stars ? <span class="stars"> {stars}</span> : null}
-          </button>
-        )}
-        <span class="header-actions">
-          <button
-            type="button"
-            class="icon-button"
-            aria-label="Help"
-            onClick={() => setSheet(sheet === "help" ? null : "help")}
-          >
-            ?
-          </button>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label="Settings"
-            onClick={() => setSheet(sheet === "settings" ? null : "settings")}
-          >
-            ⚙
-          </button>
-        </span>
-      </header>
+      <Header
+        showPicker={showPicker}
+        puzzle={puzzle}
+        stars={stars}
+        onBack={() => setPicking(false)}
+        onPick={() => {
+          setSheet(null);
+          setPicking(true);
+        }}
+        onHelp={() => setSheet(sheet === "help" ? null : "help")}
+        onSettings={() => setSheet(sheet === "settings" ? null : "settings")}
+      />
       {split ? <aside class="side">{problemView}</aside> : null}
 
-      <nav class={`tabs ${showPicker ? "hidden" : ""}`}>
-        {(wide ? (["code", "notes", "discuss"] as const) : TABS).map((t) => (
-          <button
-            type="button"
-            key={t}
-            class={t === shownTab ? "selected" : ""}
-            onClick={() => setTab(t)}
-          >
-            {t === "discuss" ? "Discuss" : t[0]?.toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </nav>
+      <Tabs hidden={showPicker} wide={wide} shown={shownTab} onTab={setTab} />
 
       <main class="content" style={{ "--stack-height": `${stackHeight}px` }}>
         <Stack
@@ -1071,10 +664,12 @@ export function App({ boot }: { boot: Bootstrap }) {
           />
         ) : null}
         <div class={`code-pane ${shownTab === "code" && !showPicker ? "" : "hidden"}`}>
-          <div class="status-line">
-            <span>{statusParts.join(" · ")}</span>
-            {hover ? <code class="hover">{hover}</code> : null}
-          </div>
+          <StatusLine
+            checks={lsp ? lspStatus : null}
+            diagnostics={diagnostics}
+            saveStatus={saveStatus}
+            hover={hover}
+          />
           <div class="editor" ref={editorHost} />
         </div>
         {!showPicker && !wide && shownTab === "problem" ? problemView : null}
@@ -1161,7 +756,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               setCommitAfterStar(enabled);
               api.setSolutionsRepo(enabled).catch((e: unknown) => {
                 setCommitAfterStar(!enabled);
-                notify("error", `Couldn't change that: ${message(e)}`);
+                notify("error", `Couldn't change that: ${errorMessage(e)}`);
               });
             }}
             commitMessage={puzzle ? puzzleTitle(puzzle) : "Advent of Code"}

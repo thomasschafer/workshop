@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, type BenchInfo, type WhisperTranscript } from "../api";
 import { AudioRecorder } from "../audio";
+import { errorMessage } from "../errors";
 import { PushToTalk, speechSupported } from "../voice";
 import { wordErrorRate } from "../wer";
 
@@ -55,7 +56,6 @@ interface Take {
 
 type Phase = "ready" | "recording" | "transcribing" | "keyboard";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const percent = (rate: number) => `${Math.round(rate * 100)}%`;
 /** Progress through the phrases, kept on this device so the benchmark can be finished later. */
 interface Progress {
@@ -133,7 +133,7 @@ export function SpeechBench() {
     api
       .bench()
       .then(setInfo)
-      .catch((e: unknown) => setError(message(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
 
   // Kept as it changes, so leaving part way through loses nothing.
@@ -199,7 +199,7 @@ export function SpeechBench() {
       recording.current = { audio, ptt };
       setPhase("recording");
     } catch (e) {
-      setError(`Couldn't record: ${message(e)}`);
+      setError(`Couldn't record: ${errorMessage(e)}`);
     }
   };
 
@@ -219,7 +219,7 @@ export function SpeechBench() {
     try {
       whisper = await api.benchTranscribe(session, index, prompt(phrase.language), wav);
     } catch (e) {
-      whisper = { error: message(e) };
+      whisper = { error: errorMessage(e) };
     }
     setCurrent({ browser, whisper });
     setKeyboard("");
@@ -239,7 +239,7 @@ export function SpeechBench() {
         ...take,
       });
     } catch (e) {
-      setError(`Couldn't save the result: ${message(e)}`);
+      setError(`Couldn't save the result: ${errorMessage(e)}`);
       return;
     }
     setTakes([...takes, take]);

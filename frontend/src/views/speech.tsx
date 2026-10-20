@@ -1,11 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type SpeechState } from "../api";
+import { errorMessage } from "../errors";
 import { InstallProgress, LastInstallLog } from "./install";
 
 /** How often to check on a download, for its progress. */
 const PROGRESS_MS = 1000;
-
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * Whisper on the server, which hears dictation more accurately than phones' own recognition:
@@ -24,7 +23,7 @@ export function ServerSpeechSection({ onReady }: { onReady: (ready: boolean) => 
     api
       .speech()
       .then(show)
-      .catch((e: unknown) => setError(message(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
   useEffect(() => void refresh(), []);
 
   const downloading = since !== null || state?.download.installing === true;
@@ -41,7 +40,7 @@ export function ServerSpeechSection({ onReady }: { onReady: (ready: boolean) => 
     try {
       show(await api.downloadSpeechModel());
     } catch (e) {
-      setError(message(e));
+      setError(errorMessage(e));
       await refresh();
     } finally {
       setSince(null);
@@ -67,7 +66,7 @@ export function ServerSpeechSection({ onReady }: { onReady: (ready: boolean) => 
           since={since}
           progress={state.download.progress}
           onCancel={() => {
-            api.cancelSpeechDownload().catch((e: unknown) => setError(message(e)));
+            api.cancelSpeechDownload().catch((e: unknown) => setError(errorMessage(e)));
           }}
         />
       ) : (

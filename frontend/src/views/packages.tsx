@@ -1,10 +1,9 @@
 import { useEffect, useState } from "preact/hooks";
 import type { Resolution } from "../api";
+import { errorMessage } from "../errors";
 import type { Packages, PackagesActivity } from "../hooks/usePackages";
 import { isUpToDate, type MissingModule } from "../packages";
 import { InstallProgress, LastInstallLog } from "./install";
-
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** What's under way, in a few words. */
 function describe(activity: PackagesActivity | null): string {
@@ -54,7 +53,7 @@ export function PackagesSection({
     try {
       await packages.save(text);
     } catch (e) {
-      setFormError(message(e));
+      setFormError(errorMessage(e));
       return;
     }
     setEditing(null);
@@ -190,7 +189,7 @@ export function MissingPackageBanner({
     setLookup({ kind: "looking" });
     resolve(module)
       .then((found) => current && setLookup(found))
-      .catch((e: unknown) => current && setLookup({ kind: "failed", reason: message(e) }));
+      .catch((e: unknown) => current && setLookup({ kind: "failed", reason: errorMessage(e) }));
     return () => {
       current = false;
     };
