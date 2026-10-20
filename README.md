@@ -12,7 +12,7 @@ Workshop runs on a server you control, such as your laptop, a desktop or a VPS, 
 - Run on the sample and your input, then submit, all from the phone, with inline errors and types from your language server.
 - A discuss mode: a coach that sees the puzzle and your code, and won't give the answer away unless you ask.
 - Haskell, Python, TypeScript, Go and Rust built in, with a helpers module of your own. Import a package you haven't installed and Workshop offers to install it. Other languages can be added in your config.
-- Instant commands like "undo" and "run the sample", notes, snippets, and committing your solutions, all saved as you go.
+- Instant commands like "undo" and "run the sample", notes, snippets, and committing your solutions, all saved as you go. Workshop can also commit after each star, and push if the repo has a remote; turn it on in Settings.
 
 Workshop is voice editing, not code generation. "Write a function to sort a list" won't do anything. "Function solve from String to Int", then "solve equals lines", "before that map read dot" and "before that sum dot" gives you `solve = sum . map read . lines`. If Workshop isn't sure what you meant, it makes no edit and tells you why.
 
