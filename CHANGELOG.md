@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/thomasschafer/workshop/compare/v0.7.0...v0.8.0) - 2026-10-20
+
+### Other
+
+- Release 0.8.0, as the config can now turn on committing after each star
+- Split the app's concerns into hooks, and share one error message helper
+- Split the server into a module per area
+- Run the tests, the app's and the install script on macOS in CI
+- Show only titles in the settings list, and a line when something needs doing
+- Leave the formula's version to Homebrew, which reads it from the URLs
+- Let the config turn on committing after each star
+- Mention committing after each star, and every built-in language in the config
+
 ## [0.7.0](https://github.com/thomasschafer/workshop/compare/v0.6.0...v0.7.0) - 2026-10-20
 
 ### Other
