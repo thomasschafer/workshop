@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/thomasschafer/workshop/compare/v0.6.0...v0.7.0) - 2026-10-20
+
+### Other
+
+- Release 0.7.0, as finding examples with the model is new
+- Keep the PATH dev.sh is started with for the commands it watches
+- Let dev.sh leave keeping the machine awake to something else
+- Use whisper.cpp's current Homebrew formula name
+- Bump release-plz/action ([#13](https://github.com/thomasschafer/workshop/pull/13))
+- Bump tokio from 1.53.2 to 1.53.3 in the cargo-minor-and-patch group ([#12](https://github.com/thomasschafer/workshop/pull/12))
+- Align Dependabot config with baseline ([#11](https://github.com/thomasschafer/workshop/pull/11))
+- Mark an example written inline as the sample, and only the answer that belongs to it
+- Bump vitest in /frontend in the npm-minor-and-patch group ([#10](https://github.com/thomasschafer/workshop/pull/10))
+- Bump base64 from 0.22.1 to 0.23.1 ([#9](https://github.com/thomasschafer/workshop/pull/9))
+- Align Dependabot config with baseline ([#8](https://github.com/thomasschafer/workshop/pull/8))
+- Find a puzzle's example with the edit model when the page doesn't make it clear
+- Keep haskell-language-server's notes plugin from covering the code with its internal errors
+- Merge Dependabot's updates once CI passes, check the real toolchains weekly, and add mise run check-fast
+- Hear long, repetitive dictation, such as a sum of every number up to 20
+- Keep the code scrolled where it was when an edit lands at the end of a long line
+
 ## [0.6.0](https://github.com/thomasschafer/workshop/compare/v0.5.0...v0.6.0) - 2026-10-16
 
 ### Other
