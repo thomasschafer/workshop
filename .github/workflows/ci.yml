@@ -75,7 +75,61 @@ jobs:
         working-directory: frontend
         run: npm run e2e:webkit
 
-      # Installs the latest release as the README says to, on Linux.
+      # Installs the latest release as the README says to.
+      - name: Install script
+        run: |
+          WORKSHOP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/workshop" --version
+
+  # Most people run the server on a Mac, so its tests, the app's and the install script run there too.
+  macos:
+    name: macOS
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build server
+        run: cargo build --locked
+
+      - name: Install browsers
+        working-directory: frontend
+        run: npx playwright install chromium webkit
+
+      - name: End-to-end tests
+        working-directory: frontend
+        run: npm run e2e
+
+      - name: End-to-end tests in WebKit
+        working-directory: frontend
+        run: npm run e2e:webkit
+
       - name: Install script
         run: |
           WORKSHOP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
