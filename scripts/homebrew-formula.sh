@@ -25,7 +25,6 @@ cat <<FORMULA
 class Workshop < Formula
   desc "Solve Advent of Code puzzles by voice, from your phone"
   homepage "https://github.com/${repo}"
-  version "${version}"
   license any_of: ["MIT", "Apache-2.0"]
 
   on_macos do
