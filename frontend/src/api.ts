@@ -1,4 +1,4 @@
-// Types mirror the Rust API in src/server.rs.
+// Types mirror the Rust API in src/server/.
 
 export interface Puzzle {
   year: number;
