@@ -7,7 +7,7 @@ Thanks for helping. Bug reports, language profiles and model providers are all e
 Install [mise](https://mise.jdx.dev), then:
 
 ```sh
-mise run dev         # rebuild and restart on every change; refresh the page to see it
+mise run dev         # rebuild and restart on every change, alongside any Workshop you use (see the README)
 mise run check-fast  # formatting, lints, types and unit tests, in seconds
 mise run check       # all of that and the browser tests, as CI does
 ```

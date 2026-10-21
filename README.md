@@ -128,7 +128,7 @@ mise run check   # everything CI runs; check-fast skips the browser tests
 mise run build   # a release binary with the frontend embedded
 ```
 
-Both `dev` and `serve` serve to your phone over Tailscale when it's installed, and keep macOS awake while they run.
+`serve` serves to your phone over Tailscale when it's installed. `dev` runs alongside any Workshop you already use: on port 7879, with its own settings and history in `.dev`, starting from a copy of your config and Advent of Code cookie. `mise run dev --tailscale` serves it to your phone too, on its own HTTPS port. Both keep macOS awake while they run.
 
 ## Licence
 
