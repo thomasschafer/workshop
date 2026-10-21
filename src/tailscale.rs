@@ -15,17 +15,21 @@ pub fn program() -> Option<PathBuf> {
     })
 }
 
-/// Serves the local port over HTTPS on the tailnet, returning the base URL.
-pub async fn serve(port: u16) -> Result<String> {
+/// The HTTPS port `tailscale serve` uses unless told otherwise.
+pub const DEFAULT_HTTPS_PORT: u16 = 443;
+
+/// Serves the local port over HTTPS on the tailnet, on `https_port`, returning the base URL.
+pub async fn serve(port: u16, https_port: u16) -> Result<String> {
     let Some(tailscale) = program() else {
         bail!("`--tailscale` needs Tailscale, which isn't installed");
     };
     let target = format!("http://127.0.0.1:{port}");
+    let https = format!("--https={https_port}");
     println!("Setting up `tailscale serve`…");
     // Tailscale's output is shown rather than captured, because it can ask the user to do
     // something first, such as enabling Serve for their tailnet, and waits until they have.
     let status = Command::new(&tailscale)
-        .args(["serve", "--bg", &target])
+        .args(["serve", "--bg", &https, &target])
         .stdin(Stdio::null())
         .status()
         .await
@@ -40,7 +44,15 @@ pub async fn serve(port: u16) -> Result<String> {
     }
     let status = run(&["status", "--json"]).await?;
     let name = dns_name(&status)?;
-    Ok(format!("https://{name}"))
+    Ok(base_url(&name, https_port))
+}
+
+fn base_url(name: &str, https_port: u16) -> String {
+    if https_port == DEFAULT_HTTPS_PORT {
+        format!("https://{name}")
+    } else {
+        format!("https://{name}:{https_port}")
+    }
 }
 
 /// The HTTPS address Tailscale is already serving `port` at, without changing anything.
@@ -56,14 +68,28 @@ pub async fn serving_url(port: u16) -> Option<String> {
     serving_url_from_status(&status, port)
 }
 
+/// Reads `tailscale serve status`, which lists each served address followed by what it proxies:
+///
+/// ```text
+/// https://laptop.tail1234.ts.net (tailnet only)
+/// |-- / proxy http://127.0.0.1:7878
+/// ```
+///
+/// Returns the address whose root proxies to `port`, as other apps may be served too.
 fn serving_url_from_status(status: &str, port: u16) -> Option<String> {
-    if !status.contains(&format!(":{port}")) {
-        return None;
+    let target = format!("http://127.0.0.1:{port}");
+    let mut url = None;
+    for line in status.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            [address, ..] if address.starts_with("https://") => {
+                url = Some(address.trim_end_matches('/').to_owned());
+            }
+            ["|--", "/", "proxy", proxied] if *proxied == target => return url,
+            _ => {}
+        }
     }
-    status
-        .split_whitespace()
-        .find(|word| word.starts_with("https://"))
-        .map(|url| url.trim_end_matches('/').to_owned())
+    None
 }
 
 async fn run(args: &[&str]) -> Result<String> {
@@ -110,7 +136,42 @@ mod tests {
             Some("https://laptop.tail1234.ts.net")
         );
         assert_eq!(serving_url_from_status(status, 9999), None);
+        assert_eq!(serving_url_from_status(status, 787), None);
         assert_eq!(serving_url_from_status("No serve config", 7878), None);
+    }
+
+    #[test]
+    fn reads_serve_status_with_other_apps_served() {
+        let status = "https://laptop.tail1234.ts.net:8443 (tailnet only)\n\
+                      |-- / proxy http://127.0.0.1:8787\n\n\
+                      https://laptop.tail1234.ts.net (tailnet only)\n\
+                      |-- / proxy http://127.0.0.1:7878\n\n\
+                      https://laptop.tail1234.ts.net:7879 (tailnet only)\n\
+                      |-- / proxy http://127.0.0.1:7879\n";
+        assert_eq!(
+            serving_url_from_status(status, 7878).as_deref(),
+            Some("https://laptop.tail1234.ts.net")
+        );
+        assert_eq!(
+            serving_url_from_status(status, 7879).as_deref(),
+            Some("https://laptop.tail1234.ts.net:7879")
+        );
+        assert_eq!(
+            serving_url_from_status(status, 8787).as_deref(),
+            Some("https://laptop.tail1234.ts.net:8443")
+        );
+    }
+
+    #[test]
+    fn builds_base_urls() {
+        assert_eq!(
+            base_url("laptop.tail1234.ts.net", DEFAULT_HTTPS_PORT),
+            "https://laptop.tail1234.ts.net"
+        );
+        assert_eq!(
+            base_url("laptop.tail1234.ts.net", 7879),
+            "https://laptop.tail1234.ts.net:7879"
+        );
     }
 
     #[test]

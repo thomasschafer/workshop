@@ -56,6 +56,10 @@ enum Command {
         /// provides the HTTPS that phones need for the microphone.
         #[arg(long)]
         tailscale: bool,
+        /// The HTTPS port to serve on over Tailscale, such as to run a second copy of Workshop
+        /// alongside one already served on the default port.
+        #[arg(long, requires = "tailscale", default_value_t = tailscale::DEFAULT_HTTPS_PORT)]
+        https_port: u16,
     },
     /// Check that everything Workshop needs is installed and set up.
     Doctor,
@@ -113,9 +117,15 @@ async fn main() -> Result<()> {
     match cli.command.unwrap_or(Command::Serve {
         bind: None,
         tailscale: false,
+        https_port: tailscale::DEFAULT_HTTPS_PORT,
     }) {
-        Command::Serve { bind, tailscale } => {
-            serve(config, paths, aoc_session, bind, tailscale).await
+        Command::Serve {
+            bind,
+            tailscale,
+            https_port,
+        } => {
+            let https_port = tailscale.then_some(https_port);
+            serve(config, paths, aoc_session, bind, https_port).await
         }
         Command::Doctor => {
             let checks = doctor::run(&config, &paths, aoc_session.is_some()).await;
@@ -166,7 +176,7 @@ async fn main() -> Result<()> {
         Command::Token { tailscale } => {
             let token = server::load_or_create_token(&paths)?;
             if tailscale {
-                print_phone_link(config.server.bind, &token).await
+                print_phone_link(config.server.bind, &token, tailscale::DEFAULT_HTTPS_PORT).await
             } else {
                 println!("{}", open_url(config.server.bind, &token));
                 Ok(())
@@ -224,7 +234,8 @@ async fn serve(
     paths: Paths,
     aoc_session: Option<String>,
     bind: Option<SocketAddr>,
-    use_tailscale: bool,
+    // The HTTPS port to serve on with `tailscale serve`, if at all.
+    tailscale_https_port: Option<u16>,
 ) -> Result<()> {
     if let Some(bind) = bind {
         config.server.bind = bind;
@@ -254,8 +265,8 @@ async fn serve(
         "Workshop is running. On this computer, open {}",
         open_url(bind, &token)
     );
-    if use_tailscale {
-        print_phone_link(bind, &token).await?;
+    if let Some(https_port) = tailscale_https_port {
+        print_phone_link(bind, &token, https_port).await?;
     } else {
         println!(
             "To use it from your phone, run `workshop serve --tailscale`, or put it behind another HTTPS proxy, which browsers need for the microphone."
@@ -300,11 +311,11 @@ async fn shutdown_signal() {
     }
 }
 
-async fn print_phone_link(bind: SocketAddr, token: &str) -> Result<()> {
+async fn print_phone_link(bind: SocketAddr, token: &str, https_port: u16) -> Result<()> {
     if !(bind.ip().is_loopback() || bind.ip().is_unspecified()) {
         anyhow::bail!("`--tailscale` forwards to 127.0.0.1, so Workshop must listen there");
     }
-    let base = tailscale::serve(bind.port()).await?;
+    let base = tailscale::serve(bind.port(), https_port).await?;
     let url = format!("{base}/?token={token}");
     println!(
         "\nOn your phone, open {url}\nor scan:\n\n{}",
