@@ -258,7 +258,7 @@ async fn serve(
         print_phone_link(bind, &token).await?;
     } else {
         println!(
-            "To use it from your phone, run `workshop serve --tailscale`, or see the README for other options."
+            "To use it from your phone, run `workshop serve --tailscale`, or put it behind another HTTPS proxy, which browsers need for the microphone."
         );
     }
     let warm = app.clone();
