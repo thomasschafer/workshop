@@ -22,12 +22,17 @@ run = "scripts/dev.sh"
 [tasks.serve]
 description = "Run an optimised build for your phone over Tailscale, keeping this machine awake"
 depends = ["build-frontend"]
+usage = 'flag "--https-port <port>" help="The HTTPS port to serve on, if not where Tailscale already serves Workshop or 443"'
 run = '''
 tailscale status >/dev/null 2>&1 || tailscale up
+set -- cargo run --release -- serve --tailscale
+if [ -n "${usage_https_port:-}" ]; then
+  set -- "$@" --https-port "$usage_https_port"
+fi
 if command -v caffeinate >/dev/null 2>&1; then
-  exec caffeinate -i cargo run --release -- serve --tailscale
+  exec caffeinate -i "$@"
 else
-  exec cargo run --release -- serve --tailscale
+  exec "$@"
 fi
 '''
 

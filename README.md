@@ -57,7 +57,7 @@ To use it from your phone over Tailscale, start it with:
 workshop serve --tailscale
 ```
 
-This gives Workshop an HTTPS address on your tailnet, and prints a link and QR code to open on your phone. Keep the server awake while you're out; on a Mac, for example, with `caffeinate -i`. You can add Workshop to your phone's home screen to open it full screen like an app; on an iPhone, it asks for the link once more, as it doesn't share Safari's login.
+This gives Workshop an HTTPS address on your tailnet, and prints a link and QR code to open on your phone. If Tailscale already serves Workshop, it reuses that address; otherwise it uses your machine's bare address (port 443). It never takes over a port another app is served on: if 443 is in use, pick another with `--https-port`, such as `workshop serve --tailscale --https-port 8443`. `workshop token --tailscale` takes the same options, and prints the link without starting the server. Keep the server awake while you're out; on a Mac, for example, with `caffeinate -i`. You can add Workshop to your phone's home screen to open it full screen like an app; on an iPhone, it asks for the link once more, as it doesn't share Safari's login.
 
 The first time you open Workshop, a short setup walks you through choosing your language and model and logging in to Advent of Code. If you'd rather not paste your session cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
@@ -128,7 +128,7 @@ mise run check   # everything CI runs; check-fast skips the browser tests
 mise run build   # a release binary with the frontend embedded
 ```
 
-`serve` serves to your phone over Tailscale when it's installed. `dev` runs alongside any Workshop you already use: on port 7879, with its own settings and history in `.dev`, starting from a copy of your config and Advent of Code cookie. `mise run dev --tailscale` serves it to your phone too, on its own HTTPS port. Both keep macOS awake while they run.
+`serve` serves to your phone over Tailscale when it's installed, and takes `--https-port` as `workshop serve` does. `dev` runs alongside any Workshop you already use: on port 7879, with its own settings and history in `.dev`, starting from a copy of your config and Advent of Code cookie. `mise run dev --tailscale` serves it to your phone too, on its own HTTPS port. Both keep macOS awake while they run.
 
 ## Licence
 
