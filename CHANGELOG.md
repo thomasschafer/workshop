@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1](https://github.com/thomasschafer/workshop/compare/v0.8.0...v0.8.1) - 2026-10-24
+
+### Other
+
+- Never take over another app's Tailscale address
+- Run mise run dev alongside any Workshop already in use
+- Let serve --tailscale use another HTTPS port, and find the right served address
+- Say how else to reach Workshop from a phone, rather than pointing at the README
+- Trim the README to what a first read needs
+
 ## [0.8.0](https://github.com/thomasschafer/workshop/compare/v0.7.0...v0.8.0) - 2026-10-20
 
 ### Other
