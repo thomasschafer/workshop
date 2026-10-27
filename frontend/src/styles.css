@@ -202,6 +202,7 @@ code {
 }
 
 .code-pane.hidden,
+.problem.hidden,
 .tabs.hidden,
 .controls.hidden {
   display: none;

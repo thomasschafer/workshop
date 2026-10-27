@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, type DayMeta, type Problem, type Puzzle } from "../api";
 import {
   answerCode,
@@ -21,6 +21,8 @@ interface Props {
   onStartAgain: (() => void) | null;
   /** Parts whose example is being looked for. */
   findingSamples: readonly PartIndex[];
+  /** Kept in the page while another tab is shown, so it's where the user left it on coming back. */
+  hidden: boolean;
 }
 
 /** Code the user tapped in the puzzle, waiting for them to say what it is. */
@@ -52,10 +54,29 @@ export function ProblemView({
   onRefresh,
   onStartAgain,
   findingSamples,
+  hidden,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [editing, setEditing] = useState<PartIndex | null>(null);
+  // Browsers may forget how far an element was scrolled while it's not displayed.
+  const scrollTop = useRef(0);
+
+  useEffect(() => {
+    scrollTop.current = 0;
+  }, [puzzle.year, puzzle.day]);
+
+  useLayoutEffect(() => {
+    if (!hidden && ref.current) ref.current.scrollTop = scrollTop.current;
+  }, [hidden]);
+
+  const pane = {
+    ref,
+    class: `pane problem ${hidden ? "hidden" : ""}`,
+    onScroll: () => {
+      if (!hidden && ref.current) scrollTop.current = ref.current.scrollTop;
+    },
+  };
 
   useEffect(() => {
     const root = ref.current;
@@ -97,7 +118,7 @@ export function ProblemView({
 
   if (!problem) {
     return (
-      <div class="pane problem">
+      <div {...pane}>
         {loading ? <p class="muted">Fetching the puzzle…</p> : null}
         {error ? <p class="error-text">{error}</p> : null}
         {!loading ? (
@@ -136,7 +157,7 @@ export function ProblemView({
   };
 
   return (
-    <div class="pane problem" ref={ref}>
+    <div {...pane}>
       <div class="sample-summary">
         {problem.parts_html.slice(0, 2).map((_, i) => {
           const part: PartIndex = i === 0 ? 0 : 1;

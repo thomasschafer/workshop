@@ -582,6 +582,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       meta={meta}
       onMeta={updateMeta}
       findingSamples={findingSamples}
+      hidden={!wide && (showPicker || shownTab !== "problem")}
       onRefresh={() => puzzle && void loadProblem(puzzle, true)}
       onStartAgain={
         puzzle && isPractice(puzzle)
@@ -672,7 +673,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           />
           <div class="editor" ref={editorHost} />
         </div>
-        {!showPicker && !wide && shownTab === "problem" ? problemView : null}
+        {wide ? null : problemView}
         {!showPicker && shownTab === "notes" ? (
           <div class="pane notes">
             <textarea

@@ -86,6 +86,23 @@ test("opens a puzzle from the picker", async () => {
   expect(readFileSync(join(HOME, "solutions", "pyrightconfig.json"), "utf8")).toContain("lib");
 });
 
+test("keeps the puzzle scrolled where it was after looking at another tab", async () => {
+  const phone = page.viewportSize();
+  // Short enough that the puzzle scrolls.
+  await page.setViewportSize({ width: phone?.width ?? 412, height: 400 });
+  const problem = page.locator(".problem");
+  await problem.evaluate((pane) => {
+    pane.scrollTop = 60;
+  });
+  await expect.poll(() => problem.evaluate((pane) => pane.scrollTop)).toBe(60);
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(problem).toBeHidden();
+  await page.getByRole("button", { name: "Problem", exact: true }).click();
+  await expect(problem).toBeVisible();
+  expect(await problem.evaluate((pane) => pane.scrollTop)).toBe(60);
+  if (phone) await page.setViewportSize(phone);
+});
+
 test("edits by voice, and undoes without the model", async () => {
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await say("return the number of lines");
