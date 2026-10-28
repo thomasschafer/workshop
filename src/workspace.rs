@@ -682,10 +682,11 @@ mod tests {
             .solution_path(Path::new(""), Puzzle::new(2017, 4).unwrap())
             .unwrap();
         let committed = git(&workspace.solutions_dir, &["ls-files"]).await.unwrap();
-        let committed: Vec<&str> = committed.lines().collect();
-        assert!(committed.contains(&solution.to_str().unwrap()));
-        assert!(committed.contains(&"notes/2017/day05.md"));
-        assert!(!committed.contains(&"tmp.py"));
+        // Paths compare by component, so git's `/` matches the system's separator.
+        let committed: Vec<&Path> = committed.lines().map(Path::new).collect();
+        assert!(committed.contains(&solution.as_path()));
+        assert!(committed.contains(&Path::new("notes/2017/day05.md")));
+        assert!(!committed.contains(&Path::new("tmp.py")));
         let changed = git(&workspace.solutions_dir, &["status", "--porcelain"])
             .await
             .unwrap();
