@@ -120,16 +120,22 @@ pub(super) async fn submit(
     let committed = if correct && app.settings().commit_after_star(&app.config) {
         let message = format!("{}, part {}", puzzle.title(), part.number());
         // The star is earned either way, so a failed push is reported rather than an error.
-        Some(match app.workspace.commit_and_push(&message).await {
-            Ok(summary) => Committed {
-                succeeded: true,
-                summary,
+        Some(
+            match app
+                .workspace
+                .commit_and_push(app.language(), &message)
+                .await
+            {
+                Ok(summary) => Committed {
+                    succeeded: true,
+                    summary,
+                },
+                Err(err) => Committed {
+                    succeeded: false,
+                    summary: format!("Couldn't commit and push: {err:#}"),
+                },
             },
-            Err(err) => Committed {
-                succeeded: false,
-                summary: format!("Couldn't commit and push: {err:#}"),
-            },
-        })
+        )
     } else {
         None
     };

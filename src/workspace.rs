@@ -1,5 +1,6 @@
 //! The user's solutions repo, and Workshop's own state about each puzzle.
 
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use crate::aoc::Part;
-use crate::language::{LanguageProfile, Puzzle};
+use crate::language::{LanguageProfile, Puzzle, relative_inside};
 use crate::paths::{self, Paths};
 
 const SOLUTIONS_GITIGNORE: &str = "\
@@ -329,9 +330,30 @@ impl Workspace {
         paths::write_atomic(&self.paths.state_file(), &serde_json::to_vec_pretty(state)?)
     }
 
-    /// Commits everything in the solutions repo and pushes if there is a remote.
-    pub async fn commit_and_push(&self, message: &str) -> Result<String> {
-        git(&self.solutions_dir, &["add", "--all"]).await?;
+    /// Commits changes to tracked files and any new files Workshop owns, then pushes if there is
+    /// a remote. Other new files, such as scratch files, are left out, so they're only committed
+    /// once the user adds them themselves.
+    pub async fn commit_and_push(
+        &self,
+        profile: &LanguageProfile,
+        message: &str,
+    ) -> Result<String> {
+        git(&self.solutions_dir, &["add", "--update"]).await?;
+        let untracked = git(
+            &self.solutions_dir,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+        )
+        .await?;
+        let untracked: Vec<&str> = untracked.split('\0').filter(|p| !p.is_empty()).collect();
+        let owned = self.owned_files(profile, &untracked)?;
+        let new_files: Vec<&str> = untracked
+            .into_iter()
+            .filter(|p| owned.contains(&self.solutions_dir.join(p)))
+            .collect();
+        if !new_files.is_empty() {
+            let args: Vec<&str> = ["add", "--"].into_iter().chain(new_files).collect();
+            git(&self.solutions_dir, &args).await?;
+        }
         let staged = Command::new("git")
             .args(["diff", "--cached", "--quiet"])
             .current_dir(&self.solutions_dir)
@@ -353,6 +375,48 @@ impl Workspace {
             summary.push("Pushed.".to_owned());
         }
         Ok(summary.join(" "))
+    }
+
+    /// The files Workshop writes in the solutions repo that any of `candidates` could be: the
+    /// shared ones, such as the helpers, and the solutions and notes of the puzzles from the
+    /// years the candidates name.
+    fn owned_files(
+        &self,
+        profile: &LanguageProfile,
+        candidates: &[&str],
+    ) -> Result<HashSet<PathBuf>> {
+        let dir = &self.solutions_dir;
+        let mut owned: HashSet<PathBuf> = [".gitignore", "README.md"]
+            .into_iter()
+            .map(|name| dir.join(name))
+            .collect();
+        if let Some(helpers) = &profile.helpers {
+            owned.insert(dir.join(relative_inside(&helpers.file)?));
+            if let Some(config) = &helpers.lsp_config {
+                owned.insert(dir.join(relative_inside(&config.file)?));
+            }
+        }
+        if let Some(packages) = &profile.packages {
+            owned.insert(dir.join(relative_inside(&packages.manifest)?));
+        }
+        owned.extend(crate::toolchain::mise_config(dir));
+
+        let years: BTreeSet<u16> = candidates
+            .iter()
+            .flat_map(|path| path.split(|c: char| !c.is_ascii_digit()))
+            .filter_map(|digits| digits.parse().ok())
+            .filter(|&year| year >= 2015)
+            .collect();
+        let puzzles = years
+            .into_iter()
+            .flat_map(|year| (1..=25).map(move |day| Puzzle::new(year, day)))
+            .chain([Ok(Puzzle::PRACTICE)]);
+        for puzzle in puzzles {
+            let puzzle = puzzle?;
+            owned.insert(profile.solution_path(dir, puzzle)?);
+            owned.insert(self.notes_path(puzzle));
+        }
+        Ok(owned)
     }
 }
 
@@ -589,9 +653,42 @@ mod tests {
         git(&workspace.solutions_dir, &["config", "user.name", "Test"])
             .await
             .unwrap();
-        let summary = workspace.commit_and_push("Day 4").await.unwrap();
+        std::fs::write(workspace.solutions_dir.join("tmp.py"), "print(1)").unwrap();
+        let summary = workspace.commit_and_push(&profile, "Day 4").await.unwrap();
         assert_eq!(summary, "Committed. No remote to push to.");
-        let summary = workspace.commit_and_push("Day 4").await.unwrap();
+        let summary = workspace.commit_and_push(&profile, "Day 4").await.unwrap();
         assert_eq!(summary, "Nothing new to commit. No remote to push to.");
+
+        let puzzle = Puzzle::new(2017, 5).unwrap();
+        let notes = workspace.load_notes(puzzle).unwrap();
+        workspace
+            .save_notes(puzzle, "Use a stack.", &notes.version)
+            .unwrap();
+        let code = workspace
+            .load_code(&profile, Puzzle::new(2017, 4).unwrap())
+            .unwrap();
+        workspace
+            .save_code(
+                &profile,
+                Puzzle::new(2017, 4).unwrap(),
+                "main = pure ()",
+                &code.version,
+            )
+            .unwrap();
+        let summary = workspace.commit_and_push(&profile, "Day 5").await.unwrap();
+        assert_eq!(summary, "Committed. No remote to push to.");
+
+        let solution = profile
+            .solution_path(Path::new(""), Puzzle::new(2017, 4).unwrap())
+            .unwrap();
+        let committed = git(&workspace.solutions_dir, &["ls-files"]).await.unwrap();
+        let committed: Vec<&str> = committed.lines().collect();
+        assert!(committed.contains(&solution.to_str().unwrap()));
+        assert!(committed.contains(&"notes/2017/day05.md"));
+        assert!(!committed.contains(&"tmp.py"));
+        let changed = git(&workspace.solutions_dir, &["status", "--porcelain"])
+            .await
+            .unwrap();
+        assert_eq!(changed, "?? tmp.py\n");
     }
 }

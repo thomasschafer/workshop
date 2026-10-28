@@ -22,6 +22,9 @@ pub(super) async fn git_sync(
     Json(body): Json<GitSyncBody>,
 ) -> ApiResult<GitSynced> {
     Ok(Json(GitSynced {
-        summary: app.workspace.commit_and_push(&body.message).await?,
+        summary: app
+            .workspace
+            .commit_and_push(app.language(), &body.message)
+            .await?,
     }))
 }
