@@ -4,7 +4,7 @@ import { isPractice, PRACTICE, puzzleLabel, puzzleTitle } from "./puzzle";
 describe("puzzle names", () => {
   it("names real puzzles by year and day", () => {
     expect(puzzleLabel({ year: 2017, day: 4 })).toBe("2017 · day 4");
-    expect(puzzleTitle({ year: 2017, day: 4 })).toBe("Advent of Code 2017 day 4");
+    expect(puzzleTitle({ year: 2017, day: 4 })).toBe("2017 day 4");
     expect(isPractice({ year: 2017, day: 4 })).toBe(false);
   });
 

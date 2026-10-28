@@ -267,7 +267,7 @@ impl Puzzle {
         if self.is_practice() {
             "Workshop practice puzzle".to_owned()
         } else {
-            format!("Advent of Code {} day {}", self.year, self.day)
+            format!("{} day {}", self.year, self.day)
         }
     }
 

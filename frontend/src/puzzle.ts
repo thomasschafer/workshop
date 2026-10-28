@@ -14,5 +14,5 @@ export function puzzleLabel(p: Puzzle): string {
 
 /** How a puzzle is named in a commit message. */
 export function puzzleTitle(p: Puzzle): string {
-  return isPractice(p) ? "Workshop practice puzzle" : `Advent of Code ${p.year} day ${p.day}`;
+  return isPractice(p) ? "Workshop practice puzzle" : `${p.year} day ${p.day}`;
 }
