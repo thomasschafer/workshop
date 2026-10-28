@@ -269,12 +269,13 @@ impl Workspace {
         if current.version != expected_version {
             return Err(SaveError::Conflict { current });
         }
+        let text = with_final_newline(text);
         if text != current.text {
             paths::write_atomic(path, text.as_bytes())?;
         }
         Ok(VersionedFile {
-            text: text.to_owned(),
-            version: version_of(text),
+            version: version_of(&text),
+            text,
             path: path.to_owned(),
         })
     }
@@ -438,6 +439,16 @@ fn read_optional(path: &Path) -> Result<Option<String>> {
     }
 }
 
+/// Text files end in a newline, which git and most tools expect. Empty text stays empty, so an
+/// empty file still counts as missing.
+fn with_final_newline(text: &str) -> String {
+    if text.is_empty() || text.ends_with('\n') {
+        text.to_owned()
+    } else {
+        format!("{text}\n")
+    }
+}
+
 /// A stable hash of the contents (FNV-1a), so versions survive server restarts.
 pub fn version_of(text: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -510,8 +521,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             workspace.load_code(&profile, puzzle).unwrap().text,
-            "main = pure ()"
+            "main = pure ()\n"
         );
+        let resaved = workspace
+            .save_code(&profile, puzzle, "main = pure ()\n", &saved.version)
+            .unwrap();
+        assert_eq!(resaved.version, saved.version);
 
         match workspace.save_code(&profile, puzzle, "stale", &loaded.version) {
             Err(SaveError::Conflict { current }) => assert_eq!(current.version, saved.version),
@@ -546,7 +561,7 @@ mod tests {
         let saved = workspace
             .save_notes(puzzle, "try a map", &empty.version)
             .unwrap();
-        assert_eq!(workspace.load_notes(puzzle).unwrap().text, "try a map");
+        assert_eq!(workspace.load_notes(puzzle).unwrap().text, "try a map\n");
         assert!(matches!(
             workspace.save_notes(puzzle, "stale", &empty.version),
             Err(SaveError::Conflict { current }) if current.version == saved.version

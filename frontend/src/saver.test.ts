@@ -26,6 +26,8 @@ class FakeServer {
   failBefore = 0;
   /** Apply this many requests, then fail before the response arrives. */
   failAfter = 0;
+  /** Add a final newline to what's saved, as the real server does. */
+  addsFinalNewline = false;
   saves: { text: string; keepalive: boolean }[] = [];
 
   constructor(text: string) {
@@ -51,6 +53,9 @@ class FakeServer {
     }
     if (version !== String(this.version)) {
       throw new ApiError("conflict", 409, { current: this.file });
+    }
+    if (this.addsFinalNewline && text !== "" && !text.endsWith("\n")) {
+      text = `${text}\n`;
     }
     if (text !== this.text) {
       this.text = text;
@@ -127,6 +132,32 @@ describe("VersionedSaver", () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(conflicts).toEqual([]);
     expect(server.text).toBe("abc");
+  });
+
+  it("settles when the server adds a final newline", async () => {
+    const server = new FakeServer("a\n");
+    server.addsFinalNewline = true;
+    const { saver, statuses } = saverFor(server);
+    saver.schedule("ab");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(server.saves).toEqual([{ text: "ab", keepalive: false }]);
+    expect(server.text).toBe("ab\n");
+    expect(saver.hasUnsavedChanges).toBe(false);
+    expect(statuses.at(-1)).toBe("saved");
+  });
+
+  it("recognises its own hidden save when the server added a final newline", async () => {
+    const server = new FakeServer("a\n");
+    server.addsFinalNewline = true;
+    const { saver, conflicts } = saverFor(server);
+    saver.schedule("ab");
+    server.failAfter = 1;
+    saver.flushOnExit();
+    await vi.advanceTimersByTimeAsync(0);
+    saver.schedule("abc");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(conflicts).toEqual([]);
+    expect(server.text).toBe("abc\n");
   });
 
   it("doesn't lose a save sent as the page was hidden while another was in flight", async () => {

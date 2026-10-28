@@ -174,15 +174,19 @@ export class VersionedSaver {
     this.onStatus("saving");
     try {
       const saved = await this.saveFile(text, this.version, keepalive);
-      this.confirm(saved);
+      // The server may have added a final newline, but what it saved is still this text.
+      this.confirm({ text, version: saved.version });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         const theirs = (err.body as { current?: FileVersion } | null)?.current;
         if (!theirs) {
           this.enterConflict({ text: this.confirmed, version: this.version });
-        } else if (this.sent.includes(theirs.text)) {
+          return;
+        }
+        const ours = this.sentAs(theirs.text);
+        if (ours !== undefined) {
           // One of our own saves landed first, for example one sent as the page was hidden.
-          this.confirm(theirs);
+          this.confirm({ text: ours, version: theirs.version });
         } else {
           this.enterConflict(theirs);
         }
@@ -221,6 +225,11 @@ export class VersionedSaver {
   private markSaved(): void {
     this.clearUnsaved();
     this.onStatus("saved");
+  }
+
+  /** The recently sent text that the server saved as `saved`, which may add a final newline. */
+  private sentAs(saved: string): string | undefined {
+    return this.sent.find((text) => text === saved || `${text}\n` === saved);
   }
 
   private remember(text: string): void {
