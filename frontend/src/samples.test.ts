@@ -36,6 +36,12 @@ describe("withSuggestions", () => {
     expect(sampleInput(meta, 1)).toBe("1\n2\n");
   });
 
+  it("leaves part 2 without a sample when it has no answer to check part 1's against", () => {
+    const meta = withSuggestions(EMPTY_META, problem({ suggested_sample_answers: ["3", null] }));
+    expect(sampleInput(meta, 1)).toBeNull();
+    expect(sampleInput(setAnswer(meta, 1, "7"), 1)).toBe("1\n2\n");
+  });
+
   it("uses part 2's own sample when it has one", () => {
     const meta = withSuggestions(EMPTY_META, problem({ suggested_sample_blocks: [0, 2] }));
     expect(sampleInput(meta, 1)).toBe("5\n6\n");

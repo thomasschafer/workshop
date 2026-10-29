@@ -2,8 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, type DayMeta, type Problem, type Puzzle } from "../api";
 import {
   answerCode,
+  inheritsPartOne,
   type PartIndex,
   sameValues,
+  sampleInput,
   setAnswer,
   setSampleText,
   toggleSample,
@@ -40,7 +42,7 @@ function describeSample(meta: DayMeta, part: PartIndex, finding: boolean): strin
     const lines = text.trimEnd().split("\n").length;
     return lines === 1 ? `"${text.trim()}"` : `${lines} lines`;
   }
-  if (part === 1 && meta.sample_inputs[0] !== null) return "same as part 1";
+  if (part === 1 && sampleInput(meta, 1) !== null) return "same as part 1";
   return finding ? "looking for the example…" : "none chosen";
 }
 
@@ -250,7 +252,7 @@ function SampleEditor({
   part: PartIndex;
   onMeta: (meta: DayMeta) => void;
 }) {
-  const inherited = part === 1 && meta.sample_inputs[1] === null ? meta.sample_inputs[0] : null;
+  const inherited = part === 1 && inheritsPartOne(meta) ? meta.sample_inputs[0] : null;
   return (
     <div class="sample-editor">
       <label>

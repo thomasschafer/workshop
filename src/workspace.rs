@@ -125,7 +125,8 @@ pub enum SaveError {
 #[serde(from = "StoredDayMeta")]
 pub struct DayMeta {
     /// The puzzle code block chosen as each part's sample input. Part 2 uses part 1's sample
-    /// when it has none of its own.
+    /// when it has none of its own but has an expected answer, as the puzzle then reuses part 1's
+    /// example. Without that answer, part 2 has no sample, rather than silently running part 1's.
     pub sample_blocks: [Option<usize>; 2],
     pub sample_inputs: [Option<String>; 2],
     /// Expected sample answers for parts 1 and 2.
@@ -138,9 +139,10 @@ impl DayMeta {
     pub fn sample_input(&self, part: Part) -> Option<&str> {
         match part {
             Part::One => self.sample_inputs[0].as_deref(),
-            Part::Two => self.sample_inputs[1]
-                .as_deref()
-                .or(self.sample_inputs[0].as_deref()),
+            Part::Two if self.sample_inputs[1].is_none() && self.sample_answers[1].is_some() => {
+                self.sample_inputs[0].as_deref()
+            }
+            Part::Two => self.sample_inputs[1].as_deref(),
         }
     }
 }
@@ -603,7 +605,7 @@ mod tests {
         let meta: DayMeta = serde_json::from_str(old).unwrap();
         assert_eq!(meta.sample_blocks, [Some(0), None]);
         assert_eq!(meta.sample_input(Part::One), Some("1\n2\n"));
-        assert_eq!(meta.sample_input(Part::Two), Some("1\n2\n"));
+        assert_eq!(meta.sample_input(Part::Two), None);
         assert_eq!(meta.cursor, Some(4));
         assert!(serde_json::from_str::<DayMeta>(r#"{"typo":1}"#).is_err());
     }
@@ -615,6 +617,17 @@ mod tests {
             ..DayMeta::default()
         };
         assert_eq!(meta.sample_input(Part::Two), Some("b"));
+    }
+
+    #[test]
+    fn part_two_reuses_part_ones_sample_only_when_it_has_an_answer() {
+        let mut meta = DayMeta {
+            sample_inputs: [Some("a".into()), None],
+            ..DayMeta::default()
+        };
+        assert_eq!(meta.sample_input(Part::Two), None);
+        meta.sample_answers[1] = Some("7".into());
+        assert_eq!(meta.sample_input(Part::Two), Some("a"));
     }
 
     #[test]

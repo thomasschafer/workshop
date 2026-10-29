@@ -15,21 +15,27 @@ use crate::provider::Role;
 use crate::workspace::{DayMeta, SaveError, VersionedFile};
 
 /// Asks the edit model for a part's example, for when the page's structure doesn't give it away.
-/// What it finds, or that it found nothing, is kept, so each part is only asked about once.
+/// What it proposes, including that there's none, is kept, so each part is only asked about once.
 pub(super) async fn find_sample(
     State(app): State<Shared>,
     Path((year, day, part)): Path<(u16, u8, u8)>,
 ) -> ApiResult<Option<crate::samples::Sample>> {
     let puzzle = puzzle(year, day)?;
     let part = Part::from_number(part).map_err(|e| bad_request(e.to_string()))?;
+    let problem = app.aoc.problem(puzzle, false).await?;
     let path = app.aoc.sample_path(puzzle, part);
     if let Ok(text) = std::fs::read_to_string(&path) {
-        match serde_json::from_str(&text) {
-            Ok(found) => return Ok(Json(found)),
+        // A `null` file was written by older versions, both when the model found no example and
+        // when the check rejected the one it found. As the two can't be told apart, it's asked
+        // again.
+        match serde_json::from_str::<Option<crate::samples::Proposal>>(&text) {
+            Ok(Some(proposal)) => {
+                return Ok(Json(crate::samples::check(&proposal, &problem.text)));
+            }
+            Ok(None) => {}
             Err(err) => tracing::warn!("reading {}: {err}", path.display()),
         }
     }
-    let problem = app.aoc.problem(puzzle, false).await?;
     let shown = usize::from(part.number());
     if problem.parts_text.len() < shown {
         return Err(bad_request(format!(
@@ -48,13 +54,14 @@ pub(super) async fn find_sample(
     let reply = app.runners[&choice.provider]
         .call_aside(&spec, &prompt, crate::samples::TIMEOUT)
         .await?;
-    let found = crate::samples::read_reply(&reply.text, &problem.text)?;
+    let proposal = crate::samples::read_reply(&reply.text)?;
+    let found = crate::samples::check(&proposal, &problem.text);
     tracing::info!(
         "sample for {puzzle} part {}: {found:?} in {}ms",
         part.number(),
         reply.elapsed_ms
     );
-    let json = serde_json::to_string(&found).map_err(anyhow::Error::from)?;
+    let json = serde_json::to_string(&proposal).map_err(anyhow::Error::from)?;
     crate::paths::write_atomic(&path, json.as_bytes())?;
     Ok(Json(found))
 }

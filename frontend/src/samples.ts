@@ -9,9 +9,20 @@ export const EMPTY_META: DayMeta = {
   cursor: null,
 };
 
-/** The sample input a part runs against: its own, or part 1's if it has none. */
+/**
+ * Whether part 2 runs against part 1's sample: it has no input of its own but has an expected
+ * answer, as the puzzle then reuses part 1's example. Without that answer, part 2 has no sample,
+ * rather than silently running part 1's.
+ */
+export function inheritsPartOne(meta: DayMeta): boolean {
+  return meta.sample_inputs[1] === null && meta.sample_answers[1] !== null;
+}
+
+/** The sample input a part runs against: its own, or part 1's when part 2 inherits it. */
 export function sampleInput(meta: DayMeta, part: PartIndex): string | null {
-  return meta.sample_inputs[part] ?? (part === 1 ? meta.sample_inputs[0] : null);
+  return (
+    meta.sample_inputs[part] ?? (part === 1 && inheritsPartOne(meta) ? meta.sample_inputs[0] : null)
+  );
 }
 
 /** Fills in each part's sample input and expected answer from the puzzle's likely candidates. */
