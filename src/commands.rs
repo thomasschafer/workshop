@@ -63,6 +63,9 @@ pub async fn run(
     print!("{}", result.stdout);
     eprint!("{}", result.stderr);
     eprintln!("{}", describe(&result));
+    for warning in &result.warnings {
+        eprintln!("{warning}");
+    }
     let mut passed =
         matches!(result.ending, Ending::Exited { code: Some(0) }) && result.phase == Phase::Run;
     if sample && passed {

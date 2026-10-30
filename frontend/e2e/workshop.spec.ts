@@ -134,6 +134,20 @@ test("runs on the sample and the real input", async () => {
   await page.getByRole("button", { name: "Close" }).click();
 });
 
+test("warns when an answer is printed as a decimal", async () => {
+  await say("divide it by one");
+  await expect(editor()).toContainText("return len(data.splitlines()) / 1");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByRole("button", { name: "Run sample" }).click();
+  await expect(page.locator(".run-result")).toContainText("Part 1: 3.0 ✗ (expected 3)", RUN);
+  await expect(page.locator(".run-result .warning-text")).toContainText(
+    "Part 1's answer, 3.0, looks like a decimal",
+  );
+  await page.getByRole("button", { name: "Close" }).click();
+  await say("undo");
+  await expect(editor()).not.toContainText("/ 1");
+});
+
 test("runs what was said, even when run before the edit is made", async () => {
   await send("slowly make it return seven");
   // Its card shows the edit is under way, and for how long, leaving the button free.

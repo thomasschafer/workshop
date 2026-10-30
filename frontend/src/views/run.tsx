@@ -182,6 +182,11 @@ export function RunSheet({
               second.
             </p>
           ) : null}
+          {last.result.warnings.map((warning) => (
+            <p key={warning} class="warning-text">
+              {warning}
+            </p>
+          ))}
           {last.input === "sample" && expected === null && part !== null ? (
             <p class="muted">Tap the sample's answer in the puzzle to check it automatically.</p>
           ) : null}

@@ -232,6 +232,10 @@ code {
   white-space: pre-wrap;
 }
 
+.warning-text {
+  color: var(--warn);
+}
+
 .text-button {
   background: none;
   border: none;

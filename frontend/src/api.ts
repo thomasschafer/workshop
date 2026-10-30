@@ -263,6 +263,8 @@ export interface RunResult {
   stderr: string;
   duration_ms: number;
   answers: string[];
+  /** Answers that are probably wrong as printed, such as a decimal. */
+  warnings: string[];
 }
 
 export type SubmitOutcome =

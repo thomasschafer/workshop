@@ -53,6 +53,13 @@ const replies = {
     ],
     summary: "used lanterns",
   },
+  "divide it by one": {
+    status: "edit",
+    edits: [
+      { find: "return len(data.splitlines())", replace: "return len(data.splitlines()) / 1‸" },
+    ],
+    summary: "divided it by one",
+  },
   "slowly make it return seven": {
     status: "edit",
     edits: [{ find: "return len(data.splitlines())", replace: "return 7‸" }],

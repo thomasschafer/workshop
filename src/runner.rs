@@ -42,8 +42,10 @@ pub struct RunResult {
     pub stdout: String,
     pub stderr: String,
     pub duration_ms: u64,
-    /// Non-empty stdout lines; line N is the answer to part N.
+    /// Non-empty stdout lines, read as answers by `answer`; line N is the answer to part N.
     pub answers: Vec<String>,
+    /// Answers that are probably wrong as printed, such as a decimal, to point out with them.
+    pub warnings: Vec<String>,
 }
 
 #[cfg(test)]
@@ -104,6 +106,7 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
                 stderr: output.stderr,
                 duration_ms: elapsed_ms(started),
                 answers: Vec::new(),
+                warnings: Vec::new(),
             });
         }
     }
@@ -118,12 +121,25 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
         request.cancel,
     )
     .await?;
-    let answers = output
+    let answers: Vec<String> = output
         .stdout
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
-        .map(str::to_owned)
+        .map(|l| answer(l).to_owned())
+        .collect();
+    let warnings = answers
+        .iter()
+        .take(2)
+        .enumerate()
+        .filter(|(_, a)| looks_like_a_decimal(a))
+        .map(|(i, a)| {
+            format!(
+                "Part {}'s answer, {a}, looks like a decimal, but Advent of Code's answers are \
+                 whole numbers. Is a division or a float type giving it?",
+                i + 1
+            )
+        })
         .collect();
     Ok(RunResult {
         phase: Phase::Run,
@@ -132,6 +148,7 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
         stderr: output.stderr,
         duration_ms: elapsed_ms(started),
         answers,
+        warnings,
     })
 }
 
@@ -239,6 +256,48 @@ fn elapsed_ms(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+/// The answer a line of output gives. Advent of Code's answers are letters, digits and the odd
+/// comma, so how a language prints a value can be read past: a string in double quotes, as
+/// Haskell's `print` writes one, is the text inside, and digits ending in `n`, as JavaScript
+/// writes a BigInt, are the number.
+fn answer(line: &str) -> &str {
+    if let Some(inner) = line
+        .strip_prefix('"')
+        .and_then(|l| l.strip_suffix('"'))
+        .filter(|inner| !inner.is_empty() && !inner.contains('"'))
+    {
+        return inner;
+    }
+    match line.strip_suffix('n') {
+        Some(number) if is_integer(number) => number,
+        _ => line,
+    }
+}
+
+fn is_integer(text: &str) -> bool {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Whether an answer is a number written as a decimal or in exponent form, such as `3.0` or
+/// `1e+21`, which no answer is but a float prints as.
+fn looks_like_a_decimal(answer: &str) -> bool {
+    let unsigned = answer.strip_prefix('-').unwrap_or(answer);
+    let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
+        Some((m, e)) => (m, Some(e.strip_prefix(['+', '-']).unwrap_or(e))),
+        None => (unsigned, None),
+    };
+    let mantissa_ok = match mantissa.split_once('.') {
+        Some((whole, fraction)) => is_integer(whole) && is_integer(fraction),
+        None => is_integer(mantissa),
+    };
+    mantissa_ok
+        && match exponent {
+            Some(e) => is_integer(e),
+            None => mantissa.contains('.'),
+        }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -304,6 +363,46 @@ mod tests {
         assert!(result.succeeded());
         assert_eq!(result.answers, vec!["7", "42"]);
         assert_eq!(result.stderr.trim(), "oops");
+    }
+
+    #[test]
+    fn reads_answers_past_how_a_language_prints_them() {
+        assert_eq!(answer("\"fgij\""), "fgij");
+        assert_eq!(answer("10n"), "10");
+        assert_eq!(answer("-10n"), "-10");
+        for line in [
+            "42", "abc", "\"\"", "\"a\"b\"", "\"ab", "n", "-n", "12an", "1,2,3",
+        ] {
+            assert_eq!(answer(line), line, "{line}");
+        }
+    }
+
+    #[test]
+    fn spots_answers_printed_as_decimals() {
+        for answer in ["3.0", "-2.5", "1e+21", "1.5e21", "2E-3"] {
+            assert!(looks_like_a_decimal(answer), "{answer}");
+        }
+        for answer in [
+            "3", "-12", "1,2", "abc", "e5", "1.", ".5", "3.0.1", "1e", "fgij",
+        ] {
+            assert!(!looks_like_a_decimal(answer), "{answer}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reads_answers_and_warns_about_a_decimal_one() {
+        let profile = profile(None, &["sh", "{file}"]);
+        let result = run_with(
+            &profile,
+            "echo '\"fgij\"'; echo 3.0; echo 1.5",
+            "",
+            Duration::from_secs(10),
+        )
+        .await;
+        assert_eq!(result.answers, vec!["fgij", "3.0", "1.5"]);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].starts_with("Part 2's answer, 3.0,"));
+        assert!(result.stdout.contains("\"fgij\""));
     }
 
     #[tokio::test]
