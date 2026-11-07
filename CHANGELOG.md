@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2](https://github.com/thomasschafer/workshop/compare/v0.8.1...v0.8.2) - 2026-10-30
+
+### Other
+
+- Read quoted strings and BigInts as answers, and warn about decimal ones
+- Find part 2's sample when the puzzle wraps its answer in brackets, and never run part 1's in its place
+- Keep the coach to the question asked, without raising other problems
+- End saved solutions and notes with a newline
+- Name puzzles in commit messages by year and day only
+- Compare committed paths by component in the commit test
+- Only commit tracked changes and Workshop's own files
+- Keep the puzzle scrolled where it was after looking at another tab
+- Bump libc from 0.2.190 to 0.2.191 in the cargo-minor-and-patch group ([#17](https://github.com/thomasschafer/workshop/pull/17))
+- Bump the github-actions-minor-and-patch group with 2 updates ([#16](https://github.com/thomasschafer/workshop/pull/16))
+- Bump the npm-minor-and-patch group in /frontend with 3 updates ([#18](https://github.com/thomasschafer/workshop/pull/18))
+
 ## [0.8.1](https://github.com/thomasschafer/workshop/compare/v0.8.0...v0.8.1) - 2026-10-24
 
 ### Other
