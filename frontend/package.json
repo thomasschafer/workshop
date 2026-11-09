@@ -21,19 +21,19 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@lezer/highlight": "^1.2.5",
-    "@preact/signals": "^2.11.3",
+    "@preact/signals": "^2.11.4",
     "codemirror": "^6.0.2",
     "micromark": "^4.0.3",
     "micromark-extension-gfm": "^3.0.0",
-    "preact": "^11.0.1"
+    "preact": "^11.1.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
+    "@biomejs/biome": "^2.6.4",
     "@playwright/test": "^1.64.1",
     "@preact/preset-vite": "^2.10.6",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   }
 }
