@@ -345,6 +345,18 @@ test("keeps the code scrolled where it was when an edit makes a line long, unles
   await page.locator(".cm-line", { hasText: "well past" }).click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("End");
   await expect.poll(scrolledSideways).toBeGreaterThan(0);
+  // Scrolled all the way, there is room beside the end of the line to tap.
+  const room = await page.locator(".cm-scroller").evaluate((scroller) => {
+    scroller.scrollLeft = scroller.scrollWidth;
+    const line = [...scroller.querySelectorAll(".cm-line")].find((l) =>
+      l.textContent?.includes("well past"),
+    );
+    if (!line) throw new Error("The long line isn't drawn");
+    const text = document.createRange();
+    text.selectNodeContents(line);
+    return scroller.getBoundingClientRect().right - text.getBoundingClientRect().right;
+  });
+  expect(room).toBeGreaterThan(100);
   await expect.poll(() => readFileSync(solution, "utf8")).toContain("well past the right edge");
   writeFileSync(solution, before);
   await expect(editor()).not.toContainText("well past the right edge", { timeout: 15_000 });

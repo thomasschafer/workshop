@@ -183,7 +183,7 @@ export class CodeEditor {
         syntaxHighlighting(highlightStyle),
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         theme,
-        this.wrapping.of(options.lineWrapping ? EditorView.lineWrapping : []),
+        this.wrapping.of(wrapping(options.lineWrapping)),
         this.inset.of([]),
         changedField,
         language ? language() : [],
@@ -259,7 +259,7 @@ export class CodeEditor {
 
   setLineWrapping(enabled: boolean): void {
     this.view.dispatch({
-      effects: this.wrapping.reconfigure(enabled ? EditorView.lineWrapping : []),
+      effects: this.wrapping.reconfigure(wrapping(enabled)),
     });
   }
 
@@ -423,6 +423,16 @@ export class CodeEditor {
     window.clearTimeout(this.flashTimer);
     this.view.destroy();
   }
+}
+
+/**
+ * Without wrapping, lines can be scrolled a good way past their end, so there is room to tap
+ * beside the end of the longest one to put the cursor there.
+ */
+const scrollPastLineEnd = EditorView.theme({ ".cm-content": { paddingRight: "40vw" } });
+
+function wrapping(enabled: boolean): Extension {
+  return enabled ? EditorView.lineWrapping : scrollPastLineEnd;
 }
 
 /** Typing, deleting and moving with keys, rather than tapping or edits made by voice. */
