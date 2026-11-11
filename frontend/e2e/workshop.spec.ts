@@ -904,7 +904,10 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
   await helix.getByRole("button", { name: "2017" }).click();
   await expect(picker).toContainText("5 stars in 2017");
   await helix.locator(".day", { hasText: /^4$/ }).click();
-  await expect(helix.locator(".problem")).toContainText("Day 4: Counting Lines");
+  // The puzzle switching over can briefly show two problems.
+  await expect(
+    helix.getByRole("heading", { name: "--- Day 4: Counting Lines ---" }).first(),
+  ).toBeVisible();
   // A phone shows one tab at a time.
   const codeTab = helix.getByRole("navigation").getByRole("button", { name: "Code" });
   if (await codeTab.isVisible()) await codeTab.click();
