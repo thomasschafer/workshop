@@ -867,17 +867,17 @@ class StatusPanel {
     button.className = "cm-helix-esc";
     button.textContent = "esc";
     button.setAttribute("aria-label", "Escape");
-    const escape = () => run(this.helix, this.helix.handler.handle("esc" as Key));
+    const pressEscape = () => run(this.helix, this.helix.handler.handle("esc" as Key));
     // On pressing, which also keeps the focus, and with it the keyboard, as preventing it stops
     // Safari sending a click.
     button.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      escape();
+      pressEscape();
     });
     button.addEventListener("mousedown", (e) => e.preventDefault());
     // From a keyboard, which clicks without pressing.
     button.addEventListener("click", (e) => {
-      if (e.detail === 0) escape();
+      if (e.detail === 0) pressEscape();
     });
     return button;
   }
