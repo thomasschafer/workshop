@@ -278,12 +278,24 @@ export class CodeEditor {
    */
   setBottomInset(px: number): void {
     this.insetPx = px;
+    this.applyInset();
+  }
+
+  private applyInset(): void {
+    const px = this.insetPx;
     setHelixBottomInset(this.view, px);
+    // Helix's status line sits clear of what floats over the editor, so the code already ends
+    // above it.
+    const helix = helixMode(this.view.state) !== null;
     this.view.dispatch({
-      effects: this.inset.reconfigure([
-        EditorView.scrollMargins.of(() => ({ bottom: px })),
-        EditorView.contentAttributes.of({ style: `padding-bottom: ${px}px` }),
-      ]),
+      effects: this.inset.reconfigure(
+        helix
+          ? []
+          : [
+              EditorView.scrollMargins.of(() => ({ bottom: px })),
+              EditorView.contentAttributes.of({ style: `padding-bottom: ${px}px` }),
+            ],
+      ),
     });
   }
 
@@ -295,7 +307,7 @@ export class CodeEditor {
         this.numbers.reconfigure(this.lineNumbersFor(helix)),
       ],
     });
-    setHelixBottomInset(this.view, this.insetPx);
+    this.applyInset();
   }
 
   private keysFor(helix: HelixSetup | null): Extension {

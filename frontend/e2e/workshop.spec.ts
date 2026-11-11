@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { devices, expect, type Page, test } from "@playwright/test";
 import { HOME, PORT } from "./fixture";
 import { installSimulatedSpeech } from "./speech";
 
@@ -995,6 +995,92 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
 
   // Each key is one undo step, so undoing both edits puts the file back as it was.
   await keys("u", "u");
+  await expect.poll(saved).toBe(original);
+  await context.close();
+});
+
+test("works on a phone with Helix's keybindings, from its on-screen keyboard", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${PORT}`,
+  });
+  const phone = await context.newPage();
+  await phone.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await phone.goto(`/?token=${token}`);
+  const picker = phone.locator(".picker");
+  await expect(picker.or(phone.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
+  if (!(await picker.isVisible())) await phone.locator(".puzzle-button").click();
+  await phone.getByRole("button", { name: "2017", exact: true }).click();
+  await expect(picker).toContainText("5 stars in 2017");
+  await phone.locator(".day", { hasText: /^4$/ }).click();
+  await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
+  const code = phone.locator(".cm-content");
+  await expect(code).toContainText("def part1");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const scroller = phone.locator(".cm-scroller");
+
+  // Tapping the code leaves the starts of lines in view, beside the line numbers. Where, rather
+  // than tapping the element, which would scroll it into view first, as no finger does.
+  const line = await phone.locator(".cm-line").nth(3).boundingBox();
+  if (line === null) throw new Error("the code has no fourth line");
+  await phone.touchscreen.tap(line.x + 30, line.y + line.height / 2);
+  await expect.poll(() => scroller.evaluate((s) => s.scrollLeft)).toBe(0);
+
+  // What an on-screen keyboard sends: input rather than key presses.
+  const input = (inputType: string, data: string | null = null) =>
+    code.evaluate(
+      (el, [type, text]) =>
+        el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: type ?? "",
+            data: text,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      [inputType, data] as const,
+    );
+  const mode = phone.locator(".cm-helix-mode");
+  for (const key of ["g", "g", "i"]) await input("insertText", key);
+  await expect(mode).toHaveText("INS");
+  await input("insertText", "ab");
+  await input("deleteContentBackward");
+  await expect.poll(() => saved().split("\n")[0]).toBe(`a${original.split("\n")[0]}`);
+
+  // The keyboard has no escape key, so there's one under the code.
+  await phone.getByRole("button", { name: "Escape" }).tap();
+  await expect(mode).toHaveText("NOR");
+  await input("insertText", "u");
+  await expect.poll(saved).toBe(original);
+
+  // No help for the keys after `g` covering the code, though what's pending still shows.
+  await input("insertText", "g");
+  await expect(phone.locator(".cm-helix-pending")).toHaveText("g");
+  await expect(phone.locator(".cm-helix-info")).toBeHidden();
+  await phone.getByRole("button", { name: "Escape" }).tap();
+
+  // Picking from a list by tapping it, as from the command palette.
+  await input("insertText", " ?yank_joined");
+  await phone.locator(".cm-helix-picker-row").first().tap();
+  await expect(phone.locator(".cm-helix-message")).toContainText("joined and yanked 1 selection");
+
+  // Moving within what's in view doesn't scroll.
+  await input("insertText", "%yppp");
+  await input("insertText", "gg");
+  const top = await scroller.evaluate((s) => s.scrollTop);
+  for (let i = 0; i < 3; i++) await input("insertText", "j");
+  await input("insertText", "w");
+  await expect(phone.locator(".cm-helix-mode")).toHaveText("NOR");
+  expect(await scroller.evaluate((s) => s.scrollTop)).toBe(top);
+  // Going well down the file does.
+  await input("insertText", "50j");
+  await expect.poll(() => scroller.evaluate((s) => s.scrollTop)).toBeGreaterThan(top);
+
+  for (let i = 0; i < 3; i++) await input("insertText", "u");
   await expect.poll(saved).toBe(original);
   await context.close();
 });

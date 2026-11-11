@@ -448,6 +448,11 @@ export interface Prompt {
 export interface Info {
   readonly title: string;
   readonly body: readonly (readonly [string, string])[];
+  /**
+   * Help with which keys come next, which a phone leaves out for room, or text to read, such as
+   * hover documentation. Help by default.
+   */
+  readonly kind?: "keys" | "text";
 }
 
 /** One `gw` label: the two characters to type and the range they select. */

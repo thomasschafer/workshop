@@ -27,6 +27,7 @@ import {
   EditorState,
   type Extension,
   Prec,
+  type Range,
   RangeSetBuilder,
   StateEffect,
   StateField,
@@ -52,6 +53,7 @@ import {
   type HelixOptions,
   type Host,
   type HostAction,
+  type Info,
   isHelixTransaction,
   type ScrollRequest,
   toEditorSelection,
@@ -155,6 +157,38 @@ class JumpLabel extends WidgetType {
   }
 }
 
+/**
+ * The selections, drawn as marks on the text, where they show over a line's own background,
+ * and with the line endings they take in, as Helix shows them. Only in view, as `%` can select a
+ * whole long file.
+ */
+function selectionDecorations(view: EditorView): DecorationSet {
+  const state = view.state;
+  const doc = new Doc(state.doc);
+  const selection = fromEditorSelection(state.selection);
+  const decorations: Range<Decoration>[] = [];
+  const mark = Decoration.mark({ class: "cm-helix-selection" });
+  const lineEnd = Decoration.widget({ widget: new EndCursor("cm-helix-selection"), side: 1 });
+  for (const range of selection.ranges) {
+    if (range.empty) continue;
+    const cursor = range.cursor(doc);
+    for (const visible of view.visibleRanges) {
+      const from = Math.max(range.from, visible.from);
+      const to = Math.min(range.to, visible.to);
+      if (from >= to) continue;
+      decorations.push(mark.range(from, to));
+      for (
+        let pos = doc.str.indexOf("\n", from);
+        pos !== -1 && pos < to;
+        pos = doc.str.indexOf("\n", pos + 1)
+      ) {
+        if (pos !== cursor) decorations.push(lineEnd.range(pos));
+      }
+    }
+  }
+  return Decoration.set(decorations, true);
+}
+
 function cursorDecorations(view: EditorView, editor: HelixEditor): DecorationSet {
   const state = view.state;
   const doc = new Doc(state.doc);
@@ -247,6 +281,7 @@ class HelixView implements PluginValue, Host {
   readonly editor: HelixEditor;
   readonly handler: KeyHandler;
   decorations: DecorationSet;
+  selections: DecorationSet;
   private scrollRequest: ScrollRequest | null = null;
   private dispatching = false;
   private readonly panel: StatusPanel;
@@ -263,8 +298,12 @@ class HelixView implements PluginValue, Host {
     this.editor.onChange = () => this.refresh();
     this.panel = new StatusPanel(this);
     this.decorations = cursorDecorations(view, this.editor);
+    this.selections = selectionDecorations(view);
     // Capturing, so keys reach Helix before CodeMirror, which holds some back on phones.
     view.dom.addEventListener("keydown", this.onKey, true);
+    view.dom.addEventListener("beforeinput", this.onBeforeInput, true);
+    // A phone's keyboard coming up can cover the cursor.
+    window.visualViewport?.addEventListener("resize", this.onViewportResize);
     // Start with the selection as Helix keeps it.
     queueMicrotask(() => {
       if (this.destroyed) return;
@@ -296,6 +335,7 @@ class HelixView implements PluginValue, Host {
     if (update.docChanged || update.selectionSet || update.viewportChanged || this.needsRedraw) {
       this.needsRedraw = false;
       this.decorations = cursorDecorations(update.view, this.editor);
+      this.selections = selectionDecorations(update.view);
     }
     // A tap or a change made elsewhere ends whatever was waiting for a key.
     if (!this.dispatching && update.transactions.some((tr) => tr.isUserEvent("select.pointer"))) {
@@ -330,28 +370,124 @@ class HelixView implements PluginValue, Host {
     if (this.destroyed) return;
     const request = this.scrollRequest;
     this.scrollRequest = null;
-    const margin = this.editor.options.scrolloff * this.view.defaultLineHeight;
-    const pos = helixCursor(this.view.state);
-    let effect: StateEffect<unknown>;
-    if (request?.kind === "align") {
-      effect = EditorView.scrollIntoView(request.pos, {
-        y: request.align === "top" ? "start" : request.align === "bottom" ? "end" : "center",
-        yMargin: margin,
-      });
-    } else if (request?.kind === "horizontal-center") {
-      effect = EditorView.scrollIntoView(request.pos, {
-        x: "center",
-        y: "nearest",
-        yMargin: margin,
-      });
-    } else if (request?.kind === "lines") {
+    if (request?.kind === "lines") {
       this.view.scrollDOM.scrollTop += request.lines * this.view.defaultLineHeight;
-      effect = EditorView.scrollIntoView(pos, { y: "nearest", yMargin: margin });
-    } else {
-      effect = EditorView.scrollIntoView(pos, { y: "nearest", yMargin: margin });
     }
-    this.dispatch({ effects: effect });
+    const pos =
+      request?.kind === "align" || request?.kind === "horizontal-center"
+        ? request.pos
+        : helixCursor(this.view.state);
+    const align = request?.kind === "align" ? request.align : null;
+    this.scrollToShow(pos, align, request?.kind === "horizontal-center");
   }
+
+  /**
+   * The part of the code that can be seen: the scroller, less anything over it such as a phone's
+   * on-screen keyboard, in the window's coordinates.
+   */
+  private visibleArea(): { top: number; bottom: number; left: number; right: number } {
+    const rect = this.view.scrollDOM.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const top = Math.max(rect.top, vv ? vv.offsetTop : 0);
+    const bottom = Math.min(rect.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight);
+    const gutters = this.view.dom.querySelector(".cm-gutters")?.getBoundingClientRect();
+    const left = Math.max(rect.left, gutters?.right ?? rect.left);
+    const right = Math.min(rect.right, vv ? vv.offsetLeft + vv.width : window.innerWidth);
+    return { top, bottom: Math.max(top, bottom), left, right: Math.max(left, right) };
+  }
+
+  /**
+   * Scrolls the code, only as far as needed, so `pos` is in view with Helix's scrolloff around
+   * it, or lines it up with the top, centre or bottom. Helix keeps the scrolloff to less than
+   * half the view, so the cursor can always settle somewhere without the view moving again.
+   */
+  private scrollToShow(
+    pos: number,
+    align: "top" | "center" | "bottom" | null,
+    centerX: boolean,
+  ): void {
+    const view = this.view;
+    const coords = view.coordsAtPos(pos, 1) ?? view.coordsAtPos(pos, -1);
+    if (coords === null) {
+      // Not drawn yet, being far from what's in view, so CodeMirror measures and scrolls to it.
+      this.dispatch({
+        effects: EditorView.scrollIntoView(pos, {
+          y: align === "top" ? "start" : align === "bottom" ? "end" : "center",
+        }),
+      });
+      return;
+    }
+    const area = this.visibleArea();
+    const lineHeight = view.defaultLineHeight;
+    const lines = Math.floor((area.bottom - area.top) / lineHeight);
+    const margin =
+      Math.min(this.editor.options.scrolloff, Math.max(0, Math.floor((lines - 1) / 2))) *
+      lineHeight;
+    let dy = 0;
+    if (align === "top") dy = coords.top - (area.top + margin);
+    else if (align === "bottom") dy = coords.bottom - (area.bottom - margin);
+    else if (align === "center")
+      dy = (coords.top + coords.bottom) / 2 - (area.top + area.bottom) / 2;
+    else if (coords.top < area.top + margin) dy = coords.top - (area.top + margin);
+    else if (coords.bottom > area.bottom - margin) dy = coords.bottom - (area.bottom - margin);
+    if (dy !== 0) view.scrollDOM.scrollTop += dy;
+    if (this.softWrap()) return;
+    const sideMargin = view.defaultCharacterWidth;
+    let dx = 0;
+    if (centerX) dx = (coords.left + coords.right) / 2 - (area.left + area.right) / 2;
+    else if (coords.left < area.left + sideMargin) dx = coords.left - (area.left + sideMargin);
+    else if (coords.right > area.right - sideMargin) dx = coords.right - (area.right - sideMargin);
+    if (dx !== 0) view.scrollDOM.scrollLeft += dx;
+  }
+
+  /**
+   * Text from an on-screen keyboard, which comes as input rather than key presses, goes to Helix
+   * as the keys it stands for: typing, and Backspace and Enter in particular, which would
+   * otherwise change the text over Helix's selection rather than at its cursor.
+   */
+  private readonly onBeforeInput = (event: InputEvent): void => {
+    if (!event.cancelable || event.isComposing) return;
+    let work: Promise<void> | null = null;
+    switch (event.inputType) {
+      case "insertText":
+      case "insertReplacementText":
+        if (event.data) work = this.handler.type(event.data);
+        break;
+      case "insertParagraph":
+      case "insertLineBreak":
+        work = this.handler.handle("ret" as Key);
+        break;
+      case "deleteContentBackward":
+        work = this.handler.handle("backspace" as Key);
+        break;
+      case "deleteContentForward":
+        work = this.handler.handle("del" as Key);
+        break;
+      case "deleteWordBackward":
+        work = this.handler.handle("A-backspace" as Key);
+        break;
+      case "deleteWordForward":
+        work = this.handler.handle("A-del" as Key);
+        break;
+      case "deleteSoftLineBackward":
+      case "deleteHardLineBackward":
+        work = this.editor.mode === "insert" ? this.handler.handle("C-u" as Key) : null;
+        break;
+      case "deleteSoftLineForward":
+      case "deleteHardLineForward":
+        work = this.editor.mode === "insert" ? this.handler.handle("C-k" as Key) : null;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (work) run(this, work);
+  };
+
+  private readonly onViewportResize = (): void => {
+    if (this.view.hasFocus) this.scrollToShow(helixCursor(this.view.state), null, false);
+  };
 
   private readonly onKey = (event: KeyboardEvent): void => {
     if (event.defaultPrevented || !this.view.hasFocus) return;
@@ -361,15 +497,17 @@ class HelixView implements PluginValue, Host {
   destroy(): void {
     this.destroyed = true;
     this.view.dom.removeEventListener("keydown", this.onKey, true);
+    this.view.dom.removeEventListener("beforeinput", this.onBeforeInput, true);
+    window.visualViewport?.removeEventListener("resize", this.onViewportResize);
   }
 
   // ---- Host ----
 
   viewport(): { firstLine: number; lastLine: number; height: number } {
     const view = this.view;
-    const rect = view.scrollDOM.getBoundingClientRect();
-    const top = Math.max(rect.top, 0) - view.documentTop;
-    const bottom = rect.bottom - view.documentTop - this.bottomInset;
+    const area = this.visibleArea();
+    const top = area.top - view.documentTop;
+    const bottom = area.bottom - view.documentTop;
     const doc = view.state.doc;
     const firstBlock = view.lineBlockAtHeight(Math.max(0, top));
     const lastBlock = view.lineBlockAtHeight(Math.max(0, bottom - 1));
@@ -545,6 +683,7 @@ class HelixView implements PluginValue, Host {
     this.editor.autoinfo = {
       title: "Hover",
       body: text.split("\n").map((line) => ["", line] as const),
+      kind: "text",
     };
     this.editor.onChange();
   }
@@ -673,8 +812,14 @@ class StatusPanel {
     const { editor, handler } = this.helix;
     this.dom.style.marginBottom = `${this.helix.bottomInset}px`;
     this.extra.replaceChildren();
-    if (editor.picker) this.extra.append(renderPicker(editor));
-    else if (editor.autoinfo) this.extra.append(renderInfo(editor.autoinfo));
+    if (editor.picker) {
+      this.extra.append(
+        renderPicker(editor, (index) => {
+          if (editor.picker) editor.picker.selected = index;
+          run(this.helix, this.helix.handler.handle("ret" as Key));
+        }),
+      );
+    } else if (editor.autoinfo) this.extra.append(renderInfo(editor.autoinfo));
     this.status.replaceChildren();
     if (editor.prompt) {
       const prompt = editor.prompt;
@@ -686,7 +831,7 @@ class StatusPanel {
         span("cm-helix-prompt-cursor", prompt.input.slice(cursor, cursor + 1) || " "),
         document.createTextNode(prompt.input.slice(cursor + 1)),
       );
-      this.status.append(label, input);
+      this.status.append(label, input, this.escButton());
       return;
     }
     const mode = span(
@@ -708,8 +853,33 @@ class StatusPanel {
         span(message.severity === "error" ? "cm-helix-error" : "cm-helix-message", message.message),
       );
     }
-    parts.push(span("cm-helix-pending", handler.pendingDisplay()));
+    parts.push(span("cm-helix-pending", handler.pendingDisplay()), this.escButton());
     this.status.append(...parts);
+  }
+
+  /**
+   * Escape, for an on-screen keyboard, which has no escape key. Shown on touch screens, and kept
+   * from taking the focus, so the keyboard stays up.
+   */
+  private escButton(): HTMLElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cm-helix-esc";
+    button.textContent = "esc";
+    button.setAttribute("aria-label", "Escape");
+    const escape = () => run(this.helix, this.helix.handler.handle("esc" as Key));
+    // On pressing, which also keeps the focus, and with it the keyboard, as preventing it stops
+    // Safari sending a click.
+    button.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      escape();
+    });
+    button.addEventListener("mousedown", (e) => e.preventDefault());
+    // From a keyboard, which clicks without pressing.
+    button.addEventListener("click", (e) => {
+      if (e.detail === 0) escape();
+    });
+    return button;
   }
 }
 
@@ -720,12 +890,9 @@ function span(className: string, text: string): HTMLElement {
   return el;
 }
 
-function renderInfo(info: {
-  title: string;
-  body: readonly (readonly [string, string])[];
-}): HTMLElement {
+function renderInfo(info: Info): HTMLElement {
   const box = document.createElement("div");
-  box.className = "cm-helix-info";
+  box.className = `cm-helix-info cm-helix-info-${info.kind ?? "keys"}`;
   if (info.title) box.append(span("cm-helix-info-title", info.title));
   const table = document.createElement("div");
   table.className = "cm-helix-info-body";
@@ -738,7 +905,8 @@ function renderInfo(info: {
 
 const PICKER_ROWS = 12;
 
-function renderPicker(editor: HelixEditor): HTMLElement {
+/** The picker, whose rows run when tapped or clicked, with `pick` given the match's index. */
+function renderPicker(editor: HelixEditor, pick: (index: number) => void): HTMLElement {
   const picker = editor.picker;
   const box = document.createElement("div");
   box.className = "cm-helix-picker";
@@ -763,6 +931,11 @@ function renderPicker(editor: HelixEditor): HTMLElement {
       span("cm-helix-picker-label", item.label),
       span("cm-helix-picker-detail", item.detail),
     );
+    // On pressing, so the focus, and a phone's keyboard, stay where they are.
+    row.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      pick(start + i);
+    });
     list.append(row);
   });
   box.append(list);
@@ -824,7 +997,17 @@ function panelElement(view: EditorView): HTMLElement {
 
 const theme = EditorView.theme({
   "&.cm-helix .cm-cursorLayer": { display: "none" },
-  "&.cm-helix .cm-content": { caretColor: "transparent" },
+  "&.cm-helix .cm-content": { caretColor: "transparent", WebkitTapHighlightColor: "transparent" },
+  // The browser's own selection would cover Helix's cursors, as WebKit draws it on top.
+  "&.cm-helix .cm-line::selection, &.cm-helix .cm-line ::selection": {
+    background: "transparent !important",
+  },
+  // Helix shows selections clearly, and highlights no line of its own, which would hide them.
+  "&.cm-helix .cm-activeLine": { background: "transparent" },
+  "&.cm-helix .cm-selectionBackground, &.cm-helix.cm-focused .cm-selectionBackground": {
+    background: "transparent !important",
+  },
+  ".cm-helix-selection": { background: "color-mix(in srgb, var(--accent) 30%, transparent)" },
   ".cm-helix-cursor-block": {
     background: "color-mix(in srgb, var(--helix-cursor) 45%, transparent)",
     outline: "1px solid var(--helix-cursor)",
@@ -845,6 +1028,7 @@ const theme = EditorView.theme({
   },
   ".cm-panels-bottom": { borderTop: "none", background: "transparent" },
   ".cm-helix-panel": {
+    color: "var(--fg)",
     fontFamily: "var(--mono)",
     fontSize: "0.85em",
     background: "var(--surface)",
@@ -883,6 +1067,24 @@ const theme = EditorView.theme({
     whiteSpace: "pre-wrap",
   },
   ".cm-helix-info-key": { color: "var(--accent)" },
+  ".cm-helix-esc": {
+    display: "none",
+    marginLeft: "1ch",
+    padding: "0 1.5ch",
+    font: "inherit",
+    color: "var(--fg)",
+    background: "var(--bg)",
+    border: "1px solid var(--border)",
+    borderRadius: "4px",
+    touchAction: "manipulation",
+  },
+  // On a phone: an escape key, as on-screen keyboards have none, and no key help, which would
+  // take up most of the screen.
+  "@media (pointer: coarse)": {
+    ".cm-helix-esc": { display: "inline-block" },
+    ".cm-helix-info-keys": { display: "none" },
+    ".cm-helix-info-text, .cm-helix-picker": { maxHeight: "30vh" },
+  },
   ".cm-helix-picker-query": { display: "block", marginBottom: "2px" },
   ".cm-helix-picker-row": { display: "flex", gap: "2ch", whiteSpace: "pre", overflow: "hidden" },
   ".cm-helix-picker-selected": { background: "var(--selection)" },
@@ -912,6 +1114,10 @@ export function helixKeybindings(config: HelixConfig): Extension {
     EditorState.allowMultipleSelections.of(true),
     helixHistory(),
     plugin,
+    // Outside the cursors' marks, so a cursor shows over the selection it's in.
+    Prec.high(
+      EditorView.decorations.of((view) => view.plugin(plugin)?.selections ?? Decoration.none),
+    ),
     showPanel.of((view): Panel => ({ dom: panelElement(view) })),
     Prec.highest(
       EditorView.domEventHandlers({
@@ -931,11 +1137,19 @@ export function helixKeybindings(config: HelixConfig): Extension {
     ),
     // Text typed other than by key presses Helix sees, such as by composing an accented letter
     // or an on-screen keyboard, is typed as if its keys had been pressed.
-    EditorView.inputHandler.of((view, _from, _to, text) =>
+    // Changes made to the page before Helix could see them as keys, such as by a keyboard
+    // composing a word, go to Helix as the keys they stand for: deleting as backspaces, in insert
+    // mode, then typing. Not applying the change itself has CodeMirror put the page back.
+    EditorView.inputHandler.of((view, from, to, text) =>
       withHelix(
         view,
         (helix) => {
-          run(helix, helix.handler.type(text));
+          let work = Promise.resolve();
+          if (helix.editor.mode === "insert") {
+            for (let i = from; i < to; i++) work = helix.handler.handle("backspace" as Key);
+          }
+          if (text !== "") work = helix.handler.type(text);
+          run(helix, work);
           return true;
         },
         false,
