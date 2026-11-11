@@ -46,6 +46,8 @@ interface Props {
   /** The reply so far, while it's being written. */
   partial: string;
   error: string | null;
+  draft: string;
+  onDraft: (draft: string) => void;
   onModel: (model: string) => void;
   onSend: (text: string) => void;
   onClear: () => void;
@@ -58,11 +60,12 @@ export function DiscussView({
   thinking,
   partial,
   error,
+  draft,
+  onDraft,
   onModel,
   onSend,
   onClear,
 }: Props) {
-  const [draft, setDraft] = useState("");
   const end = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,7 +76,7 @@ export function DiscussView({
     event.preventDefault();
     const text = draft.trim();
     if (!text) return;
-    setDraft("");
+    onDraft("");
     onSend(text);
   };
 
@@ -127,7 +130,7 @@ export function DiscussView({
       <form class="discuss-input" onSubmit={send}>
         <input
           value={draft}
-          onInput={(e) => setDraft((e.target as HTMLInputElement).value)}
+          onInput={(e) => onDraft((e.target as HTMLInputElement).value)}
           placeholder="Or type a question"
           enterKeyHint="send"
         />

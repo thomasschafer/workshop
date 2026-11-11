@@ -35,6 +35,8 @@ export function useDiscussion(puzzle: Puzzle | null, model: string, context: () 
   /** The reply so far, while it's being written. */
   const [partial, setPartial] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** A question being typed, kept here so it survives the Discuss view closing. */
+  const [draft, setDraft] = useState("");
   // Utterances are queued, so a send can start before a re-render; these always hold the latest.
   const turnsRef = useRef(turns);
   const puzzleRef = useRef(puzzle);
@@ -51,6 +53,7 @@ export function useDiscussion(puzzle: Puzzle | null, model: string, context: () 
     turnsRef.current = loaded;
     setTurns(loaded);
     setError(null);
+    setDraft("");
   }, [puzzle]);
 
   const send = async (text: string) => {
@@ -95,5 +98,5 @@ export function useDiscussion(puzzle: Puzzle | null, model: string, context: () 
     if (p) update(p, []);
   };
 
-  return { turns, thinking, partial, error, send, clear };
+  return { turns, thinking, partial, error, draft, setDraft, send, clear };
 }

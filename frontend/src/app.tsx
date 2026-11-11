@@ -743,6 +743,8 @@ export function App({ boot }: { boot: Bootstrap }) {
             thinking={discussion.thinking}
             partial={discussion.partial}
             error={discussion.error}
+            draft={discussion.draft}
+            onDraft={discussion.setDraft}
             onModel={setDiscussModel}
             onSend={(text) => enqueue(text)}
             onClear={discussion.clear}

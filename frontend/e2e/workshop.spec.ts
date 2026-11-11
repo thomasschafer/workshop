@@ -211,6 +211,14 @@ test("discusses the puzzle, keeping the conversation", async () => {
   await expect(formatted.locator("ol li")).toHaveCount(2);
   await expect(formatted.locator("code")).toHaveText("seen");
   await expect(formatted).toContainText("Try a <b>set</b>.");
+
+  // A half-typed question is still there after looking at another tab.
+  const input = page.getByPlaceholder("Or type a question");
+  await input.fill("half a thought");
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await page.getByRole("button", { name: "Discuss", exact: true }).click();
+  await expect(input).toHaveValue("half a thought");
+  await input.fill("");
 });
 
 test("keeps everything across a reload", async () => {
