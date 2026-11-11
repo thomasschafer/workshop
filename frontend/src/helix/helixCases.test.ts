@@ -29,3 +29,29 @@ describe("Helix's own integration tests", () => {
     });
   }
 });
+
+describe("undo", () => {
+  it("undoes a key bound to several commands as one step, moves and all", async () => {
+    const { keymapsWithConfig } = await import("./keymap");
+    const { keymaps } = keymapsWithConfig({
+      normal: {
+        "A-up": [
+          "ensure_selections_forward",
+          "extend_to_line_bounds",
+          "extend_char_right",
+          "extend_char_left",
+          "delete_selection",
+          "move_line_up",
+          "add_newline_above",
+          "move_line_up",
+          "replace_with_yanked",
+        ],
+      },
+    });
+    const h = harness("x = 1\n#[i|]#mport sys\ny = 2\n", { keymaps });
+    await h.keys("<A-up>");
+    expect(h.state()).toBe("#[import sys\n|]#x = 1\ny = 2\n");
+    await h.keys("u");
+    expect(h.host.state.doc.toString()).toBe("x = 1\nimport sys\ny = 2\n");
+  });
+});

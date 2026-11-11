@@ -43,6 +43,18 @@ export const keepScreenOn = flag("workshop:keep-screen-on", true);
 export const lineWrapping = flag("workshop:line-wrapping", false);
 
 /**
+ * The code editor's keybindings on this device, as a phone and a computer with a keyboard want
+ * different ones; `config` follows the config file.
+ */
+export const KEYBINDINGS_CHOICES = ["config", "default", "helix"] as const;
+export type KeybindingsChoice = (typeof KEYBINDINGS_CHOICES)[number];
+export const keybindings = choice<KeybindingsChoice>(
+  "workshop:keybindings",
+  KEYBINDINGS_CHOICES,
+  "config",
+);
+
+/**
  * How what's said is heard: Whisper on the server or the browser's own speech recognition while
  * the button is held, or the keyboard's dictation into a box. `auto` picks the best available.
  */

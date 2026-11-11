@@ -35,6 +35,7 @@ pub(super) struct Bootstrap {
     leaderboard: Option<crate::aoc::LeaderboardId>,
     /// A newer release, if one is out.
     update: Option<crate::updates::Update>,
+    editor: crate::config::EditorConfig,
 }
 
 #[derive(Serialize)]
@@ -96,6 +97,7 @@ pub(super) async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap>
         solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
         leaderboard: app.settings().leaderboard,
         update: app.updates.available(),
+        editor: app.config.editor.clone(),
         server_dictation: {
             let ready = speech_state(&app).ready;
             if ready {

@@ -96,6 +96,28 @@ language = "python"
 # Nothing listens here, so no request ever reaches Advent of Code.
 [aoc]
 base_url = "http://127.0.0.1:9"
+
+# Off until a device turns them on, with keys of one's own.
+[editor.helix]
+line-number = "relative"
+color-modes = true
+
+[editor.helix.keys.normal]
+X = "extend_line_above"
+A-up = [
+  "ensure_selections_forward",
+  "extend_to_line_bounds",
+  "extend_char_right",
+  "extend_char_left",
+  "delete_selection",
+  "move_line_up",
+  "add_newline_above",
+  "move_line_up",
+  "replace_with_yanked",
+]
+
+[editor.helix.keys.normal.space]
+x = ["yank_to_clipboard", "delete_selection"]
 ${models}
 ${pythonProfile()}`,
   );

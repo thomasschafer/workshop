@@ -890,3 +890,75 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   await expect(december.locator(".countdown")).toContainText("Day 5 unlocks in");
   await context.close();
 });
+
+test("edits with Helix's keybindings, and keys from the config", async ({ browser }) => {
+  // In its own page, so turning them on for this device leaves the other tests' page as it was.
+  const context = await browser.newContext({ baseURL: `http://127.0.0.1:${PORT}` });
+  const helix = await context.newPage();
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await helix.goto(`/?token=${token}`);
+  // Day 4, whatever the other tests left open.
+  const picker = helix.locator(".picker");
+  await expect(picker.or(helix.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
+  if (!(await picker.isVisible())) await helix.locator(".puzzle-button").click();
+  await helix.getByRole("button", { name: "2017" }).click();
+  await expect(picker).toContainText("5 stars in 2017");
+  await helix.locator(".day", { hasText: /^4$/ }).click();
+  await expect(helix.locator(".problem")).toContainText("Day 4: Counting Lines");
+  // A phone shows one tab at a time.
+  const codeTab = helix.getByRole("navigation").getByRole("button", { name: "Code" });
+  if (await codeTab.isVisible()) await codeTab.click();
+  const code = helix.locator(".cm-content");
+  await expect(code).toContainText("def part1");
+  // What's saved, which is the text without what's drawn for the cursor.
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const firstLine = original.split("\n")[0] ?? "";
+  const lines = () => saved().split("\n").slice(0, 2);
+
+  await helix.getByRole("button", { name: "Settings" }).click();
+  await helix.locator(".settings-row", { hasText: "Display" }).getByRole("button").click();
+  await helix.getByLabel("Helix keybindings, for a keyboard").check();
+  await helix.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+  const mode = helix.locator(".cm-helix-mode");
+  await expect(mode).toHaveText("NOR");
+  await expect(helix.locator(".cm-helix-mode.cm-helix-color-modes")).toHaveCount(1);
+
+  await code.click();
+  const keys = async (...presses: string[]) => {
+    for (const p of presses) await helix.keyboard.press(p);
+  };
+  // To the top, then select the first line and delete it, and undo that.
+  await keys("g", "g", "x", "d");
+  await expect.poll(lines).not.toContain(firstLine);
+  await keys("u");
+  await expect.poll(saved).toBe(original);
+
+  // Insert mode, typed into, then back to normal mode.
+  await keys("g", "g", "i");
+  await expect(mode).toHaveText("INS");
+  await helix.keyboard.type("x = 1");
+  await keys("Enter", "Escape");
+  await expect(mode).toHaveText("NOR");
+  await expect.poll(lines).toEqual(["x = 1", firstLine]);
+
+  // A key from the config: Alt-Up moves the cursor's line up, as a sequence of commands.
+  await keys("Alt+ArrowUp");
+  await expect.poll(lines).toEqual([firstLine, "x = 1"]);
+
+  // Searching, and the command line.
+  await keys("/");
+  await expect(helix.locator(".cm-helix-prompt-label")).toHaveText("search:");
+  await helix.keyboard.type("part1");
+  await keys("Enter");
+  await expect(helix.locator(".cm-helix-cursor-primary")).toHaveText("1");
+  await keys(":");
+  await helix.keyboard.type("w");
+  await keys("Enter");
+  await expect(helix.locator(".cm-helix-message")).toContainText("written");
+
+  // Each key is one undo step, so undoing both edits puts the file back as it was.
+  await keys("u", "u");
+  await expect.poll(saved).toBe(original);
+  await context.close();
+});

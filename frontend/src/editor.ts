@@ -29,6 +29,7 @@ import { LSPClient, serverDiagnostics, type Transport } from "@codemirror/lsp-cl
 import {
   Compartment,
   EditorSelection,
+  type EditorState,
   type Extension,
   StateEffect,
   StateField,
@@ -45,6 +46,17 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { markCursor, minimalChange, unmarkCursor } from "./diff";
+import type { HelixOptions } from "./helix/editor";
+import { isHelixTransaction } from "./helix/editor";
+import type { KeyTrieNode, Mode } from "./helix/keymap";
+import {
+  type HelixActions,
+  helixCursor,
+  helixKeybindings,
+  helixMode,
+  relativeLineNumbers,
+  setHelixBottomInset,
+} from "./helix/view";
 import { quietMessage, withoutPullDiagnostics } from "./lsp";
 
 const LANGUAGES: Record<string, () => Extension> = {
@@ -130,12 +142,23 @@ export interface Diagnostics {
   warnings: number;
 }
 
+/** Helix's keybindings, as configured, and what Workshop does for its commands. */
+export interface HelixSetup {
+  keymaps: Record<Mode, KeyTrieNode>;
+  options: Partial<HelixOptions>;
+  actions: HelixActions;
+  /** The file's name, for messages such as `:w`'s. */
+  documentName: string;
+}
+
 export interface EditorOptions {
   doc: string;
   cursor: number | null;
   mode: string;
   lineWrapping: boolean;
   lsp: { client: LSPClient; uri: string; languageId: string } | null;
+  /** Helix's keybindings, or null for CodeMirror's own. */
+  helix: HelixSetup | null;
   onChange: (text: string) => void;
   onCursor: (pos: number) => void;
   onDiagnostics: (diagnostics: Diagnostics) => void;
@@ -153,6 +176,9 @@ export class CodeEditor {
   private readonly inputMode = new Compartment();
   private readonly wrapping = new Compartment();
   private readonly inset = new Compartment();
+  private readonly keys = new Compartment();
+  private readonly numbers = new Compartment();
+  private insetPx = 0;
   private flashTimer: number | undefined;
   /** The text most recently inserted by voice, which "that" refers to. */
   recentInsertion: string | null = null;
@@ -164,7 +190,10 @@ export class CodeEditor {
   /** Whether the latest change was typing or moving with keys, which the view follows sideways. */
   private followSideways = false;
 
+  private readonly options: EditorOptions;
+
   constructor(parent: HTMLElement, options: EditorOptions) {
+    this.options = options;
     const language = LANGUAGES[options.mode];
     const cursor = Math.min(options.cursor ?? 0, options.doc.length);
     this.view = new EditorView({
@@ -174,14 +203,13 @@ export class CodeEditor {
       extensions: [
         // So screen readers say what the text box is.
         EditorView.contentAttributes.of({ "aria-label": "Code" }),
-        lineNumbers(),
-        history(),
+        this.numbers.of(this.lineNumbersFor(options.helix)),
         drawSelection(),
         highlightActiveLine(),
         indentOnInput(),
         bracketMatching(),
         syntaxHighlighting(highlightStyle),
-        keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+        this.keys.of(this.keysFor(options.helix)),
         theme,
         this.wrapping.of(wrapping(options.lineWrapping)),
         this.inset.of([]),
@@ -222,7 +250,7 @@ export class CodeEditor {
             }
           }
           if (update.selectionSet || update.docChanged) {
-            options.onCursor(update.state.selection.main.head);
+            options.onCursor(cursorOf(update.state));
           }
           const diagnostics = countDiagnostics(update.view);
           options.onDiagnostics(diagnostics);
@@ -249,12 +277,43 @@ export class CodeEditor {
    * file can be scrolled above them and the cursor is never hidden behind them.
    */
   setBottomInset(px: number): void {
+    this.insetPx = px;
+    setHelixBottomInset(this.view, px);
     this.view.dispatch({
       effects: this.inset.reconfigure([
         EditorView.scrollMargins.of(() => ({ bottom: px })),
         EditorView.contentAttributes.of({ style: `padding-bottom: ${px}px` }),
       ]),
     });
+  }
+
+  /** Switches between Helix's keybindings and CodeMirror's own. */
+  setHelix(helix: HelixSetup | null): void {
+    this.view.dispatch({
+      effects: [
+        this.keys.reconfigure(this.keysFor(helix)),
+        this.numbers.reconfigure(this.lineNumbersFor(helix)),
+      ],
+    });
+    setHelixBottomInset(this.view, this.insetPx);
+  }
+
+  private keysFor(helix: HelixSetup | null): Extension {
+    if (helix === null)
+      return [history(), keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab])];
+    const lsp = this.options.lsp;
+    return helixKeybindings({
+      keymaps: helix.keymaps,
+      options: helix.options,
+      language: this.options.mode,
+      documentName: helix.documentName,
+      lsp: lsp ? { client: lsp.client, uri: lsp.uri } : null,
+      actions: helix.actions,
+    });
+  }
+
+  private lineNumbersFor(helix: HelixSetup | null): Extension {
+    return helix?.options.lineNumbers === "relative" ? relativeLineNumbers() : lineNumbers();
   }
 
   setLineWrapping(enabled: boolean): void {
@@ -268,7 +327,7 @@ export class CodeEditor {
   }
 
   markedText(): string {
-    return markCursor(this.text(), this.view.state.selection.main.head);
+    return markCursor(this.text(), cursorOf(this.view.state));
   }
 
   /**
@@ -294,7 +353,11 @@ export class CodeEditor {
   }
 
   insertSnippet(body: string): void {
-    const { from, to } = this.view.state.selection.main;
+    // With Helix's keybindings, at the cursor rather than over the selection, as Helix pastes.
+    const { from, to } =
+      helixMode(this.view.state) === null
+        ? this.view.state.selection.main
+        : { from: cursorOf(this.view.state), to: cursorOf(this.view.state) };
     this.view.dispatch({
       changes: { from, to, insert: body },
       selection: EditorSelection.cursor(from + body.length),
@@ -372,7 +435,7 @@ export class CodeEditor {
   /** Remembers where the cursor is now, following it as the text changes. */
   anchor(): Anchor {
     const id = this.nextAnchor++;
-    this.anchors.set(id, this.view.state.selection.main.head);
+    this.anchors.set(id, cursorOf(this.view.state));
     return { id, moves: this.userMoves };
   }
 
@@ -435,9 +498,18 @@ function wrapping(enabled: boolean): Extension {
   return enabled ? EditorView.lineWrapping : scrollPastLineEnd;
 }
 
+/**
+ * Where the cursor is: the head of the main selection, or with Helix's keybindings, the left of
+ * its block cursor, which is where typing goes.
+ */
+function cursorOf(state: EditorState): number {
+  return helixMode(state) === null ? state.selection.main.head : helixCursor(state);
+}
+
 /** Typing, deleting and moving with keys, rather than tapping or edits made by voice. */
 function followsSideways(tr: Transaction): boolean {
   return (
+    isHelixTransaction(tr) ||
     tr.isUserEvent("input.type") ||
     tr.isUserEvent("input.paste") ||
     tr.isUserEvent("input.complete") ||

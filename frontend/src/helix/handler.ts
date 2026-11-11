@@ -156,7 +156,7 @@ export class KeyHandler {
       runCommandLine: (line: string) => runCommandLine(cx, line),
       runCommand: (command: MappableCommand) => this.execute(cx, command),
       openPicker: (title: string, items: readonly PickerItem[]) =>
-        this.openPicker(cx, title, items),
+        this.openPicker(title, items, { count: cx.count, register: cx.register }),
       bindings: () => this.bindings(this.editor.mode),
     };
     return cx;
@@ -328,8 +328,12 @@ export class KeyHandler {
   // ---- Pickers ----
 
   /** Opens a picker, whose items run with the count and register given before it. */
-  openPicker(cx: Context, title: string, items: readonly PickerItem[]): void {
-    this.pickerContext = { count: cx.count, register: cx.register };
+  openPicker(
+    title: string,
+    items: readonly PickerItem[],
+    given: { count: number | null; register: string | null } = { count: null, register: null },
+  ): void {
+    this.pickerContext = given;
     this.editor.picker = { title, items, query: "", selected: 0 };
     this.editor.onChange();
   }
@@ -596,6 +600,35 @@ export class KeyHandler {
         : (index + (forward ? 1 : completions.length - 1)) % completions.length;
     prompt.input = at(completions, next);
     this.promptCursor = prompt.input.length;
+  }
+
+  /**
+   * Pastes text from outside, as Helix does a terminal's bracketed paste: before the selections in
+   * normal mode, and at the cursors otherwise, or into a prompt if one is open.
+   */
+  paste(
+    text: string,
+    pasteImpl: (
+      editor: HelixEditor,
+      values: readonly string[],
+      kind: "before" | "cursor",
+      n: number,
+    ) => void,
+  ): Promise<void> {
+    const run = this.queue.then(() => {
+      const editor = this.editor;
+      if (this.pasteIntoPrompt(text)) return;
+      editor.status = null;
+      const n = editor.count ?? 1;
+      editor.count = null;
+      pasteImpl(editor, [text], editor.mode === "normal" ? "before" : "cursor", n);
+      editor.exitSelectMode();
+      if (editor.mode !== "insert") editor.commitUndoCheckpoint();
+      this.afterKey();
+      editor.onChange();
+    });
+    this.queue = run.catch(() => {});
+    return run;
   }
 
   /** Pastes text into the prompt, if one is open, returning whether it was. */

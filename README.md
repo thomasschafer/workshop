@@ -89,6 +89,8 @@ name = "parse ints"
 body = "map read . lines"
 ```
 
+With a keyboard, the code editor can use [Helix](https://helix-editor.com)'s modal keybindings instead of its own: turn them on for a device under Settings, Display, or for every device with `keybindings = "helix"` under `[editor]`. Your own Helix keymaps and the Helix options Workshop follows go under `[editor.helix]`, in the same format as Helix's config; the commented config file lists them. Commands that work across files, splits, shell commands and anything needing tree-sitter aren't available, and say so if you press them.
+
 To compare models on the same set of example utterances, use `workshop eval --model codex:luna`, for example. Workshop checks once a day for a newer release; set `check_for_updates = false` under `[server]` to turn this off.
 
 ## Your solutions
@@ -133,3 +135,5 @@ mise run build   # a release binary with the frontend embedded
 ## Licence
 
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
+Most of `frontend/src/helix`, the Helix keybindings, is ported from [Helix](https://github.com/helix-editor/helix). The ported files are under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/), as Helix is, and each says so at its top.

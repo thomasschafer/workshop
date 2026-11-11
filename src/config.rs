@@ -22,6 +22,7 @@ struct RawConfig {
     providers: BTreeMap<String, ProviderConfig>,
     languages: BTreeMap<String, LanguageProfile>,
     snippets: Vec<Snippet>,
+    editor: EditorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -74,6 +75,93 @@ pub struct EditModelConfig {
 pub struct DiscussModelConfig {
     pub provider: String,
     pub models: Vec<String>,
+}
+
+/// How the code editor behaves with a keyboard.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct EditorConfig {
+    /// The keybindings, until chosen on a device in the app.
+    pub keybindings: Keybindings,
+    pub helix: HelixConfig,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Keybindings {
+    /// CodeMirror's own, much like a text box's.
+    #[default]
+    Default,
+    /// Helix's modal keybindings.
+    Helix,
+}
+
+/// Helix's own options, named as in Helix's `[editor]` config, so they can be copied from it, with
+/// its `[keys]` tables under `keys`. Only the options Workshop follows are allowed.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, default, rename_all = "kebab-case")]
+pub struct HelixConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scrolloff: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_number: Option<LineNumber>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_modes: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_pairs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jump_label_alphabet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart_tab: Option<SmartTab>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<HelixSearch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_shape: Option<CursorShapes>,
+    /// Keymaps by mode, in Helix's format, which the app reads and checks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keys: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LineNumber {
+    Absolute,
+    Relative,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SmartTab {
+    pub enable: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct HelixSearch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart_case: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wrap_around: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CursorShapes {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normal: Option<CursorShape>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub insert: Option<CursorShape>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub select: Option<CursorShape>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorShape {
+    Block,
+    Bar,
+    Underline,
+    Hidden,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -149,6 +237,7 @@ pub struct Config {
     pub providers: BTreeMap<String, ProviderConfig>,
     pub languages: BTreeMap<String, LanguageProfile>,
     pub snippets: Vec<Snippet>,
+    pub editor: EditorConfig,
 }
 
 impl Config {
@@ -227,6 +316,7 @@ impl Config {
             providers,
             languages,
             snippets: raw.snippets,
+            editor: raw.editor,
         })
     }
 }
@@ -299,6 +389,41 @@ mod tests {
         let source =
             "[[snippets]]\nname = \"a\"\nbody = \"x\"\n[[snippets]]\nname = \"A\"\nbody = \"y\"";
         assert!(Config::parse(source).is_err());
+    }
+
+    #[test]
+    fn reads_helix_options_and_keys() {
+        let source = r#"
+            [editor]
+            keybindings = "helix"
+
+            [editor.helix]
+            line-number = "relative"
+            color-modes = true
+            smart-tab.enable = false
+
+            [editor.helix.keys.normal]
+            X = "extend_line_above"
+            A-up = ["extend_to_line_bounds", "delete_selection"]
+
+            [editor.helix.keys.normal.space]
+            p = "paste_after"
+        "#;
+        let config = Config::parse(source).unwrap();
+        assert_eq!(config.editor.keybindings, Keybindings::Helix);
+        let helix = &config.editor.helix;
+        assert_eq!(helix.line_number, Some(LineNumber::Relative));
+        assert_eq!(helix.color_modes, Some(true));
+        assert_eq!(helix.smart_tab, Some(SmartTab { enable: false }));
+        let keys = helix.keys.as_ref().unwrap();
+        assert_eq!(keys["normal"]["X"], "extend_line_above");
+        assert_eq!(keys["normal"]["space"]["p"], "paste_after");
+    }
+
+    #[test]
+    fn rejects_helix_options_workshop_does_not_follow() {
+        assert!(Config::parse("[editor.helix]\nbufferline = \"always\"").is_err());
+        assert!(Config::parse("[editor]\nkeybindings = \"vim\"").is_err());
     }
 
     #[test]

@@ -24,6 +24,28 @@ export interface FoundSample {
   answer: string;
 }
 
+export interface EditorConfig {
+  keybindings: "default" | "helix";
+  /** Helix's options, as named in Helix's config, and its keymaps under `keys`. */
+  helix: HelixConfigJson;
+}
+
+export interface HelixConfigJson {
+  scrolloff?: number;
+  "line-number"?: "absolute" | "relative";
+  "color-modes"?: boolean;
+  "auto-pairs"?: boolean;
+  "jump-label-alphabet"?: string;
+  "smart-tab"?: { enable: boolean };
+  search?: { "smart-case"?: boolean; "wrap-around"?: boolean };
+  "cursor-shape"?: {
+    normal?: "block" | "bar" | "underline" | "hidden";
+    insert?: "block" | "bar" | "underline" | "hidden";
+    select?: "block" | "bar" | "underline" | "hidden";
+  };
+  keys?: unknown;
+}
+
 export interface Bootstrap {
   state: UiState;
   language: {
@@ -42,6 +64,8 @@ export interface Bootstrap {
   };
   snippets: Snippet[];
   models: ModelsState;
+  /** How the code editor behaves with a keyboard, from the config file. */
+  editor: EditorConfig;
   has_aoc_session: boolean;
   needs_setup: boolean;
   theme_css: string | null;

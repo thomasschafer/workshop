@@ -41,6 +41,30 @@ provider = "claude"
 # ["sol", "astra"].
 models = ["sonnet", "opus", "fable"]
 
+[editor]
+# The code editor's keybindings with a keyboard: "default", or "helix" for Helix's modal ones.
+# Each device can choose for itself in the app, under Settings, Display.
+keybindings = "default"
+
+# Helix's own options, named as in Helix's [editor] config, and its keymaps as in its [keys]
+# tables, under [editor.helix.keys.normal], [editor.helix.keys.select] and
+# [editor.helix.keys.insert]. These are the options Workshop follows, with Helix's defaults:
+# [editor.helix]
+# scrolloff = 5
+# line-number = "absolute"    # or "relative"
+# color-modes = false
+# auto-pairs = true
+# jump-label-alphabet = "abcdefghijklmnopqrstuvwxyz"
+# smart-tab.enable = false    # Helix's default is true; without a syntax tree, Tab after text
+#                             # moves past the closing bracket around the cursor instead
+# search.smart-case = true
+# search.wrap-around = true
+# cursor-shape = { normal = "block", insert = "block", select = "block" }
+#
+# [editor.helix.keys.normal]
+# X = "extend_line_above"
+# C-s = ":w"
+
 # Snippets you can insert by saying "snippet <name>", or from the snippet menu.
 # [[snippets]]
 # name = "parse ints"

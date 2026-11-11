@@ -10,6 +10,7 @@ import {
   ChangeSet,
   EditorSelection,
   type EditorState,
+  Transaction,
   type TransactionSpec,
 } from "@codemirror/state";
 import { type Change, mapSelection, normalizeChanges } from "./changes";
@@ -457,8 +458,16 @@ export interface JumpLabel {
 
 // ---- The editor ----
 
-/** Annotates transactions Helix commands make, so the view can tell them from others. */
-export const HELIX_USER_EVENT = "helix";
+/**
+ * The user events of transactions Helix commands make, so the view can tell them from others.
+ * Changes count as typing, so CodeMirror's history joins them into Helix's undo steps.
+ */
+export const HELIX_CHANGE_EVENT = "input.type.helix";
+export const HELIX_SELECT_EVENT = "select.helix";
+
+export function isHelixTransaction(tr: Transaction): boolean {
+  return tr.isUserEvent(HELIX_CHANGE_EVENT) || tr.isUserEvent(HELIX_SELECT_EVENT);
+}
 
 /**
  * The state Helix commands work on: the document and selection, held in the host's CodeMirror
@@ -546,7 +555,13 @@ export class HelixEditor {
     const doc = this.doc;
     const fixed = selection.ensureInvariants(doc);
     if (fixed.equals(this.selection) && sameGoals(fixed, this.selection)) return;
-    this.host.dispatch({ selection: toEditorSelection(fixed), userEvent: HELIX_USER_EVENT });
+    this.host.dispatch({
+      selection: toEditorSelection(fixed),
+      userEvent: HELIX_SELECT_EVENT,
+      // Moving the selection is no undo step of its own, and mustn't split the one it's in, as
+      // a key bound to several commands is one step.
+      annotations: Transaction.addToHistory.of(false),
+    });
   }
 
   /**
@@ -572,7 +587,7 @@ export class HelixEditor {
     this.host.dispatch({
       changes: changeSet,
       selection: toEditorSelection(mapped),
-      userEvent: HELIX_USER_EVENT,
+      userEvent: HELIX_CHANGE_EVENT,
       annotations: helixUndoGroup.of(this.undoGroup),
     });
     // After the dispatch, which maps the previous one through these changes.

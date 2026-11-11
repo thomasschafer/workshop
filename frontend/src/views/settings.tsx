@@ -48,6 +48,11 @@ interface Props {
   onServerSpeech: (ready: boolean) => void;
   lineWrapping: boolean;
   onLineWrapping: (enabled: boolean) => void;
+  /** Whether Helix's keybindings are on for this device. */
+  helixOn: boolean;
+  /** What's wrong with the Helix keys in the config, if anything. */
+  helixProblems: string | null;
+  onHelix: (enabled: boolean) => void;
 }
 
 /** A page of settings, opened from the list. */
@@ -244,7 +249,15 @@ function TalkingPage({ dictation, onDictation, onServerSpeech, onBench }: Props)
   );
 }
 
-function DisplayPage({ lineWrapping, onLineWrapping, keepScreenOn, onKeepScreenOn }: Props) {
+function DisplayPage({
+  lineWrapping,
+  onLineWrapping,
+  keepScreenOn,
+  onKeepScreenOn,
+  helixOn,
+  helixProblems,
+  onHelix,
+}: Props) {
   return (
     <>
       <ThemeSection />
@@ -256,6 +269,18 @@ function DisplayPage({ lineWrapping, onLineWrapping, keepScreenOn, onKeepScreenO
         />
         Wrap long lines of code
       </label>
+      <label class="toggle">
+        <input
+          type="checkbox"
+          checked={helixOn}
+          onChange={(e) => onHelix((e.target as HTMLInputElement).checked)}
+        />
+        Helix keybindings, for a keyboard
+      </label>
+      <p class="muted small">
+        Edit with Helix's modal keys, and your own from the config file. Kept on this device only.
+      </p>
+      {helixOn && helixProblems ? <p class="error-text small">{helixProblems}</p> : null}
       {keepScreenOn === null ? (
         <p class="muted">This browser can't keep the screen on.</p>
       ) : (

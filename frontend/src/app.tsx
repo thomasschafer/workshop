@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, type Bootstrap, loginNeeded, type Problem, type Puzzle, type Tab } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
-import { CodeEditor, type Diagnostics, hoverText } from "./editor";
+import { CodeEditor, type Diagnostics, type HelixSetup, hoverText } from "./editor";
 import { errorMessage } from "./errors";
+import { describeProblems, helixSettings } from "./helix/config";
 import { useConnection } from "./hooks/useConnection";
 import { useDayMeta } from "./hooks/useDayMeta";
 import { useDictation } from "./hooks/useDictation";
@@ -173,6 +174,56 @@ export function App({ boot }: { boot: Bootstrap }) {
   );
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
   const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
+  const lineWrappingRef = useRef(lineWrapping);
+  lineWrappingRef.current = lineWrapping;
+  const changeLineWrapping = (enabled: boolean) => {
+    preferences.lineWrapping.set(enabled);
+    setLineWrapping(enabled);
+    lineWrappingRef.current = enabled;
+    editor.current?.setLineWrapping(enabled);
+  };
+  const [keybindings, setKeybindings] = useState(() => preferences.keybindings.get());
+  const helixOn =
+    keybindings === "helix" || (keybindings === "config" && boot.editor.keybindings === "helix");
+  const helixOnRef = useRef(helixOn);
+  helixOnRef.current = helixOn;
+  const helix = useMemo(() => helixSettings(boot.editor.helix), [boot]);
+  // Read through refs, as the editor keeps these for as long as it's open.
+  const changeLineWrappingRef = useRef(changeLineWrapping);
+  changeLineWrappingRef.current = changeLineWrapping;
+  /** Helix's keybindings for the open file, or null if they're off. */
+  const helixSetup = (documentName: string): HelixSetup | null =>
+    helixOnRef.current
+      ? {
+          keymaps: helix.keymaps,
+          options: helix.options,
+          documentName,
+          actions: {
+            write: async () => {
+              await saver.current?.flush();
+            },
+            reload: async () => {
+              const p = puzzleRef.current;
+              const s = saver.current;
+              const current = editor.current;
+              if (!p || !s || !current) return;
+              // Changes here are saved first, so reloading only ever picks up changes made
+              // elsewhere.
+              await s.flush();
+              const opened = await api.open(p);
+              if (s.adopt(opened.code)) current.replaceAll(opened.code.text);
+            },
+            lineWrapping: () => lineWrappingRef.current,
+            setLineWrapping: (enabled) => changeLineWrappingRef.current(enabled),
+          },
+        }
+      : null;
+  const helixSetupRef = useRef(helixSetup);
+  helixSetupRef.current = helixSetup;
+  useEffect(() => {
+    const problems = describeProblems(helix.problems);
+    if (helixOn && problems) notify("error", problems);
+  }, [helix, helixOn]);
   /** Whether code has started part 2: the template's part 2 line is no longer turned off. */
   const hasStartedPart2 = (text: string) => {
     const swap = boot.language.start_part_two;
@@ -288,6 +339,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
           lineWrapping: preferences.lineWrapping.get(),
+          helix: helixSetupRef.current(fileName(opened.file_uri)),
           lsp: lsp
             ? {
                 client: lsp.client,
@@ -785,10 +837,16 @@ export function App({ boot }: { boot: Bootstrap }) {
               setDictationChoice(choice);
             }}
             lineWrapping={lineWrapping}
-            onLineWrapping={(enabled) => {
-              preferences.lineWrapping.set(enabled);
-              setLineWrapping(enabled);
-              editor.current?.setLineWrapping(enabled);
+            onLineWrapping={changeLineWrapping}
+            helixOn={helixOn}
+            helixProblems={describeProblems(helix.problems)}
+            onHelix={(enabled) => {
+              const choice = enabled ? "helix" : "default";
+              preferences.keybindings.set(choice);
+              setKeybindings(choice);
+              helixOnRef.current = enabled;
+              const uri = fileUri.current;
+              editor.current?.setHelix(uri ? helixSetupRef.current(fileName(uri)) : null);
             }}
             onInsertSnippet={(s) => {
               editor.current?.insertSnippet(s.body);
@@ -817,4 +875,9 @@ export function App({ boot }: { boot: Bootstrap }) {
       />
     </div>
   );
+}
+
+/** The file's name, from its URI. */
+function fileName(uri: string): string {
+  return decodeURIComponent(uri.slice(uri.lastIndexOf("/") + 1));
 }
