@@ -813,16 +813,18 @@ code {
 
 /* Workshop's own keyboard, for Helix's keybindings on a touch screen, in the controls' place.
    The letters are sized and placed as on Gboard on a phone, measured from a Pixel's, so fingers
-   used to it find them where they expect. */
+   used to it find them where they expect. Like its keys' widths, every size is in proportion to
+   the width of the screen, in units of a 411px-wide screen's pixels, up to a phone's widest. */
 
 .keyboard {
-  --key-gap: 5.6px;
+  --u: calc(min(100vw, 460px) / 411);
+  --key-gap: calc(5.6 * var(--u));
   position: relative;
   z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 5.5px env(safe-area-inset-bottom);
+  padding: calc(8 * var(--u)) calc(5.5 * var(--u)) env(safe-area-inset-bottom);
   background: var(--key-tray);
   user-select: none;
   -webkit-user-select: none;
@@ -844,18 +846,18 @@ code {
 }
 
 .keyboard-row-small {
-  margin-bottom: 10px;
+  margin-bottom: calc(10 * var(--u));
 }
 
 .keyboard-row-full + .keyboard-row-full {
-  margin-top: 13.6px;
+  margin-top: calc(13.6 * var(--u));
 }
 
 /* Beneath the keys, as on a phone's keyboard: Helix's status line, and the key to lower it. */
 .keyboard-footer {
   width: 100%;
   max-width: 48rem;
-  height: 44px;
+  height: calc(44 * var(--u));
   display: flex;
   align-items: center;
   gap: var(--key-gap);
@@ -877,7 +879,7 @@ code {
 
 .key {
   min-width: 0;
-  height: 48.6px;
+  height: calc(48.6 * var(--u));
   padding: 0;
   border: none;
   border-radius: 6px;
@@ -890,7 +892,7 @@ code {
 }
 
 .keyboard-row-small .key {
-  height: 40px;
+  height: calc(40 * var(--u));
   font-size: 19px;
 }
 
@@ -902,8 +904,8 @@ code {
 
 .key-lower {
   flex: none;
-  width: 52px;
-  height: 32px;
+  width: calc(52 * var(--u));
+  height: calc(32 * var(--u));
   font-size: 18px;
 }
 
