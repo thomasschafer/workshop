@@ -1013,7 +1013,7 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
  * character it types.
  */
 const PLAIN_KEYS = new Map<string, { shift: boolean }>(
-  LAYOUT.flat().flatMap((def) =>
+  LAYOUT.flatMap((row) => row.keys).flatMap((def) =>
     def.kind === "char" && def.label === undefined
       ? [[def.char, { shift: false }] as const, [charFor(def.char, true), { shift: true }] as const]
       : [],

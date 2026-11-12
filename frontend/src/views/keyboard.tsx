@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { Key } from "../helix/keys";
 import {
+  COLUMNS,
   charFor,
   type KeyDef,
   keyFor,
@@ -12,6 +13,7 @@ import {
   REPEAT_DELAY,
   REPEAT_INTERVAL,
   repeats,
+  widthOf,
 } from "../keyboard";
 
 interface Props {
@@ -28,6 +30,14 @@ interface Preview {
   /** The middle of the key's top edge, within the keyboard. */
   x: number;
   y: number;
+}
+
+/**
+ * The width of `n` columns, gaps between them included, as a phone's keyboard sizes its keys: so
+ * a key of one and a half columns ends where the next row's keys do, half a column on.
+ */
+function columns(n: number): { flex: string } {
+  return { flex: `0 0 calc((100% + var(--key-gap)) * ${n / COLUMNS} - var(--key-gap))` };
 }
 
 /**
@@ -113,26 +123,21 @@ export function Keyboard({ onKey, onLower, statusHost }: Props) {
   return (
     <section ref={root} class="keyboard" aria-label="Keyboard">
       {LAYOUT.map((row, r) => (
-        <div class="keyboard-row" key={r}>
-          {row.map((def) => {
+        <div class={`keyboard-row keyboard-row-${row.size}`} key={r}>
+          {row.inset ? <div class="key-spacer" style={columns(row.inset)} /> : null}
+          {row.keys.map((def) => {
             const id = keyId(def);
             const on = def.kind === "modifier" && mods[def.modifier];
-            const width = "width" in def ? def.width : undefined;
             return (
               <button
                 type="button"
                 key={id}
                 class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${movesCursor(def) ? " key-move" : ""}${on ? " on" : ""}${down.has(id) ? " down" : ""}`}
-                style={width ? { flexGrow: width } : undefined}
+                style={columns(widthOf(def))}
                 tabIndex={-1}
                 aria-label={def.name}
                 aria-pressed={def.kind === "modifier" ? on : undefined}
-                onPointerDown={def.kind === "lower" ? undefined : (e) => press(def, e)}
-                // On a click, once the finger's lifted, so the controls coming back under it
-                // don't take the press too. Safari only clicks if the press wasn't prevented, so
-                // just the focus is kept.
-                onMouseDown={def.kind === "lower" ? (e) => e.preventDefault() : undefined}
-                onClick={def.kind === "lower" ? onLower : undefined}
+                onPointerDown={(e) => press(def, e)}
                 onPointerUp={release}
                 onPointerCancel={release}
                 onLostPointerCapture={release}
@@ -143,9 +148,26 @@ export function Keyboard({ onKey, onLower, statusHost }: Props) {
               </button>
             );
           })}
+          {row.inset ? <div class="key-spacer" style={columns(row.inset)} /> : null}
         </div>
       ))}
-      <div class="keyboard-status" ref={statusHost} />
+      <div class="keyboard-footer">
+        <div class="keyboard-status" ref={statusHost} />
+        <button
+          type="button"
+          class="key key-lower"
+          tabIndex={-1}
+          aria-label="Hide keyboard"
+          // On a click, once the finger's lifted, so the controls coming back under it don't
+          // take the press too. Safari only clicks if the press wasn't prevented, so just the
+          // focus is kept.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onLower}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          ▾
+        </button>
+      </div>
       {preview ? (
         <div
           class="key-preview"

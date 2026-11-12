@@ -811,16 +811,18 @@ code {
   color: var(--accent-fg);
 }
 
-/* Workshop's own keyboard, for Helix's keybindings on a touch screen, in the controls' place. */
+/* Workshop's own keyboard, for Helix's keybindings on a touch screen, in the controls' place.
+   The letters are sized and placed as on Gboard on a phone, measured from a Pixel's, so fingers
+   used to it find them where they expect. */
 
 .keyboard {
+  --key-gap: 5.6px;
   position: relative;
   z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 8px 4px env(safe-area-inset-bottom);
+  padding: 8px 5.5px env(safe-area-inset-bottom);
   background: var(--key-tray);
   user-select: none;
   -webkit-user-select: none;
@@ -829,22 +831,40 @@ code {
   touch-action: none;
 }
 
+/* Full screen, Android draws its gesture bar over the page, where it otherwise sits below it. */
+:root:fullscreen .keyboard {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
 .keyboard-row {
   display: flex;
-  gap: 5px;
+  gap: var(--key-gap);
   width: 100%;
   max-width: 48rem;
 }
 
-/* Helix's status line, in the space a phone's keyboard leaves beneath its keys, clear of the
-   gesture bar even full screen without it. */
-.keyboard-status {
+.keyboard-row-small {
+  margin-bottom: 10px;
+}
+
+.keyboard-row-full + .keyboard-row-full {
+  margin-top: 13.6px;
+}
+
+/* Beneath the keys, as on a phone's keyboard: Helix's status line, and the key to lower it. */
+.keyboard-footer {
   width: 100%;
   max-width: 48rem;
-  min-height: 40px;
-  padding-bottom: 8px;
+  height: 44px;
   display: flex;
   align-items: center;
+  gap: var(--key-gap);
+}
+
+.keyboard-status {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   color: var(--fg);
   font-family: var(--mono);
   font-size: calc(var(--code-size) * 0.85);
@@ -856,9 +876,8 @@ code {
 }
 
 .key {
-  flex: 1 1 0;
   min-width: 0;
-  height: 44px;
+  height: 48.6px;
   padding: 0;
   border: none;
   border-radius: 6px;
@@ -866,8 +885,13 @@ code {
   color: var(--key-fg);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
   font-family: var(--mono);
-  font-size: 20px;
+  font-size: 22px;
   touch-action: none;
+}
+
+.keyboard-row-small .key {
+  height: 40px;
+  font-size: 19px;
 }
 
 .key-named,
@@ -876,8 +900,15 @@ code {
   background: var(--key-fn);
 }
 
+.key-lower {
+  flex: none;
+  width: 52px;
+  height: 32px;
+  font-size: 18px;
+}
+
 /* Names such as `esc`, which would be wide at the size of a character. */
-.key-word {
+.keyboard .key-word {
   font-size: 14px;
 }
 
@@ -913,12 +944,25 @@ code {
 
 /* Sideways, keeping some of the code in view. */
 @media (max-height: 500px) {
-  .keyboard {
-    gap: 4px;
+  .key,
+  .keyboard-row-small .key {
+    height: 28px;
   }
 
-  .key {
+  .keyboard-row-small {
+    margin-bottom: 4px;
+  }
+
+  .keyboard-row-full + .keyboard-row-full {
+    margin-top: 4px;
+  }
+
+  .keyboard-footer {
     height: 30px;
+  }
+
+  .key-lower {
+    height: 24px;
   }
 }
 

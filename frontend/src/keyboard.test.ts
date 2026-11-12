@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  COLUMNS,
   type KeyDef,
   keyFor,
   LAYOUT,
@@ -8,6 +9,7 @@ import {
   type Modifiers,
   movesCursor,
   NO_MODIFIERS,
+  widthOf,
 } from "./keyboard";
 
 const char = (c: string): KeyDef & { kind: "char" } => ({ kind: "char", char: c });
@@ -20,19 +22,39 @@ const named = (key: string): KeyDef & { kind: "named" } => ({
 const mods = (m: Partial<Modifiers>): Modifiers => ({ ...NO_MODIFIERS, ...m });
 
 describe("the layout", () => {
-  it("has ten columns in every row", () => {
+  const keys = LAYOUT.flatMap((row) => row.keys);
+
+  it("fills every row's columns", () => {
     for (const row of LAYOUT) {
-      const columns = row.reduce(
-        (n, def) => n + ("width" in def && def.width !== undefined ? def.width : 1),
-        0,
-      );
-      expect(columns).toBe(10);
+      const used = row.keys.reduce((n, def) => n + widthOf(def), 2 * (row.inset ?? 0));
+      expect(used).toBe(COLUMNS);
     }
   });
 
   it("has each key once", () => {
-    const names = LAYOUT.flat().map((def) => (def.kind === "char" ? def.char : def.name));
+    const names = keys.map((def) => (def.kind === "char" ? def.char : def.name));
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("has the letters where a phone's keyboard has them", () => {
+    const letters = LAYOUT.map((row) => {
+      let column = row.inset ?? 0;
+      const placed: string[] = [];
+      for (const def of row.keys) {
+        if (def.kind === "char" && /^[a-z]$/.test(def.char)) placed.push(`${def.char}@${column}`);
+        column += widthOf(def);
+      }
+      return placed.join(" ");
+    }).filter((row) => row !== "");
+    expect(letters).toEqual([
+      "q@0 w@1 e@2 r@3 t@4 y@5 u@6 i@7 o@8 p@9",
+      "a@0.5 s@1.5 d@2.5 f@3.5 g@4.5 h@5.5 j@6.5 k@7.5 l@8.5",
+      "z@1.5 x@2.5 c@3.5 v@4.5 b@5.5 n@6.5 m@7.5",
+    ]);
+    const full = LAYOUT.filter((row) =>
+      row.keys.some((def) => def.kind === "char" && /^[a-z]$/.test(def.char)),
+    );
+    expect(full.every((row) => row.size === "full")).toBe(true);
   });
 });
 
@@ -73,7 +95,7 @@ describe("labelFor", () => {
 
 describe("movesCursor", () => {
   it("is h, j, k and l alone", () => {
-    const moving = LAYOUT.flat().filter(movesCursor);
+    const moving = LAYOUT.flatMap((row) => row.keys).filter(movesCursor);
     expect(moving.map((def) => (def.kind === "char" ? def.char : def.name))).toEqual([
       "h",
       "j",

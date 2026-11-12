@@ -10,40 +10,63 @@ export type KeyDef =
   | { kind: "char"; char: string; label?: string; name?: string; width?: number }
   /** A key that isn't a character, in Helix's notation, such as `esc`. */
   | { kind: "named"; key: string; label: string; name: string; width?: number }
-  | { kind: "modifier"; modifier: Modifier; label: string; name: string; width?: number }
-  /** Lowers the keyboard. */
-  | { kind: "lower"; label: string; name: string };
+  | { kind: "modifier"; modifier: Modifier; label: string; name: string; width?: number };
+
+export interface Row {
+  readonly keys: readonly KeyDef[];
+  /** How far in the row starts and ends, in columns, as the middle row of letters does. */
+  readonly inset?: number;
+  /** The letters, and the row beneath them, are as big as on a phone's keyboard; others smaller. */
+  readonly size: "full" | "small";
+}
+
+/** Every row is this many columns wide; a key's width, if not 1, is in columns too. */
+export const COLUMNS = 10;
 
 const chars = (s: string): KeyDef[] => [...s].map((char) => ({ kind: "char", char }));
 
 /**
- * The keys, row by row, ten to a row as on a phone's keyboard: a US laptop's, with those at its
- * edges moved to a row along the top and to the bottom row.
+ * The keys, row by row, a US laptop's, with the letters as a phone's keyboard has them: rows of
+ * ten, nine set in by half a key, and seven between shift and backspace, so they're where the
+ * thumbs expect them. The laptop's other keys are in two rows above, and the row below.
  */
-export const LAYOUT: readonly (readonly KeyDef[])[] = [
-  [
-    { kind: "named", key: "esc", label: "esc", name: "Escape" },
-    { kind: "named", key: "tab", label: "tab", name: "Tab" },
-    ...chars("`-=[]\\'"),
-    { kind: "lower", label: "▾", name: "Hide keyboard" },
-  ],
-  chars("1234567890"),
-  chars("qwertyuiop"),
-  chars("asdfghjkl;"),
-  [
-    { kind: "modifier", modifier: "shift", label: "⇧", name: "Shift", width: 1.5 },
-    ...chars("zxcvbnm"),
-    { kind: "named", key: "backspace", label: "⌫", name: "Backspace", width: 1.5 },
-  ],
-  [
-    { kind: "modifier", modifier: "ctrl", label: "ctrl", name: "Ctrl" },
-    { kind: "modifier", modifier: "alt", label: "alt", name: "Alt" },
-    { kind: "char", char: "," },
-    { kind: "char", char: " ", label: "space", name: "Space", width: 3.5 },
-    ...chars("./"),
-    { kind: "named", key: "ret", label: "⏎", name: "Enter", width: 1.5 },
-  ],
+export const LAYOUT: readonly Row[] = [
+  {
+    size: "small",
+    keys: [
+      { kind: "named", key: "esc", label: "esc", name: "Escape" },
+      { kind: "named", key: "tab", label: "tab", name: "Tab" },
+      ...chars("`-=[]\\;'"),
+    ],
+  },
+  { size: "small", keys: chars("1234567890") },
+  { size: "full", keys: chars("qwertyuiop") },
+  { size: "full", inset: 0.5, keys: chars("asdfghjkl") },
+  {
+    size: "full",
+    keys: [
+      { kind: "modifier", modifier: "shift", label: "⇧", name: "Shift", width: 1.5 },
+      ...chars("zxcvbnm"),
+      { kind: "named", key: "backspace", label: "⌫", name: "Backspace", width: 1.5 },
+    ],
+  },
+  {
+    size: "full",
+    keys: [
+      { kind: "modifier", modifier: "ctrl", label: "ctrl", name: "Ctrl" },
+      { kind: "modifier", modifier: "alt", label: "alt", name: "Alt" },
+      { kind: "char", char: "," },
+      { kind: "char", char: " ", label: "space", name: "Space", width: 3.5 },
+      ...chars("./"),
+      { kind: "named", key: "ret", label: "⏎", name: "Enter", width: 1.5 },
+    ],
+  },
 ];
+
+/** A key's width, in columns. */
+export function widthOf(def: KeyDef): number {
+  return def.width ?? 1;
+}
 
 export interface Modifiers {
   readonly shift: boolean;
@@ -113,7 +136,7 @@ export class ModifierState {
 
 /** Whether holding a key down presses it again and again, as all but the modifiers do. */
 export function repeats(def: KeyDef): def is KeyDef & { kind: "char" | "named" } {
-  return def.kind === "char" || def.kind === "named";
+  return def.kind !== "modifier";
 }
 
 /** Helix's movement keys, tinted so a finger finds its way back to them. */
