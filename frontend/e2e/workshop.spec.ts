@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { devices, expect, type Page, test } from "@playwright/test";
 import { HOME, PORT } from "./fixture";
 import { installSimulatedSpeech } from "./speech";
 
@@ -995,6 +995,251 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
 
   // Each key is one undo step, so undoing both edits puts the file back as it was.
   await keys("u", "u");
+  await expect.poll(saved).toBe(original);
+  await context.close();
+});
+
+test("works on a phone with Helix's keybindings, from its on-screen keyboard", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${PORT}`,
+  });
+  const phone = await context.newPage();
+  await phone.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await phone.goto(`/?token=${token}`);
+  const picker = phone.locator(".picker");
+  await expect(picker.or(phone.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
+  if (!(await picker.isVisible())) await phone.locator(".puzzle-button").click();
+  await phone.getByRole("button", { name: "2017", exact: true }).click();
+  await expect(picker).toContainText("5 stars in 2017");
+  await phone.locator(".day", { hasText: /^4$/ }).click();
+  await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
+  const code = phone.locator(".cm-content");
+  await expect(code).toContainText("def part1");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const scroller = phone.locator(".cm-scroller");
+
+  // Tapping the code leaves the starts of lines in view, beside the line numbers. Where, rather
+  // than tapping the element, which would scroll it into view first, as no finger does.
+  const line = await phone.locator(".cm-line").nth(3).boundingBox();
+  if (line === null) throw new Error("the code has no fourth line");
+  await phone.touchscreen.tap(line.x + 30, line.y + line.height / 2);
+  // The keyboard types into a field of Helix's own, which tapping the code focuses.
+  const field = phone.locator(".cm-helix-keyboard");
+  await expect(field).toBeFocused();
+  // Tapping puts the cursor where it taps.
+  const def = await phone.locator(".cm-line", { hasText: "def part1" }).boundingBox();
+  if (def === null) throw new Error("there's no line defining part1");
+  await phone.touchscreen.tap(def.x + 2, def.y + def.height / 2);
+  await expect(phone.locator(".cm-helix-cursor-primary")).toHaveText("d");
+  await phone.touchscreen.tap(def.x + 2, line.y + line.height / 2);
+  await expect.poll(() => scroller.evaluate((s) => s.scrollLeft)).toBe(0);
+
+  // What an on-screen keyboard sends: input rather than key presses.
+  const input = (inputType: string, data: string | null = null) =>
+    field.evaluate(
+      (el, [type, text]) =>
+        el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: type ?? "",
+            data: text,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      [inputType, data] as const,
+    );
+  const mode = phone.locator(".cm-helix-mode");
+  for (const key of ["g", "g", "i"]) await input("insertText", key);
+  await expect(mode).toHaveText("INS");
+  await input("insertText", "ab");
+  await input("deleteContentBackward");
+  await expect.poll(() => saved().split("\n")[0]).toBe(`a${original.split("\n")[0]}`);
+
+  // The keyboard has no escape key, so there's one under the code.
+  await phone.getByRole("button", { name: "Escape" }).tap();
+  await expect(mode).toHaveText("NOR");
+  await input("insertText", "u");
+  await expect.poll(saved).toBe(original);
+  // Anywhere on the status line presses it, such as the mode at the other end.
+  await input("insertText", "i");
+  await expect(mode).toHaveText("INS");
+  await mode.tap();
+  await expect(mode).toHaveText("NOR");
+
+  // No help for the keys after `g` covering the code, though what's pending still shows.
+  await input("insertText", "g");
+  await expect(phone.locator(".cm-helix-pending")).toHaveText("g");
+  await expect(phone.locator(".cm-helix-info")).toBeHidden();
+  await phone.getByRole("button", { name: "Escape" }).tap();
+
+  // Picking from a list by tapping it, as from the command palette.
+  await input("insertText", " ?yank_joined");
+  await phone.locator(".cm-helix-picker-row").first().tap();
+  await expect(phone.locator(".cm-helix-message")).toContainText("joined and yanked 1 selection");
+
+  // Moving within what's in view doesn't scroll.
+  await input("insertText", "%yppp");
+  await input("insertText", "gg");
+  const top = await scroller.evaluate((s) => s.scrollTop);
+  for (let i = 0; i < 3; i++) await input("insertText", "j");
+  await input("insertText", "w");
+  await expect(phone.locator(".cm-helix-mode")).toHaveText("NOR");
+  expect(await scroller.evaluate((s) => s.scrollTop)).toBe(top);
+  // Going well down the file does.
+  await input("insertText", "50j");
+  await expect.poll(() => scroller.evaluate((s) => s.scrollTop)).toBeGreaterThan(top);
+
+  for (let i = 0; i < 3; i++) await input("insertText", "u");
+  await expect.poll(saved).toBe(original);
+  await context.close();
+});
+
+test("types and deletes in Helix's insert mode however a phone's keyboard sends it", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${PORT}`,
+  });
+  const phone = await context.newPage();
+  await phone.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await phone.goto(`/?token=${token}`);
+  const picker = phone.locator(".picker");
+  await expect(picker.or(phone.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
+  if (!(await picker.isVisible())) await phone.locator(".puzzle-button").click();
+  await phone.getByRole("button", { name: "2017", exact: true }).click();
+  await expect(picker).toContainText("5 stars in 2017");
+  await phone.locator(".day", { hasText: /^4$/ }).click();
+  await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
+  const code = phone.locator(".cm-content");
+  await expect(code).toContainText("def part1");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const [first = "", second = ""] = original.split("\n");
+  const firstLines = () => saved().split("\n").slice(0, 2);
+  const field = phone.locator(".cm-helix-keyboard");
+  await field.focus();
+
+  /** Input an on-screen keyboard sends, which Helix can take instead of the browser. */
+  const input = (inputType: string, data: string | null = null, cancelable = true) =>
+    field.evaluate(
+      (el, [type, text, canCancel]) =>
+        el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: type as string,
+            data: text as string | null,
+            bubbles: true,
+            cancelable: canCancel as boolean,
+          }),
+        ),
+      [inputType, data, cancelable] as const,
+    );
+  /**
+   * The field as the keyboard leaves it after an edit Helix couldn't stop, given what it holds
+   * after the character always in it.
+   */
+  const fieldEdit = (value: string, composing = false) =>
+    field.evaluate(
+      (el, [text, isComposing]) => {
+        const area = el as HTMLTextAreaElement;
+        area.value = text as string;
+        area.dispatchEvent(
+          new InputEvent("input", { bubbles: true, isComposing: isComposing as boolean }),
+        );
+      },
+      [value, composing] as const,
+    );
+  const compositionStart = () =>
+    field.evaluate((el) =>
+      el.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })),
+    );
+  const SENTINEL = "\u200b";
+  const mode = phone.locator(".cm-helix-mode");
+  const pressEscape = () => phone.getByRole("button", { name: "Escape" }).tap();
+
+  for (const key of ["g", "g", "i"]) await input("insertText", key);
+  await expect(mode).toHaveText("INS");
+  // Typed, then backspaced, as input events.
+  await input("insertText", "abcd");
+  await input("deleteContentBackward");
+  await input("deleteContentBackward");
+  await expect.poll(firstLines).toEqual([`ab${first}`, second]);
+  // As key presses.
+  await phone.keyboard.press("Backspace");
+  await expect.poll(firstLines).toEqual([`a${first}`, second]);
+  // A key press the browser also carries out, as an iPhone can for Backspace, counts once.
+  await code.evaluate((el) => {
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Backspace",
+        code: "Backspace",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    el.dispatchEvent(
+      new InputEvent("beforeinput", {
+        inputType: "deleteContentBackward",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect.poll(firstLines).toEqual([first, second]);
+  // Edits the keyboard makes to its field that Helix can't stop: typing, and Backspace, which
+  // deletes the character the field always holds.
+  await fieldEdit(`${SENTINEL}xyz`);
+  await expect.poll(firstLines).toEqual([`xyz${first}`, second]);
+  await input("deleteContentBackward", null, false);
+  await fieldEdit("");
+  await expect.poll(firstLines).toEqual([`xy${first}`, second]);
+  await fieldEdit("");
+  await expect.poll(firstLines).toEqual([`x${first}`, second]);
+  // Enter, and deleting a word.
+  await input("insertParagraph");
+  await expect.poll(firstLines).toEqual(["x", first]);
+  await input("insertText", "foo bar");
+  await input("deleteWordBackward");
+  await expect.poll(firstLines).toEqual(["x", `foo ${first}`]);
+  await pressEscape();
+  await expect(mode).toHaveText("NOR");
+  // Appending, and opening a line below, then backspacing there.
+  await input("insertText", "A");
+  await expect(mode).toHaveText("INS");
+  await input("insertText", "!!");
+  await input("deleteContentBackward");
+  await pressEscape();
+  await input("insertText", "o");
+  await input("insertText", "zz");
+  await input("deleteContentBackward");
+  await pressEscape();
+  await expect.poll(() => saved().split("\n").slice(0, 3)).toEqual(["x", `foo ${first}!`, "z"]);
+
+  // A keyboard that composes words, as Gboard does, sends each letter as it's added, so normal
+  // mode's keys work as they're pressed. Here `mi(` selects inside `part1(...)`, with "mi"
+  // composed as a word, and the bracket ending it.
+  await input("insertText", "/data:");
+  await input("insertParagraph");
+  await compositionStart();
+  await fieldEdit(`${SENTINEL}m`, true);
+  await fieldEdit(`${SENTINEL}mi`, true);
+  // Then, as Safari does, one more input event at once, with the field as it was.
+  await field.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent("compositionend", { data: "mi", bubbles: true }));
+    el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  });
+  await input("insertText", "(");
+  await input("insertText", "cx");
+  await pressEscape();
+  await expect.poll(saved).toContain("def part1(x) -> int:");
+
+  for (let i = 0; i < 5; i++) await input("insertText", "u");
   await expect.poll(saved).toBe(original);
   await context.close();
 });

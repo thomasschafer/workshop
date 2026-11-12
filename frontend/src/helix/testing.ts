@@ -17,6 +17,7 @@ import {
   HelixEditor,
   type HelixOptions,
   type Host,
+  insertSelectionField,
   type ScrollRequest,
   toEditorSelection,
 } from "./editor";
@@ -135,7 +136,11 @@ export class TestHost implements Host {
     this.state = EditorState.create({
       doc: text,
       selection: toEditorSelection(selection),
-      extensions: [helixHistory(), EditorState.allowMultipleSelections.of(true)],
+      extensions: [
+        helixHistory(),
+        insertSelectionField,
+        EditorState.allowMultipleSelections.of(true),
+      ],
     });
   }
 
