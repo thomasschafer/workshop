@@ -1,15 +1,20 @@
 import type { Puzzle, Tab } from "../api";
 import { puzzleLabel } from "../puzzle";
+import { ZenButton } from "./zen";
 
 const TABS = ["problem", "code", "notes", "discuss"] as const;
 
-/** The top bar: the open puzzle, which opens the picker, and buttons for help and settings. */
+/**
+ * The top bar: the open puzzle, which opens the picker, and buttons for zen mode, help and
+ * settings.
+ */
 export function Header({
   showPicker,
   puzzle,
   stars,
   onBack,
   onPick,
+  onZen,
   onHelp,
   onSettings,
 }: {
@@ -19,6 +24,8 @@ export function Header({
   /** Closes the picker, back to the open puzzle. */
   onBack: () => void;
   onPick: () => void;
+  /** Enters zen mode, or null where there's no code to show in it. */
+  onZen: (() => void) | null;
   onHelp: () => void;
   onSettings: () => void;
 }) {
@@ -40,6 +47,7 @@ export function Header({
         </button>
       )}
       <span class="header-actions">
+        {onZen ? <ZenButton onClick={onZen} /> : null}
         <button type="button" class="icon-button" aria-label="Help" onClick={onHelp}>
           ?
         </button>

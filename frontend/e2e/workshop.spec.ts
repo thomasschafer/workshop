@@ -240,6 +240,31 @@ test("shows help as a modal", async () => {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
+test("hides everything but the code and the keyboard in zen mode", async () => {
+  await page.getByRole("button", { name: "Problem", exact: true }).click();
+  await page.getByRole("button", { name: "Zen mode" }).click();
+  await expect(editor()).toBeVisible();
+  await expect(editor()).toBeFocused();
+  await expect(editor()).toHaveAttribute("inputmode", "text");
+  for (const hidden of [".top", "nav.tabs", ".controls", ".status-line"]) {
+    await expect(page.locator(hidden)).toBeHidden();
+  }
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement !== null)).toBe(true);
+
+  await page.getByRole("button", { name: "Leave zen mode" }).click();
+  await expect(page.locator(".puzzle-button")).toBeVisible();
+  await expect(page.locator(".controls")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement !== null)).toBe(false);
+
+  // Going back leaves zen mode too, staying in the app.
+  await page.getByRole("button", { name: "Zen mode" }).click();
+  await expect(page.locator(".top")).toBeHidden();
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "Leave zen mode" })).toHaveCount(0);
+  await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
+  await expect(page.getByRole("button", { name: "Code", exact: true })).toHaveClass(/selected/);
+});
+
 test("closes settings when going back, staying in the app", async () => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();

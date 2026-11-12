@@ -49,6 +49,7 @@ import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
 import { Stack } from "./views/stack";
 import { StatusLine } from "./views/status";
+import { enterFullscreen, exitFullscreen, ZenExit } from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
@@ -63,7 +64,9 @@ export function App({ boot }: { boot: Bootstrap }) {
   // On a wide screen the puzzle has a column of its own, beside the other tabs.
   const wide = useMediaQuery("(min-width: 1000px)");
   const online = useConnection();
-  const shownTab: Tab = wide && tab === "problem" ? "code" : tab;
+  // Just the code and the keyboard, for typing on a phone without the rest of the app in the way.
+  const [zen, setZen] = useState(false);
+  const shownTab: Tab = zen || (wide && tab === "problem") ? "code" : tab;
   const [models, setModels] = useState(boot.models);
   const [chosenDiscussModel, setDiscussModel] = useState(boot.state.discuss_model);
   // The chosen discussion model, if the current provider offers it, or its first model.
@@ -102,6 +105,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   });
 
   const editorHost = useRef<HTMLDivElement>(null);
+  const codePane = useRef<HTMLDivElement>(null);
   const editor = useRef<CodeEditor | null>(null);
   // Utterances spoken while a puzzle's editor is still loading wait for it.
   const editorWaiters = useRef<((editor: CodeEditor) => void)[]>([]);
@@ -587,11 +591,30 @@ export function App({ boot }: { boot: Bootstrap }) {
     [dictationMethod],
   );
 
-  const toggleKeyboard = () => {
-    const next = !keyboard;
-    setKeyboard(next);
+  const showKeyboard = (shown: boolean) => {
+    setKeyboard(shown);
     setTab("code");
-    editor.current?.setKeyboard(next);
+    // Shown now rather than on the next render, as the editor can't take focus while hidden,
+    // and phones only open the keyboard for a focus in the tap itself.
+    codePane.current?.classList.remove("hidden");
+    editor.current?.setKeyboard(shown);
+  };
+
+  const enterZen = () => {
+    setSheet(null);
+    setZen(true);
+    // In the tap itself, as browsers only go full screen, and phones only open the keyboard,
+    // for something the user started.
+    showKeyboard(true);
+    enterFullscreen().catch((e: unknown) =>
+      notify("warn", `Couldn't go full screen: ${errorMessage(e)}`),
+    );
+  };
+  const exitZen = () => {
+    setZen(false);
+    exitFullscreen().catch((e: unknown) =>
+      notify("warn", `Couldn't leave full screen: ${errorMessage(e)}`),
+    );
   };
 
   const resolveCodeConflict = (keep: "mine" | "theirs") => {
@@ -622,7 +645,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   // The picker is the home screen until a puzzle is open, and can be reopened from the header.
   const showPicker = picking || puzzle === null;
   // The talk button's state, and where it's hidden, apply to the Ctrl key just the same.
-  const controlsHidden = showPicker || shownTab === "problem";
+  const controlsHidden = showPicker || shownTab === "problem" || zen;
   useTalkKey(dictationMethod !== "keyboard" && !controlsHidden && sheet === null, talk);
 
   const problemView = puzzle ? (
@@ -651,7 +674,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   const split = wide && !showPicker && problemView !== null;
 
   return (
-    <div class={`app ${split ? "split" : ""}`}>
+    <div class={`app ${split ? "split" : ""} ${zen ? "zen" : ""}`}>
       <Header
         showPicker={showPicker}
         puzzle={puzzle}
@@ -661,6 +684,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           setSheet(null);
           setPicking(true);
         }}
+        onZen={showPicker ? null : enterZen}
         onHelp={() => setSheet(sheet === "help" ? null : "help")}
         onSettings={() => setSheet(sheet === "settings" ? null : "settings")}
       />
@@ -716,7 +740,11 @@ export function App({ boot }: { boot: Bootstrap }) {
             onDismiss={() => setOutdatedDismissed(true)}
           />
         ) : null}
-        <div class={`code-pane ${shownTab === "code" && !showPicker ? "" : "hidden"}`}>
+        <div
+          ref={codePane}
+          class={`code-pane ${shownTab === "code" && !showPicker ? "" : "hidden"}`}
+        >
+          {zen ? <ZenExit onExit={exitZen} /> : null}
           <StatusLine
             checks={lsp ? lspStatus : null}
             diagnostics={diagnostics}
@@ -873,7 +901,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         onRedo={() => editor.current?.redo()}
         onRun={() => setSheet(sheet === "run" ? null : "run")}
         keyboard={keyboard}
-        onToggleKeyboard={toggleKeyboard}
+        onToggleKeyboard={() => showKeyboard(!keyboard)}
       />
     </div>
   );

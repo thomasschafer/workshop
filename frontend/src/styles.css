@@ -1780,6 +1780,42 @@ code {
   flex: 0 1 360px;
 }
 
+/* Zen mode: just the code, with Helix's status line if it's on, and the keyboard. */
+.app.zen > .top,
+.app.zen > .tabs,
+.app.zen > .side,
+.app.zen .status-line {
+  display: none;
+}
+
+.app.split.zen {
+  display: flex;
+}
+
+.app.zen .code-pane {
+  position: relative;
+}
+
+.zen-exit {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.icon-button svg {
+  vertical-align: middle;
+}
+
 /* For screen readers only. */
 .visually-hidden {
   position: absolute;
