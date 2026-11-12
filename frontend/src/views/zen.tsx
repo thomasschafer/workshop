@@ -43,16 +43,34 @@ export function ZenExit({ onExit }: { onExit: () => void }) {
   );
 }
 
+/** Chrome's VirtualKeyboard API, which TypeScript doesn't describe yet. */
+interface VirtualKeyboard {
+  overlaysContent: boolean;
+}
+
+/**
+ * Has the on-screen keyboard cover the page rather than shrink it, so the page can size itself
+ * from `env(keyboard-inset-height)`. Full screen, Chrome on Android has shrunk the page by the
+ * hidden status bar's height as well as the keyboard's, leaving an empty band above the
+ * keyboard. Browsers without the API, such as Safari, shrink the page as usual.
+ */
+function overlayKeyboard(overlay: boolean): void {
+  const keyboard = (navigator as Navigator & { virtualKeyboard?: VirtualKeyboard }).virtualKeyboard;
+  if (keyboard) keyboard.overlaysContent = overlay;
+}
+
 /**
  * Hides the phone's own status and navigation bars, where the browser allows it. iPhones only
  * let video go full screen, so there zen mode keeps them.
  */
 export async function enterFullscreen(): Promise<void> {
+  overlayKeyboard(true);
   const root = document.documentElement;
   if (!document.fullscreenEnabled || typeof root.requestFullscreen !== "function") return;
   await root.requestFullscreen({ navigationUI: "hide" });
 }
 
 export async function exitFullscreen(): Promise<void> {
+  overlayKeyboard(false);
   if (document.fullscreenElement) await document.exitFullscreen();
 }

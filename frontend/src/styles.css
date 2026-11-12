@@ -1796,6 +1796,8 @@ code {
    either side of the camera, so it runs to the top. */
 .app.zen {
   padding-top: 0;
+  /* Where the keyboard covers the page, rather than shrinking it, as zen mode asks. */
+  height: calc(100dvh - env(keyboard-inset-height, 0px));
 }
 
 .app.zen .code-pane {
