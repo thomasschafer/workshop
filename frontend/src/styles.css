@@ -34,6 +34,7 @@
   --key-fg: #111114;
   --key-down: #9a9ca8;
   --key-preview: #ffffff;
+  --key-move: #e4ebfa;
 
   color-scheme: light dark;
 }
@@ -68,6 +69,7 @@
     --key-fg: #ffffff;
     --key-down: #5c5c68;
     --key-preview: #6a6a78;
+    --key-move: #3b4256;
   }
 }
 
@@ -806,6 +808,10 @@ code {
 /* Names such as `esc`, which would be wide at the size of a character. */
 .key-word {
   font-size: 14px;
+}
+
+.key-move {
+  background: var(--key-move);
 }
 
 .key.down {

@@ -116,6 +116,11 @@ export function repeats(def: KeyDef): def is KeyDef & { kind: "char" | "named" }
   return def.kind === "char" || def.kind === "named";
 }
 
+/** Helix's movement keys, tinted so a finger finds its way back to them. */
+export function movesCursor(def: KeyDef): boolean {
+  return def.kind === "char" && "hjkl".includes(def.char);
+}
+
 /** Identifies a key within the layout. */
 export function keyId(def: KeyDef): string {
   return def.kind === "char" ? def.char : def.name;

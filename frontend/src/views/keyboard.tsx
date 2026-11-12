@@ -8,6 +8,7 @@ import {
   LAYOUT,
   labelFor,
   ModifierState,
+  movesCursor,
   REPEAT_DELAY,
   REPEAT_INTERVAL,
   repeats,
@@ -119,7 +120,7 @@ export function Keyboard({ onKey, onLower }: Props) {
               <button
                 type="button"
                 key={id}
-                class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${on ? " on" : ""}${down.has(id) ? " down" : ""}`}
+                class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${movesCursor(def) ? " key-move" : ""}${on ? " on" : ""}${down.has(id) ? " down" : ""}`}
                 style={width ? { flexGrow: width } : undefined}
                 tabIndex={-1}
                 aria-label={def.name}

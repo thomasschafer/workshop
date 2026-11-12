@@ -6,6 +6,7 @@ import {
   labelFor,
   ModifierState,
   type Modifiers,
+  movesCursor,
   NO_MODIFIERS,
 } from "./keyboard";
 
@@ -67,6 +68,18 @@ describe("labelFor", () => {
     expect(labelFor(char("q"), true)).toBe("Q");
     expect(labelFor(char("1"), true)).toBe("!");
     expect(labelFor(named("esc"), true)).toBe("esc");
+  });
+});
+
+describe("movesCursor", () => {
+  it("is h, j, k and l alone", () => {
+    const moving = LAYOUT.flat().filter(movesCursor);
+    expect(moving.map((def) => (def.kind === "char" ? def.char : def.name))).toEqual([
+      "h",
+      "j",
+      "k",
+      "l",
+    ]);
   });
 });
 
