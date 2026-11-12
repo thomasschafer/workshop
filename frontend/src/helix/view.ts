@@ -846,6 +846,17 @@ class StatusPanel {
     this.extra.className = "cm-helix-extra";
     this.status = document.createElement("div");
     this.status.className = "cm-helix-status";
+    // On a touch screen the whole status line is the escape key, so it needn't be hit exactly.
+    // On pressing, which keeps the focus, and with it the keyboard, up; preventing that stops
+    // Safari sending a click.
+    this.status.addEventListener("pointerdown", (e) => {
+      if (!window.matchMedia("(pointer: coarse)").matches) return;
+      e.preventDefault();
+      this.escape();
+    });
+    this.status.addEventListener("mousedown", (e) => {
+      if (window.matchMedia("(pointer: coarse)").matches) e.preventDefault();
+    });
     this.dom.append(this.extra, this.status);
     this.render();
   }
@@ -900,8 +911,8 @@ class StatusPanel {
   }
 
   /**
-   * Escape, for an on-screen keyboard, which has no escape key. Shown on touch screens, and kept
-   * from taking the focus, so the keyboard stays up.
+   * Escape, for an on-screen keyboard, which has no escape key. Shown on touch screens, where
+   * pressing anywhere on the status line presses it, so it shows what that does.
    */
   private escButton(): HTMLElement {
     const button = document.createElement("button");
@@ -909,19 +920,16 @@ class StatusPanel {
     button.className = "cm-helix-esc";
     button.textContent = "esc";
     button.setAttribute("aria-label", "Escape");
-    const pressEscape = () => run(this.helix, this.helix.handler.handle("esc" as Key));
-    // On pressing, which also keeps the focus, and with it the keyboard, as preventing it stops
-    // Safari sending a click.
-    button.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      pressEscape();
-    });
-    button.addEventListener("mousedown", (e) => e.preventDefault());
-    // From a keyboard, which clicks without pressing.
+    // Pressing it is pressing the status line; this is for a keyboard, which clicks without
+    // pressing.
     button.addEventListener("click", (e) => {
-      if (e.detail === 0) pressEscape();
+      if (e.detail === 0) this.escape();
     });
     return button;
+  }
+
+  private escape(): void {
+    run(this.helix, this.helix.handler.handle("esc" as Key));
   }
 }
 
@@ -1120,9 +1128,10 @@ const theme = EditorView.theme({
     borderRadius: "4px",
     touchAction: "manipulation",
   },
-  // On a phone: an escape key, as on-screen keyboards have none, and no key help, which would
-  // take up most of the screen.
+  // On a phone: an escape key, as on-screen keyboards have none, which the whole status line
+  // presses, and no key help, which would take up most of the screen.
   "@media (pointer: coarse)": {
+    ".cm-helix-status": { cursor: "pointer", touchAction: "manipulation" },
     ".cm-helix-esc": { display: "inline-block" },
     ".cm-helix-info-keys": { display: "none" },
     ".cm-helix-info-text, .cm-helix-picker": { maxHeight: "30vh" },

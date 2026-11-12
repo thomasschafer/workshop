@@ -1056,6 +1056,11 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   await expect(mode).toHaveText("NOR");
   await input("insertText", "u");
   await expect.poll(saved).toBe(original);
+  // Anywhere on the status line presses it, such as the mode at the other end.
+  await input("insertText", "i");
+  await expect(mode).toHaveText("INS");
+  await mode.tap();
+  await expect(mode).toHaveText("NOR");
 
   // No help for the keys after `g` covering the code, though what's pending still shows.
   await input("insertText", "g");
