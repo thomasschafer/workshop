@@ -1792,13 +1792,20 @@ code {
   display: flex;
 }
 
+/* Full screen hides the status bar, but its space stays inset for the camera; code can show
+   either side of the camera, so it runs to the top. */
+.app.zen {
+  padding-top: 0;
+}
+
 .app.zen .code-pane {
   position: relative;
 }
 
 .zen-exit {
   position: absolute;
-  top: 6px;
+  /* Below the camera, which sits in the top inset. */
+  top: calc(6px + env(safe-area-inset-top));
   right: 6px;
   z-index: 10;
   width: 36px;
