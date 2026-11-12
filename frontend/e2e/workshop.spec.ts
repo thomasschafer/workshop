@@ -1197,6 +1197,12 @@ test("works on a phone with Helix's keybindings, from Workshop's own keyboard", 
   await expect(keyboard).toBeHidden();
   await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
   await expect(keyboard).toBeVisible();
+  // Elsewhere, such as in the notes, the controls' keyboard button brings it back up, at the code.
+  await phone.getByRole("navigation").getByRole("button", { name: "Notes" }).click();
+  await expect(keyboard).toBeHidden();
+  await phone.getByRole("button", { name: "Type" }).tap();
+  await expect(keyboard).toBeVisible();
+  await expect(phone.locator(".cm-content")).toBeVisible();
   // Lowering it brings the controls back.
   await key("Hide keyboard").tap();
   await expect(keyboard).toBeHidden();

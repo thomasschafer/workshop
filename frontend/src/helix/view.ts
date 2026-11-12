@@ -294,7 +294,7 @@ class HelixView implements PluginValue, Host {
   private readonly panel: StatusPanel;
   readonly documentName: string;
 
-  /** Where an on-screen keyboard types, on a touch screen. */
+  /** Where keyboards other than Workshop's own type, on a touch screen. */
   readonly keyboard: KeyboardField | null;
 
   constructor(
@@ -359,7 +359,7 @@ class HelixView implements PluginValue, Host {
     if (this.keyboard?.focused) this.keyboard.el.blur();
   };
 
-  /** Whether keys come here: to the code, or the field a phone's keyboard types into. */
+  /** Whether keys come here: to the code, or the field keyboards other than Workshop's type into. */
   get focused(): boolean {
     return this.view.hasFocus || (this.keyboard?.focused ?? false);
   }
@@ -1313,7 +1313,7 @@ export function helixKeybindings(config: HelixConfig): Extension {
   ];
 }
 
-/** The field a touch screen's keyboard types into, if Helix's keybindings have one. */
+/** The field keyboards other than Workshop's own type into on a touch screen, if there is one. */
 export function helixKeyboard(view: EditorView): KeyboardField | null {
   const helix = activePlugin ? view.plugin(activePlugin) : null;
   return helix?.keyboard ?? null;

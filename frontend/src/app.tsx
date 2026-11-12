@@ -921,8 +921,9 @@ export function App({ boot }: { boot: Bootstrap }) {
         onUndo={() => editor.current?.undo()}
         onRedo={() => editor.current?.redo()}
         onRun={() => setSheet(sheet === "run" ? null : "run")}
-        keyboard={keyboard}
-        onToggleKeyboard={() => showKeyboard(!keyboard)}
+        // Workshop's own keyboard only shows for the code, so elsewhere the button brings it up.
+        keyboard={ownKeyboard ? keyboardShown : keyboard}
+        onToggleKeyboard={() => showKeyboard(ownKeyboard ? !keyboardShown : !keyboard)}
       />
       {keyboardShown ? (
         <Keyboard

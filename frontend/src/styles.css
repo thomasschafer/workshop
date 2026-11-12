@@ -850,7 +850,7 @@ code {
 }
 
 .keyboard-row-full + .keyboard-row-full {
-  margin-top: calc(13.6 * var(--u));
+  margin-top: calc(11.2 * var(--u));
 }
 
 /* Beneath the keys, as on a phone's keyboard: Helix's status line, and the key to lower it. */
@@ -879,7 +879,7 @@ code {
 
 .key {
   min-width: 0;
-  height: calc(48.6 * var(--u));
+  height: calc(51 * var(--u));
   padding: 0;
   border: none;
   border-radius: 6px;
