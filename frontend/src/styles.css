@@ -741,6 +741,98 @@ code {
   gap: 8px;
 }
 
+/* Workshop's own keyboard, for Helix's keybindings on a touch screen, in the controls' place. */
+
+.keyboard {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 3px calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  /* Fingers on it press keys, rather than scrolling or zooming the page. */
+  touch-action: none;
+}
+
+.keyboard-row {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  max-width: 48rem;
+}
+
+.key {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 0 var(--border);
+  font-family: var(--mono);
+  font-size: 17px;
+  touch-action: none;
+}
+
+.key-named,
+.key-modifier,
+.key-lower {
+  font-size: 12px;
+  letter-spacing: -0.03em;
+  color: var(--muted);
+}
+
+/* Symbols such as ⌫, which are small at the size of a word. */
+.key.key-glyph {
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.key.down {
+  background: var(--selection);
+}
+
+.key.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Above the key under the finger, which the finger hides. */
+.key-preview {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 6px));
+  min-width: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  font-family: var(--mono);
+  font-size: 24px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Sideways, keeping some of the code in view. */
+@media (max-height: 500px) {
+  .keyboard {
+    gap: 4px;
+  }
+
+  .key {
+    height: 32px;
+  }
+}
+
 .buttons {
   display: flex;
   align-items: center;
@@ -1811,6 +1903,23 @@ code {
   position: absolute;
   /* Below the camera, which sits in the top inset. */
   top: calc(6px + env(safe-area-inset-top));
+  right: 6px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+/* Below the way out of zen mode. */
+.zen-keyboard {
+  position: absolute;
+  top: calc(48px + env(safe-area-inset-top));
   right: 6px;
   z-index: 10;
   width: 36px;

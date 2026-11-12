@@ -40,6 +40,7 @@ import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
 import { Header, Tabs } from "./views/header";
 import { Help } from "./views/help";
+import { Keyboard } from "./views/keyboard";
 import { Modal } from "./views/modal";
 import { MissingPackageBanner, OutdatedPackagesBanner } from "./views/packages";
 import { Picker } from "./views/picker";
@@ -49,7 +50,7 @@ import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
 import { Stack } from "./views/stack";
 import { StatusLine } from "./views/status";
-import { enterFullscreen, exitFullscreen, ZenExit } from "./views/zen";
+import { enterFullscreen, exitFullscreen, ZenExit, ZenKeyboardButton } from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
@@ -191,6 +192,10 @@ export function App({ boot }: { boot: Bootstrap }) {
     keybindings === "helix" || (keybindings === "config" && boot.editor.keybindings === "helix");
   const helixOnRef = useRef(helixOn);
   helixOnRef.current = helixOn;
+  // With Helix's keybindings on a touch screen, typing is on Workshop's own keyboard: a laptop's
+  // keys, rather than the phone's.
+  const touchScreen = useMediaQuery("(pointer: coarse)");
+  const ownKeyboard = helixOn && touchScreen;
   const helix = useMemo(() => helixSettings(boot.editor.helix), [boot]);
   // Read through refs, as the editor keeps these for as long as it's open.
   const changeLineWrappingRef = useRef(changeLineWrapping);
@@ -645,7 +650,13 @@ export function App({ boot }: { boot: Bootstrap }) {
   // The picker is the home screen until a puzzle is open, and can be reopened from the header.
   const showPicker = picking || puzzle === null;
   // The talk button's state, and where it's hidden, apply to the Ctrl key just the same.
-  const controlsHidden = showPicker || shownTab === "problem" || zen;
+  // Only for the code, and in place of the controls, which lowering it brings back.
+  const keyboardShown = ownKeyboard && keyboard && shownTab === "code" && !showPicker;
+  const controlsHidden = showPicker || shownTab === "problem" || zen || keyboardShown;
+  // The code gets shorter as the keyboard comes up, which can leave the cursor below it.
+  useEffect(() => {
+    if (keyboardShown) editor.current?.revealCursor();
+  }, [keyboardShown]);
   useTalkKey(dictationMethod !== "keyboard" && !controlsHidden && sheet === null, talk);
 
   const problemView = puzzle ? (
@@ -745,6 +756,9 @@ export function App({ boot }: { boot: Bootstrap }) {
           class={`code-pane ${shownTab === "code" && !showPicker ? "" : "hidden"}`}
         >
           {zen ? <ZenExit onExit={exitZen} /> : null}
+          {zen && ownKeyboard && !keyboard ? (
+            <ZenKeyboardButton onClick={() => showKeyboard(true)} />
+          ) : null}
           <StatusLine
             checks={lsp ? lspStatus : null}
             diagnostics={diagnostics}
@@ -903,6 +917,12 @@ export function App({ boot }: { boot: Bootstrap }) {
         keyboard={keyboard}
         onToggleKeyboard={() => showKeyboard(!keyboard)}
       />
+      {keyboardShown ? (
+        <Keyboard
+          onKey={(key) => editor.current?.pressKey(key)}
+          onLower={() => showKeyboard(false)}
+        />
+      ) : null}
     </div>
   );
 }

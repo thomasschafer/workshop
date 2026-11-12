@@ -2,9 +2,11 @@
 // key presses into Helix commands, draws Helix's cursors, and shows the mode, prompts and help.
 
 import {
+  acceptCompletion,
   autocompletion,
   closeCompletion,
   completionStatus,
+  moveCompletionSelection,
   startCompletion,
 } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
@@ -324,9 +326,9 @@ class HelixView implements PluginValue, Host {
   private destroyed = false;
 
   /**
-   * The field an on-screen keyboard types into, which the code can't be, as the keyboard would
-   * soon have the wrong idea of the code's text. Tapping the code moves the cursor there and
-   * gives the field the focus, which shows the keyboard if Workshop's keyboard button has it on.
+   * The field keyboards other than Workshop's own type into, which the code can't be, as a
+   * phone's keyboard would soon have the wrong idea of the code's text. Tapping the code moves
+   * the cursor there and gives the field the focus, without bringing up the phone's keyboard.
    */
   private createKeyboard(): KeyboardField {
     const field = new KeyboardField({
@@ -575,8 +577,12 @@ class HelixView implements PluginValue, Host {
   };
 
   private readonly onViewportResize = (): void => {
-    if (this.focused) this.scrollToShow(helixCursor(this.view.state), null, false);
+    if (this.focused) this.revealCursor();
   };
+
+  revealCursor(): void {
+    this.scrollToShow(helixCursor(this.view.state), null, false);
+  }
 
   private readonly onKey = (event: KeyboardEvent): void => {
     if (event.defaultPrevented || !this.focused) return;
@@ -908,17 +914,6 @@ class StatusPanel {
     this.extra.className = "cm-helix-extra";
     this.status = document.createElement("div");
     this.status.className = "cm-helix-status";
-    // On a touch screen the whole status line is the escape key, so it needn't be hit exactly.
-    // On pressing, which keeps the focus, and with it the keyboard, up; preventing that stops
-    // Safari sending a click.
-    this.status.addEventListener("pointerdown", (e) => {
-      if (!window.matchMedia("(pointer: coarse)").matches) return;
-      e.preventDefault();
-      this.escape();
-    });
-    this.status.addEventListener("mousedown", (e) => {
-      if (window.matchMedia("(pointer: coarse)").matches) e.preventDefault();
-    });
     this.dom.append(this.extra, this.status);
     this.render();
   }
@@ -946,7 +941,7 @@ class StatusPanel {
         span("cm-helix-prompt-cursor", prompt.input.slice(cursor, cursor + 1) || " "),
         document.createTextNode(prompt.input.slice(cursor + 1)),
       );
-      this.status.append(label, input, this.escButton());
+      this.status.append(label, input);
       return;
     }
     const mode = span(
@@ -968,30 +963,8 @@ class StatusPanel {
         span(message.severity === "error" ? "cm-helix-error" : "cm-helix-message", message.message),
       );
     }
-    parts.push(span("cm-helix-pending", handler.pendingDisplay()), this.escButton());
+    parts.push(span("cm-helix-pending", handler.pendingDisplay()));
     this.status.append(...parts);
-  }
-
-  /**
-   * Escape, for an on-screen keyboard, which has no escape key. Shown on touch screens, where
-   * pressing anywhere on the status line presses it, so it shows what that does.
-   */
-  private escButton(): HTMLElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "cm-helix-esc";
-    button.textContent = "esc";
-    button.setAttribute("aria-label", "Escape");
-    // Pressing it is pressing the status line; this is for a keyboard, which clicks without
-    // pressing.
-    button.addEventListener("click", (e) => {
-      if (e.detail === 0) this.escape();
-    });
-    return button;
-  }
-
-  private escape(): void {
-    run(this.helix, this.helix.handler.handle("esc" as Key));
   }
 }
 
@@ -1084,6 +1057,30 @@ function onKeyDown(event: KeyboardEvent, helix: HelixView): boolean {
   event.preventDefault();
   run(helix, helix.handler.handle(key));
   return true;
+}
+
+/**
+ * A key from Workshop's own keyboard, which has no key events for CodeMirror to see. While the
+ * completion list is open, it takes the keys Helix's own completion menu does.
+ */
+function pressKey(helix: HelixView, key: Key): void {
+  const view = helix.view;
+  if (completionStatus(view.state) === "active" && helix.editor.mode === "insert") {
+    const completion: Record<string, (view: EditorView) => boolean> = {
+      ret: acceptCompletion,
+      tab: moveCompletionSelection(true),
+      "C-n": moveCompletionSelection(true),
+      "S-tab": moveCompletionSelection(false),
+      "C-p": moveCompletionSelection(false),
+    };
+    const command = completion[key];
+    if (command) {
+      command(view);
+      return;
+    }
+    if (key === "esc") closeCompletion(view);
+  }
+  run(helix, helix.handler.handle(key));
 }
 
 function run(helix: HelixView, work: Promise<void>): void {
@@ -1198,28 +1195,8 @@ const theme = EditorView.theme({
     pointerEvents: "none",
     zIndex: "-1",
   },
-  ".cm-helix-esc": {
-    display: "none",
-    marginLeft: "1ch",
-    padding: "0 1.5ch",
-    font: "inherit",
-    color: "var(--fg)",
-    background: "var(--bg)",
-    border: "1px solid var(--border)",
-    borderRadius: "4px",
-    touchAction: "manipulation",
-  },
-  // On a phone: an escape key, as on-screen keyboards have none, which the whole status line
-  // presses, so the line is taller to make an easy target, and no key help, which would take up
-  // most of the screen.
+  // On a phone, no key help, which would take up most of the screen.
   "@media (pointer: coarse)": {
-    ".cm-helix-status": {
-      cursor: "pointer",
-      touchAction: "manipulation",
-      alignItems: "center",
-      minHeight: "2.5em",
-    },
-    ".cm-helix-esc": { display: "inline-block", alignSelf: "stretch" },
     ".cm-helix-info-keys": { display: "none" },
     ".cm-helix-info-text, .cm-helix-picker": { maxHeight: "30vh" },
   },
@@ -1328,6 +1305,19 @@ export function helixKeybindings(config: HelixConfig): Extension {
 export function helixKeyboard(view: EditorView): KeyboardField | null {
   const helix = activePlugin ? view.plugin(activePlugin) : null;
   return helix?.keyboard ?? null;
+}
+
+/** Presses a key from Workshop's own keyboard, if the view has Helix's keybindings. */
+export function pressHelixKey(view: EditorView, key: Key): void {
+  const helix = activePlugin ? view.plugin(activePlugin) : null;
+  if (!helix) throw new Error("a key was pressed for Helix in an editor without its keybindings");
+  pressKey(helix, key);
+}
+
+/** Scrolls Helix's cursor into view, as after the code has been made shorter. */
+export function revealHelixCursor(view: EditorView): void {
+  const helix = activePlugin ? view.plugin(activePlugin) : null;
+  helix?.revealCursor();
 }
 
 /** Keeps the status line clear of what floats over the bottom of the editor. */
