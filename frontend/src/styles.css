@@ -217,6 +217,9 @@ code {
 .editor {
   flex: 1;
   min-height: 0;
+  /* CodeMirror raises its panels, such as Helix's status line, to z-index 300; this keeps them
+     within the editor, under modals and sheets. */
+  isolation: isolate;
 }
 
 .muted {

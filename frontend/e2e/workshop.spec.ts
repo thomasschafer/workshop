@@ -1096,6 +1096,17 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
 
   for (let i = 0; i < 3; i++) await input("insertText", "u");
   await expect.poll(saved).toBe(original);
+
+  // The Run panel covers the status line, which CodeMirror raises above the rest of the code.
+  await phone.getByRole("button", { name: "Run", exact: true }).tap();
+  await expect(phone.getByRole("dialog", { name: "Run" })).toBeVisible();
+  const status = await phone.locator(".cm-helix-status").boundingBox();
+  if (status === null) throw new Error("there's no status line");
+  const covered = await phone.evaluate(
+    ([x, y]) => document.elementFromPoint(x ?? 0, y ?? 0)?.closest(".modal-backdrop") !== null,
+    [status.x + status.width / 2, status.y + status.height / 2],
+  );
+  expect(covered).toBe(true);
   await context.close();
 });
 

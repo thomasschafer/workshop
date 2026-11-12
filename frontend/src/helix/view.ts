@@ -1210,10 +1210,16 @@ const theme = EditorView.theme({
     touchAction: "manipulation",
   },
   // On a phone: an escape key, as on-screen keyboards have none, which the whole status line
-  // presses, and no key help, which would take up most of the screen.
+  // presses, so the line is taller to make an easy target, and no key help, which would take up
+  // most of the screen.
   "@media (pointer: coarse)": {
-    ".cm-helix-status": { cursor: "pointer", touchAction: "manipulation" },
-    ".cm-helix-esc": { display: "inline-block" },
+    ".cm-helix-status": {
+      cursor: "pointer",
+      touchAction: "manipulation",
+      alignItems: "center",
+      minHeight: "2.5em",
+    },
+    ".cm-helix-esc": { display: "inline-block", alignSelf: "stretch" },
     ".cm-helix-info-keys": { display: "none" },
     ".cm-helix-info-text, .cm-helix-picker": { maxHeight: "30vh" },
   },
