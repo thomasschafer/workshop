@@ -922,8 +922,10 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
     await december.locator(".puzzle-button").click();
   }
   // Seven hours to go, stopped there, so the countdown reads the same however slowly the page
-  // got here.
-  await december.clock.pauseAt(new Date("2017-12-03T22:00:00Z"));
+  // got here. Pausing a second short then fast-forwarding fires the countdown's timer, which
+  // jumping doesn't.
+  await december.clock.pauseAt(new Date("2017-12-03T21:59:59Z"));
+  await december.clock.fastForward(1000);
   await expect(december.locator(".countdown")).toContainText("Day 4 unlocks in 7h 00m");
   await expect(december.getByRole("button", { name: "Day 4, not unlocked yet" })).toBeDisabled();
   await expect(december.locator(".star-times")).toContainText("1:02:03");
