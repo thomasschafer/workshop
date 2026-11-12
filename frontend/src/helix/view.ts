@@ -62,6 +62,7 @@ import {
 } from "./editor";
 import { KeyHandler } from "./handler";
 import { helixHistory } from "./history";
+import { KeyboardField } from "./keyboardField";
 import type { KeyTrieNode, Mode } from "./keymap";
 import { type Key, keyChar, keyFromEvent, unparseKey } from "./keys";
 import { LANGUAGES, PLAIN_TEXT } from "./languages";
@@ -291,9 +292,13 @@ class HelixView implements PluginValue, Host {
   private readonly panel: StatusPanel;
   readonly documentName: string;
 
+  /** Where an on-screen keyboard types, on a touch screen. */
+  readonly keyboard: KeyboardField | null;
+
   constructor(
     readonly view: EditorView,
     private readonly config: HelixConfig,
+    touch: boolean,
   ) {
     this.documentName = config.documentName;
     const language = LANGUAGES[config.language] ?? PLAIN_TEXT;
@@ -303,6 +308,7 @@ class HelixView implements PluginValue, Host {
     this.panel = new StatusPanel(this);
     this.decorations = cursorDecorations(view, this.editor);
     this.selections = selectionDecorations(view);
+    this.keyboard = touch ? this.createKeyboard() : null;
     // Capturing, so keys reach Helix before CodeMirror, which holds some back on phones.
     view.dom.addEventListener("keydown", this.onKey, true);
     view.dom.addEventListener("beforeinput", this.onBeforeInput, true);
@@ -316,6 +322,50 @@ class HelixView implements PluginValue, Host {
   }
 
   private destroyed = false;
+
+  /**
+   * The field an on-screen keyboard types into, which the code can't be, as the keyboard would
+   * soon have the wrong idea of the code's text. Tapping the code moves the cursor there and
+   * gives the field the focus, which shows the keyboard if Workshop's keyboard button has it on.
+   */
+  private createKeyboard(): KeyboardField {
+    const field = new KeyboardField({
+      key: (name) => run(this, this.handler.handle(name as Key)),
+      text: (text) => run(this, this.handler.type(text)),
+      paste: (text) => run(this, this.handler.paste(text, pasteImpl)),
+    });
+    this.view.dom.append(field.el);
+    // On the tap's last event, as the ones before it move the focus on.
+    this.view.contentDOM.addEventListener("click", () => field.focus());
+    return field;
+  }
+
+  /** Whether keys come here: to the code, or the field a phone's keyboard types into. */
+  get focused(): boolean {
+    return this.view.hasFocus || (this.keyboard?.focused ?? false);
+  }
+
+  /**
+   * Keeps the keyboard's field at the cursor, where the browser expects the keyboard to be
+   * typing, so it has no reason to scroll to show it.
+   */
+  private placeKeyboard(): void {
+    const field = this.keyboard;
+    if (field === null) return;
+    this.view.requestMeasure({
+      key: field,
+      read: (view) => {
+        const coords = view.coordsAtPos(helixCursor(view.state), 1);
+        const box = view.dom.getBoundingClientRect();
+        return coords ? { left: coords.left - box.left, top: coords.top - box.top } : null;
+      },
+      write: (at) => {
+        if (at === null) return;
+        field.el.style.left = `${at.left}px`;
+        field.el.style.top = `${at.top}px`;
+      },
+    });
+  }
 
   get state(): EditorState {
     return this.view.state;
@@ -340,6 +390,7 @@ class HelixView implements PluginValue, Host {
       this.needsRedraw = false;
       this.decorations = cursorDecorations(update.view, this.editor);
       this.selections = selectionDecorations(update.view);
+      this.placeKeyboard();
     }
     // A tap or a change made elsewhere ends whatever was waiting for a key.
     if (!this.dispatching && update.transactions.some((tr) => tr.isUserEvent("select.pointer"))) {
@@ -450,6 +501,8 @@ class HelixView implements PluginValue, Host {
    * otherwise change the text over Helix's selection rather than at its cursor.
    */
   private readonly onBeforeInput = (event: InputEvent): void => {
+    // The keyboard's field reads its own input.
+    if (this.keyboard && event.target === this.keyboard.el) return;
     // Composing, such as an accented letter or a word on some keyboards, is left to the browser
     // and CodeMirror, and what it makes reaches Helix as a change to the page.
     if (event.isComposing || event.inputType === "insertCompositionText") return;
@@ -514,11 +567,11 @@ class HelixView implements PluginValue, Host {
   };
 
   private readonly onViewportResize = (): void => {
-    if (this.view.hasFocus) this.scrollToShow(helixCursor(this.view.state), null, false);
+    if (this.focused) this.scrollToShow(helixCursor(this.view.state), null, false);
   };
 
   private readonly onKey = (event: KeyboardEvent): void => {
-    if (event.defaultPrevented || !this.view.hasFocus) return;
+    if (event.defaultPrevented || !this.focused) return;
     if (onKeyDown(event, this)) {
       event.stopPropagation();
       this.keyHandledAt = Date.now();
@@ -541,6 +594,7 @@ class HelixView implements PluginValue, Host {
     this.view.dom.removeEventListener("keydown", this.onKey, true);
     this.view.dom.removeEventListener("beforeinput", this.onBeforeInput, true);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
+    this.keyboard?.el.remove();
   }
 
   // ---- Host ----
@@ -1117,6 +1171,25 @@ const theme = EditorView.theme({
     whiteSpace: "pre-wrap",
   },
   ".cm-helix-info-key": { color: "var(--accent)" },
+  // Where a touch screen's keyboard types: at the cursor, unseen, and large enough a font that
+  // Safari doesn't zoom in to it.
+  ".cm-helix-keyboard": {
+    position: "absolute",
+    width: "1px",
+    height: "1em",
+    padding: "0",
+    border: "0",
+    margin: "0",
+    opacity: "0",
+    fontSize: "16px",
+    resize: "none",
+    overflow: "hidden",
+    caretColor: "transparent",
+    color: "transparent",
+    background: "transparent",
+    pointerEvents: "none",
+    zIndex: "-1",
+  },
   ".cm-helix-esc": {
     display: "none",
     marginLeft: "1ch",
@@ -1151,7 +1224,9 @@ let activePlugin: ViewPlugin<HelixView> | null = null;
 
 /** Helix's keybindings, with the editor model and everything shown for them. */
 export function helixKeybindings(config: HelixConfig): Extension {
-  const plugin = ViewPlugin.define((view) => new HelixView(view, config), {
+  // A touch screen's keyboard types into a field of Helix's own, and not into the code.
+  const touch = window.matchMedia("(pointer: coarse)").matches;
+  const plugin = ViewPlugin.define((view) => new HelixView(view, config, touch), {
     decorations: (v) => v.decorations,
   });
   activePlugin = plugin;
@@ -1165,6 +1240,7 @@ export function helixKeybindings(config: HelixConfig): Extension {
     EditorState.allowMultipleSelections.of(true),
     helixHistory(),
     insertSelectionField,
+    touch ? EditorView.editable.of(false) : [],
     plugin,
     // Outside the cursors' marks, so a cursor shows over the selection it's in.
     Prec.high(
@@ -1232,6 +1308,12 @@ export function helixKeybindings(config: HelixConfig): Extension {
       : [],
     theme,
   ];
+}
+
+/** The field a touch screen's keyboard types into, if Helix's keybindings have one. */
+export function helixKeyboard(view: EditorView): KeyboardField | null {
+  const helix = activePlugin ? view.plugin(activePlugin) : null;
+  return helix?.keyboard ?? null;
 }
 
 /** Keeps the status line clear of what floats over the bottom of the editor. */

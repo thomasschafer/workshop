@@ -1028,11 +1028,14 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   const line = await phone.locator(".cm-line").nth(3).boundingBox();
   if (line === null) throw new Error("the code has no fourth line");
   await phone.touchscreen.tap(line.x + 30, line.y + line.height / 2);
+  // The keyboard types into a field of Helix's own, which tapping the code focuses.
+  const field = phone.locator(".cm-helix-keyboard");
+  await expect(field).toBeFocused();
   await expect.poll(() => scroller.evaluate((s) => s.scrollLeft)).toBe(0);
 
   // What an on-screen keyboard sends: input rather than key presses.
   const input = (inputType: string, data: string | null = null) =>
-    code.evaluate(
+    field.evaluate(
       (el, [type, text]) =>
         el.dispatchEvent(
           new InputEvent("beforeinput", {
@@ -1114,12 +1117,12 @@ test("types and deletes in Helix's insert mode however a phone's keyboard sends 
   const original = saved();
   const [first = "", second = ""] = original.split("\n");
   const firstLines = () => saved().split("\n").slice(0, 2);
-  await code.focus();
-  await expect(code).toBeFocused();
+  const field = phone.locator(".cm-helix-keyboard");
+  await field.focus();
 
   /** Input an on-screen keyboard sends, which Helix can take instead of the browser. */
   const input = (inputType: string, data: string | null = null, cancelable = true) =>
-    code.evaluate(
+    field.evaluate(
       (el, [type, text, canCancel]) =>
         el.dispatchEvent(
           new InputEvent("beforeinput", {
@@ -1131,20 +1134,26 @@ test("types and deletes in Helix's insert mode however a phone's keyboard sends 
         ),
       [inputType, data, cancelable] as const,
     );
-  /** An edit the keyboard makes to the page itself, at the caret, as Helix can't stop. */
-  const pageEdit = (deleteBefore: number, insert: string) =>
-    code.evaluate(
-      (_el, [count, text]) => {
-        const sel = window.getSelection();
-        if (!sel?.focusNode) throw new Error("there's no caret");
-        sel.collapse(sel.focusNode, sel.focusOffset);
-        for (let i = 0; i < (count as number); i++) sel.modify("extend", "backward", "character");
-        const range = sel.getRangeAt(0);
-        range.deleteContents();
-        if (text) range.insertNode(document.createTextNode(text as string));
+  /**
+   * The field as the keyboard leaves it after an edit Helix couldn't stop, given what it holds
+   * after the character always in it.
+   */
+  const fieldEdit = (value: string, composing = false) =>
+    field.evaluate(
+      (el, [text, isComposing]) => {
+        const area = el as HTMLTextAreaElement;
+        area.value = text as string;
+        area.dispatchEvent(
+          new InputEvent("input", { bubbles: true, isComposing: isComposing as boolean }),
+        );
       },
-      [deleteBefore, insert] as const,
+      [value, composing] as const,
     );
+  const compositionStart = () =>
+    field.evaluate((el) =>
+      el.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })),
+    );
+  const SENTINEL = "\u200b";
   const mode = phone.locator(".cm-helix-mode");
   const pressEscape = () => phone.getByRole("button", { name: "Escape" }).tap();
 
@@ -1177,14 +1186,14 @@ test("types and deletes in Helix's insert mode however a phone's keyboard sends 
     );
   });
   await expect.poll(firstLines).toEqual([first, second]);
-  // Changes the keyboard makes to the page itself happen at the cursor: typing, and backspacing
-  // what's before it rather than deleting what's after.
-  await pageEdit(0, "xyz");
+  // Edits the keyboard makes to its field that Helix can't stop: typing, and Backspace, which
+  // deletes the character the field always holds.
+  await fieldEdit(`${SENTINEL}xyz`);
   await expect.poll(firstLines).toEqual([`xyz${first}`, second]);
   await input("deleteContentBackward", null, false);
-  await pageEdit(1, "");
+  await fieldEdit("");
   await expect.poll(firstLines).toEqual([`xy${first}`, second]);
-  await pageEdit(1, "");
+  await fieldEdit("");
   await expect.poll(firstLines).toEqual([`x${first}`, second]);
   // Enter, and deleting a word.
   await input("insertParagraph");
@@ -1206,7 +1215,25 @@ test("types and deletes in Helix's insert mode however a phone's keyboard sends 
   await pressEscape();
   await expect.poll(() => saved().split("\n").slice(0, 3)).toEqual(["x", `foo ${first}!`, "z"]);
 
-  for (let i = 0; i < 4; i++) await input("insertText", "u");
+  // A keyboard that composes words, as Gboard does, sends each letter as it's added, so normal
+  // mode's keys work as they're pressed. Here `mi(` selects inside `part1(...)`, with "mi"
+  // composed as a word, and the bracket ending it.
+  await input("insertText", "/data:");
+  await input("insertParagraph");
+  await compositionStart();
+  await fieldEdit(`${SENTINEL}m`, true);
+  await fieldEdit(`${SENTINEL}mi`, true);
+  // Then, as Safari does, one more input event at once, with the field as it was.
+  await field.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent("compositionend", { data: "mi", bubbles: true }));
+    el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  });
+  await input("insertText", "(");
+  await input("insertText", "cx");
+  await pressEscape();
+  await expect.poll(saved).toContain("def part1(x) -> int:");
+
+  for (let i = 0; i < 5; i++) await input("insertText", "u");
   await expect.poll(saved).toBe(original);
   await context.close();
 });

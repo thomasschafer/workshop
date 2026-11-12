@@ -53,6 +53,7 @@ import {
   type HelixActions,
   helixCursor,
   helixKeybindings,
+  helixKeyboard,
   helixMode,
   relativeLineNumbers,
   setHelixBottomInset,
@@ -262,15 +263,23 @@ export class CodeEditor {
 
   /** Shows the on-screen keyboard for typing, or hides it so taps only move the cursor. */
   setKeyboard(enabled: boolean): void {
+    this.keyboardOn = enabled;
     this.view.dispatch({
       effects: this.inputMode.reconfigure(
         EditorView.contentAttributes.of({ inputmode: enabled ? "text" : "none" }),
       ),
     });
+    // With Helix's keybindings on a touch screen, the keyboard types into a field of their own.
+    const field = helixKeyboard(this.view);
+    field?.setKeyboard(enabled);
     if (enabled) {
-      this.view.focus();
+      if (field) field.focus();
+      else this.view.focus();
     }
   }
+
+  /** Whether the on-screen keyboard is wanted, which Helix's keyboard field follows. */
+  private keyboardOn = false;
 
   /**
    * Keeps the bottom `px` of the editor clear, for things floating over it, so the end of the
@@ -308,6 +317,7 @@ export class CodeEditor {
       ],
     });
     this.applyInset();
+    helixKeyboard(this.view)?.setKeyboard(this.keyboardOn);
   }
 
   private keysFor(helix: HelixSetup | null): Extension {
