@@ -1084,3 +1084,124 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   await expect.poll(saved).toBe(original);
   await context.close();
 });
+
+test("types and deletes in Helix's insert mode however a phone's keyboard sends it", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${PORT}`,
+  });
+  const phone = await context.newPage();
+  await phone.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await phone.goto(`/?token=${token}`);
+  const picker = phone.locator(".picker");
+  await expect(picker.or(phone.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
+  if (!(await picker.isVisible())) await phone.locator(".puzzle-button").click();
+  await phone.getByRole("button", { name: "2017", exact: true }).click();
+  await expect(picker).toContainText("5 stars in 2017");
+  await phone.locator(".day", { hasText: /^4$/ }).click();
+  await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
+  const code = phone.locator(".cm-content");
+  await expect(code).toContainText("def part1");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const [first = "", second = ""] = original.split("\n");
+  const firstLines = () => saved().split("\n").slice(0, 2);
+  await code.focus();
+  await expect(code).toBeFocused();
+
+  /** Input an on-screen keyboard sends, which Helix can take instead of the browser. */
+  const input = (inputType: string, data: string | null = null, cancelable = true) =>
+    code.evaluate(
+      (el, [type, text, canCancel]) =>
+        el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: type as string,
+            data: text as string | null,
+            bubbles: true,
+            cancelable: canCancel as boolean,
+          }),
+        ),
+      [inputType, data, cancelable] as const,
+    );
+  /** An edit the keyboard makes to the page itself, at the caret, as Helix can't stop. */
+  const pageEdit = (deleteBefore: number, insert: string) =>
+    code.evaluate(
+      (_el, [count, text]) => {
+        const sel = window.getSelection();
+        if (!sel?.focusNode) throw new Error("there's no caret");
+        sel.collapse(sel.focusNode, sel.focusOffset);
+        for (let i = 0; i < (count as number); i++) sel.modify("extend", "backward", "character");
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        if (text) range.insertNode(document.createTextNode(text as string));
+      },
+      [deleteBefore, insert] as const,
+    );
+  const mode = phone.locator(".cm-helix-mode");
+  const pressEscape = () => phone.getByRole("button", { name: "Escape" }).tap();
+
+  for (const key of ["g", "g", "i"]) await input("insertText", key);
+  await expect(mode).toHaveText("INS");
+  // Typed, then backspaced, as input events.
+  await input("insertText", "abcd");
+  await input("deleteContentBackward");
+  await input("deleteContentBackward");
+  await expect.poll(firstLines).toEqual([`ab${first}`, second]);
+  // As key presses.
+  await phone.keyboard.press("Backspace");
+  await expect.poll(firstLines).toEqual([`a${first}`, second]);
+  // A key press the browser also carries out, as an iPhone can for Backspace, counts once.
+  await code.evaluate((el) => {
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Backspace",
+        code: "Backspace",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    el.dispatchEvent(
+      new InputEvent("beforeinput", {
+        inputType: "deleteContentBackward",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect.poll(firstLines).toEqual([first, second]);
+  // Changes the keyboard makes to the page itself happen at the cursor: typing, and backspacing
+  // what's before it rather than deleting what's after.
+  await pageEdit(0, "xyz");
+  await expect.poll(firstLines).toEqual([`xyz${first}`, second]);
+  await input("deleteContentBackward", null, false);
+  await pageEdit(1, "");
+  await expect.poll(firstLines).toEqual([`xy${first}`, second]);
+  await pageEdit(1, "");
+  await expect.poll(firstLines).toEqual([`x${first}`, second]);
+  // Enter, and deleting a word.
+  await input("insertParagraph");
+  await expect.poll(firstLines).toEqual(["x", first]);
+  await input("insertText", "foo bar");
+  await input("deleteWordBackward");
+  await expect.poll(firstLines).toEqual(["x", `foo ${first}`]);
+  await pressEscape();
+  await expect(mode).toHaveText("NOR");
+  // Appending, and opening a line below, then backspacing there.
+  await input("insertText", "A");
+  await expect(mode).toHaveText("INS");
+  await input("insertText", "!!");
+  await input("deleteContentBackward");
+  await pressEscape();
+  await input("insertText", "o");
+  await input("insertText", "zz");
+  await input("deleteContentBackward");
+  await pressEscape();
+  await expect.poll(() => saved().split("\n").slice(0, 3)).toEqual(["x", `foo ${first}!`, "z"]);
+
+  for (let i = 0; i < 4; i++) await input("insertText", "u");
+  await expect.poll(saved).toBe(original);
+  await context.close();
+});

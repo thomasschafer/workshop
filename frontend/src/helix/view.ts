@@ -53,7 +53,9 @@ import {
   type HelixOptions,
   type Host,
   type HostAction,
+  helixSelection,
   type Info,
+  insertSelectionField,
   isHelixTransaction,
   type ScrollRequest,
   toEditorSelection,
@@ -65,7 +67,7 @@ import { type Key, keyChar, keyFromEvent, unparseKey } from "./keys";
 import { LANGUAGES, PLAIN_TEXT } from "./languages";
 import { pickerMatches } from "./picker";
 import { Selection } from "./selection";
-import { Doc, nextGraphemeBoundary } from "./text";
+import { Doc, graphemes, nextGraphemeBoundary } from "./text";
 
 /** What Workshop does for Helix's commands that reach beyond the editor. */
 export interface HelixActions {
@@ -105,7 +107,7 @@ export function helixMode(state: EditorState): Mode | null {
 
 /** Where Helix's primary cursor is: the left side of its block. */
 export function helixCursor(state: EditorState): number {
-  return fromEditorSelection(state.selection).primary.cursor(new Doc(state.doc));
+  return helixSelection(state).primary.cursor(new Doc(state.doc));
 }
 
 /**
@@ -114,6 +116,8 @@ export function helixCursor(state: EditorState): number {
  */
 const keepSelectionsWide = EditorState.transactionFilter.of((tr) => {
   if (isHelixTransaction(tr) || (!tr.selection && !tr.docChanged)) return tr;
+  // In insert mode, CodeMirror's selection is just the cursors.
+  if (tr.startState.field(insertSelectionField, false)) return tr;
   const doc = new Doc(tr.newDoc);
   const selection = fromEditorSelection(tr.newSelection);
   const wide = selection.ensureInvariants(doc);
@@ -165,7 +169,7 @@ class JumpLabel extends WidgetType {
 function selectionDecorations(view: EditorView): DecorationSet {
   const state = view.state;
   const doc = new Doc(state.doc);
-  const selection = fromEditorSelection(state.selection);
+  const selection = helixSelection(state);
   const decorations: Range<Decoration>[] = [];
   const mark = Decoration.mark({ class: "cm-helix-selection" });
   const lineEnd = Decoration.widget({ widget: new EndCursor("cm-helix-selection"), side: 1 });
@@ -196,7 +200,7 @@ function cursorDecorations(view: EditorView, editor: HelixEditor): DecorationSet
   const shape = editor.options.cursorShape[mode];
   const builder: { from: number; to: number; deco: Decoration }[] = [];
   if (shape !== "hidden") {
-    const selection = fromEditorSelection(state.selection);
+    const selection = helixSelection(state);
     selection.ranges.forEach((range, i) => {
       const primary = i === selection.primaryIndex;
       const className = `cm-helix-cursor cm-helix-cursor-${shape}${primary ? " cm-helix-cursor-primary" : ""}`;
@@ -446,7 +450,18 @@ class HelixView implements PluginValue, Host {
    * otherwise change the text over Helix's selection rather than at its cursor.
    */
   private readonly onBeforeInput = (event: InputEvent): void => {
-    if (!event.cancelable || event.isComposing) return;
+    // Composing, such as an accented letter or a word on some keyboards, is left to the browser
+    // and CodeMirror, and what it makes reaches Helix as a change to the page.
+    if (event.isComposing || event.inputType === "insertCompositionText") return;
+    // CodeMirror reads some of these as key presses still to come on phones, which would repeat
+    // what Helix does with them.
+    event.stopPropagation();
+    // What can't be stopped changes the page, which also reaches Helix as a change to the page.
+    if (!event.cancelable) return;
+    if (this.echoesHandledKey()) {
+      event.preventDefault();
+      return;
+    }
     let work: Promise<void> | null = null;
     switch (event.inputType) {
       case "insertText":
@@ -477,11 +492,24 @@ class HelixView implements PluginValue, Host {
       case "deleteHardLineForward":
         work = this.editor.mode === "insert" ? this.handler.handle("C-k" as Key) : null;
         break;
+      case "historyUndo":
+      case "historyRedo":
+        // The browser's own history doesn't know Helix's changes.
+        work = null;
+        break;
       default:
-        return;
+        if (event.inputType.startsWith("insertFrom")) {
+          // Dropped or pasted text goes in as Helix pastes, rather than running as keys.
+          const text = event.dataTransfer?.getData("text/plain") ?? event.data;
+          if (text) work = this.handler.paste(text, pasteImpl);
+        } else if (event.inputType.startsWith("format")) {
+          // Code has no bold or italics.
+          work = null;
+        } else {
+          return;
+        }
     }
     event.preventDefault();
-    event.stopPropagation();
     if (work) run(this, work);
   };
 
@@ -491,8 +519,22 @@ class HelixView implements PluginValue, Host {
 
   private readonly onKey = (event: KeyboardEvent): void => {
     if (event.defaultPrevented || !this.view.hasFocus) return;
-    if (onKeyDown(event, this)) event.stopPropagation();
+    if (onKeyDown(event, this)) {
+      event.stopPropagation();
+      this.keyHandledAt = Date.now();
+    }
   };
+
+  /**
+   * When Helix last took a key press. Some on-screen keyboards, such as an iPhone's for Backspace,
+   * carry on with a key Helix has taken, and edit the page too, which mustn't count again.
+   */
+  private keyHandledAt = 0;
+
+  /** Whether input now comes from a key Helix has just taken. */
+  echoesHandledKey(): boolean {
+    return Date.now() - this.keyHandledAt < 50;
+  }
 
   destroy(): void {
     this.destroyed = true;
@@ -1113,6 +1155,7 @@ export function helixKeybindings(config: HelixConfig): Extension {
     keepSelectionsWide,
     EditorState.allowMultipleSelections.of(true),
     helixHistory(),
+    insertSelectionField,
     plugin,
     // Outside the cursors' marks, so a cursor shows over the selection it's in.
     Prec.high(
@@ -1144,9 +1187,18 @@ export function helixKeybindings(config: HelixConfig): Extension {
       withHelix(
         view,
         (helix) => {
+          if (helix.echoesHandledKey()) return true;
           let work = Promise.resolve();
           if (helix.editor.mode === "insert") {
-            for (let i = from; i < to; i++) work = helix.handler.handle("backspace" as Key);
+            // In insert mode the page's caret is at Helix's cursor, so what went before it was
+            // backspaced, and what went after it deleted forwards.
+            const cursor = helixCursor(view.state);
+            const before = graphemes(
+              view.state.sliceDoc(from, Math.max(from, Math.min(to, cursor))),
+            );
+            const after = graphemes(view.state.sliceDoc(Math.min(to, Math.max(from, cursor)), to));
+            for (const _ of before) work = helix.handler.handle("backspace" as Key);
+            for (const _ of after) work = helix.handler.handle("del" as Key);
           }
           if (text !== "") work = helix.handler.type(text);
           run(helix, work);

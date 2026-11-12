@@ -10,6 +10,8 @@ import {
   ChangeSet,
   EditorSelection,
   type EditorState,
+  StateEffect,
+  StateField,
   Transaction,
   type TransactionSpec,
 } from "@codemirror/state";
@@ -532,7 +534,7 @@ export class HelixEditor {
   }
 
   get selection(): Selection {
-    return fromEditorSelection(this.host.state.selection);
+    return helixSelection(this.host.state);
   }
 
   get tabWidth(): number {
@@ -561,7 +563,7 @@ export class HelixEditor {
     const fixed = selection.ensureInvariants(doc);
     if (fixed.equals(this.selection) && sameGoals(fixed, this.selection)) return;
     this.host.dispatch({
-      selection: toEditorSelection(fixed),
+      ...this.selectionSpec(fixed, this.mode),
       userEvent: HELIX_SELECT_EVENT,
       // Moving the selection is no undo step of its own, and mustn't split the one it's in, as
       // a key bound to several commands is one step.
@@ -591,7 +593,7 @@ export class HelixEditor {
     if (this.mode === "insert") this.insertChanges.push(normalized);
     this.host.dispatch({
       changes: changeSet,
-      selection: toEditorSelection(mapped),
+      ...this.selectionSpec(mapped, this.mode, newDoc),
       userEvent: HELIX_CHANGE_EVENT,
       annotations: helixUndoGroup.of(this.undoGroup),
     });
@@ -634,8 +636,38 @@ export class HelixEditor {
 
   setMode(mode: Mode): void {
     if (this.mode === mode) return;
+    const wasInsert = this.mode === "insert";
+    const selection = this.selection;
     this.mode = mode;
+    // Insert mode keeps CodeMirror's selection collapsed to the cursors, so it's back to Helix's
+    // own ranges on leaving it.
+    if (wasInsert !== (mode === "insert")) {
+      this.host.dispatch({
+        ...this.selectionSpec(selection, mode),
+        userEvent: HELIX_SELECT_EVENT,
+        annotations: Transaction.addToHistory.of(false),
+      });
+    }
     this.onChange();
+  }
+
+  /**
+   * How CodeMirror holds `selection` in `mode`. In insert mode its selection is just the cursors,
+   * where the browser, and a phone's keyboard in particular, then makes any change of its own,
+   * as typing goes at Helix's cursors; Helix's ranges are kept beside it.
+   */
+  private selectionSpec(
+    selection: Selection,
+    mode: Mode,
+    doc: Doc = this.doc,
+  ): Pick<TransactionSpec, "selection" | "effects"> {
+    if (mode !== "insert") {
+      return { selection: toEditorSelection(selection), effects: setInsertSelection.of(null) };
+    }
+    return {
+      selection: toEditorSelection(selection.cursors(doc)),
+      effects: setInsertSelection.of(selection),
+    };
   }
 
   enterInsertMode(): void {
@@ -738,6 +770,39 @@ function indentLevelForLine(doc: Doc, line: number, tabWidth: number, width: num
 
 function sameGoals(a: Selection, b: Selection): boolean {
   return a.ranges.every((r, i) => r.goalColumn === b.ranges[i]?.goalColumn);
+}
+
+const setInsertSelection = StateEffect.define<Selection | null>();
+
+/** The changes in a CodeMirror change set, as Helix's commands describe changes. */
+function changesOf(tr: Transaction): Change[] {
+  const out: Change[] = [];
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    out.push({ from: fromA, to: toA, insert: inserted.toString() });
+  });
+  return out;
+}
+
+/**
+ * Helix's selection while in insert mode, when CodeMirror's is collapsed to its cursors. Follows
+ * changes made other than by Helix's commands, as Helix maps selections, and taps, which put a
+ * cursor where they are.
+ */
+export const insertSelectionField = StateField.define<Selection | null>({
+  create: () => null,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setInsertSelection)) return e.value;
+    if (value === null || isHelixTransaction(tr)) return value;
+    const doc = new Doc(tr.newDoc);
+    if (tr.selection) return fromEditorSelection(tr.newSelection).ensureInvariants(doc);
+    if (!tr.docChanged) return value;
+    return mapSelection(changesOf(tr), value).ensureInvariants(doc);
+  },
+});
+
+/** Helix's selection in a state, wherever it's kept. */
+export function helixSelection(state: EditorState): Selection {
+  return state.field(insertSelectionField, false) ?? fromEditorSelection(state.selection);
 }
 
 export function fromEditorSelection(selection: EditorSelection): Selection {
