@@ -60,6 +60,7 @@ import {
   relativeLineNumbers,
   revealHelixCursor,
   setHelixBottomInset,
+  setHelixStatusHost,
 } from "./helix/view";
 import { quietMessage, withoutPullDiagnostics } from "./lsp";
 
@@ -285,6 +286,11 @@ export class CodeEditor {
   /** Presses a key on Workshop's own keyboard, which only Helix's keybindings have. */
   pressKey(key: Key): void {
     pressHelixKey(this.view, key);
+  }
+
+  /** Shows Helix's status line in `host`, beneath Workshop's own keyboard, or under the code. */
+  setStatusHost(host: HTMLElement | null): void {
+    setHelixStatusHost(this.view, host);
   }
 
   /** Scrolls Helix's cursor into view, as after the editor has been made shorter. */

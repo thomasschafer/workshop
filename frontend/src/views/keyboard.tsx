@@ -17,6 +17,8 @@ import {
 interface Props {
   onKey: (key: Key) => void;
   onLower: () => void;
+  /** Takes the element beneath the keys, where the editor's status line shows. */
+  statusHost: (el: HTMLElement | null) => void;
 }
 
 /** The character a key under a finger types, shown above it, where the finger doesn't hide it. */
@@ -32,7 +34,7 @@ interface Preview {
  * Workshop's own keyboard, in place of the phone's, for Helix's keybindings. Keys are pressed as
  * a finger comes down, and repeat while held. Pressing keeps the focus where it is.
  */
-export function Keyboard({ onKey, onLower }: Props) {
+export function Keyboard({ onKey, onLower, statusHost }: Props) {
   const modifiers = useRef(new ModifierState());
   const [mods, setMods] = useState(modifiers.current.current);
   const [down, setDown] = useState<ReadonlySet<string>>(new Set());
@@ -143,6 +145,7 @@ export function Keyboard({ onKey, onLower }: Props) {
           })}
         </div>
       ))}
+      <div class="keyboard-status" ref={statusHost} />
       {preview ? (
         <div
           class="key-preview"

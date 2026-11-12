@@ -758,6 +758,59 @@ code {
   gap: 8px;
 }
 
+/* Helix's status line, under the code or beneath Workshop's own keyboard. */
+
+.cm-helix-status {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+  padding: 2px 1ch;
+  min-height: 1.5em;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.cm-helix-mode {
+  font-weight: bold;
+  padding: 0 1ch;
+}
+
+.cm-helix-mode.cm-helix-color-modes {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+.cm-helix-mode-insert.cm-helix-color-modes {
+  background: var(--syntax-string);
+}
+
+.cm-helix-mode-select.cm-helix-color-modes {
+  background: var(--syntax-number);
+}
+
+.cm-helix-pending {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.cm-helix-recording,
+.cm-helix-selections {
+  color: var(--muted);
+}
+
+.cm-helix-error {
+  color: var(--error);
+}
+
+.cm-helix-message {
+  color: var(--fg);
+}
+
+.cm-helix-prompt-cursor {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
 /* Workshop's own keyboard, for Helix's keybindings on a touch screen, in the controls' place. */
 
 .keyboard {
@@ -767,8 +820,7 @@ code {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  /* Clear of the bottom edge, where the phone's gesture bar is, even full screen without it. */
-  padding: 8px 4px calc(20px + env(safe-area-inset-bottom));
+  padding: 8px 4px env(safe-area-inset-bottom);
   background: var(--key-tray);
   user-select: none;
   -webkit-user-select: none;
@@ -782,6 +834,25 @@ code {
   gap: 5px;
   width: 100%;
   max-width: 48rem;
+}
+
+/* Helix's status line, in the space a phone's keyboard leaves beneath its keys, clear of the
+   gesture bar even full screen without it. */
+.keyboard-status {
+  width: 100%;
+  max-width: 48rem;
+  min-height: 40px;
+  padding-bottom: 8px;
+  display: flex;
+  align-items: center;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: calc(var(--code-size) * 0.85);
+}
+
+.keyboard-status .cm-helix-status {
+  flex: 1;
+  min-width: 0;
 }
 
 .key {

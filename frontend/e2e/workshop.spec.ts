@@ -1091,6 +1091,9 @@ test("works on a phone with Helix's keybindings, from Workshop's own keyboard", 
   await expect(keyboard).toBeVisible();
   await expect(controls).toBeHidden();
   await expect(field).toHaveAttribute("inputmode", "none");
+  // Helix's status line moves beneath the keys, into the space a phone's keyboard leaves there.
+  await expect(keyboard.locator(".cm-helix-mode")).toHaveText("NOR");
+  await expect(phone.locator(".cm-helix-status")).toHaveCount(1);
 
   const key = (name: string) => keyboard.getByRole("button", { name, exact: true });
   /** Types characters on the keyboard, tapping shift first for those it makes. */
@@ -1198,6 +1201,7 @@ test("works on a phone with Helix's keybindings, from Workshop's own keyboard", 
   await key("Hide keyboard").tap();
   await expect(keyboard).toBeHidden();
   await expect(controls).toBeVisible();
+  await expect(phone.locator(".cm-editor .cm-helix-mode")).toHaveText("NOR");
 
   // The Run panel covers the status line, which CodeMirror raises above the rest of the code.
   await phone.getByRole("button", { name: "Run", exact: true }).tap();

@@ -614,6 +614,7 @@ class HelixView implements PluginValue, Host {
 
   destroy(): void {
     this.destroyed = true;
+    this.panel.destroy();
     this.view.dom.removeEventListener("keydown", this.onKey, true);
     this.view.dom.removeEventListener("beforeinput", this.onBeforeInput, true);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
@@ -925,8 +926,23 @@ class StatusPanel {
     this.extra.className = "cm-helix-extra";
     this.status = document.createElement("div");
     this.status.className = "cm-helix-status";
-    this.dom.append(this.extra, this.status);
+    this.dom.append(this.extra);
+    this.place(statusHosts.get(helix.view) ?? null);
     this.render();
+  }
+
+  /**
+   * Shows the status line in `host`, such as beneath Workshop's own keyboard, or under the code
+   * for null. It's styled from the page's styles rather than the editor's theme, so it looks the
+   * same in either place.
+   */
+  place(host: HTMLElement | null): void {
+    if (host === null) this.dom.append(this.status);
+    else host.replaceChildren(this.status);
+  }
+
+  destroy(): void {
+    this.status.remove();
   }
 
   render(): void {
@@ -1102,6 +1118,9 @@ function run(helix: HelixView, work: Promise<void>): void {
   });
 }
 
+/** Where each view's status line shows, if not under the code, for its plugin when it's made. */
+const statusHosts = new WeakMap<EditorView, HTMLElement | null>();
+
 /** The status line's element for each view, which exists before the plugin that fills it does. */
 const panels = new WeakMap<EditorView, HTMLElement>();
 
@@ -1154,24 +1173,6 @@ const theme = EditorView.theme({
     background: "var(--surface)",
     borderTop: "1px solid var(--border)",
   },
-  ".cm-helix-status": {
-    display: "flex",
-    gap: "1ch",
-    alignItems: "baseline",
-    padding: "2px 1ch",
-    minHeight: "1.5em",
-    whiteSpace: "pre",
-    overflow: "hidden",
-  },
-  ".cm-helix-mode": { fontWeight: "bold", padding: "0 1ch" },
-  ".cm-helix-mode.cm-helix-color-modes": { color: "var(--accent-fg)", background: "var(--accent)" },
-  ".cm-helix-mode-insert.cm-helix-color-modes": { background: "var(--syntax-string)" },
-  ".cm-helix-mode-select.cm-helix-color-modes": { background: "var(--syntax-number)" },
-  ".cm-helix-pending": { marginLeft: "auto", color: "var(--muted)" },
-  ".cm-helix-recording, .cm-helix-selections": { color: "var(--muted)" },
-  ".cm-helix-error": { color: "var(--error)" },
-  ".cm-helix-message": { color: "var(--fg)" },
-  ".cm-helix-prompt-cursor": { background: "var(--accent)", color: "var(--accent-fg)" },
   ".cm-helix-extra:empty": { display: "none" },
   ".cm-helix-info, .cm-helix-picker": {
     padding: "4px 1ch",
@@ -1329,6 +1330,13 @@ export function pressHelixKey(view: EditorView, key: Key): void {
 export function revealHelixCursor(view: EditorView): void {
   const helix = activePlugin ? view.plugin(activePlugin) : null;
   helix?.revealCursor();
+}
+
+/** Shows the status line in `host`, such as beneath Workshop's own keyboard, or under the code. */
+export function setHelixStatusHost(view: EditorView, host: HTMLElement | null): void {
+  statusHosts.set(view, host);
+  const helix = activePlugin ? view.plugin(activePlugin) : null;
+  helix?.panelDom.place(host);
 }
 
 /** Keeps the status line clear of what floats over the bottom of the editor. */

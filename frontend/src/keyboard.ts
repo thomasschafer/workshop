@@ -18,9 +18,15 @@ const chars = (s: string): KeyDef[] => [...s].map((char) => ({ kind: "char", cha
 
 /**
  * The keys, row by row, ten to a row as on a phone's keyboard: a US laptop's, with those at its
- * edges moved to the bottom two rows, so the letters sit higher, nearer the thumbs.
+ * edges moved to a row along the top and to the bottom row.
  */
 export const LAYOUT: readonly (readonly KeyDef[])[] = [
+  [
+    { kind: "named", key: "esc", label: "esc", name: "Escape" },
+    { kind: "named", key: "tab", label: "tab", name: "Tab" },
+    ...chars("`-=[]\\'"),
+    { kind: "lower", label: "▾", name: "Hide keyboard" },
+  ],
   chars("1234567890"),
   chars("qwertyuiop"),
   chars("asdfghjkl;"),
@@ -36,12 +42,6 @@ export const LAYOUT: readonly (readonly KeyDef[])[] = [
     { kind: "char", char: " ", label: "space", name: "Space", width: 3.5 },
     ...chars("./"),
     { kind: "named", key: "ret", label: "⏎", name: "Enter", width: 1.5 },
-  ],
-  [
-    { kind: "named", key: "esc", label: "esc", name: "Escape" },
-    { kind: "named", key: "tab", label: "tab", name: "Tab" },
-    ...chars("`-=[]\\'"),
-    { kind: "lower", label: "▾", name: "Hide keyboard" },
   ],
 ];
 

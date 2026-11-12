@@ -111,6 +111,12 @@ export function App({ boot }: { boot: Bootstrap }) {
   // Utterances spoken while a puzzle's editor is still loading wait for it.
   const editorWaiters = useRef<((editor: CodeEditor) => void)[]>([]);
   const stackHeightRef = useRef(0);
+  // Where Helix's status line shows while Workshop's own keyboard is up, beneath its keys.
+  const statusHost = useRef<HTMLElement | null>(null);
+  const placeStatus = useCallback((host: HTMLElement | null) => {
+    statusHost.current = host;
+    editor.current?.setStatusHost(host);
+  }, []);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
   const { lsp, lspStatus } = useLanguageServer(boot, editor);
@@ -370,6 +376,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             ),
         });
         created.setBottomInset(insetFor(stackHeightRef.current));
+        created.setStatusHost(statusHost.current);
         editor.current = created;
         for (const waiter of editorWaiters.current.splice(0)) waiter(created);
       } catch (e) {
@@ -921,6 +928,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         <Keyboard
           onKey={(key) => editor.current?.pressKey(key)}
           onLower={() => showKeyboard(false)}
+          statusHost={placeStatus}
         />
       ) : null}
     </div>
