@@ -1031,6 +1031,12 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   // The keyboard types into a field of Helix's own, which tapping the code focuses.
   const field = phone.locator(".cm-helix-keyboard");
   await expect(field).toBeFocused();
+  // Tapping puts the cursor where it taps.
+  const def = await phone.locator(".cm-line", { hasText: "def part1" }).boundingBox();
+  if (def === null) throw new Error("there's no line defining part1");
+  await phone.touchscreen.tap(def.x + 2, def.y + def.height / 2);
+  await expect(phone.locator(".cm-helix-cursor-primary")).toHaveText("d");
+  await phone.touchscreen.tap(def.x + 2, line.y + line.height / 2);
   await expect.poll(() => scroller.evaluate((s) => s.scrollLeft)).toBe(0);
 
   // What an on-screen keyboard sends: input rather than key presses.

@@ -335,8 +335,16 @@ class HelixView implements PluginValue, Host {
       paste: (text) => run(this, this.handler.paste(text, pasteImpl)),
     });
     this.view.dom.append(field.el);
-    // On the tap's last event, as the ones before it move the focus on.
-    this.view.contentDOM.addEventListener("click", () => field.focus());
+    // On a touch screen CodeMirror leaves putting the cursor where the code is tapped to the
+    // browser, which can't now that the code isn't where the keyboard types. On the tap's last
+    // event, as the ones before it move the focus on.
+    this.view.contentDOM.addEventListener("click", (event) => {
+      const pos = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos !== null) {
+        this.view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: "select.pointer" });
+      }
+      field.focus();
+    });
     return field;
   }
 
