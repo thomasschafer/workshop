@@ -912,7 +912,7 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   // The evening before day 4 of the fixture's year, in its own page so the clock is its own.
   const context = await browser.newContext({ baseURL: `http://127.0.0.1:${PORT}` });
   const december = await context.newPage();
-  await december.clock.install({ time: new Date("2017-12-03T22:00:00Z") });
+  await december.clock.install({ time: new Date("2017-12-03T21:00:00Z") });
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
   await december.goto(`/?token=${token}`);
   await expect(december.locator(".card", { hasText: "Day 3 is out." })).toBeVisible();
@@ -921,6 +921,9 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   if (!(await december.locator(".picker").isVisible())) {
     await december.locator(".puzzle-button").click();
   }
+  // Seven hours to go, stopped there, so the countdown reads the same however slowly the page
+  // got here.
+  await december.clock.pauseAt(new Date("2017-12-03T22:00:00Z"));
   await expect(december.locator(".countdown")).toContainText("Day 4 unlocks in 7h 00m");
   await expect(december.getByRole("button", { name: "Day 4, not unlocked yet" })).toBeDisabled();
   await expect(december.locator(".star-times")).toContainText("1:02:03");
