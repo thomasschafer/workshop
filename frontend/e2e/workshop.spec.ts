@@ -1173,6 +1173,22 @@ test("works on a phone with Helix's keybindings, from Workshop's own keyboard", 
   await key("Escape").tap();
   await expect(mode).toHaveText("NOR");
 
+  // Leaving the app takes the focus from the field, as Chrome on Android otherwise brings up the
+  // phone's keyboard for it on coming back.
+  await phone.touchscreen.tap(def.x + 2, def.y + def.height / 2);
+  await expect(field).toBeFocused();
+  await phone.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await expect(field).not.toBeFocused();
+  await phone.touchscreen.tap(def.x + 2, def.y + def.height / 2);
+  await expect(field).toBeFocused();
+  await phone.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(field).not.toBeFocused();
+  // The keyboard still types, needing no focus.
+  await type("ggi");
+  await expect(mode).toHaveText("INS");
+  await key("Escape").tap();
+  await expect(mode).toHaveText("NOR");
+
   // Only for the code: the problem's tab hides it, and coming back shows it again.
   await phone.getByRole("navigation").getByRole("button", { name: "Problem" }).click();
   await expect(keyboard).toBeHidden();

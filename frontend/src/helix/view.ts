@@ -347,8 +347,17 @@ class HelixView implements PluginValue, Host {
       }
       field.focus();
     });
+    // Chrome on Android brings up the phone's keyboard for the field when the page comes back
+    // into view, despite its inputmode, so the field lets go of the focus as the page loses it.
+    // Workshop's own keyboard needs no focus; one plugged in types again once the code's tapped.
+    window.addEventListener("blur", this.releaseKeyboardFocus);
+    document.addEventListener("visibilitychange", this.releaseKeyboardFocus);
     return field;
   }
+
+  private readonly releaseKeyboardFocus = (): void => {
+    if (this.keyboard?.focused) this.keyboard.el.blur();
+  };
 
   /** Whether keys come here: to the code, or the field a phone's keyboard types into. */
   get focused(): boolean {
@@ -609,6 +618,8 @@ class HelixView implements PluginValue, Host {
     this.view.dom.removeEventListener("beforeinput", this.onBeforeInput, true);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
     this.keyboard?.el.remove();
+    window.removeEventListener("blur", this.releaseKeyboardFocus);
+    document.removeEventListener("visibilitychange", this.releaseKeyboardFocus);
   }
 
   // ---- Host ----
