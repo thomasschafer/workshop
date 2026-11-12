@@ -10,33 +10,38 @@ export type KeyDef =
   | { kind: "char"; char: string; label?: string; name?: string; width?: number }
   /** A key that isn't a character, in Helix's notation, such as `esc`. */
   | { kind: "named"; key: string; label: string; name: string; width?: number }
-  | { kind: "modifier"; modifier: Modifier; label: string; name: string }
+  | { kind: "modifier"; modifier: Modifier; label: string; name: string; width?: number }
   /** Lowers the keyboard. */
   | { kind: "lower"; label: string; name: string };
 
 const chars = (s: string): KeyDef[] => [...s].map((char) => ({ kind: "char", char }));
 
-/** The keys, row by row, a US laptop's squeezed into twelve columns. */
+/**
+ * The keys, row by row, ten to a row as on a phone's keyboard: a US laptop's, with those at its
+ * edges moved to a row along the top and to the bottom row.
+ */
 export const LAYOUT: readonly (readonly KeyDef[])[] = [
   [
     { kind: "named", key: "esc", label: "esc", name: "Escape" },
-    ...chars("1234567890"),
-    { kind: "named", key: "backspace", label: "⌫", name: "Backspace" },
-  ],
-  [{ kind: "named", key: "tab", label: "tab", name: "Tab" }, ...chars("qwertyuiop-")],
-  [{ kind: "modifier", modifier: "ctrl", label: "ctrl", name: "Ctrl" }, ...chars("asdfghjkl;'")],
-  [
-    { kind: "modifier", modifier: "shift", label: "⇧", name: "Shift" },
-    ...chars("zxcvbnm,./"),
-    { kind: "named", key: "ret", label: "⏎", name: "Enter" },
-  ],
-  [
-    { kind: "modifier", modifier: "alt", label: "alt", name: "Alt" },
-    ...chars("[]`\\="),
-    { kind: "char", char: " ", label: "space", name: "Space", width: 3 },
-    { kind: "named", key: "left", label: "←", name: "Left" },
-    { kind: "named", key: "right", label: "→", name: "Right" },
+    { kind: "named", key: "tab", label: "tab", name: "Tab" },
+    ...chars("`-=[]\\'"),
     { kind: "lower", label: "▾", name: "Hide keyboard" },
+  ],
+  chars("1234567890"),
+  chars("qwertyuiop"),
+  chars("asdfghjkl;"),
+  [
+    { kind: "modifier", modifier: "shift", label: "⇧", name: "Shift", width: 1.5 },
+    ...chars("zxcvbnm"),
+    { kind: "named", key: "backspace", label: "⌫", name: "Backspace", width: 1.5 },
+  ],
+  [
+    { kind: "modifier", modifier: "ctrl", label: "ctrl", name: "Ctrl" },
+    { kind: "modifier", modifier: "alt", label: "alt", name: "Alt" },
+    { kind: "char", char: "," },
+    { kind: "char", char: " ", label: "space", name: "Space", width: 3.5 },
+    ...chars("./"),
+    { kind: "named", key: "ret", label: "⏎", name: "Enter", width: 1.5 },
   ],
 ];
 

@@ -27,6 +27,14 @@
   --syntax-type: #1f5fa8;
   --syntax-operator: #5b5b62;
 
+  /* Workshop's own keyboard, as distinct from the page as a phone's keyboard is. */
+  --key-tray: #d3d4da;
+  --key: #ffffff;
+  --key-fn: #b3b5bf;
+  --key-fg: #111114;
+  --key-down: #9a9ca8;
+  --key-preview: #ffffff;
+
   color-scheme: light dark;
 }
 
@@ -53,6 +61,13 @@
     --syntax-number: #f0a26a;
     --syntax-type: #79c9ef;
     --syntax-operator: #a3a3ad;
+
+    --key-tray: #0c0c0f;
+    --key: #3a3a43;
+    --key-fn: #25252c;
+    --key-fg: #ffffff;
+    --key-down: #5c5c68;
+    --key-preview: #6a6a78;
   }
 }
 
@@ -749,10 +764,10 @@ code {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 6px 3px calc(6px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  gap: 8px;
+  /* Clear of the bottom edge, where the phone's gesture bar is, even full screen without it. */
+  padding: 8px 4px calc(20px + env(safe-area-inset-bottom));
+  background: var(--key-tray);
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -762,7 +777,7 @@ code {
 
 .keyboard-row {
   display: flex;
-  gap: 4px;
+  gap: 5px;
   width: 100%;
   max-width: 48rem;
 }
@@ -774,30 +789,27 @@ code {
   padding: 0;
   border: none;
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  box-shadow: 0 1px 0 var(--border);
+  background: var(--key);
+  color: var(--key-fg);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
   font-family: var(--mono);
-  font-size: 17px;
+  font-size: 20px;
   touch-action: none;
 }
 
 .key-named,
 .key-modifier,
 .key-lower {
-  font-size: 12px;
-  letter-spacing: -0.03em;
-  color: var(--muted);
+  background: var(--key-fn);
 }
 
-/* Symbols such as ⌫, which are small at the size of a word. */
-.key.key-glyph {
-  font-size: 20px;
-  letter-spacing: 0;
+/* Names such as `esc`, which would be wide at the size of a character. */
+.key-word {
+  font-size: 14px;
 }
 
 .key.down {
-  background: var(--selection);
+  background: var(--key-down);
 }
 
 .key.on {
@@ -813,11 +825,11 @@ code {
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  background: var(--key-preview);
+  color: var(--key-fg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   font-family: var(--mono);
-  font-size: 24px;
+  font-size: 26px;
   text-align: center;
   pointer-events: none;
 }
@@ -829,7 +841,7 @@ code {
   }
 
   .key {
-    height: 32px;
+    height: 30px;
   }
 }
 

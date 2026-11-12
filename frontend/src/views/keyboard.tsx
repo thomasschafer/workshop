@@ -114,12 +114,12 @@ export function Keyboard({ onKey, onLower }: Props) {
           {row.map((def) => {
             const id = keyId(def);
             const on = def.kind === "modifier" && mods[def.modifier];
-            const width = (def.kind === "char" || def.kind === "named") && def.width;
+            const width = "width" in def ? def.width : undefined;
             return (
               <button
                 type="button"
                 key={id}
-                class={`key key-${def.kind}${def.kind !== "char" && [...def.label].length === 1 ? " key-glyph" : ""}${on ? " on" : ""}${down.has(id) ? " down" : ""}`}
+                class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${on ? " on" : ""}${down.has(id) ? " down" : ""}`}
                 style={width ? { flexGrow: width } : undefined}
                 tabIndex={-1}
                 aria-label={def.name}

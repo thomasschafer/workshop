@@ -19,13 +19,13 @@ const named = (key: string): KeyDef & { kind: "named" } => ({
 const mods = (m: Partial<Modifiers>): Modifiers => ({ ...NO_MODIFIERS, ...m });
 
 describe("the layout", () => {
-  it("has twelve columns in every row", () => {
+  it("has ten columns in every row", () => {
     for (const row of LAYOUT) {
       const columns = row.reduce(
         (n, def) => n + ("width" in def && def.width !== undefined ? def.width : 1),
         0,
       );
-      expect(columns).toBe(12);
+      expect(columns).toBe(10);
     }
   });
 
