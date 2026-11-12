@@ -49,14 +49,18 @@ import { markCursor, minimalChange, unmarkCursor } from "./diff";
 import type { HelixOptions } from "./helix/editor";
 import { isHelixTransaction } from "./helix/editor";
 import type { KeyTrieNode, Mode } from "./helix/keymap";
+import type { Key } from "./helix/keys";
 import {
   type HelixActions,
   helixCursor,
   helixKeybindings,
   helixKeyboard,
   helixMode,
+  pressHelixKey,
   relativeLineNumbers,
+  revealHelixCursor,
   setHelixBottomInset,
+  setHelixStatusHost,
 } from "./helix/view";
 import { quietMessage, withoutPullDiagnostics } from "./lsp";
 
@@ -261,25 +265,38 @@ export class CodeEditor {
     this.view.dispatch({ effects: EditorView.scrollIntoView(cursor, { y: "center" }) });
   }
 
-  /** Shows the on-screen keyboard for typing, or hides it so taps only move the cursor. */
+  /**
+   * Shows the on-screen keyboard for typing, or hides it so taps only move the cursor. With
+   * Helix's keybindings on a touch screen, the keyboard is Workshop's own, which the app shows,
+   * so this only gives the focus to the field Helix reads other keyboards from.
+   */
   setKeyboard(enabled: boolean): void {
-    this.keyboardOn = enabled;
     this.view.dispatch({
       effects: this.inputMode.reconfigure(
         EditorView.contentAttributes.of({ inputmode: enabled ? "text" : "none" }),
       ),
     });
-    // With Helix's keybindings on a touch screen, the keyboard types into a field of their own.
-    const field = helixKeyboard(this.view);
-    field?.setKeyboard(enabled);
     if (enabled) {
+      const field = helixKeyboard(this.view);
       if (field) field.focus();
       else this.view.focus();
     }
   }
 
-  /** Whether the on-screen keyboard is wanted, which Helix's keyboard field follows. */
-  private keyboardOn = false;
+  /** Presses a key on Workshop's own keyboard, which only Helix's keybindings have. */
+  pressKey(key: Key): void {
+    pressHelixKey(this.view, key);
+  }
+
+  /** Shows Helix's status line in `host`, beneath Workshop's own keyboard, or under the code. */
+  setStatusHost(host: HTMLElement | null): void {
+    setHelixStatusHost(this.view, host);
+  }
+
+  /** Scrolls Helix's cursor into view, as after the editor has been made shorter. */
+  revealCursor(): void {
+    revealHelixCursor(this.view);
+  }
 
   /**
    * Keeps the bottom `px` of the editor clear, for things floating over it, so the end of the
@@ -317,7 +334,6 @@ export class CodeEditor {
       ],
     });
     this.applyInset();
-    helixKeyboard(this.view)?.setKeyboard(this.keyboardOn);
   }
 
   private keysFor(helix: HelixSetup | null): Extension {

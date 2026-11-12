@@ -208,6 +208,11 @@ const US_KEYS: Record<string, [string, string]> = {
   Space: [" ", " "],
 };
 
+/** The character shift makes of each character on a US keyboard, such as `@` for `2`. */
+export const US_SHIFTED: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.values(US_KEYS),
+);
+
 const DOM_NAMED: Record<string, string> = {
   Backspace: "backspace",
   Enter: "ret",

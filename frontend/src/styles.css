@@ -27,6 +27,15 @@
   --syntax-type: #1f5fa8;
   --syntax-operator: #5b5b62;
 
+  /* Workshop's own keyboard, as distinct from the page as a phone's keyboard is. */
+  --key-tray: #d3d4da;
+  --key: #ffffff;
+  --key-fn: #b3b5bf;
+  --key-fg: #111114;
+  --key-down: #9a9ca8;
+  --key-preview: #ffffff;
+  --key-move: #e4ebfa;
+
   color-scheme: light dark;
 }
 
@@ -53,6 +62,14 @@
     --syntax-number: #f0a26a;
     --syntax-type: #79c9ef;
     --syntax-operator: #a3a3ad;
+
+    --key-tray: #0c0c0f;
+    --key: #3a3a43;
+    --key-fn: #25252c;
+    --key-fg: #ffffff;
+    --key-down: #5c5c68;
+    --key-preview: #6a6a78;
+    --key-move: #3b4256;
   }
 }
 
@@ -739,6 +756,216 @@ code {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Helix's status line, under the code or beneath Workshop's own keyboard. */
+
+.cm-helix-status {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+  padding: 2px 1ch;
+  min-height: 1.5em;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.cm-helix-mode {
+  font-weight: bold;
+  padding: 0 1ch;
+}
+
+.cm-helix-mode.cm-helix-color-modes {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+.cm-helix-mode-insert.cm-helix-color-modes {
+  background: var(--syntax-string);
+}
+
+.cm-helix-mode-select.cm-helix-color-modes {
+  background: var(--syntax-number);
+}
+
+.cm-helix-pending {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.cm-helix-recording,
+.cm-helix-selections {
+  color: var(--muted);
+}
+
+.cm-helix-error {
+  color: var(--error);
+}
+
+.cm-helix-message {
+  color: var(--fg);
+}
+
+.cm-helix-prompt-cursor {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Workshop's own keyboard, for Helix's keybindings on a touch screen, in the controls' place.
+   The letters are sized and placed as on Gboard on a phone, measured from a Pixel's, so fingers
+   used to it find them where they expect. Like its keys' widths, every size is in proportion to
+   the width of the screen, in units of a 411px-wide screen's pixels, up to a phone's widest. */
+
+.keyboard {
+  --u: calc(min(100vw, 460px) / 411);
+  --key-gap: calc(5.6 * var(--u));
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: calc(8 * var(--u)) calc(5.5 * var(--u)) env(safe-area-inset-bottom);
+  background: var(--key-tray);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  /* Fingers on it press keys, rather than scrolling or zooming the page. */
+  touch-action: none;
+}
+
+/* Full screen, Android draws its gesture bar over the page, where it otherwise sits below it. */
+:root:fullscreen .keyboard {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.keyboard-row {
+  display: flex;
+  gap: var(--key-gap);
+  width: 100%;
+  max-width: 48rem;
+}
+
+.keyboard-row-small {
+  margin-bottom: calc(10 * var(--u));
+}
+
+.keyboard-row-full + .keyboard-row-full {
+  margin-top: calc(11.2 * var(--u));
+}
+
+/* Beneath the keys, as on a phone's keyboard: Helix's status line, and the key to lower it. */
+.keyboard-footer {
+  width: 100%;
+  max-width: 48rem;
+  height: calc(44 * var(--u));
+  display: flex;
+  align-items: center;
+  gap: var(--key-gap);
+}
+
+.keyboard-status {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: calc(var(--code-size) * 0.85);
+}
+
+.keyboard-status .cm-helix-status {
+  flex: 1;
+  min-width: 0;
+}
+
+.key {
+  min-width: 0;
+  height: calc(51 * var(--u));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--key);
+  color: var(--key-fg);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+  font-family: var(--mono);
+  font-size: 22px;
+  touch-action: none;
+}
+
+.keyboard-row-small .key {
+  height: calc(40 * var(--u));
+  font-size: 19px;
+}
+
+.key-named,
+.key-modifier,
+.key-lower {
+  background: var(--key-fn);
+}
+
+.key-lower {
+  flex: none;
+  width: calc(52 * var(--u));
+  height: calc(32 * var(--u));
+  font-size: 18px;
+}
+
+/* Names such as `esc`, which would be wide at the size of a character. */
+.keyboard .key-word {
+  font-size: 14px;
+}
+
+.key-move {
+  background: var(--key-move);
+}
+
+.key.down {
+  background: var(--key-down);
+}
+
+.key.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Above the key under the finger, which the finger hides. */
+.key-preview {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 6px));
+  min-width: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--key-preview);
+  color: var(--key-fg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  font-family: var(--mono);
+  font-size: 26px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Sideways, keeping some of the code in view. */
+@media (max-height: 500px) {
+  .key,
+  .keyboard-row-small .key {
+    height: 28px;
+  }
+
+  .keyboard-row-small {
+    margin-bottom: 4px;
+  }
+
+  .keyboard-row-full + .keyboard-row-full {
+    margin-top: 4px;
+  }
+
+  .keyboard-footer {
+    height: 30px;
+  }
+
+  .key-lower {
+    height: 24px;
+  }
 }
 
 .buttons {
@@ -1811,6 +2038,23 @@ code {
   position: absolute;
   /* Below the camera, which sits in the top inset. */
   top: calc(6px + env(safe-area-inset-top));
+  right: 6px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+/* Below the way out of zen mode. */
+.zen-keyboard {
+  position: absolute;
+  top: calc(48px + env(safe-area-inset-top));
   right: 6px;
   z-index: 10;
   width: 36px;

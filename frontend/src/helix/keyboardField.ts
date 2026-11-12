@@ -5,6 +5,9 @@
 // sends edits for text that isn't there. Instead, the keyboard types into a hidden field of its
 // own, which this reads as keys and empties again after every edit, so what the keyboard thinks
 // the field holds is always right.
+//
+// The phone's own keyboard is kept from coming up, as Workshop has its own, which presses keys
+// directly; this is for whatever else types, such as a keyboard plugged into a phone or tablet.
 
 import { graphemes } from "./text";
 
@@ -56,11 +59,6 @@ export class KeyboardField {
       if (!this.composing) this.reset();
     });
     this.el = el;
-  }
-
-  /** Whether an on-screen keyboard shows while the field has the focus. */
-  setKeyboard(enabled: boolean): void {
-    this.el.inputMode = enabled ? "text" : "none";
   }
 
   focus(): void {

@@ -43,6 +43,15 @@ export function ZenExit({ onExit }: { onExit: () => void }) {
   );
 }
 
+/** Brings Workshop's own keyboard back up in zen mode, where the button that does so is hidden. */
+export function ZenKeyboardButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" class="zen-keyboard" aria-label="Show keyboard" onClick={onClick}>
+      ⌨
+    </button>
+  );
+}
+
 /** Chrome's VirtualKeyboard API, which TypeScript doesn't describe yet. */
 interface VirtualKeyboard {
   overlaysContent: boolean;

@@ -89,7 +89,7 @@ name = "parse ints"
 body = "map read . lines"
 ```
 
-With a keyboard, the code editor can use [Helix](https://helix-editor.com)'s modal keybindings instead of its own: turn them on for a device under Settings, Display, or for every device with `keybindings = "helix"` under `[editor]`. Your own Helix keymaps and the Helix options Workshop follows go under `[editor.helix]`, in the same format as Helix's config; the commented config file lists them. Commands that work across files, splits, shell commands and anything needing tree-sitter aren't available, and say so if you press them.
+With a keyboard, the code editor can use [Helix](https://helix-editor.com)'s modal keybindings instead of its own: turn them on for a device under Settings, Display, or for every device with `keybindings = "helix"` under `[editor]`. Your own Helix keymaps and the Helix options Workshop follows go under `[editor.helix]`, in the same format as Helix's config; the commented config file lists them. Commands that work across files, splits, shell commands and anything needing tree-sitter aren't available, and say so if you press them. On a phone or tablet they come with Workshop's own keyboard in place of the phone's: a laptop's keys, with Escape, Ctrl, Alt and a number row, and the letters where Gboard has them.
 
 To compare models on the same set of example utterances, use `workshop eval --model codex:luna`, for example. Workshop checks once a day for a newer release; set `check_for_updates = false` under `[server]` to turn this off.
 

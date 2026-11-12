@@ -3,7 +3,16 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { devices, expect, type Page, test } from "@playwright/test";
+import {
+  type Browser,
+  type BrowserContext,
+  devices,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from "@playwright/test";
+import { charFor, LAYOUT } from "../src/keyboard";
 import { HOME, PORT } from "./fixture";
 import { installSimulatedSpeech } from "./speech";
 
@@ -903,7 +912,7 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   // The evening before day 4 of the fixture's year, in its own page so the clock is its own.
   const context = await browser.newContext({ baseURL: `http://127.0.0.1:${PORT}` });
   const december = await context.newPage();
-  await december.clock.install({ time: new Date("2017-12-03T22:00:00Z") });
+  await december.clock.install({ time: new Date("2017-12-03T21:00:00Z") });
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
   await december.goto(`/?token=${token}`);
   await expect(december.locator(".card", { hasText: "Day 3 is out." })).toBeVisible();
@@ -912,6 +921,11 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   if (!(await december.locator(".picker").isVisible())) {
     await december.locator(".puzzle-button").click();
   }
+  // Seven hours to go, stopped there, so the countdown reads the same however slowly the page
+  // got here. Pausing a second short then fast-forwarding fires the countdown's timer, which
+  // jumping doesn't.
+  await december.clock.pauseAt(new Date("2017-12-03T21:59:59Z"));
+  await december.clock.fastForward(1000);
   await expect(december.locator(".countdown")).toContainText("Day 4 unlocks in 7h 00m");
   await expect(december.getByRole("button", { name: "Day 4, not unlocked yet" })).toBeDisabled();
   await expect(december.locator(".star-times")).toContainText("1:02:03");
@@ -934,7 +948,7 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
   const picker = helix.locator(".picker");
   await expect(picker.or(helix.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
   if (!(await picker.isVisible())) await helix.locator(".puzzle-button").click();
-  await helix.getByRole("button", { name: "2017" }).click();
+  await helix.getByRole("button", { name: "2017", exact: true }).click();
   await expect(picker).toContainText("5 stars in 2017");
   await helix.locator(".day", { hasText: /^4$/ }).click();
   // The puzzle switching over can briefly show two problems.
@@ -999,9 +1013,36 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
   await context.close();
 });
 
-test("works on a phone with Helix's keybindings, from its on-screen keyboard", async ({
-  browser,
-}) => {
+/**
+ * Whether each character Workshop's own keyboard types needs shift, after which its key shows the
+ * character it types.
+ */
+const PLAIN_KEYS = new Map<string, { shift: boolean }>(
+  LAYOUT.flatMap((row) => row.keys).flatMap((def) =>
+    def.kind === "char" && def.label === undefined
+      ? [[def.char, { shift: false }] as const, [charFor(def.char, true), { shift: true }] as const]
+      : [],
+  ),
+);
+
+/**
+ * Holds a key on the page down, with a finger of its own, while `during` runs. The finger is a
+ * mouse, as Playwright's touch screen can only tap, but the key takes it just the same.
+ */
+async function holdKey(page: Page, key: Locator, during: () => Promise<unknown>): Promise<void> {
+  const box = await key.boundingBox();
+  if (box === null) throw new Error("the key to hold isn't on screen");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  try {
+    await during();
+  } finally {
+    await page.mouse.up();
+  }
+}
+
+/** Opens 2017's day 4 on a phone, with Helix's keybindings, at its code. */
+async function openOnPhone(browser: Browser): Promise<{ context: BrowserContext; phone: Page }> {
   const context = await browser.newContext({
     ...devices["Pixel 7"],
     baseURL: `http://127.0.0.1:${PORT}`,
@@ -1017,8 +1058,14 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   await expect(picker).toContainText("5 stars in 2017");
   await phone.locator(".day", { hasText: /^4$/ }).click();
   await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
-  const code = phone.locator(".cm-content");
-  await expect(code).toContainText("def part1");
+  await expect(phone.locator(".cm-content")).toContainText("def part1");
+  return { context, phone };
+}
+
+test("works on a phone with Helix's keybindings, from Workshop's own keyboard", async ({
+  browser,
+}) => {
+  const { context, phone } = await openOnPhone(browser);
   const saved = () => readFileSync(solution, "utf8");
   const original = saved();
   const scroller = phone.locator(".cm-scroller");
@@ -1028,9 +1075,11 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   const line = await phone.locator(".cm-line").nth(3).boundingBox();
   if (line === null) throw new Error("the code has no fourth line");
   await phone.touchscreen.tap(line.x + 30, line.y + line.height / 2);
-  // The keyboard types into a field of Helix's own, which tapping the code focuses.
+  // Tapping focuses a field of Helix's own, for keyboards plugged in, which never brings up the
+  // phone's keyboard.
   const field = phone.locator(".cm-helix-keyboard");
   await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute("inputmode", "none");
   // Tapping puts the cursor where it taps.
   const def = await phone.locator(".cm-line", { hasText: "def part1" }).boundingBox();
   if (def === null) throw new Error("there's no line defining part1");
@@ -1039,63 +1088,131 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   await phone.touchscreen.tap(def.x + 2, line.y + line.height / 2);
   await expect.poll(() => scroller.evaluate((s) => s.scrollLeft)).toBe(0);
 
-  // What an on-screen keyboard sends: input rather than key presses.
-  const input = (inputType: string, data: string | null = null) =>
-    field.evaluate(
-      (el, [type, text]) =>
-        el.dispatchEvent(
-          new InputEvent("beforeinput", {
-            inputType: type ?? "",
-            data: text,
-            bubbles: true,
-            cancelable: true,
-          }),
-        ),
-      [inputType, data] as const,
-    );
-  const mode = phone.locator(".cm-helix-mode");
-  for (const key of ["g", "g", "i"]) await input("insertText", key);
-  await expect(mode).toHaveText("INS");
-  await input("insertText", "ab");
-  await input("deleteContentBackward");
-  await expect.poll(() => saved().split("\n")[0]).toBe(`a${original.split("\n")[0]}`);
+  // Workshop's keyboard comes up in place of the controls, and only when asked for.
+  const keyboard = phone.locator(".keyboard");
+  const controls = phone.locator(".controls");
+  await expect(keyboard).toBeHidden();
+  await phone.getByRole("button", { name: "Type" }).tap();
+  await expect(keyboard).toBeVisible();
+  await expect(controls).toBeHidden();
+  await expect(field).toHaveAttribute("inputmode", "none");
+  // Helix's status line moves beneath the keys, into the space a phone's keyboard leaves there.
+  await expect(keyboard.locator(".cm-helix-mode")).toHaveText("NOR");
+  await expect(phone.locator(".cm-helix-status")).toHaveCount(1);
 
-  // The keyboard has no escape key, so there's one under the code.
-  await phone.getByRole("button", { name: "Escape" }).tap();
-  await expect(mode).toHaveText("NOR");
-  await input("insertText", "u");
-  await expect.poll(saved).toBe(original);
-  // Anywhere on the status line presses it, such as the mode at the other end.
-  await input("insertText", "i");
+  const key = (name: string) => keyboard.getByRole("button", { name, exact: true });
+  /** Types characters on the keyboard, tapping shift first for those it makes. */
+  const type = async (text: string) => {
+    for (const ch of text) {
+      const plain = PLAIN_KEYS.get(ch);
+      if (plain === undefined) throw new Error(`the keyboard has no key for '${ch}'`);
+      if (plain.shift) await key("Shift").tap();
+      await key(ch).tap();
+    }
+  };
+  const mode = phone.locator(".cm-helix-mode");
+  await type("ggi");
   await expect(mode).toHaveText("INS");
-  await mode.tap();
+  await type("ab");
+  await key("Backspace").tap();
+  await expect.poll(() => saved().split("\n")[0]).toBe(`a${original.split("\n")[0]}`);
+  // Shift, tapped, applies to the next key alone, and shows the keys as it makes them.
+  await key("Shift").tap();
+  await expect(key("Shift")).toHaveAttribute("aria-pressed", "true");
+  await expect(key("@")).toBeVisible();
+  await key("@").tap();
+  await expect(key("Shift")).toHaveAttribute("aria-pressed", "false");
+  await key("2").tap();
+  await expect.poll(() => saved().split("\n")[0]).toBe(`a@2${original.split("\n")[0]}`);
+  await key("Escape").tap();
   await expect(mode).toHaveText("NOR");
+  await type("u");
+  await expect.poll(saved).toBe(original);
 
   // No help for the keys after `g` covering the code, though what's pending still shows.
-  await input("insertText", "g");
+  await type("g");
   await expect(phone.locator(".cm-helix-pending")).toHaveText("g");
   await expect(phone.locator(".cm-helix-info")).toBeHidden();
-  await phone.getByRole("button", { name: "Escape" }).tap();
+  await key("Escape").tap();
+  await expect(phone.locator(".cm-helix-pending")).toHaveText("");
 
   // Picking from a list by tapping it, as from the command palette.
-  await input("insertText", " ?yank_joined");
+  await key("Space").tap();
+  await type("?yank_joined");
   await phone.locator(".cm-helix-picker-row").first().tap();
   await expect(phone.locator(".cm-helix-message")).toContainText("joined and yanked 1 selection");
 
+  // Ctrl and Alt make the keys Helix binds with them: Ctrl-c comments the line, and Alt-u goes
+  // back to before it.
+  await type("gg");
+  await key("Ctrl").tap();
+  await type("c");
+  await expect.poll(() => saved().split("\n")[0]).toMatch(/^# /);
+  await key("Alt").tap();
+  await type("u");
+  await expect.poll(saved).toBe(original);
+
   // Moving within what's in view doesn't scroll.
-  await input("insertText", "%yppp");
-  await input("insertText", "gg");
+  await type("%yppp");
+  await type("gg");
   const top = await scroller.evaluate((s) => s.scrollTop);
-  for (let i = 0; i < 3; i++) await input("insertText", "j");
-  await input("insertText", "w");
-  await expect(phone.locator(".cm-helix-mode")).toHaveText("NOR");
+  for (let i = 0; i < 3; i++) await type("j");
+  await type("w");
+  await expect(mode).toHaveText("NOR");
   expect(await scroller.evaluate((s) => s.scrollTop)).toBe(top);
   // Going well down the file does.
-  await input("insertText", "50j");
+  await type("50j");
   await expect.poll(() => scroller.evaluate((s) => s.scrollTop)).toBeGreaterThan(top);
-
-  for (let i = 0; i < 3; i++) await input("insertText", "u");
+  for (let i = 0; i < 3; i++) await type("u");
   await expect.poll(saved).toBe(original);
+
+  // Holding shift shifts every key until it's let go, as on a laptop.
+  await type("ggi");
+  await holdKey(phone, key("Shift"), async () => {
+    await key("@").tap();
+    await key("@").tap();
+  });
+  await key("2").tap();
+  await expect.poll(() => saved().split("\n")[0]).toBe(`@@2${original.split("\n")[0]}`);
+  // Holding a key presses it again and again: Backspace, held, deletes all three, at the start
+  // of the file, where pressing it more does nothing.
+  await holdKey(phone, key("Backspace"), () => phone.waitForTimeout(700));
+  await expect.poll(saved).toBe(original);
+  await key("Escape").tap();
+  await expect(mode).toHaveText("NOR");
+
+  // Leaving the app takes the focus from the field, as Chrome on Android otherwise brings up the
+  // phone's keyboard for it on coming back.
+  await phone.touchscreen.tap(def.x + 2, def.y + def.height / 2);
+  await expect(field).toBeFocused();
+  await phone.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await expect(field).not.toBeFocused();
+  await phone.touchscreen.tap(def.x + 2, def.y + def.height / 2);
+  await expect(field).toBeFocused();
+  await phone.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(field).not.toBeFocused();
+  // The keyboard still types, needing no focus.
+  await type("ggi");
+  await expect(mode).toHaveText("INS");
+  await key("Escape").tap();
+  await expect(mode).toHaveText("NOR");
+
+  // Only for the code: the problem's tab hides it, and coming back shows it again.
+  await phone.getByRole("navigation").getByRole("button", { name: "Problem" }).click();
+  await expect(keyboard).toBeHidden();
+  await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
+  await expect(keyboard).toBeVisible();
+  // Elsewhere, such as in the notes, the controls' keyboard button brings it back up, at the code.
+  await phone.getByRole("navigation").getByRole("button", { name: "Notes" }).click();
+  await expect(keyboard).toBeHidden();
+  await phone.getByRole("button", { name: "Type" }).tap();
+  await expect(keyboard).toBeVisible();
+  await expect(phone.locator(".cm-content")).toBeVisible();
+  // Lowering it brings the controls back.
+  await key("Hide keyboard").tap();
+  await expect(keyboard).toBeHidden();
+  await expect(controls).toBeVisible();
+  await expect(phone.locator(".cm-editor .cm-helix-mode")).toHaveText("NOR");
 
   // The Run panel covers the status line, which CodeMirror raises above the rest of the code.
   await phone.getByRole("button", { name: "Run", exact: true }).tap();
@@ -1110,26 +1227,11 @@ test("works on a phone with Helix's keybindings, from its on-screen keyboard", a
   await context.close();
 });
 
-test("types and deletes in Helix's insert mode however a phone's keyboard sends it", async ({
+test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({
   browser,
 }) => {
-  const context = await browser.newContext({
-    ...devices["Pixel 7"],
-    baseURL: `http://127.0.0.1:${PORT}`,
-  });
-  const phone = await context.newPage();
-  await phone.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
-  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
-  await phone.goto(`/?token=${token}`);
-  const picker = phone.locator(".picker");
-  await expect(picker.or(phone.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
-  if (!(await picker.isVisible())) await phone.locator(".puzzle-button").click();
-  await phone.getByRole("button", { name: "2017", exact: true }).click();
-  await expect(picker).toContainText("5 stars in 2017");
-  await phone.locator(".day", { hasText: /^4$/ }).click();
-  await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
+  const { context, phone } = await openOnPhone(browser);
   const code = phone.locator(".cm-content");
-  await expect(code).toContainText("def part1");
   const saved = () => readFileSync(solution, "utf8");
   const original = saved();
   const [first = "", second = ""] = original.split("\n");
@@ -1172,7 +1274,7 @@ test("types and deletes in Helix's insert mode however a phone's keyboard sends 
     );
   const SENTINEL = "\u200b";
   const mode = phone.locator(".cm-helix-mode");
-  const pressEscape = () => phone.getByRole("button", { name: "Escape" }).tap();
+  const pressEscape = () => phone.keyboard.press("Escape");
 
   for (const key of ["g", "g", "i"]) await input("insertText", key);
   await expect(mode).toHaveText("INS");
