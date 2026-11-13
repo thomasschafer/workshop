@@ -61,6 +61,8 @@ This gives Workshop an HTTPS address on your tailnet, and prints a link and QR c
 
 The first time you open Workshop, a short setup walks you through choosing your language and model and logging in to Advent of Code. If you'd rather not paste your session cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
+Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on. Below it are the tracks, of which Advent of Code is the first.
+
 To try Workshop before logging in, or outside December, open the practice puzzle from the bottom of the puzzle list.
 
 ## Configuration

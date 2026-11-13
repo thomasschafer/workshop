@@ -12,7 +12,7 @@ mise run check-fast  # formatting, lints, types and unit tests, in seconds
 mise run check       # all of that and the browser tests, as CI does
 ```
 
-The Rust server is in `src/` and the TypeScript frontend, built with Vite and CodeMirror 6, is in `frontend/`. The built frontend is embedded in the binary, so users only ever need the one file.
+The Rust server is in `src/`, and what it shares between tracks is in crates of its own under `crates/`: the model providers, building and running code, toolchains and packages, the language server relay, Tailscale serving, the token that guards the server, Web Push notifications, and the tracks themselves. They're parts of the one binary, never published on their own. The TypeScript frontend, built with Vite and CodeMirror 6, is in `frontend/`, with the home screen and its tracks in `frontend/src/tracks/`. The built frontend is embedded in the binary, so users only ever need the one file.
 
 Tests must never use real Advent of Code puzzle text or inputs; invent your own.
 
