@@ -1,5 +1,5 @@
 import type { EditorView } from "@codemirror/view";
-import { pinchedCodeScale } from "./zoom";
+import { pinchedCodeScale, roundCodeScale } from "./zoom";
 
 export interface PinchOptions {
   /** The text's scale as the pinch begins. */
@@ -71,7 +71,7 @@ export function pinchToZoom(view: EditorView, options: PinchOptions): () => void
     const p = pinch;
     if (!p) return;
     p.frame = null;
-    p.scale = pinchedCodeScale(p.startScale, p.startDistance, p.distance);
+    p.scale = roundCodeScale(pinchedCodeScale(p.startScale, p.startDistance, p.distance));
     options.apply(p.scale);
     const { centre: at, line, lineFraction, scrollLeft } = p;
     const ratio = p.scale / p.startScale;

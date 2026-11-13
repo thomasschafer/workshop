@@ -19,7 +19,8 @@ export interface ScaleRange {
 }
 
 export function codeScaleRange(ios: boolean): ScaleRange {
-  return { min: ios ? 1 : 0.7, max: 2 };
+  // As small as the shape of a whole file, which is all that can be made out of the code there.
+  return { min: ios ? 1 : 0.1, max: 2 };
 }
 
 export const CODE_SCALE_RANGE = codeScaleRange(IOS);

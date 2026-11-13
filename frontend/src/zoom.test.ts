@@ -19,7 +19,7 @@ describe("codeScaleRange", () => {
 
 describe("clampCodeScale", () => {
   it("keeps the scale within the range", () => {
-    expect(clampCodeScale(0.1, desk)).toBe(desk.min);
+    expect(clampCodeScale(0.01, desk)).toBe(desk.min);
     expect(clampCodeScale(9, desk)).toBe(desk.max);
     expect(clampCodeScale(1.3, desk)).toBe(1.3);
     expect(clampCodeScale(0.8, iphone)).toBe(1);
@@ -59,7 +59,7 @@ describe("stepCodeScale", () => {
 describe("pinchedCodeScale", () => {
   it("scales with how far apart the fingers have moved", () => {
     expect(pinchedCodeScale(1, 100, 150, desk)).toBe(1.5);
-    expect(pinchedCodeScale(1.2, 100, 50, desk)).toBe(desk.min);
+    expect(pinchedCodeScale(1.2, 100, 5, desk)).toBe(desk.min);
     expect(pinchedCodeScale(1.5, 100, 400, desk)).toBe(desk.max);
   });
 

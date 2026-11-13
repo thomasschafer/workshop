@@ -64,6 +64,7 @@ import {
 } from "./helix/view";
 import { quietMessage, withoutPullDiagnostics } from "./lsp";
 import { pinchToZoom } from "./pinch";
+import { roundCodeScale } from "./zoom";
 
 const LANGUAGES: Record<string, () => Extension> = {
   haskell: () => StreamLanguage.define(haskell),
@@ -557,9 +558,22 @@ export class CodeEditor {
  */
 const scrollPastLineEnd = EditorView.theme({ ".cm-content": { paddingRight: "40vw" } });
 
-/** Scales the text, and so the gutter and tooltips with it, from its usual size. */
+const scaleThemes = new Map<number, Extension>();
+
+/**
+ * Scales the text, and so the gutter and tooltips with it, from its usual size. As a theme, as
+ * CodeMirror measures its lines again when its theme changes, but not its attributes, and would
+ * otherwise leave the line numbers spaced for the old size once the whole file fits on screen.
+ * One per percent, so pinching doesn't keep adding styles to the page.
+ */
 function scaled(scale: number): Extension {
-  return EditorView.editorAttributes.of({ style: `--code-scale: ${scale}` });
+  const rounded = roundCodeScale(scale);
+  let theme = scaleThemes.get(rounded);
+  if (theme === undefined) {
+    theme = EditorView.theme({ "&": { "--code-scale": String(rounded) } });
+    scaleThemes.set(rounded, theme);
+  }
+  return theme;
 }
 
 function wrapping(enabled: boolean): Extension {

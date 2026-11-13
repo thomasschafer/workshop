@@ -1154,6 +1154,21 @@ test("scales only the code when it's pinched, and in settings, on this device", 
   expect(await fontSize(".tabs")).toBe(title);
   expect(await phone.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 
+  // Pinching right in shows the shape of the whole file, and pinching out again comes back.
+  const middle = await phone.locator(".cm-editor").boundingBox();
+  if (middle === null) throw new Error("there's no editor");
+  const wide = { x: middle.x + middle.width / 2, y: middle.y + middle.height / 2 };
+  await pinch(phone, wide, 200, 10);
+  await expect.poll(() => fontSize(".cm-content")).toBeCloseTo(usual * 0.1, 1);
+  await expect(phone.locator(".cm-line", { hasText: "# more" }).last()).toBeInViewport();
+  // The line numbers stay beside their lines, rather than spaced for the size before.
+  const lastLine = await phone.locator(".cm-line").last().boundingBox();
+  const lastNumber = await phone.locator(".cm-lineNumbers .cm-gutterElement").last().boundingBox();
+  if (lastLine === null || lastNumber === null) throw new Error("the last line has gone");
+  expect(Math.abs(lastNumber.y - lastLine.y)).toBeLessThan(1);
+  await pinch(phone, wide, 10, 150);
+  await expect.poll(() => fontSize(".cm-content")).toBeCloseTo(usual * 1.5, 0);
+
   // Settings shows the pinched size, and steps from it.
   await phone.getByRole("button", { name: "Settings" }).click();
   await phone.locator(".settings-row", { hasText: "Display" }).getByRole("button").click();
