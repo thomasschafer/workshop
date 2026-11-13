@@ -1282,7 +1282,8 @@ function span(className: string, text: string): HTMLElement {
 function button(className: string, text: string, onPress: () => void): HTMLElement {
   const el = span(className, text);
   el.setAttribute("role", "button");
-  el.addEventListener("pointerdown", (e) => e.preventDefault());
+  // Safari only clicks if the press itself wasn't prevented, so just the focus is kept.
+  el.addEventListener("mousedown", (e) => e.preventDefault());
   el.addEventListener("click", onPress);
   return el;
 }

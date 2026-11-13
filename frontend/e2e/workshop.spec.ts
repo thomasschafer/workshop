@@ -1176,18 +1176,20 @@ async function touchWithTwoFingers(phone: Page, frames: TwoFingers[]): Promise<v
   }
   await phone.evaluate(
     async ({ frames }) => {
-      const target = document.querySelector(".cm-editor");
-      if (!target) throw new Error("there's no editor to touch");
+      // A touch belongs to whatever was under the finger as it came down, wherever it goes.
+      const targets = (frames[0] ?? []).map((p) => document.elementFromPoint(p.x, p.y));
+      const [first] = targets;
+      if (!first) throw new Error("there's nothing to touch there");
       const fire = (type: string, points: { x: number; y: number }[]) => {
         const event = new Event(type, { bubbles: true, cancelable: true });
         const touches = points.map((p, identifier) => ({
           clientX: p.x,
           clientY: p.y,
           identifier,
-          target,
+          target: targets[identifier],
         }));
         Object.defineProperty(event, "touches", { value: touches });
-        target.dispatchEvent(event);
+        first.dispatchEvent(event);
       };
       fire("touchstart", frames[0] ?? []);
       for (const points of frames.slice(1)) {
@@ -1593,7 +1595,10 @@ test("presses the nearest key to a touch on Workshop's keyboard, and measures wh
     }
   }
   await expect(measuring).toContainText("missed the key they were for");
-  await expect(measuring).toContainText(`${off}px right of the middle of a key`);
+  // To within a pixel, as browsers round where a touch lands differently.
+  await expect(measuring).toContainText(
+    new RegExp(`(${off - 1}|${off}|${off + 1})px right of the middle of a key`),
+  );
   await measuring.getByRole("button", { name: "Use what was measured" }).tap();
   await expect(measuring).toBeHidden();
   const kept = await phone.evaluate(() =>
@@ -1756,7 +1761,7 @@ test("says what's wrong where the cursor is, and shows the whole of it when aske
   await phone.touchscreen.tap(oops.x + oops.width / 2, oops.y + oops.height / 2);
   await expect(problem).toHaveText("oops isn't a thing");
   await phone.waitForTimeout(600);
-  await expect(phone.locator(".cm-tooltip")).toHaveCount(0);
+  await expect(phone.locator(".cm-tooltip")).toBeHidden();
 
   // Tapping what it says shows every problem, each in full, starting at this one, along the
   // bottom of the screen or over all of it.
@@ -1954,8 +1959,9 @@ test("completes as it's typed, and renames with the editor's own keys", async ({
   await computer.keyboard.press(`${mod}+End`);
   await computer.keyboard.type("par");
   await expect(completions.getByRole("option")).toHaveText(["part", "part1", "part2"]);
-  // The list takes no keys for a moment after it comes up, so it isn't chosen from by accident.
-  await computer.waitForTimeout(200);
+  // The list takes no keys for a moment after it comes up or changes, so it isn't chosen from
+  // by accident, and it can change again as the server answers for each letter typed.
+  await computer.waitForTimeout(700);
   await computer.keyboard.press("ArrowDown");
   await computer.keyboard.press("Enter");
   await expect.poll(() => saved().trimEnd()).toBe(`${original}part1`);
@@ -1987,7 +1993,7 @@ test("completes as it's typed, and renames with the editor's own keys", async ({
   await expect.poll(saved).toBe(`pri\n\n${original}`);
   await helix.keyboard.type("pri");
   await expect(offered.getByRole("option")).toHaveText(["print"]);
-  await helix.waitForTimeout(200);
+  await helix.waitForTimeout(700);
   await helix.keyboard.press("Tab");
   await helix.keyboard.press("Enter");
   await expect.poll(saved).toBe(`pri\nprint\n${original}`);

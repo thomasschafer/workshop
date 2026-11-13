@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, type Bootstrap, loginNeeded, type Problem, type Puzzle, type Tab } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
 import { CodeEditor, type Diagnostics, type HelixSetup, hoverText, NO_DIAGNOSTICS } from "./editor";
@@ -665,7 +665,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   // next one, or back. The keyboard, if it's up, goes while the code isn't showing, and comes
   // back with it.
   const app = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  // As zen mode is entered, rather than once the page has next been drawn, so no sweep is missed.
+  useLayoutEffect(() => {
     const root = app.current;
     if (!zen || !touchScreen || root === null) return;
     return watchSwipes(root, ".keyboard, .modal-backdrop", (direction) =>

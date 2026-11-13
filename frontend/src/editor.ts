@@ -20,7 +20,7 @@ import { haskell } from "@codemirror/legacy-modes/mode/haskell";
 import { typescript } from "@codemirror/legacy-modes/mode/javascript";
 import { python } from "@codemirror/legacy-modes/mode/python";
 import { rust } from "@codemirror/legacy-modes/mode/rust";
-import { linter, nextDiagnostic, previousDiagnostic, setDiagnostics } from "@codemirror/lint";
+import { nextDiagnostic, previousDiagnostic, setDiagnostics } from "@codemirror/lint";
 import {
   findReferencesKeymap,
   formatKeymap,
@@ -140,6 +140,9 @@ const theme = EditorView.theme({
     maxHeight: "40vh",
     overflow: "auto",
   },
+  // A finger has no way to point without tapping, and a problem's message can be longer than a
+  // phone's screen, so there it's read from the status line, and nothing comes up over the code.
+  "@media (pointer: coarse)": { ".cm-tooltip-hover": { display: "none" } },
   ".cm-tooltip-autocomplete ul li[aria-selected]": {
     background: "var(--selection)",
     color: "var(--fg)",
@@ -299,11 +302,6 @@ export class CodeEditor {
         changedField,
         language ? language() : [],
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],
-        // A finger has no way to point without tapping, and a problem's message can be longer
-        // than a phone's screen, so there it's read from the status line instead.
-        window.matchMedia("(pointer: coarse)").matches
-          ? linter(null, { tooltipFilter: () => [] })
-          : [],
         this.inputMode.of(EditorView.contentAttributes.of({ inputmode: "none" })),
         // Keeping the cursor in view only scrolls up and down, unless the user is typing: a long
         // line otherwise leaves every line's start out of sight until they scroll back.
