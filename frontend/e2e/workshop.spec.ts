@@ -974,6 +974,23 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
   await expect(mode).toHaveText("NOR");
   await expect(helix.locator(".cm-helix-mode.cm-helix-color-modes")).toHaveCount(1);
 
+  // Key help floats over the code in the corner, only as wide as it needs, as in Helix, rather
+  // than across the editor, pushing the code up.
+  await code.click();
+  const scroller = helix.locator(".cm-scroller");
+  const codeHeight = (await scroller.boundingBox())?.height;
+  await helix.keyboard.press("g");
+  const info = helix.locator(".cm-helix-info");
+  await expect(info).toContainText("Goto");
+  const [box, area] = [await info.boundingBox(), await scroller.boundingBox()];
+  if (box === null || area === null) throw new Error("the key help or code isn't shown");
+  expect(box.width).toBeLessThan(area.width * 0.9);
+  expect(box.x + box.width).toBeGreaterThan(area.x + area.width * 0.9);
+  expect(box.y + box.height).toBeLessThanOrEqual(area.y + area.height);
+  expect(area.height).toBe(codeHeight);
+  await helix.keyboard.press("Escape");
+  await expect(info).toHaveCount(0);
+
   await code.click();
   const keys = async (...presses: string[]) => {
     for (const p of presses) await helix.keyboard.press(p);

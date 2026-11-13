@@ -1183,13 +1183,27 @@ const theme = EditorView.theme({
     fontSize: "calc(var(--code-size) * 0.85)",
     background: "var(--surface)",
     borderTop: "1px solid var(--border)",
+    position: "relative",
   },
   ".cm-helix-extra:empty": { display: "none" },
   ".cm-helix-info, .cm-helix-picker": {
     padding: "4px 1ch",
-    borderBottom: "1px solid var(--border)",
     maxHeight: "40vh",
     overflow: "auto",
+  },
+  ".cm-helix-picker": { borderBottom: "1px solid var(--border)" },
+  // Floating over the code in the corner, only as big as what it says, as in Helix.
+  ".cm-helix-info": {
+    position: "absolute",
+    right: "1ch",
+    bottom: "calc(100% + 4px)",
+    width: "max-content",
+    maxWidth: "calc(100% - 2ch)",
+    boxSizing: "border-box",
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    boxShadow: "0 2px 8px rgb(0 0 0 / 0.12)",
   },
   ".cm-helix-info-title": { display: "block", fontWeight: "bold", marginBottom: "2px" },
   ".cm-helix-info-body": {
