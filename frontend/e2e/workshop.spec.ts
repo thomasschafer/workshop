@@ -1830,7 +1830,7 @@ test("turns to other tabs in zen mode with two fingers, keeping the keyboard for
     document.documentElement.requestFullscreen = () => Promise.reject(new Error("not allowed"));
   });
   await phone.getByRole("button", { name: "Zen mode" }).tap();
-  await expect(phone.locator(".card")).toContainText("Couldn't go full screen");
+  await expect(phone.locator(".card", { hasText: "Couldn't go full screen" })).toHaveCount(1);
   const keyboard = phone.locator(".keyboard");
   const code = phone.locator(".cm-content");
   // Not any `.problem`: a card saying zen mode couldn't go full screen has the class too.
