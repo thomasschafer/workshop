@@ -7,12 +7,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
+use workshop_provider::{CallSpec, ProviderRunner, Role};
 
 use crate::config::Config;
 use crate::edit::{self, CURSOR, EditOutcome};
 use crate::models::ModelChoice;
 use crate::paths::Paths;
-use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::settings::AppSettings;
 
 #[derive(Debug, Deserialize)]

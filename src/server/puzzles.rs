@@ -5,13 +5,13 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+use workshop_provider::Role;
 
 use super::error::{ApiError, ApiResult, bad_request};
 use super::lsp::file_uri;
 use super::state::Shared;
 use crate::aoc::{Part, Problem};
 use crate::language::Puzzle;
-use crate::provider::Role;
 use crate::workspace::{DayMeta, SaveError, VersionedFile};
 
 /// Asks the edit model for a part's example, for when the page's structure doesn't give it away.

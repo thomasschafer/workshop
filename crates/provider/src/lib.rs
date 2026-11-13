@@ -1,3 +1,6 @@
+//! Model CLIs, such as Claude Code and Codex: how to start each, give it a prompt and read its
+//! reply, with every tool turned off.
+
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -7,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc};
 use workshop_common::process::{self, GroupedChild};
-
 use workshop_common::template::{self, Vars};
 
 /// A model CLI: how to start it, how to give it a prompt and how to read its reply.
@@ -108,9 +110,8 @@ pub fn builtin_providers() -> Result<Vec<(String, ProviderConfig)>> {
 }
 
 impl ProviderConfig {
-    /// A provider with just a command, for tests.
-    #[cfg(test)]
-    pub fn for_test(command: Vec<String>, input: InputMode, output: OutputMode) -> Self {
+    /// A provider with just a command and how to talk to it, such as a stand-in for tests.
+    pub fn with_command(command: Vec<String>, input: InputMode, output: OutputMode) -> Self {
         Self {
             command,
             input,
@@ -848,7 +849,7 @@ mod tests {
     fn validation_catches_inconsistent_input() {
         let mut provider = ProviderConfig {
             prespawn: false,
-            ..ProviderConfig::for_test(
+            ..ProviderConfig::with_command(
                 vec!["cli".into(), "{prompt}".into()],
                 InputMode::Argument,
                 OutputMode::Text,
@@ -1018,7 +1019,7 @@ printf '{"type":"assistant","message":{"model":"m","content":[{"type":"text","te
         // In a file, as command arguments are templates, where braces mean placeholders.
         let script_file = dir.path().join("fake-claude.sh");
         std::fs::write(&script_file, script).unwrap();
-        let provider = ProviderConfig::for_test(
+        let provider = ProviderConfig::with_command(
             vec!["sh".into(), script_file.to_string_lossy().into_owned()],
             InputMode::ClaudeStreamJson,
             OutputMode::ClaudeStreamJson,
@@ -1049,7 +1050,7 @@ printf '{"type":"assistant","message":{"model":"m","content":[{"type":"text","te
         let dir = tempfile::tempdir().unwrap();
         let provider = ProviderConfig {
             prespawn: true,
-            ..ProviderConfig::for_test(
+            ..ProviderConfig::with_command(
                 vec![
                     "sh".into(),
                     "-c".into(),

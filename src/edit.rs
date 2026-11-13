@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
+use workshop_provider::{CallSpec, ProviderRunner};
 
 use crate::language::{HelperDefinition, LanguageProfile};
-use crate::provider::{CallSpec, ProviderRunner};
 
 /// Marks the cursor in documents exchanged with the model and the frontend.
 pub const CURSOR: char = '‸';
@@ -527,10 +527,10 @@ mod tests {
             std::fs::write(dir.join(format!("reply{i}")), reply).unwrap();
         }
         let script = r#"n=$(cat count 2>/dev/null || echo 0); echo $((n + 1)) > count; cat >/dev/null; cat "reply$n""#;
-        let provider = crate::provider::ProviderConfig::for_test(
+        let provider = workshop_provider::ProviderConfig::with_command(
             vec!["sh".into(), "-c".into(), script.into()],
-            crate::provider::InputMode::Stdin,
-            crate::provider::OutputMode::Text,
+            workshop_provider::InputMode::Stdin,
+            workshop_provider::OutputMode::Text,
         );
         ProviderRunner::new(provider, dir.to_owned()).unwrap()
     }

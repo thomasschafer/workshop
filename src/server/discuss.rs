@@ -8,13 +8,13 @@ use axum::extract::State;
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use workshop_provider::Role;
 
 use super::error::{ApiError, bad_request};
 use super::puzzles::puzzle;
 use super::state::Shared;
 use crate::discuss::{self, Turn};
 use crate::models;
-use crate::provider::Role;
 
 const DISCUSS_TIMEOUT: Duration = Duration::from_secs(300);
 

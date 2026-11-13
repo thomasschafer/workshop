@@ -196,7 +196,7 @@ Dictation hints matter most. They're given to the edit model with every request,
 
 ## Adding a model provider
 
-A provider describes a model CLI: the command to start it, how to send it the prompt, and how to read its reply. Built-in providers live in `providers/` and are registered in `src/provider.rs`; users can add their own under `[providers.<id>]` in their config.
+A provider describes a model CLI: the command to start it, how to send it the prompt, and how to read its reply. Built-in providers live in `crates/provider/providers/` and are registered in `crates/provider/src/lib.rs`; users can add their own under `[providers.<id>]` in their config.
 
 Besides `{model}` and `{system_prompt}`, `command` can use `{system_prompt_file}`, the path of a file holding the system prompt, for CLIs that read their instructions from a file, and `{effort}`.
 
@@ -247,7 +247,7 @@ output = "ollama-chat"
 
 Check one with `workshop eval` before relying on it. On a 16 GB M2 Pro, Qwen2.5-Coder 7B and 14B made far more wrong edits than Haiku, and the 14B was also slower, so larger models on bigger machines are the ones worth trying.
 
-Use cheap, fast models for editing, since every utterance is a call. If the CLI can name its models (as `codex debug models` does), set `model_catalog` to that command, and a family name such as "luna" will always mean the newest model in the family. See `providers/codex.toml` for a preset built this way. For a new input or output format, add a variant to `InputMode` or `OutputMode` in `src/provider.rs` with tests for its parsing.
+Use cheap, fast models for editing, since every utterance is a call. If the CLI can name its models (as `codex debug models` does), set `model_catalog` to that command, and a family name such as "luna" will always mean the newest model in the family. See `crates/provider/providers/codex.toml` for a preset built this way. For a new input or output format, add a variant to `InputMode` or `OutputMode` in `crates/provider/src/lib.rs` with tests for its parsing.
 
 ## Pull requests
 

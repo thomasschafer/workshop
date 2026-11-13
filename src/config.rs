@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_common::files;
+use workshop_provider::ProviderConfig;
 
 use crate::language::{self, LanguageProfile};
 use crate::paths::Paths;
-use crate::provider::{self, ProviderConfig};
 
 pub const EXAMPLE: &str = include_str!("../config.example.toml");
 
@@ -272,7 +272,9 @@ impl Config {
     pub fn parse(source: &str) -> Result<Self> {
         let raw: RawConfig = toml::from_str(source)?;
 
-        let mut providers: BTreeMap<_, _> = provider::builtin_providers()?.into_iter().collect();
+        let mut providers: BTreeMap<_, _> = workshop_provider::builtin_providers()?
+            .into_iter()
+            .collect();
         for (id, provider) in raw.providers {
             provider
                 .validate()

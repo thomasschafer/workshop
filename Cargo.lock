@@ -3671,6 +3671,7 @@ dependencies = [
  "urlencoding",
  "web-push-native",
  "workshop-common",
+ "workshop-provider",
 ]
 
 [[package]]
@@ -3683,6 +3684,20 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "workshop-provider"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "workshop-common",
 ]
 
 [[package]]

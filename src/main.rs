@@ -13,7 +13,6 @@ mod notify;
 mod packages;
 mod paths;
 mod practice;
-mod provider;
 mod runner;
 mod samples;
 mod server;

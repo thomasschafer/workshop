@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use workshop_provider::{CallSpec, ProviderRunner, Role};
 
 use super::install::Installs;
 use crate::aoc::AocClient;
@@ -16,7 +17,6 @@ use crate::language::LanguageProfile;
 use crate::models::ModelSettings;
 use crate::packages::Resolution;
 use crate::paths::Paths;
-use crate::provider::{CallSpec, ProviderRunner, Role};
 use crate::settings::AppSettings;
 use crate::solutions::Solutions;
 use crate::workspace::Workspace;
