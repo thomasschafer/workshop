@@ -27,6 +27,18 @@ Each case is one call to your edit model, so the evals aren't part of CI. When y
 
 When a change alters what the demo shows, re-record `docs/demo.gif` with `mise run demo`. It plays an invented puzzle on an emulated phone, with simulated speech, and makes a few calls to your edit model.
 
+## A local content check
+
+`scripts/content-check` refuses a commit that adds a phrase from a denylist of your own, in its changes or its message, such as names or details that shouldn't go into a public repo. To use it, install it as both of the repo's pre-commit and commit-msg hooks, from the repo's root:
+
+```sh
+hooks=$(git rev-parse --git-path hooks)
+ln -s "$PWD/scripts/content-check" "$hooks/pre-commit"
+ln -s "$PWD/scripts/content-check" "$hooks/commit-msg"
+```
+
+Then set `CONTENT_CHECK_DENYLIST` to your denylist's path, such as in your shell's profile; the check does nothing while it's unset. The denylist has one phrase per line, matched as whole words, ignoring case. Keep it outside the repo.
+
 ## Adding a language profile
 
 A language profile tells Workshop how to lay out, build and run solutions, which language server to start, and how the language is spoken. Built-in profiles live in `languages/` and are registered in `src/language.rs`. You can also add one in your own config file under `[languages.<id>]` without changing Workshop.

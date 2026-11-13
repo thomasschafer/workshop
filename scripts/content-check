@@ -1,0 +1,102 @@
+#!/bin/sh
+# A local content check, run as git hooks: it refuses a commit if a line the commit adds, or its
+# message, has a phrase from a denylist of your own, such as names that shouldn't leave your
+# machine. See CONTRIBUTING.md for installing it.
+#
+# The denylist is the file CONTENT_CHECK_DENYLIST names, and the check does nothing when that's
+# unset. It has one phrase per line; blank lines and lines starting with `#` are ignored. Phrases
+# match whole words, ignoring case, so "cat" matches "Cat food" but not "concatenate". Only
+# lines a commit adds are checked, binary files are skipped, and a match is reported by where it
+# is, never by the phrase itself, so the denylist doesn't end up in a terminal's scrollback.
+#
+# As the pre-commit hook, it checks the staged changes. As the commit-msg hook, git gives it the
+# message's file, which it checks instead.
+set -eu
+
+denylist="${CONTENT_CHECK_DENYLIST:-}"
+if [ -z "$denylist" ]; then
+  exit 0
+fi
+if [ ! -f "$denylist" ]; then
+  echo "content check: CONTENT_CHECK_DENYLIST is set, but $denylist isn't a file" >&2
+  exit 1
+fi
+
+# Reads the denylist, then the lines to check. With `message` set, those are a commit message's
+# lines; otherwise they're a diff of the staged changes with no context.
+check='
+function word_char(c) {
+  return c ~ /[[:alnum:]_]/
+}
+
+function matches(text,    lowered, i, phrase, from, at, before, after) {
+  lowered = tolower(text)
+  for (i = 1; i <= count; i++) {
+    phrase = phrases[i]
+    from = 1
+    while ((at = index(substr(lowered, from), phrase)) > 0) {
+      at += from - 1
+      before = at > 1 ? substr(lowered, at - 1, 1) : ""
+      after = substr(lowered, at + length(phrase), 1)
+      if (!word_char(before) && !word_char(after)) return 1
+      from = at + 1
+    }
+  }
+  return 0
+}
+
+function report(where) {
+  print "content check: " where " matches the denylist" > "/dev/stderr"
+  found = 1
+}
+
+FNR == NR {
+  line = $0
+  sub(/^[ \t]+/, "", line)
+  sub(/[ \t\r]+$/, "", line)
+  if (line != "" && substr(line, 1, 1) != "#") phrases[++count] = tolower(line)
+  next
+}
+
+message {
+  # Git leaves out comment lines, and everything below the scissors line.
+  if ($0 ~ /^# -+ >8 -+$/) exit
+  if (substr($0, 1, 1) != "#" && matches($0)) report("the commit message, line " FNR)
+  next
+}
+
+/^diff --git / { in_hunk = 0; file = ""; next }
+!in_hunk && /^\+\+\+ / {
+  file = substr($0, 5)
+  sub(/^b\//, "", file)
+  if (file == "/dev/null") file = ""
+  next
+}
+/^@@ / {
+  in_hunk = 1
+  match($0, /\+[0-9]+/)
+  line = substr($0, RSTART + 1, RLENGTH - 1)
+  next
+}
+in_hunk && /^\+/ {
+  if (file != "" && matches(substr($0, 2))) report(file ":" line)
+  line++
+  next
+}
+
+END { exit found }
+'
+
+if [ $# -ge 1 ]; then
+  if awk -v message=1 "$check" "$denylist" "$1"; then
+    exit 0
+  fi
+else
+  # Binary files show as a line saying they differ, with no lines of their own to check.
+  staged=$(git -c core.quotePath=false diff --cached --no-color --no-ext-diff -U0)
+  if printf '%s\n' "$staged" | awk -v message=0 "$check" "$denylist" -; then
+    exit 0
+  fi
+fi
+echo "content check: commit refused; take those out and commit again." >&2
+exit 1
