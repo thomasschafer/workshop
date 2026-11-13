@@ -1572,6 +1572,107 @@ test("presses the nearest key to a touch on Workshop's keyboard, and measures wh
   await context.close();
 });
 
+test("asks the language server from Helix's own prompt and lists, on Workshop's keyboard", async ({
+  browser,
+}) => {
+  const { context, phone } = await openOnPhone(browser);
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  await phone.getByRole("button", { name: "Type" }).tap();
+  const keyboard = phone.locator(".keyboard");
+  const key = (name: string) => keyboard.getByRole("button", { name, exact: true });
+  const type = async (text: string) => {
+    for (const ch of text) {
+      const plain = PLAIN_KEYS.get(ch);
+      if (plain === undefined) throw new Error(`the keyboard has no key for '${ch}'`);
+      if (plain.shift) await key("Shift").tap();
+      await key(ch === " " ? "Space" : ch).tap();
+    }
+  };
+  const rows = phone.locator(".cm-helix-picker-row");
+  const selected = () =>
+    phone
+      .locator(".cm-helix-selection")
+      .evaluateAll((els) => els.map((e) => e.textContent).join(""));
+  const cursorLine = () =>
+    phone.locator(".cm-line", { has: phone.locator(".cm-helix-cursor-primary") });
+  // The language server has started once it's had its say about the file.
+  await expect(phone.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+
+  // Going to a definition goes straight there, being the one place.
+  await type("gg/print");
+  await key("Enter").tap();
+  await type("w");
+  await type("w");
+  await expect.poll(selected).toBe("part1");
+  await expect(cursorLine()).toContainText("print(part1(data))");
+  await type("gd");
+  await expect(cursorLine()).toContainText("def part1");
+  await expect.poll(selected).toBe("part1");
+
+  // References are a list to pick from, in Helix's own picker, which the keyboard's keys work.
+  await type("gr");
+  await expect(phone.locator(".cm-helix-picker")).toContainText("References (2/2)");
+  await expect(rows).toHaveText([/def part1.*line \d+/, /print\(part1\(data\)\).*line \d+/]);
+  await expect(phone.locator(".cm-lsp-reference-panel")).toHaveCount(0);
+  await rows.nth(1).tap();
+  await expect(cursorLine()).toContainText("print(part1(data))");
+
+  // Renaming asks for the name in Helix's prompt, beneath the keys, with the name now to change.
+  await key("Space").tap();
+  await type("r");
+  await expect(keyboard.locator(".cm-helix-prompt-label")).toHaveText("rename-to:");
+  await expect(keyboard.locator(".cm-helix-prompt-input")).toHaveText("part1 ");
+  await expect(phone.locator(".cm-dialog")).toHaveCount(0);
+  await type("x");
+  await key("Enter").tap();
+  await expect.poll(saved).toBe(original.replaceAll("part1", "part1x"));
+  await expect(keyboard.locator(".cm-helix-message")).toHaveText("Renamed part1 to part1x");
+  // As one change, which one undo takes back.
+  await type("u");
+  await expect.poll(saved).toBe(original);
+
+  // Documentation shows as it's written, rather than as markdown's marks.
+  await key("Space").tap();
+  await type("k");
+  const docs = phone.locator(".cm-helix-info-markdown");
+  await expect(docs.locator("strong")).toHaveText("part1");
+  await expect(docs.locator("pre")).toContainText("part1: str");
+  await key("Escape").tap();
+
+  // What the server offers to do is a list too. One comes without its edit until it's chosen,
+  // one with it, and one can't be used, which goes last and says why.
+  await type("gg");
+  await type("Ooops");
+  await key("Escape").tap();
+  await expect.poll(saved).toBe(`oops\n${original}`);
+  await expect(phone.locator(".status-line")).toContainText("1 error");
+  await key("Space").tap();
+  await type("a");
+  await expect(rows).toHaveText([
+    /^Remove oops/,
+    /^Shout oops/,
+    /^Explain oops.*Nothing can explain it/,
+  ]);
+  await rows.nth(2).tap();
+  await expect(keyboard.locator(".cm-helix-error")).toHaveText("Nothing can explain it");
+  await expect.poll(saved).toBe(`oops\n${original}`);
+  await key("Space").tap();
+  await type("a");
+  await rows.nth(0).tap();
+  await expect.poll(saved).toBe(`\n${original}`);
+  await type("u");
+  await expect.poll(saved).toBe(`oops\n${original}`);
+  await key("Space").tap();
+  await type("a");
+  await rows.nth(1).tap();
+  await expect.poll(saved).toBe(`OOPS\n${original}`);
+  await expect(keyboard.locator(".cm-helix-message")).toHaveText("Shout oops");
+  await type("uu");
+  await expect.poll(saved).toBe(original);
+  await context.close();
+});
+
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({
   browser,
 }) => {

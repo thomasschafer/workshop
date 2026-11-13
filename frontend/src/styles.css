@@ -2207,3 +2207,16 @@ code {
     padding: 4px 0;
   }
 }
+
+/* Documentation from the language server, in Helix's box over the code. */
+.cm-helix-info-markdown {
+  max-width: min(72ch, 100%);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cm-helix-info-markdown pre {
+  margin: 4px 0;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+}

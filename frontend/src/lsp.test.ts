@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { quietMessage, withoutPullDiagnostics } from "./lsp";
+import { adjustCapabilities, quietMessage } from "./lsp";
+import { EXTRA_CAPABILITIES } from "./lspActions";
 
-describe("withoutPullDiagnostics", () => {
-  it("stops the client offering pull diagnostics", () => {
+describe("adjustCapabilities", () => {
+  it("stops the client offering pull diagnostics, and offers code actions", () => {
     const initialize = JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -12,17 +13,24 @@ describe("withoutPullDiagnostics", () => {
         capabilities: { textDocument: { hover: {}, diagnostic: {} }, window: {} },
       },
     });
-    expect(JSON.parse(withoutPullDiagnostics(initialize))).toEqual({
+    expect(JSON.parse(adjustCapabilities(initialize))).toEqual({
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
-      params: { rootUri: "file:///aoc", capabilities: { textDocument: { hover: {} }, window: {} } },
+      params: {
+        rootUri: "file:///aoc",
+        capabilities: { textDocument: { hover: {}, ...EXTRA_CAPABILITIES }, window: {} },
+      },
     });
   });
 
   it("leaves other messages as they are", () => {
     const change = '{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"diagnostic":{}}}';
-    expect(withoutPullDiagnostics(change)).toBe(change);
+    expect(adjustCapabilities(change)).toBe(change);
+  });
+
+  it("refuses an initialize without capabilities", () => {
+    expect(() => adjustCapabilities('{"method":"initialize","params":{}}')).toThrow();
   });
 });
 

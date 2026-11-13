@@ -455,6 +455,8 @@ export interface Info {
    * hover documentation. Help by default.
    */
   readonly kind?: "keys" | "text";
+  /** Markdown to show in place of the body, such as hover documentation. */
+  readonly markdown?: string;
 }
 
 /** One `gw` label: the two characters to type and the range they select. */

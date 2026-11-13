@@ -1,17 +1,26 @@
+import { EXTRA_CAPABILITIES } from "./lspActions";
+
 interface Message {
   method?: string;
-  params?: { capabilities?: { textDocument?: { diagnostic?: unknown } } };
+  params?: { capabilities?: { textDocument?: Record<string, unknown> } };
 }
 
 /**
- * Takes pull diagnostics out of the capabilities the client offers as it connects. The client
- * offers them but only shows the diagnostics a server sends unasked, and servers that can be
- * asked, such as Deno's, then wait to be asked and send nothing.
+ * Changes the capabilities the client offers as it connects, to what Workshop does with it.
+ *
+ * Pull diagnostics go: the client offers them but only shows the diagnostics a server sends
+ * unasked, and servers that can be asked, such as Deno's, then wait to be asked and send nothing.
+ * Code actions are added, which Workshop asks for itself.
  */
-export function withoutPullDiagnostics(message: string): string {
+export function adjustCapabilities(message: string): string {
   const parsed = JSON.parse(message) as Message;
   if (parsed.method !== "initialize") return message;
-  delete parsed.params?.capabilities?.textDocument?.diagnostic;
+  const textDocument = parsed.params?.capabilities?.textDocument;
+  if (textDocument === undefined) {
+    throw new Error("the language client connected without saying what it can do");
+  }
+  delete textDocument.diagnostic;
+  Object.assign(textDocument, EXTRA_CAPABILITIES);
   return JSON.stringify(parsed);
 }
 

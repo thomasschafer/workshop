@@ -20,13 +20,15 @@ plum
 </main></body></html>`;
 
 /**
- * The built-in Python profile, with packages installed by a stand-in for pip and no lookups on
- * PyPI, so nothing needs the network. Everything else, such as how missing modules are
+ * The built-in Python profile, with packages installed by a stand-in for pip, no lookups on
+ * PyPI and a stand-in for the language server, so nothing needs the network or Pyright.
+ * Everything else, such as how missing modules are
  * recognised, is as built.
  */
 function pythonProfile(): string {
   const builtin = readFileSync(resolve(import.meta.dirname, "../../languages/python.toml"), "utf8");
   const fakeInstall = resolve(import.meta.dirname, "fake-install.mjs");
+  const fakeLsp = resolve(import.meta.dirname, "fake-lsp.mjs");
   const replacements: [RegExp, string][] = [
     [
       /^install = \[\n[\s\S]*?^\]\n/m,
@@ -34,6 +36,8 @@ function pythonProfile(): string {
     ],
     [/^environment = \{ PATH = .*$/m, 'environment = { PYTHONPATH = "{env}/site" }'],
     [/^lookup = .*\n/m, ""],
+    // A stand-in for the language server, so its errors and answers are the tests' own.
+    [/^lsp = .*$/m, `lsp = ["node", ${JSON.stringify(fakeLsp)}]`],
     [/^\[(packages|helpers|toolchain)/gm, "[languages.python.$1"],
   ];
   let profile = builtin;

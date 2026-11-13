@@ -62,7 +62,7 @@ import {
   setHelixBottomInset,
   setHelixStatusHost,
 } from "./helix/view";
-import { quietMessage, withoutPullDiagnostics } from "./lsp";
+import { adjustCapabilities, quietMessage } from "./lsp";
 import { pinchToZoom } from "./pinch";
 import { roundCodeScale } from "./zoom";
 
@@ -622,7 +622,7 @@ class SocketTransport implements Transport {
 
   send(message: string): void {
     if (this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(withoutPullDiagnostics(message));
+      this.socket.send(adjustCapabilities(message));
     }
   }
 

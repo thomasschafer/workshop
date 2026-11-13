@@ -13,14 +13,8 @@ import { redo, undo } from "@codemirror/commands";
 import { getIndentation, IndentContext } from "@codemirror/language";
 import { forEachDiagnostic } from "@codemirror/lint";
 import {
-  findReferences,
   formatDocument,
-  jumpToDeclaration,
-  jumpToDefinition,
-  jumpToImplementation,
-  jumpToTypeDefinition,
   type LSPClient,
-  renameSymbol,
   serverCompletionSource,
   showSignatureHelp,
 } from "@codemirror/lsp-client";
@@ -47,6 +41,18 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
+import {
+  type CodeAction,
+  codeActions,
+  editsFor,
+  hoverMarkdown,
+  type Location,
+  type Range as LspRange,
+  locations,
+  type Position,
+  type WorkspaceEdit,
+} from "../lspActions";
+import { renderMarkdown } from "../markdown";
 import { pasteImpl } from "./commands";
 import {
   fromEditorSelection,
@@ -345,6 +351,7 @@ class HelixView implements PluginValue, Host {
     // browser, which can't now that the code isn't where the keyboard types. On the tap's last
     // event, as the ones before it move the focus on.
     this.view.contentDOM.addEventListener("click", (event) => {
+      if (this.tapTaken()) return;
       const pos = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos !== null) {
         this.view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: "select.pointer" });
@@ -357,6 +364,17 @@ class HelixView implements PluginValue, Host {
     window.addEventListener("blur", this.releaseKeyboardFocus);
     document.addEventListener("visibilitychange", this.releaseKeyboardFocus);
     return field;
+  }
+
+  /**
+   * When a list's row was last picked by a tap. The list goes as the finger comes down, and the
+   * code takes its place under the finger, where the tap's click would then move the cursor.
+   */
+  pickedAt = 0;
+
+  /** Whether a tap now is the end of one that's already picked from a list. */
+  private tapTaken(): boolean {
+    return Date.now() - this.pickedAt < 700;
   }
 
   private readonly releaseKeyboardFocus = (): void => {
@@ -735,23 +753,39 @@ class HelixView implements PluginValue, Host {
         needsLsp(() => formatDocument(view));
         return;
       case "goto_definition":
-        needsLsp(() => jumpToDefinition(view));
-        return;
+        return this.withLsp((lsp) =>
+          this.goto(lsp, "textDocument/definition", "definitionProvider", "Definitions"),
+        );
       case "goto_declaration":
-        needsLsp(() => jumpToDeclaration(view));
-        return;
+        return this.withLsp((lsp) =>
+          this.goto(lsp, "textDocument/declaration", "declarationProvider", "Declarations"),
+        );
       case "goto_type_definition":
-        needsLsp(() => jumpToTypeDefinition(view));
-        return;
+        return this.withLsp((lsp) =>
+          this.goto(
+            lsp,
+            "textDocument/typeDefinition",
+            "typeDefinitionProvider",
+            "Type definitions",
+          ),
+        );
       case "goto_implementation":
-        needsLsp(() => jumpToImplementation(view));
-        return;
+        return this.withLsp((lsp) =>
+          this.goto(
+            lsp,
+            "textDocument/implementation",
+            "implementationProvider",
+            "Implementations",
+          ),
+        );
       case "goto_reference":
-        needsLsp(() => findReferences(view));
-        return;
+        return this.withLsp((lsp) =>
+          this.goto(lsp, "textDocument/references", "referencesProvider", "References", {
+            context: { includeDeclaration: true },
+          }),
+        );
       case "rename_symbol":
-        needsLsp(() => renameSymbol(view));
-        return;
+        return this.withLsp((lsp) => this.rename(lsp));
       case "signature_help":
         needsLsp(() => showSignatureHelp(view));
         return;
@@ -759,40 +793,242 @@ class HelixView implements PluginValue, Host {
         needsLsp(() => startCompletion(view));
         return;
       case "hover":
-        if (lsp === null) {
-          editor.setError("There's no language server running for this language");
-          return;
-        }
-        await this.hover(lsp.client, lsp.uri);
-        return;
+        return this.withLsp((lsp) => this.hover(lsp.client, lsp.uri));
       case "select_references_to_symbol_under_cursor":
-        if (lsp === null) {
-          editor.setError("There's no language server running for this language");
-          return;
-        }
-        await this.selectReferences(lsp.client, lsp.uri);
-        return;
+        return this.withLsp((lsp) => this.selectReferences(lsp.client, lsp.uri));
       case "symbol_picker":
-        if (lsp === null) {
-          editor.setError("There's no language server running for this language");
-          return;
-        }
-        await this.symbolPicker(lsp.client, lsp.uri);
-        return;
+        return this.withLsp((lsp) => this.symbolPicker(lsp.client, lsp.uri));
       case "code_action":
-        editor.setError(
-          "code_action isn't available in Workshop: its language client has no code actions",
-        );
-        return;
+        return this.withLsp((lsp) => this.codeAction(lsp));
     }
   }
 
-  private position(pos: number): { line: number; character: number } {
+  /** Runs something that needs the language server, or says there isn't one. */
+  private async withLsp(run: (lsp: Lsp) => Promise<void>): Promise<void> {
+    const lsp = this.config.lsp;
+    if (lsp === null) {
+      this.editor.setError("There's no language server running for this language");
+      return;
+    }
+    await run(lsp);
+  }
+
+  /** Whether the server says it can do something, saying so in the status line if it can't. */
+  private can(lsp: Lsp, capability: string, what: string): boolean {
+    const capabilities = lsp.client.serverCapabilities as Record<string, unknown> | null;
+    if (capabilities === null) {
+      this.editor.setError("The language server is still starting");
+      return false;
+    }
+    if (!capabilities[capability]) {
+      this.editor.setError(`This language's server can't ${what}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Asks the server about the place the cursor is at. Positions in its answer are for the text
+   * as it was sent, so the answer is dropped, with null, if the text has changed since.
+   */
+  private async ask(lsp: Lsp, method: string, extra: object = {}): Promise<unknown | null> {
+    lsp.client.sync();
+    const doc = this.view.state.doc;
+    const result = await lsp.client.request<unknown, unknown>(method, {
+      textDocument: { uri: lsp.uri },
+      position: this.position(helixCursor(this.view.state)),
+      ...extra,
+    });
+    if (this.view.state.doc !== doc) {
+      this.editor.setError("The code changed before the language server answered");
+      return null;
+    }
+    return result ?? [];
+  }
+
+  /** The line a place in the open file is on, for showing in a list, and its number. */
+  private describeLine(range: LspRange): { label: string; detail: string } {
+    const doc = this.view.state.doc;
+    const line = doc.line(Math.min(range.start.line + 1, doc.lines));
+    return { label: line.text.trim(), detail: `line ${line.number}` };
+  }
+
+  private jumpTo(range: LspRange): void {
+    const from = this.offset(range.start);
+    const to = Math.max(from, this.offset(range.end));
+    this.editor.pushJump();
+    this.editor.setSelection(Selection.single(from, to));
+    this.scroll({ kind: "align", pos: from, align: "center" });
+  }
+
+  /**
+   * Goes to where the server says the thing under the cursor is defined, used and so on: straight
+   * there if there's one place, or by picking from a list of them, as Helix does.
+   */
+  private async goto(
+    lsp: Lsp,
+    method: string,
+    capability: string,
+    title: string,
+    extra: object = {},
+  ): Promise<void> {
+    if (!this.can(lsp, capability, `find ${title.toLowerCase()}`)) return;
+    const result = await this.ask(lsp, method, extra);
+    if (result === null) return;
+    const found = locations(result);
+    const here = found.filter((location) => location.uri === lsp.uri);
+    if (here.length === 0) {
+      this.editor.setError(
+        found.length === 0 ? `No ${title.toLowerCase()} found` : elsewhere(found, title),
+      );
+      return;
+    }
+    const [only] = here;
+    if (here.length === 1 && only) {
+      this.jumpTo(only.range);
+      this.afterKey();
+    } else {
+      this.handler.openPicker(
+        title,
+        here.map((location) => ({
+          ...this.describeLine(location.range),
+          run: () => this.jumpTo(location.range),
+        })),
+      );
+    }
+    if (found.length > here.length) this.editor.setStatus(elsewhere(found, title));
+  }
+
+  /**
+   * Renames the symbol under the cursor, asking for its new name in Helix's own prompt, which
+   * every keyboard can type into, with its name now there to change.
+   */
+  private async rename(lsp: Lsp): Promise<void> {
+    if (!this.can(lsp, "renameProvider", "rename")) return;
+    const cursor = helixCursor(this.view.state);
+    const word = this.view.state.wordAt(cursor);
+    if (word === null) {
+      this.editor.setError("There's nothing to rename under the cursor");
+      return;
+    }
+    const name = this.view.state.sliceDoc(word.from, word.to);
+    this.editor.prompt = {
+      label: "rename-to:",
+      historyRegister: null,
+      input: name,
+      onEvent: async (editor, input, event) => {
+        if (event !== "validate" || input === "" || input === name) return;
+        const result = await this.ask(lsp, "textDocument/rename", { newName: input });
+        if (result === null) return;
+        const changed = this.applyEdit(lsp, result as WorkspaceEdit, "input.rename");
+        if (changed !== null) editor.setStatus(`Renamed ${name} to ${input}${changed}`);
+      },
+    };
+    this.handler.promptCursor = name.length;
+    this.editor.onChange();
+  }
+
+  /**
+   * Makes a workspace edit's changes to the open file, as one undoable change. Returns what to
+   * add to a message saying it's done, about anything left undone in other files, or null if the
+   * edit changed nothing here, which it says in the status line.
+   */
+  private applyEdit(lsp: Lsp, edit: WorkspaceEdit, userEvent: string): string | null {
+    const { edits, elsewhere: others } = editsFor(edit, lsp.uri);
+    const other = others === 0 ? "" : `, but not in ${others} other file${others === 1 ? "" : "s"}`;
+    if (edits.length === 0) {
+      this.editor.setError(
+        others === 0
+          ? "The language server had nothing to change"
+          : `That only changes other files, and Workshop edits one at a time`,
+      );
+      return null;
+    }
+    this.view.dispatch({
+      changes: edits.map((e) => ({
+        from: this.offset(e.range.start),
+        to: this.offset(e.range.end),
+        insert: e.newText,
+      })),
+      userEvent,
+    });
+    this.afterKey();
+    return other;
+  }
+
+  /** Lists what the server offers to do about the selection, and does the one picked. */
+  private async codeAction(lsp: Lsp): Promise<void> {
+    if (!this.can(lsp, "codeActionProvider", "offer code actions")) return;
+    const range = helixSelection(this.view.state).primary;
+    const lspRange = { start: this.position(range.from), end: this.position(range.to) };
+    const diagnostics: object[] = [];
+    forEachDiagnostic(this.view.state, (d, from, to) => {
+      if (to < range.from || from > range.to) return;
+      diagnostics.push({
+        range: { start: this.position(from), end: this.position(to) },
+        message: d.message,
+        severity: LSP_SEVERITY[d.severity],
+        ...(d.source ? { source: d.source } : {}),
+      });
+    });
+    const result = await this.ask(lsp, "textDocument/codeAction", {
+      range: lspRange,
+      context: { diagnostics, triggerKind: 1 },
+    });
+    if (result === null) return;
+    const actions = codeActions(result);
+    if (actions.length === 0) {
+      this.editor.setStatus("No code actions available");
+      return;
+    }
+    // Those that can't be used now go last, with why.
+    const usable = [...actions].sort(
+      (a, b) => Number(a.disabled !== null) - Number(b.disabled !== null),
+    );
+    this.handler.openPicker(
+      "Code actions",
+      usable.map((action) => ({
+        label: action.title,
+        detail: action.disabled ?? "",
+        run: () => this.runCodeAction(lsp, action),
+      })),
+    );
+  }
+
+  private async runCodeAction(lsp: Lsp, action: CodeAction): Promise<void> {
+    if (action.disabled !== null) {
+      this.editor.setError(action.disabled);
+      return;
+    }
+    let edit = action.edit;
+    if (edit === null && action.resolvable) {
+      // Sent without its edit, to be asked for once it's chosen.
+      const doc = this.view.state.doc;
+      const resolved = codeActions([
+        await lsp.client.request<unknown, unknown>("codeAction/resolve", action.raw),
+      ])[0];
+      if (this.view.state.doc !== doc) {
+        this.editor.setError("The code changed before the language server answered");
+        return;
+      }
+      edit = resolved?.edit ?? null;
+    }
+    if (edit === null) {
+      this.editor.setError(
+        "That action is a command for the language server to run, which Workshop can't follow",
+      );
+      return;
+    }
+    const changed = this.applyEdit(lsp, edit, "input.codeaction");
+    if (changed !== null) this.editor.setStatus(`${action.title}${changed}`);
+  }
+
+  private position(pos: number): Position {
     const line = this.view.state.doc.lineAt(pos);
     return { line: line.number - 1, character: pos - line.from };
   }
 
-  private offset(position: { line: number; character: number }): number {
+  private offset(position: Position): number {
     const doc = this.view.state.doc;
     const line = doc.line(Math.min(position.line + 1, doc.lines));
     return Math.min(line.from + position.character, line.to);
@@ -807,16 +1043,12 @@ class HelixView implements PluginValue, Host {
         position: this.position(helixCursor(this.view.state)),
       },
     );
-    const text = result ? hoverContents(result.contents).trim() : "";
+    const text = result ? hoverMarkdown(result.contents).trim() : "";
     if (text === "") {
       this.editor.setStatus("No hover information available");
       return;
     }
-    this.editor.autoinfo = {
-      title: "Hover",
-      body: text.split("\n").map((line) => ["", line] as const),
-      kind: "text",
-    };
+    this.editor.autoinfo = { title: "", body: [], kind: "text", markdown: text };
     this.editor.onChange();
   }
 
@@ -913,13 +1145,16 @@ class HelixView implements PluginValue, Host {
   }
 }
 
-function hoverContents(contents: unknown): string {
-  if (typeof contents === "string") return contents;
-  if (Array.isArray(contents)) return contents.map(hoverContents).join("\n");
-  if (contents && typeof contents === "object" && "value" in contents) {
-    return String((contents as { value: unknown }).value);
-  }
-  return "";
+type Lsp = NonNullable<HelixConfig["lsp"]>;
+
+/** Diagnostics' severities, as the language server numbers them. */
+const LSP_SEVERITY = { error: 1, warning: 2, info: 3, hint: 4 } as const;
+
+/** Says that places found are in files other than the open one, which is all Workshop shows. */
+function elsewhere(found: readonly Location[], title: string): string {
+  const files = new Set(found.map((location) => location.uri));
+  const names = [...files].map((uri) => decodeURIComponent(uri.slice(uri.lastIndexOf("/") + 1)));
+  return `${title} in ${names.slice(0, 3).join(", ")}${names.length > 3 ? " and others" : ""}, which Workshop can't open`;
 }
 
 // ---- The status line ----
@@ -963,6 +1198,7 @@ class StatusPanel {
       this.extra.append(
         renderPicker(editor, (index) => {
           if (editor.picker) editor.picker.selected = index;
+          this.helix.pickedAt = Date.now();
           run(this.helix, this.helix.handler.handle("ret" as Key));
         }),
       );
@@ -1016,6 +1252,14 @@ function renderInfo(info: Info): HTMLElement {
   const box = document.createElement("div");
   box.className = `cm-helix-info cm-helix-info-${info.kind ?? "keys"}`;
   if (info.title) box.append(span("cm-helix-info-title", info.title));
+  if (info.markdown !== undefined) {
+    const text = document.createElement("div");
+    text.className = "cm-helix-info-markdown markdown";
+    // Rendered with raw HTML escaped, so it's safe to put in the page.
+    text.innerHTML = renderMarkdown(info.markdown);
+    box.append(text);
+    return box;
+  }
   const table = document.createElement("div");
   table.className = "cm-helix-info-body";
   for (const [key, desc] of info.body) {
