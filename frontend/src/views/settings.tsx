@@ -13,6 +13,7 @@ import {
 } from "../notifications";
 import { isUpToDate } from "../packages";
 import type { DictationChoice } from "../preferences";
+import { CODE_SCALE_RANGE, stepCodeScale } from "../zoom";
 import { Checks } from "./checks";
 import { Modal } from "./modal";
 import { ModelsSection } from "./models";
@@ -48,6 +49,9 @@ interface Props {
   onServerSpeech: (ready: boolean) => void;
   lineWrapping: boolean;
   onLineWrapping: (enabled: boolean) => void;
+  /** How much the code editor's text is scaled from its usual size. */
+  codeScale: number;
+  onCodeScale: (scale: number) => void;
   /** Whether Helix's keybindings are on for this device. */
   helixOn: boolean;
   /** What's wrong with the Helix keys in the config, if anything. */
@@ -249,9 +253,55 @@ function TalkingPage({ dictation, onDictation, onServerSpeech, onBench }: Props)
   );
 }
 
+function CodeSizeSection({ scale, onScale }: { scale: number; onScale: (scale: number) => void }) {
+  const percent = `${Math.round(scale * 100)}%`;
+  return (
+    <>
+      <div class="code-size">
+        <span id="code-size-label">Code text size</span>
+        <div class="code-size-stepper">
+          <button
+            type="button"
+            aria-label="Smaller code text"
+            disabled={scale <= CODE_SCALE_RANGE.min}
+            onClick={() => onScale(stepCodeScale(scale, -1))}
+          >
+            −
+          </button>
+          <output aria-labelledby="code-size-label" aria-live="polite">
+            {percent}
+          </output>
+          <button
+            type="button"
+            aria-label="Larger code text"
+            disabled={scale >= CODE_SCALE_RANGE.max}
+            onClick={() => onScale(stepCodeScale(scale, 1))}
+          >
+            +
+          </button>
+        </div>
+      </div>
+      <p class="muted small">
+        On a touch screen, you can also pinch the code. Only the code changes size, on this device
+        only.
+        {scale !== 1 ? (
+          <>
+            {" "}
+            <button type="button" class="text-button inline" onClick={() => onScale(1)}>
+              Reset
+            </button>
+          </>
+        ) : null}
+      </p>
+    </>
+  );
+}
+
 function DisplayPage({
   lineWrapping,
   onLineWrapping,
+  codeScale,
+  onCodeScale,
   keepScreenOn,
   onKeepScreenOn,
   helixOn,
@@ -269,6 +319,7 @@ function DisplayPage({
         />
         Wrap long lines of code
       </label>
+      <CodeSizeSection scale={codeScale} onScale={onCodeScale} />
       <label class="toggle">
         <input
           type="checkbox"

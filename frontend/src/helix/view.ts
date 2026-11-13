@@ -1169,7 +1169,8 @@ const theme = EditorView.theme({
   ".cm-helix-panel": {
     color: "var(--fg)",
     fontFamily: "var(--mono)",
-    fontSize: "0.85em",
+    // Not scaled with the code, as pinching only makes the code larger.
+    fontSize: "calc(var(--code-size) * 0.85)",
     background: "var(--surface)",
     borderTop: "1px solid var(--border)",
   },

@@ -53,6 +53,7 @@ import { StatusLine } from "./views/status";
 import { enterFullscreen, exitFullscreen, ZenExit, ZenKeyboardButton } from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
+import { roundCodeScale } from "./zoom";
 
 type Sheet = "run" | "settings" | "help" | "setup" | "bench" | null;
 
@@ -193,6 +194,15 @@ export function App({ boot }: { boot: Bootstrap }) {
     lineWrappingRef.current = enabled;
     editor.current?.setLineWrapping(enabled);
   };
+  const [codeScale, setCodeScale] = useState(() => preferences.codeScale.get());
+  const changeCodeScale = (scale: number) => {
+    const kept = roundCodeScale(scale);
+    preferences.codeScale.set(kept);
+    setCodeScale(kept);
+    editor.current?.setCodeScale(kept);
+  };
+  const changeCodeScaleRef = useRef(changeCodeScale);
+  changeCodeScaleRef.current = changeCodeScale;
   const [keybindings, setKeybindings] = useState(() => preferences.keybindings.get());
   const helixOn =
     keybindings === "helix" || (keybindings === "config" && boot.editor.keybindings === "helix");
@@ -354,6 +364,8 @@ export function App({ boot }: { boot: Bootstrap }) {
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
           lineWrapping: preferences.lineWrapping.get(),
+          codeScale: preferences.codeScale.get(),
+          onCodeScale: (scale) => changeCodeScaleRef.current(scale),
           helix: helixSetupRef.current(fileName(opened.file_uri)),
           lsp: lsp
             ? {
@@ -889,6 +901,8 @@ export function App({ boot }: { boot: Bootstrap }) {
             }}
             lineWrapping={lineWrapping}
             onLineWrapping={changeLineWrapping}
+            codeScale={codeScale}
+            onCodeScale={changeCodeScale}
             helixOn={helixOn}
             helixProblems={describeProblems(helix.problems)}
             onHelix={(enabled) => {

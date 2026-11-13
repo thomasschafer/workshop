@@ -1,5 +1,7 @@
+import { clampCodeScale } from "./zoom";
+
 /** A setting kept on this device only, such as one that suits a phone but not a desk. */
-export class DevicePreference<T extends string | boolean> {
+export class DevicePreference<T extends string | boolean | number> {
   constructor(
     private readonly key: string,
     private readonly fallback: T,
@@ -41,6 +43,12 @@ function choice<T extends string>(key: string, choices: readonly T[], fallback: 
 
 export const keepScreenOn = flag("workshop:keep-screen-on", true);
 export const lineWrapping = flag("workshop:line-wrapping", false);
+
+/** How much the code editor's text is scaled from its usual size, by pinching or in settings. */
+export const codeScale = new DevicePreference<number>("workshop:code-scale", 1, (stored) => {
+  const scale = Number(stored);
+  return stored.trim() !== "" && Number.isFinite(scale) ? clampCodeScale(scale) : null;
+});
 
 /**
  * The code editor's keybindings on this device, as a phone and a computer with a keyboard want

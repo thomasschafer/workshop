@@ -63,6 +63,7 @@ import {
   setHelixStatusHost,
 } from "./helix/view";
 import { quietMessage, withoutPullDiagnostics } from "./lsp";
+import { pinchToZoom } from "./pinch";
 
 const LANGUAGES: Record<string, () => Extension> = {
   haskell: () => StreamLanguage.define(haskell),
@@ -91,7 +92,9 @@ const highlightStyle = HighlightStyle.define([
 const theme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "var(--code-size)",
+    fontSize: "calc(var(--code-size) * var(--code-scale, 1))",
+    // Pinching scales the code, rather than zooming the page.
+    touchAction: "pan-x pan-y",
     background: "transparent",
     color: "var(--fg)",
   },
@@ -161,6 +164,10 @@ export interface EditorOptions {
   cursor: number | null;
   mode: string;
   lineWrapping: boolean;
+  /** How much the text is scaled from its usual size. */
+  codeScale: number;
+  /** Called with the scale the text was pinched to. */
+  onCodeScale: (scale: number) => void;
   lsp: { client: LSPClient; uri: string; languageId: string } | null;
   /** Helix's keybindings, or null for CodeMirror's own. */
   helix: HelixSetup | null;
@@ -180,6 +187,9 @@ export class CodeEditor {
   readonly view: EditorView;
   private readonly inputMode = new Compartment();
   private readonly wrapping = new Compartment();
+  private readonly scale = new Compartment();
+  private codeScale: number;
+  private readonly stopPinching: () => void;
   private readonly inset = new Compartment();
   private readonly keys = new Compartment();
   private readonly numbers = new Compartment();
@@ -199,6 +209,7 @@ export class CodeEditor {
 
   constructor(parent: HTMLElement, options: EditorOptions) {
     this.options = options;
+    this.codeScale = options.codeScale;
     const language = LANGUAGES[options.mode];
     const cursor = Math.min(options.cursor ?? 0, options.doc.length);
     this.view = new EditorView({
@@ -217,6 +228,7 @@ export class CodeEditor {
         this.keys.of(this.keysFor(options.helix)),
         theme,
         this.wrapping.of(wrapping(options.lineWrapping)),
+        this.scale.of(scaled(options.codeScale)),
         this.inset.of([]),
         changedField,
         language ? language() : [],
@@ -263,6 +275,11 @@ export class CodeEditor {
       ],
     });
     this.view.dispatch({ effects: EditorView.scrollIntoView(cursor, { y: "center" }) });
+    this.stopPinching = pinchToZoom(this.view, {
+      scale: () => this.codeScale,
+      apply: (scale) => this.setCodeScale(scale),
+      done: (scale) => options.onCodeScale(scale),
+    });
   }
 
   /**
@@ -352,6 +369,13 @@ export class CodeEditor {
 
   private lineNumbersFor(helix: HelixSetup | null): Extension {
     return helix?.options.lineNumbers === "relative" ? relativeLineNumbers() : lineNumbers();
+  }
+
+  /** Scales the text from its usual size. */
+  setCodeScale(scale: number): void {
+    if (scale === this.codeScale) return;
+    this.codeScale = scale;
+    this.view.dispatch({ effects: this.scale.reconfigure(scaled(scale)) });
   }
 
   setLineWrapping(enabled: boolean): void {
@@ -522,6 +546,7 @@ export class CodeEditor {
 
   destroy(): void {
     window.clearTimeout(this.flashTimer);
+    this.stopPinching();
     this.view.destroy();
   }
 }
@@ -531,6 +556,11 @@ export class CodeEditor {
  * beside the end of the longest one to put the cursor there.
  */
 const scrollPastLineEnd = EditorView.theme({ ".cm-content": { paddingRight: "40vw" } });
+
+/** Scales the text, and so the gutter and tooltips with it, from its usual size. */
+function scaled(scale: number): Extension {
+  return EditorView.editorAttributes.of({ style: `--code-scale: ${scale}` });
+}
 
 function wrapping(enabled: boolean): Extension {
   return enabled ? EditorView.lineWrapping : scrollPastLineEnd;

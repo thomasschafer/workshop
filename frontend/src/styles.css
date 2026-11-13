@@ -263,6 +263,10 @@ code {
   padding: 8px 0;
 }
 
+.text-button.inline {
+  padding: 0;
+}
+
 .banner {
   display: flex;
   flex-wrap: wrap;
@@ -1303,6 +1307,35 @@ code {
 .phone-link code {
   font-size: 12px;
   word-break: break-all;
+}
+
+.code-size {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.code-size-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.code-size-stepper button {
+  width: 44px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 18px;
+}
+
+.code-size-stepper output {
+  min-width: 5ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .theme-picker {

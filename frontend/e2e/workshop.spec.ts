@@ -1041,14 +1041,20 @@ async function holdKey(page: Page, key: Locator, during: () => Promise<unknown>)
   }
 }
 
-/** Opens 2017's day 4 on a phone, with Helix's keybindings, at its code. */
-async function openOnPhone(browser: Browser): Promise<{ context: BrowserContext; phone: Page }> {
+/** Opens 2017's day 4 on a phone, with Helix's keybindings unless others are given, at its code. */
+async function openOnPhone(
+  browser: Browser,
+  keybindings: "helix" | "default" = "helix",
+): Promise<{ context: BrowserContext; phone: Page }> {
   const context = await browser.newContext({
     ...devices["Pixel 7"],
     baseURL: `http://127.0.0.1:${PORT}`,
   });
   const phone = await context.newPage();
-  await phone.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
+  await phone.addInitScript(
+    (choice) => localStorage.setItem("workshop:keybindings", choice),
+    keybindings,
+  );
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
   await phone.goto(`/?token=${token}`);
   const picker = phone.locator(".picker");
@@ -1061,6 +1067,117 @@ async function openOnPhone(browser: Browser): Promise<{ context: BrowserContext;
   await expect(phone.locator(".cm-content")).toContainText("def part1");
   return { context, phone };
 }
+
+/**
+ * Pinches with two fingers either side of `centre`, from `from` pixels apart to `to`. Chromium
+ * takes real touches through its DevTools protocol; Playwright has no other way to touch with two
+ * fingers, and WebKit can't construct touches, so there the events carry plain points instead.
+ */
+async function pinch(
+  phone: Page,
+  centre: { x: number; y: number },
+  from: number,
+  to: number,
+): Promise<void> {
+  const steps = 8;
+  const apart = (d: number) => [
+    { x: centre.x - d / 2, y: centre.y, id: 0 },
+    { x: centre.x + d / 2, y: centre.y, id: 1 },
+  ];
+  const distances = Array.from({ length: steps + 1 }, (_, i) => from + ((to - from) * i) / steps);
+  if (test.info().project.name === "chromium") {
+    const cdp = await phone.context().newCDPSession(phone);
+    const send = (type: "touchStart" | "touchMove" | "touchEnd", d: number | null) =>
+      cdp.send("Input.dispatchTouchEvent", { type, touchPoints: d === null ? [] : apart(d) });
+    await send("touchStart", from);
+    for (const d of distances.slice(1)) {
+      await send("touchMove", d);
+      await phone.evaluate(() => new Promise(requestAnimationFrame));
+    }
+    await send("touchEnd", null);
+    await cdp.detach();
+    return;
+  }
+  await phone.evaluate(
+    async ({ frames }) => {
+      const target = document.querySelector(".cm-editor");
+      if (!target) throw new Error("there's no editor to pinch");
+      const fire = (type: string, points: { x: number; y: number }[]) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        const touches = points.map((p) => ({ clientX: p.x, clientY: p.y, target }));
+        Object.defineProperty(event, "touches", { value: touches });
+        target.dispatchEvent(event);
+      };
+      fire("touchstart", frames[0] ?? []);
+      for (const points of frames.slice(1)) {
+        fire("touchmove", points);
+        await new Promise(requestAnimationFrame);
+      }
+      fire("touchend", []);
+    },
+    { frames: distances.map(apart) },
+  );
+}
+
+test("scales only the code when it's pinched, and in settings, on this device", async ({
+  browser,
+}) => {
+  // Long enough to scroll, so the code between the fingers can be kept there as it grows.
+  const original = readFileSync(solution, "utf8");
+  writeFileSync(solution, `${original}\n${"# more\n".repeat(60)}`);
+  const { context, phone } = await openOnPhone(browser, "default");
+  await expect(phone.locator(".cm-content")).toContainText("# more");
+  const fontSize = (selector: string) =>
+    phone
+      .locator(selector)
+      .first()
+      .evaluate((e) => Number.parseFloat(getComputedStyle(e).fontSize));
+  const usual = await fontSize(".cm-content");
+  const title = await fontSize(".tabs");
+  const gutter = await fontSize(".cm-gutters");
+
+  // Pinching between the fingers keeps the line there where it was.
+  const line = phone.locator(".cm-line", { hasText: "def part1" });
+  const before = await line.boundingBox();
+  if (before === null) throw new Error("there's no line defining part1");
+  const centre = { x: before.x + 60, y: before.y + before.height / 2 };
+  await pinch(phone, centre, 100, 150);
+  await expect.poll(() => fontSize(".cm-content")).toBeCloseTo(usual * 1.5, 0);
+  const after = await line.boundingBox();
+  if (after === null) throw new Error("the line defining part1 has gone");
+  expect(after.y).toBeLessThanOrEqual(centre.y);
+  expect(after.y + after.height).toBeGreaterThanOrEqual(centre.y);
+  // Lines still start in view, beside the line numbers.
+  expect(await phone.locator(".cm-scroller").evaluate((s) => s.scrollLeft)).toBe(0);
+  // The line numbers grow with the code, but nothing else does, and the page isn't zoomed.
+  expect(await fontSize(".cm-gutters")).toBeCloseTo(gutter * 1.5, 0);
+  expect(await fontSize(".tabs")).toBe(title);
+  expect(await phone.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+
+  // Settings shows the pinched size, and steps from it.
+  await phone.getByRole("button", { name: "Settings" }).click();
+  await phone.locator(".settings-row", { hasText: "Display" }).getByRole("button").click();
+  const dialog = phone.getByRole("dialog", { name: "Display" });
+  const size = dialog.getByLabel("Code text size");
+  await expect(size).toHaveText("150%");
+  await dialog.getByRole("button", { name: "Larger code text" }).click();
+  await expect(size).toHaveText("160%");
+  expect(await fontSize(".cm-content")).toBeCloseTo(usual * 1.6, 0);
+
+  // It's kept on this device across a reload, and can be put back as it was.
+  await phone.reload();
+  await expect(phone.locator(".cm-content")).toContainText("def part1");
+  expect(await fontSize(".cm-content")).toBeCloseTo(usual * 1.6, 0);
+  await phone.getByRole("button", { name: "Settings" }).click();
+  await phone.locator(".settings-row", { hasText: "Display" }).getByRole("button").click();
+  await dialog.getByRole("button", { name: "Reset" }).click();
+  await expect(size).toHaveText("100%");
+  await expect(dialog.getByRole("button", { name: "Reset" })).toHaveCount(0);
+  expect(await fontSize(".cm-content")).toBe(usual);
+  await context.close();
+  writeFileSync(solution, original);
+  await expect(editor()).not.toContainText("# more", { timeout: 15_000 });
+});
 
 test("works on a phone with Helix's keybindings, from Workshop's own keyboard", async ({
   browser,
