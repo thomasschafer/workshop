@@ -186,6 +186,12 @@ code {
   flex-direction: column;
 }
 
+/* Marked out as what slides while turning between tabs, and only then: marked out for good, it
+   would sit beneath the controls and dialogs. */
+html[data-tab-turn] .content {
+  view-transition-name: tab;
+}
+
 .pane {
   flex: 1;
   overflow-y: auto;
@@ -2370,4 +2376,63 @@ code {
   background: var(--surface);
   font-family: var(--mono);
   font-size: 13px;
+}
+
+/* Turning between tabs: the tabs' part of the page slides, the one that's left going out as the
+   next comes in from the side it's turned to. The rest of the page changes at once. */
+/* Only the tabs' part of the page is drawn as a picture while it slides. Whatever is, takes no
+   touches or clicks until it's done, so the rest of the page, such as the keyboard, is left as
+   it is, and what's drawn over the page lets touches through to it. */
+html[data-tab-turn] {
+  view-transition-name: none;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+/* Kept to the tabs' part of the page, so nothing slides over the puzzle's column beside it. */
+::view-transition-group(tab) {
+  animation-duration: 200ms;
+  overflow: clip;
+}
+
+html[data-tab-turn="forward"]::view-transition-old(tab) {
+  animation: 200ms ease-out both tab-out-left;
+}
+
+html[data-tab-turn="forward"]::view-transition-new(tab) {
+  animation: 200ms ease-out both tab-in-right;
+}
+
+html[data-tab-turn="back"]::view-transition-old(tab) {
+  animation: 200ms ease-out both tab-out-right;
+}
+
+html[data-tab-turn="back"]::view-transition-new(tab) {
+  animation: 200ms ease-out both tab-in-left;
+}
+
+@keyframes tab-out-left {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes tab-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes tab-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes tab-in-left {
+  from {
+    transform: translateX(-100%);
+  }
 }

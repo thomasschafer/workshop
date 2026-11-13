@@ -1838,6 +1838,8 @@ test("turns to other tabs in zen mode with two fingers, keeping the keyboard for
   await sweep(phone, middle, 150);
   await expect(problem).toBeVisible();
   await expect(shown).toHaveText("Problem");
+  // The slide between them is over, leaving nothing marked out to slide.
+  await expect(phone.locator("html")).not.toHaveAttribute("data-tab-turn");
   await expect(code).toBeHidden();
   await expect(keyboard).toBeHidden();
   await expect(phone.locator("nav.tabs")).toBeHidden();
@@ -1917,12 +1919,35 @@ test("runs, enters zen mode and turns between tabs from the keyboard, and lists 
   // Zen mode, where the tabs are hidden but can still be turned between.
   await computer.keyboard.press(`${mod}+Period`);
   await expect(computer.locator("nav.tabs")).toBeHidden();
+  // Turning slides the tab that's left out the way it's turned, as the next comes in, in
+  // browsers that can: the animations that run are noted as they do.
+  const slides = await computer.evaluate(() => {
+    const seen = new Set<string>();
+    Object.assign(window, { slidesSeen: seen });
+    const note = () => {
+      for (const animation of document.getAnimations()) {
+        if (animation instanceof CSSAnimation) seen.add(animation.animationName);
+      }
+      requestAnimationFrame(note);
+    };
+    note();
+    return typeof document.startViewTransition === "function";
+  });
+  const slidesSeen = () =>
+    computer.evaluate(() => [...(window as unknown as { slidesSeen: Set<string> }).slidesSeen]);
   await computer.keyboard.press("Alt+BracketLeft");
   await expect(computer.locator(".zen-tabs .selected")).toHaveText("Problem");
   await expect(computer.locator(".problem")).toBeVisible();
+  if (slides) {
+    await expect.poll(slidesSeen).toEqual(expect.arrayContaining(["tab-out-right", "tab-in-left"]));
+  }
+  await expect(computer.locator("html")).not.toHaveAttribute("data-tab-turn");
   await computer.keyboard.press("Alt+BracketRight");
   await computer.keyboard.press("Alt+BracketRight");
   await expect(computer.locator(".notes textarea")).toBeVisible();
+  if (slides) {
+    await expect.poll(slidesSeen).toEqual(expect.arrayContaining(["tab-out-left", "tab-in-right"]));
+  }
   await computer.keyboard.press("Alt+BracketLeft");
   await expect(computer.locator(".cm-content")).toBeVisible();
   await computer.keyboard.press(`${mod}+Period`);

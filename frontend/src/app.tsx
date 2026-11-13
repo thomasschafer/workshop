@@ -28,6 +28,7 @@ import { isPractice, PRACTICE, puzzleTitle } from "./puzzle";
 import { sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
 import { watchSwipes } from "./swipe";
+import { turnTab } from "./tabTurn";
 import {
   done,
   type Job,
@@ -42,7 +43,7 @@ import { Calibrate } from "./views/calibrate";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
-import { Header, Tabs, tabBeside } from "./views/header";
+import { Header, TABS, Tabs, tabBeside } from "./views/header";
 import { Help } from "./views/help";
 import { Keyboard } from "./views/keyboard";
 import { Modal } from "./views/modal";
@@ -286,8 +287,11 @@ export function App({ boot }: { boot: Bootstrap }) {
   useEffect(() => () => wakeLock.dispose(), [wakeLock]);
   useEffect(() => wakeLock.setEnabled(keepScreenOn), [wakeLock, keepScreenOn]);
   // Queued utterances run after later renders, so they read the latest state through refs.
+  // The tab being turned to, until the page shows it.
+  const turningTo = useRef<Tab | null>(null);
+  if (turningTo.current === tab) turningTo.current = null;
   const latest = useRef({ tab: shownTab, notes, run });
-  latest.current = { tab: shownTab, notes, run };
+  latest.current = { tab: turningTo.current ?? shownTab, notes, run };
   puzzleRef.current = puzzle;
 
   const updateNotes = (text: string) => {
@@ -661,16 +665,34 @@ export function App({ boot }: { boot: Bootstrap }) {
       (e: unknown) => notify("warn", `Couldn't go full screen: ${errorMessage(e)}`),
     );
   };
+  // Turning between tabs by a sweep or a shortcut slides the one that's left out as the next
+  // comes in, the way it's turned. Not by tapping a tab: while a tab slides in it takes no
+  // touches, and a tap on what's just been turned to shouldn't be lost. The page only changes
+  // once the browser is ready to slide, a moment later, so what happens next, such as something
+  // said or another turn, goes by the tab being turned to.
+  const turnTo = (next: Tab) => {
+    // Beside the code, the puzzle isn't a tab to turn to.
+    if (split && next === "problem") return;
+    const from = TABS.indexOf(latest.current.tab);
+    const to = TABS.indexOf(next);
+    if (to === from) return;
+    turningTo.current = next;
+    latest.current.tab = next;
+    turnTab(to > from ? "forward" : "back", () => setTab(next));
+  };
+  const turnBy = (direction: 1 | -1) => turnTo(tabBeside(latest.current.tab, direction));
+  const turnByRef = useRef(turnBy);
+  turnByRef.current = turnBy;
+
   // In zen mode the tabs are hidden, so on a touch screen two fingers swept sideways turn to the
   // next one, or back. The keyboard, if it's up, goes while the code isn't showing, and comes
   // back with it.
-  const app = useRef<HTMLDivElement>(null);
   // As zen mode is entered, rather than once the page has next been drawn, so no sweep is missed.
+  // On the whole page: while one tab slides to the next, touches on it land on what's behind.
   useLayoutEffect(() => {
-    const root = app.current;
-    if (!zen || !touchScreen || root === null) return;
-    return watchSwipes(root, ".keyboard, .modal-backdrop", (direction) =>
-      setTab((current) => tabBeside(current, direction === "left" ? 1 : -1)),
+    if (!zen || !touchScreen) return;
+    return watchSwipes(document.documentElement, ".keyboard, .modal-backdrop", (direction) =>
+      turnByRef.current(direction === "left" ? 1 : -1),
     );
   }, [zen, touchScreen]);
 
@@ -688,8 +710,8 @@ export function App({ boot }: { boot: Bootstrap }) {
     runSample: puzzleOpen ? () => void doRun("sample", true) : null,
     runReal: puzzleOpen ? () => void doRun("real", true) : null,
     zen: puzzleOpen && quiet ? () => (zen ? exitZen() : enterZen()) : null,
-    nextTab: puzzleOpen && quiet ? () => setTab((current) => tabBeside(current, 1)) : null,
-    previousTab: puzzleOpen && quiet ? () => setTab((current) => tabBeside(current, -1)) : null,
+    nextTab: puzzleOpen && quiet ? () => turnBy(1) : null,
+    previousTab: puzzleOpen && quiet ? () => turnBy(-1) : null,
     save: puzzleOpen
       ? () => {
           Promise.all([saver.current?.flush(), notesSaver.current?.flush()]).then(
@@ -781,7 +803,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   const sideBySide = split && !showPicker && problemView !== null;
 
   return (
-    <div ref={app} class={`app ${sideBySide ? "split" : ""} ${zen ? "zen" : ""}`}>
+    <div class={`app ${sideBySide ? "split" : ""} ${zen ? "zen" : ""}`}>
       <Header
         showPicker={showPicker}
         puzzle={puzzle}
