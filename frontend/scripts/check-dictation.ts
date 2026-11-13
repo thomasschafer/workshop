@@ -115,7 +115,7 @@ async function check(test: Case, recording: string, token: string): Promise<void
     const context = await browser.newContext({ ...devices["Pixel 7"] });
     await context.grantPermissions(["microphone"]);
     const page = await context.newPage();
-    await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`);
+    await page.goto(`http://127.0.0.1:${PORT}/advent-of-code?token=${token}`);
     if (await page.locator(".picker").isVisible()) {
       await page.getByRole("button", { name: "2017" }).click();
       await page.locator(".day", { hasText: /^4$/ }).click();

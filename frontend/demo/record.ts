@@ -80,7 +80,7 @@ async function say(page: Page, text: string): Promise<void> {
 
 /** What the demo shows: opening a puzzle, three short edits by voice, and running the solution. */
 async function perform(page: Page, token: string): Promise<void> {
-  await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`);
+  await page.goto(`http://127.0.0.1:${PORT}/advent-of-code?token=${token}`);
   await page.waitForTimeout(1000);
 
   await tap(page, page.locator(".day", { hasText: new RegExp(`^${DAY}$`) }));

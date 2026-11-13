@@ -2448,3 +2448,13 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
     transform: translateX(-100%);
   }
 }
+
+.header-start {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.home-button {
+  margin-left: -8px;
+}

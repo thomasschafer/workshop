@@ -12,7 +12,7 @@ pub fn unlocked(year: u16, day: u8) -> Message {
     Message {
         title: format!("Day {day} is out"),
         body: format!("Advent of Code {year}, day {day}, has unlocked."),
-        url: format!("/?open={year}-{day}"),
+        url: format!("/advent-of-code?open={year}-{day}"),
     }
 }
 
@@ -57,6 +57,6 @@ mod tests {
         let message = unlocked(2026, 4);
         assert_eq!(message.title, "Day 4 is out");
         assert_eq!(message.body, "Advent of Code 2026, day 4, has unlocked.");
-        assert_eq!(message.url, "/?open=2026-4");
+        assert_eq!(message.url, "/advent-of-code?open=2026-4");
     }
 }

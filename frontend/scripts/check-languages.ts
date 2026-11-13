@@ -190,7 +190,7 @@ async function run(test: Case): Promise<void> {
   try {
     const token = await serverToken(home, PORT);
     const page = await browser.newPage({ ...devices["Pixel 7"] });
-    await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`);
+    await page.goto(`http://127.0.0.1:${PORT}/advent-of-code?token=${token}`);
     try {
       await check(page, test, log);
     } catch (err) {

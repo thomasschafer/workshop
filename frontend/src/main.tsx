@@ -1,8 +1,8 @@
 import { render } from "preact";
 import { api } from "./api";
-import { App } from "./app";
 import "./styles.css";
 import { applyThemeCss } from "./theme";
+import { Shell } from "./tracks/shell";
 
 const root = document.getElementById("root");
 if (!root) {
@@ -24,7 +24,7 @@ api
   .bootstrap()
   .then((boot) => {
     applyThemeCss(boot.theme_css);
-    render(<App boot={boot} />, root);
+    render(<Shell boot={boot} />, root);
   })
   .catch((error: unknown) => {
     root.innerHTML = "";

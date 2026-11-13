@@ -82,6 +82,27 @@ test.afterAll(async () => {
   await page?.close();
 });
 
+test("starts at home, where Advent of Code is a track", async () => {
+  await expect(page.getByRole("heading", { name: "Tracks" })).toBeVisible();
+  // The only track with anything in it yet.
+  const tracks = page.locator(".track");
+  await expect(tracks).toHaveCount(1);
+  await expect(tracks.first()).toContainText("Advent of Code");
+  await expect(page.locator(".continue")).toContainText("Continue");
+  // On a phone, it all fits across the screen.
+  const width = page.viewportSize()?.width ?? 0;
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+  const button = await page.locator(".continue").boundingBox();
+  expect(button?.width).toBeGreaterThan(width * 0.8);
+
+  // Nothing has been opened yet, so the track opens on the list of puzzles.
+  await tracks.first().click();
+  await expect(page).toHaveURL(/\/advent-of-code$/);
+  await expect(page.locator(".picker")).toBeVisible();
+});
+
 test("opens a puzzle from the picker", async () => {
   await page.getByRole("button", { name: "2017" }).click();
   await expect(page.locator(".picker")).toContainText("5 stars in 2017");
@@ -95,6 +116,22 @@ test("opens a puzzle from the picker", async () => {
   expect(readFileSync(join(HOME, "solutions", "pyrightconfig.json"), "utf8")).toContain("lib");
 });
 
+test("goes home, and continues with the puzzle left part-way through", async () => {
+  await page.getByRole("button", { name: "Home" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  const next = page.locator(".continue");
+  await expect(next).toContainText("2017 · day 4");
+  await expect(next).toContainText("Advent of Code · Where you left off");
+  await next.click();
+  await expect(page).toHaveURL(/\/advent-of-code$/);
+  await expect(page.locator(".problem")).toContainText("Day 4: Counting Lines");
+
+  // The browser's back and forward move between them too.
+  await page.goBack();
+  await expect(page.locator(".continue")).toContainText("2017 · day 4");
+  await page.goForward();
+  await expect(page.locator(".problem")).toContainText("Day 4: Counting Lines");
+});
 test("keeps the puzzle scrolled where it was after looking at another tab", async () => {
   const phone = page.viewportSize();
   // Short enough that the puzzle scrolls.
@@ -911,7 +948,7 @@ test("sends a test notification to a device that turns them on", async ({ browse
     Notification.requestPermission = async () => "granted";
   }, subscription);
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
-  await device.goto(`/?token=${token}`);
+  await device.goto(`/advent-of-code?token=${token}`);
   await device.getByRole("button", { name: "Settings" }).click();
   await device.locator(".settings-row", { hasText: "Notifications" }).getByRole("button").click();
   const toggle = device.getByLabel("Notify me when puzzles unlock");
@@ -938,7 +975,7 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   const december = await context.newPage();
   await december.clock.install({ time: new Date("2017-12-03T21:00:00Z") });
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
-  await december.goto(`/?token=${token}`);
+  await december.goto(`/advent-of-code?token=${token}`);
   await expect(december.locator(".card", { hasText: "Day 3 is out." })).toBeVisible();
 
   // The picker shows straight away if no puzzle has been opened yet.
@@ -967,7 +1004,7 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
   const context = await browser.newContext({ baseURL: `http://127.0.0.1:${PORT}` });
   const helix = await context.newPage();
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
-  await helix.goto(`/?token=${token}`);
+  await helix.goto(`/advent-of-code?token=${token}`);
   // Day 4, whatever the other tests left open.
   const picker = helix.locator(".picker");
   await expect(picker.or(helix.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
@@ -1101,7 +1138,7 @@ async function openOnPhone(
     keybindings,
   );
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
-  await phone.goto(`/?token=${token}`);
+  await phone.goto(`/advent-of-code?token=${token}`);
   const picker = phone.locator(".picker");
   await expect(picker.or(phone.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
   if (!(await picker.isVisible())) await phone.locator(".puzzle-button").click();
@@ -1287,7 +1324,7 @@ test("glides the code when Helix's keys scroll it, ending where it would jump to
   const helix = await context.newPage();
   await helix.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
   const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
-  await helix.goto(`/?token=${token}`);
+  await helix.goto(`/advent-of-code?token=${token}`);
   const picker = helix.locator(".picker");
   await expect(picker.or(helix.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
   if (!(await picker.isVisible())) await helix.locator(".puzzle-button").click();

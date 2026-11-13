@@ -29,6 +29,7 @@ import { sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
 import { watchSwipes } from "./swipe";
 import { turnTab } from "./tabTurn";
+import type { Destination } from "./tracks/types";
 import {
   done,
   type Job,
@@ -83,8 +84,20 @@ type Sheet =
 /** The space kept clear below the code for the cards floating over it. */
 const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
 
-export function App({ boot }: { boot: Bootstrap }) {
-  const [puzzle, setPuzzle] = useState<Puzzle | null>(boot.state.puzzle);
+export function App({
+  boot,
+  entry,
+  onHome,
+}: {
+  boot: Bootstrap;
+  /** Where to open: at a puzzle or the list of them, or else where the app was last left. */
+  entry: Destination | null;
+  /** Goes to the home screen, saying where Advent of Code was left, to come back to. */
+  onHome: (left: Destination) => void;
+}) {
+  const [puzzle, setPuzzle] = useState<Puzzle | null>(
+    entry?.kind === "puzzle" ? entry.puzzle : boot.state.puzzle,
+  );
   const [tab, setTab] = useState<Tab>(boot.state.tab);
   // On a wide screen the puzzle has a column of its own, beside the other tabs.
   const wide = useMediaQuery("(min-width: 1000px)");
@@ -103,7 +116,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       : (models.discuss_models[0] ?? "");
   const [sheet, setSheet] = useState<Sheet>(boot.needs_setup ? "setup" : null);
   const [hasSession, setHasSession] = useState(boot.has_aoc_session);
-  const [picking, setPicking] = useState(false);
+  const [picking, setPicking] = useState(entry?.kind === "puzzle_list");
 
   const [openError, setOpenError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
@@ -302,6 +315,8 @@ export function App({ boot }: { boot: Bootstrap }) {
   };
 
   const stateSaver = useUiStateSaver({ puzzle, tab, discuss_model: discussModel });
+  // Leaving for the home screen, which goes by where the app was left.
+  useEffect(() => () => stateSaver.flushOnExit(), [stateSaver]);
 
   const lookUpType = useMemo(
     () =>
@@ -768,6 +783,17 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   const stars = problem ? "★".repeat(problem.stars) : "";
 
+  // Saved first, so the home screen goes by what was just done here.
+  const goHome = () => {
+    const left: Destination =
+      picking || puzzle === null ? { kind: "puzzle_list" } : { kind: "puzzle", puzzle };
+    void Promise.allSettled([
+      saver.current?.flush(),
+      notesSaver.current?.flush(),
+      stateSaver.flush(),
+    ]).then(() => onHome(left));
+  };
+
   // The picker is the home screen until a puzzle is open, and can be reopened from the header.
   const showPicker = picking || puzzle === null;
   // The talk button's state, and where it's hidden, apply to the Ctrl key just the same.
@@ -812,6 +838,7 @@ export function App({ boot }: { boot: Bootstrap }) {
         puzzle={puzzle}
         stars={stars}
         onBack={() => setPicking(false)}
+        onHome={goHome}
         onPick={() => {
           setSheet(null);
           setPicking(true);

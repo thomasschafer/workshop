@@ -15,14 +15,15 @@ export function tabBeside(tab: Tab, direction: 1 | -1): Tab {
 }
 
 /**
- * The top bar: the open puzzle, which opens the picker, and buttons for zen mode, help and
- * settings.
+ * The top bar: a button for the home screen, the open puzzle, which opens the picker, and
+ * buttons for zen mode, help and settings.
  */
 export function Header({
   showPicker,
   puzzle,
   stars,
   onBack,
+  onHome,
   onPick,
   onZen,
   onHelp,
@@ -33,6 +34,7 @@ export function Header({
   stars: string;
   /** Closes the picker, back to the open puzzle. */
   onBack: () => void;
+  onHome: () => void;
   onPick: () => void;
   /** Enters zen mode, or null where there's no code to show in it. */
   onZen: (() => void) | null;
@@ -42,20 +44,25 @@ export function Header({
   return (
     <header class="top">
       <h1 class="visually-hidden">Workshop</h1>
-      {showPicker ? (
-        puzzle ? (
-          <button type="button" class="puzzle-button" onClick={onBack}>
-            ‹ Back to {puzzleLabel(puzzle)}
-          </button>
-        ) : (
-          <h1 class="app-title">Workshop</h1>
-        )
-      ) : (
-        <button type="button" class="puzzle-button" onClick={onPick}>
-          {puzzle ? puzzleLabel(puzzle) : ""}
-          {stars ? <span class="stars"> {stars}</span> : null}
+      <span class="header-start">
+        <button type="button" class="icon-button home-button" aria-label="Home" onClick={onHome}>
+          ⌂
         </button>
-      )}
+        {showPicker ? (
+          puzzle ? (
+            <button type="button" class="puzzle-button" onClick={onBack}>
+              ‹ Back to {puzzleLabel(puzzle)}
+            </button>
+          ) : (
+            <h1 class="app-title">Workshop</h1>
+          )
+        ) : (
+          <button type="button" class="puzzle-button" onClick={onPick}>
+            {puzzle ? puzzleLabel(puzzle) : ""}
+            {stars ? <span class="stars"> {stars}</span> : null}
+          </button>
+        )}
+      </span>
       <span class="header-actions">
         {onZen ? <ZenButton onClick={onZen} /> : null}
         <button type="button" class="icon-button" aria-label="Help" onClick={onHelp}>
