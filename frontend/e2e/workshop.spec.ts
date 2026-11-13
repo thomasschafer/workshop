@@ -250,6 +250,21 @@ test("shows help as a modal", async () => {
 });
 
 test("hides everything but the code and the keyboard in zen mode", async () => {
+  const chromium = test.info().project.name === "chromium";
+  // Which keys are kept for the page rather than the browser, which only Chromium can do.
+  if (chromium) {
+    await page.evaluate(() => {
+      const keyboard = (
+        navigator as Navigator & { keyboard: { lock(keys: string[]): Promise<void> } }
+      ).keyboard;
+      const lock = keyboard.lock.bind(keyboard);
+      Object.assign(window, { lockedKeys: [] });
+      keyboard.lock = (keys) => {
+        (window as unknown as { lockedKeys: string[][] }).lockedKeys.push(keys);
+        return lock(keys);
+      };
+    });
+  }
   await page.getByRole("button", { name: "Problem", exact: true }).click();
   await page.getByRole("button", { name: "Zen mode" }).click();
   await expect(editor()).toBeVisible();
@@ -259,6 +274,15 @@ test("hides everything but the code and the keyboard in zen mode", async () => {
     await expect(page.locator(hidden)).toBeHidden();
   }
   await expect.poll(() => page.evaluate(() => document.fullscreenElement !== null)).toBe(true);
+  // Escape is kept for Helix's keys, in browsers that can, rather than leaving full screen.
+  if (chromium) {
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { lockedKeys: string[][] }).lockedKeys))
+      .toEqual([["Escape"]]);
+  }
+  // Escape alone doesn't leave zen mode, wherever the browser takes it.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".top")).toBeHidden();
 
   await page.getByRole("button", { name: "Leave zen mode" }).click();
   await expect(page.locator(".puzzle-button")).toBeVisible();

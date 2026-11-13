@@ -50,7 +50,13 @@ import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
 import { Stack } from "./views/stack";
 import { StatusLine } from "./views/status";
-import { enterFullscreen, exitFullscreen, ZenExit, ZenKeyboardButton } from "./views/zen";
+import {
+  enterFullscreen,
+  exitFullscreen,
+  keepEscape,
+  ZenExit,
+  ZenKeyboardButton,
+} from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 import { roundCodeScale } from "./zoom";
@@ -630,8 +636,12 @@ export function App({ boot }: { boot: Bootstrap }) {
     // In the tap itself, as browsers only go full screen, and phones only open the keyboard,
     // for something the user started.
     showKeyboard(true);
-    enterFullscreen().catch((e: unknown) =>
-      notify("warn", `Couldn't go full screen: ${errorMessage(e)}`),
+    enterFullscreen().then(
+      () =>
+        keepEscape().catch((e: unknown) =>
+          notify("warn", `Escape will leave full screen: ${errorMessage(e)}`),
+        ),
+      (e: unknown) => notify("warn", `Couldn't go full screen: ${errorMessage(e)}`),
     );
   };
   const exitZen = () => {

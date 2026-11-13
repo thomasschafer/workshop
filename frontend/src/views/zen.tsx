@@ -79,6 +79,24 @@ export async function enterFullscreen(): Promise<void> {
   await root.requestFullscreen({ navigationUI: "hide" });
 }
 
+/** Chromium's Keyboard Lock API, which TypeScript doesn't describe yet. */
+interface KeyboardLock {
+  lock(keys: string[]): Promise<void>;
+}
+
+/**
+ * Has Escape go to the page while full screen, for Helix's keys, rather than leaving full
+ * screen; holding it down leaves instead, as the browser says. Only Chromium has the API, so
+ * elsewhere Escape still leaves. Only with a mouse or trackpad, as a phone has no Escape key of
+ * its own to keep.
+ */
+export async function keepEscape(): Promise<void> {
+  const keyboard = (navigator as Navigator & { keyboard?: Partial<KeyboardLock> }).keyboard;
+  if (typeof keyboard?.lock !== "function") return;
+  if (!document.fullscreenElement || !window.matchMedia("(pointer: fine)").matches) return;
+  await keyboard.lock(["Escape"]);
+}
+
 export async function exitFullscreen(): Promise<void> {
   overlayKeyboard(false);
   if (document.fullscreenElement) await document.exitFullscreen();
