@@ -62,6 +62,7 @@ import {
   type ScrollRequest,
   toEditorSelection,
 } from "./editor";
+import { ScrollGlide } from "./glide";
 import { KeyHandler } from "./handler";
 import { helixHistory } from "./history";
 import { KeyboardField } from "./keyboardField";
@@ -290,6 +291,8 @@ class HelixView implements PluginValue, Host {
   decorations: DecorationSet;
   selections: DecorationSet;
   private scrollRequest: ScrollRequest | null = null;
+  /** Helix's scrolling commands glide the code, rather than jumping it. */
+  private readonly glide: ScrollGlide;
   private dispatching = false;
   private readonly panel: StatusPanel;
   readonly documentName: string;
@@ -306,6 +309,7 @@ class HelixView implements PluginValue, Host {
     const language = LANGUAGES[config.language] ?? PLAIN_TEXT;
     this.editor = new HelixEditor(this, config.options, language.indent);
     this.handler = new KeyHandler(this.editor, config.keymaps, () => this.afterKey());
+    this.glide = new ScrollGlide(view.scrollDOM);
     this.editor.onChange = () => this.refresh();
     this.panel = new StatusPanel(this);
     this.decorations = cursorDecorations(view, this.editor);
@@ -444,15 +448,17 @@ class HelixView implements PluginValue, Host {
     if (this.destroyed) return;
     const request = this.scrollRequest;
     this.scrollRequest = null;
-    if (request?.kind === "lines") {
-      this.view.scrollDOM.scrollTop += request.lines * this.view.defaultLineHeight;
-    }
-    const pos =
-      request?.kind === "align" || request?.kind === "horizontal-center"
-        ? request.pos
-        : helixCursor(this.view.state);
-    const align = request?.kind === "align" ? request.align : null;
-    this.scrollToShow(pos, align, request?.kind === "horizontal-center");
+    this.glide.run(() => {
+      if (request?.kind === "lines") {
+        this.view.scrollDOM.scrollTop += request.lines * this.view.defaultLineHeight;
+      }
+      const pos =
+        request?.kind === "align" || request?.kind === "horizontal-center"
+          ? request.pos
+          : helixCursor(this.view.state);
+      const align = request?.kind === "align" ? request.align : null;
+      return this.scrollToShow(pos, align, request?.kind === "horizontal-center");
+    }, request?.kind === "lines");
   }
 
   /**
@@ -474,12 +480,13 @@ class HelixView implements PluginValue, Host {
    * Scrolls the code, only as far as needed, so `pos` is in view with Helix's scrolloff around
    * it, or lines it up with the top, centre or bottom. Helix keeps the scrolloff to less than
    * half the view, so the cursor can always settle somewhere without the view moving again.
+   * Returns false if CodeMirror is left to scroll there, later.
    */
   private scrollToShow(
     pos: number,
     align: "top" | "center" | "bottom" | null,
     centerX: boolean,
-  ): void {
+  ): boolean {
     const view = this.view;
     const coords = view.coordsAtPos(pos, 1) ?? view.coordsAtPos(pos, -1);
     if (coords === null) {
@@ -489,7 +496,7 @@ class HelixView implements PluginValue, Host {
           y: align === "top" ? "start" : align === "bottom" ? "end" : "center",
         }),
       });
-      return;
+      return false;
     }
     const area = this.visibleArea();
     const lineHeight = view.defaultLineHeight;
@@ -505,13 +512,14 @@ class HelixView implements PluginValue, Host {
     else if (coords.top < area.top + margin) dy = coords.top - (area.top + margin);
     else if (coords.bottom > area.bottom - margin) dy = coords.bottom - (area.bottom - margin);
     if (dy !== 0) view.scrollDOM.scrollTop += dy;
-    if (this.softWrap()) return;
+    if (this.softWrap()) return true;
     const sideMargin = view.defaultCharacterWidth;
     let dx = 0;
     if (centerX) dx = (coords.left + coords.right) / 2 - (area.left + area.right) / 2;
     else if (coords.left < area.left + sideMargin) dx = coords.left - (area.left + sideMargin);
     else if (coords.right > area.right - sideMargin) dx = coords.right - (area.right - sideMargin);
     if (dx !== 0) view.scrollDOM.scrollLeft += dx;
+    return true;
   }
 
   /**
@@ -590,7 +598,7 @@ class HelixView implements PluginValue, Host {
   };
 
   revealCursor(): void {
-    this.scrollToShow(helixCursor(this.view.state), null, false);
+    this.glide.run(() => this.scrollToShow(helixCursor(this.view.state), null, false), false);
   }
 
   private readonly onKey = (event: KeyboardEvent): void => {
@@ -615,6 +623,7 @@ class HelixView implements PluginValue, Host {
   destroy(): void {
     this.destroyed = true;
     this.panel.destroy();
+    this.glide.destroy();
     this.view.dom.removeEventListener("keydown", this.onKey, true);
     this.view.dom.removeEventListener("beforeinput", this.onBeforeInput, true);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
@@ -626,6 +635,7 @@ class HelixView implements PluginValue, Host {
   // ---- Host ----
 
   viewport(): { firstLine: number; lastLine: number; height: number } {
+    this.glide.settle();
     const view = this.view;
     const area = this.visibleArea();
     const top = area.top - view.documentTop;

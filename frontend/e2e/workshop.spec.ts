@@ -1194,6 +1194,94 @@ test("scales only the code when it's pinched, and in settings, on this device", 
   await expect(editor()).not.toContainText("# more", { timeout: 15_000 });
 });
 
+test("glides the code when Helix's keys scroll it, ending where it would jump to", async ({
+  browser,
+}) => {
+  // Long enough to scroll a good way.
+  const original = readFileSync(solution, "utf8");
+  writeFileSync(solution, `${original}\n${"# more\n".repeat(200)}`);
+  const context = await browser.newContext({ baseURL: `http://127.0.0.1:${PORT}` });
+  const helix = await context.newPage();
+  await helix.addInitScript(() => localStorage.setItem("workshop:keybindings", "helix"));
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await helix.goto(`/?token=${token}`);
+  const picker = helix.locator(".picker");
+  await expect(picker.or(helix.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
+  if (!(await picker.isVisible())) await helix.locator(".puzzle-button").click();
+  await helix.getByRole("button", { name: "2017", exact: true }).click();
+  await expect(picker).toContainText("5 stars in 2017");
+  await helix.locator(".day", { hasText: /^4$/ }).click();
+  const codeTab = helix.getByRole("navigation").getByRole("button", { name: "Code" });
+  if (await codeTab.isVisible()) await codeTab.click();
+  await expect(helix.locator(".cm-content")).toContainText("# more");
+  await helix.locator(".cm-line").first().click();
+  await expect(helix.locator(".cm-helix-mode")).toHaveText("NOR");
+  const scroller = helix.locator(".cm-scroller");
+  const scrollTop = () => scroller.evaluate((s) => s.scrollTop);
+  /** Presses keys, and then where the code is once it's still. */
+  const settledAfter = async (...keys: string[]) => {
+    for (const key of keys) await helix.keyboard.press(key);
+    let last = -1;
+    await expect
+      .poll(async () => {
+        const [before, now] = [last, await scrollTop()];
+        last = now;
+        return before === now;
+      })
+      .toBe(true);
+    return last;
+  };
+
+  // Where the keys jump to, with motion reduced, as some people choose.
+  await helix.emulateMedia({ reducedMotion: "reduce" });
+  const half = await settledAfter("Control+d");
+  expect(half).toBeGreaterThan(0);
+  const twoHalves = await settledAfter("Control+d");
+  expect(twoHalves).toBeGreaterThan(half);
+  expect(await settledAfter("g", "g")).toBe(0);
+  // Paging down puts the cursor near the top of the page it shows.
+  const cursorLine = () =>
+    helix.locator(".cm-activeLine").evaluate((l) => l.getBoundingClientRect().top);
+  const twoPages = await settledAfter("PageDown", "PageDown");
+  const twoPagesCursor = await cursorLine();
+  expect(await settledAfter("g", "g")).toBe(0);
+
+  // Otherwise they glide there, through the lines between.
+  await helix.emulateMedia({ reducedMotion: "no-preference" });
+  await scroller.evaluate((s) => {
+    const seen: number[] = [];
+    Object.assign(window, { scrollsSeen: seen });
+    const start = performance.now();
+    const watch = () => {
+      seen.push(s.scrollTop);
+      if (performance.now() - start < 1000) requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  });
+  expect(await settledAfter("Control+d")).toBeCloseTo(half, 0);
+  const seen = await helix.evaluate(
+    () => (window as unknown as { scrollsSeen: number[] }).scrollsSeen,
+  );
+  expect(seen.some((top) => top > 1 && top < half - 1)).toBe(true);
+  // Pressed again before the first has finished, they go as far as both would, without stopping
+  // short.
+  expect(await settledAfter("g", "g")).toBe(0);
+  expect(await settledAfter("Control+d", "Control+d")).toBeCloseTo(twoHalves, 0);
+  expect(await settledAfter("g", "g")).toBe(0);
+  expect(await settledAfter("PageDown", "PageDown")).toBeCloseTo(twoPages, 0);
+  expect(await cursorLine()).toBeCloseTo(twoPagesCursor, 0);
+
+  // Back at the start, where the cursor is kept for the tests after, which tap the code near
+  // the top of the file.
+  await settledAfter("g", "g");
+  await expect
+    .poll(() => readFileSync(join(HOME, "data", "days", "2017-04.json"), "utf8"))
+    .toMatch(/"cursor": *0\b/);
+  await context.close();
+  writeFileSync(solution, original);
+  await expect(editor()).not.toContainText("# more", { timeout: 15_000 });
+});
+
 test("works on a phone with Helix's keybindings, from Workshop's own keyboard", async ({
   browser,
 }) => {
