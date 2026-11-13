@@ -20,6 +20,23 @@ pub fn next_unlock(now: u64) -> Option<(u16, u8, u64)> {
         .find(|(_, _, at)| *at > now)
 }
 
+/// The puzzle that unlocked most recently, while the event is running: today's puzzle.
+pub fn todays_puzzle(now: u64) -> Option<(u16, u8)> {
+    let year = year_of(now);
+    let year = if now >= unlock_time(year, 1) {
+        year
+    } else {
+        year - 1
+    };
+    let day = (now - unlock_time(year, 1)) / 86_400 + 1;
+    let day = u8::try_from(day).ok()?;
+    (day <= days_in(year)).then_some((year, day))
+}
+
+pub fn is_unlocked(year: u16, day: u8, now: u64) -> bool {
+    now >= unlock_time(year, day)
+}
+
 /// The calendar year a time falls in, in UTC.
 fn year_of(seconds: u64) -> u16 {
     let days = i64::try_from(seconds / 86_400).expect("a time within range");
@@ -79,5 +96,18 @@ mod tests {
             next_unlock(at(2024, 12, 24, 6)).map(|(_, d, _)| d),
             Some(25)
         );
+    }
+
+    #[test]
+    fn knows_todays_puzzle_while_the_event_runs() {
+        assert_eq!(todays_puzzle(at(2026, 12, 1, 5)), Some((2026, 1)));
+        assert_eq!(todays_puzzle(at(2026, 12, 3, 4)), Some((2026, 2)));
+        assert_eq!(todays_puzzle(at(2026, 12, 12, 23)), Some((2026, 12)));
+        assert_eq!(todays_puzzle(at(2026, 12, 13, 6)), None);
+        assert_eq!(todays_puzzle(at(2026, 12, 1, 4)), None);
+        assert_eq!(todays_puzzle(at(2027, 1, 1, 0)), None);
+        assert_eq!(todays_puzzle(at(2024, 12, 25, 6)), Some((2024, 25)));
+        assert!(is_unlocked(2026, 1, at(2026, 12, 1, 5)));
+        assert!(!is_unlocked(2026, 2, at(2026, 12, 1, 5)));
     }
 }

@@ -8,6 +8,7 @@ mod discuss;
 mod edit;
 mod error;
 mod git;
+mod home;
 mod install;
 mod lsp;
 mod notifications;
@@ -40,6 +41,7 @@ pub fn router(app: Shared) -> Router {
     let api = Router::new()
         .route("/bootstrap", get(client::bootstrap))
         .route("/ping", get(client::ping))
+        .route("/home", get(home::home))
         .route("/state", put(client::save_state))
         .route("/doctor", get(setup::run_doctor))
         .route(

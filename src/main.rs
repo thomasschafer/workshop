@@ -17,6 +17,7 @@ mod server;
 mod settings;
 mod solutions;
 mod theme;
+mod tracks;
 mod updates;
 mod whisper;
 mod workspace;
