@@ -1873,6 +1873,63 @@ test("turns to other tabs in zen mode with two fingers, keeping the keyboard for
   await context.close();
 });
 
+test("runs, enters zen mode and turns between tabs from the keyboard, and lists its shortcuts", async ({
+  browser,
+}) => {
+  const { context, phone: computer } = await openOnPhone(browser, "helix", "computer");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  // Cmd on a Mac and Ctrl elsewhere, going by what the browser says it's on, as the app does.
+  const mod = (await computer.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform)))
+    ? "Meta"
+    : "Control";
+  await computer.locator(".cm-content").click();
+  await expect(computer.locator(".cm-helix-mode")).toHaveText("NOR");
+
+  await computer.keyboard.press(`${mod}+Enter`);
+  const run = computer.getByRole("dialog", { name: "Run" });
+  await expect(run).toContainText("sample");
+  await computer.keyboard.press("Escape");
+  await expect(run).toBeHidden();
+
+  // The shortcuts are listed as this keyboard writes them, by the shortcut for it or from the help.
+  await computer.keyboard.press(`${mod}+Shift+Slash`);
+  const shortcuts = computer.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(shortcuts).toContainText("Run on the sample");
+  await expect(shortcuts.locator("kbd").first()).toHaveText(
+    mod === "Meta" ? "⌘Enter" : "Ctrl+Enter",
+  );
+  // With them showing, the other shortcuts wait.
+  await computer.keyboard.press(`${mod}+Period`);
+  await expect(computer.locator("nav.tabs")).toBeVisible();
+  await computer.keyboard.press(`${mod}+Shift+Slash`);
+  await expect(shortcuts).toBeHidden();
+  await computer.getByRole("button", { name: "Help" }).click();
+  await computer.getByRole("button", { name: "keyboard shortcuts" }).click();
+  await expect(shortcuts).toBeVisible();
+  await computer.keyboard.press("Escape");
+
+  // Zen mode, where the tabs are hidden but can still be turned between.
+  await computer.keyboard.press(`${mod}+Period`);
+  await expect(computer.locator("nav.tabs")).toBeHidden();
+  await computer.keyboard.press("Alt+BracketLeft");
+  await expect(computer.locator(".zen-tabs .selected")).toHaveText("Problem");
+  await expect(computer.locator(".problem")).toBeVisible();
+  await computer.keyboard.press("Alt+BracketRight");
+  await computer.keyboard.press("Alt+BracketRight");
+  await expect(computer.locator(".notes textarea")).toBeVisible();
+  await computer.keyboard.press("Alt+BracketLeft");
+  await expect(computer.locator(".cm-content")).toBeVisible();
+  await computer.keyboard.press(`${mod}+Period`);
+  await expect(computer.locator("nav.tabs")).toBeVisible();
+
+  await computer.keyboard.press(`${mod}+KeyS`);
+  await expect(computer.locator(".stack")).toContainText("Saved");
+  // None of it reached the code as keys of Helix's.
+  expect(saved()).toBe(original);
+  await context.close();
+});
+
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({
   browser,
 }) => {

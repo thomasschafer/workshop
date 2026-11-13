@@ -19,6 +19,7 @@ import { usePushToTalk } from "./hooks/usePushToTalk";
 import { usePuzzleOffers } from "./hooks/usePuzzleOffers";
 import { useRun } from "./hooks/useRun";
 import { useSampleFinding } from "./hooks/useSampleFinding";
+import { useShortcuts } from "./hooks/useShortcuts";
 import { useTalkKey } from "./hooks/useTalkKey";
 import { useUiStateSaver } from "./hooks/useUiStateSaver";
 import { findMissingModule, isUpToDate } from "./packages";
@@ -52,6 +53,7 @@ import { ProblemsSheet } from "./views/problems";
 import { describeEnding, initialRunState, RunSheet } from "./views/run";
 import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
+import { ShortcutsModal } from "./views/shortcuts";
 import { Stack } from "./views/stack";
 import { StatusLine } from "./views/status";
 import {
@@ -66,7 +68,16 @@ import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 import { roundCodeScale } from "./zoom";
 
-type Sheet = "run" | "settings" | "help" | "setup" | "bench" | "calibrate" | "problems" | null;
+type Sheet =
+  | "run"
+  | "settings"
+  | "help"
+  | "setup"
+  | "bench"
+  | "calibrate"
+  | "problems"
+  | "shortcuts"
+  | null;
 
 /** The space kept clear below the code for the cards floating over it. */
 const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
@@ -669,6 +680,43 @@ export function App({ boot }: { boot: Bootstrap }) {
     );
   };
 
+  // With a dialog open, only the shortcut that lists the shortcuts works, to show or hide them.
+  const puzzleOpen = puzzle !== null && !picking && (sheet === null || sheet === "run");
+  const quiet = sheet === null;
+  useShortcuts({
+    runSample: puzzleOpen ? () => void doRun("sample", true) : null,
+    runReal: puzzleOpen ? () => void doRun("real", true) : null,
+    zen: puzzleOpen && quiet ? () => (zen ? exitZen() : enterZen()) : null,
+    nextTab: puzzleOpen && quiet ? () => setTab((current) => tabBeside(current, 1)) : null,
+    previousTab: puzzleOpen && quiet ? () => setTab((current) => tabBeside(current, -1)) : null,
+    save: puzzleOpen
+      ? () => {
+          Promise.all([saver.current?.flush(), notesSaver.current?.flush()]).then(
+            () => notify("ok", "Saved"),
+            (e: unknown) => notify("error", `Couldn't save: ${errorMessage(e)}`),
+          );
+        }
+      : null,
+    nextProblem:
+      puzzleOpen && quiet
+        ? () => {
+            setTab("code");
+            editor.current?.nextError();
+          }
+        : null,
+    previousProblem:
+      puzzleOpen && quiet
+        ? () => {
+            setTab("code");
+            editor.current?.previousError();
+          }
+        : null,
+    shortcuts:
+      sheet === null || sheet === "shortcuts"
+        ? () => setSheet(sheet === "shortcuts" ? null : "shortcuts")
+        : null,
+  });
+
   const resolveCodeConflict = (keep: "mine" | "theirs") => {
     if (!codeConflict) return;
     if (keep === "mine") {
@@ -882,8 +930,11 @@ export function App({ boot }: { boot: Bootstrap }) {
         ) : null}
         {sheet === "help" ? (
           <Modal title="How Workshop works" onClose={() => setSheet(null)} shape="full">
-            <Help />
+            <Help onShortcuts={() => setSheet("shortcuts")} />
           </Modal>
+        ) : null}
+        {sheet === "shortcuts" ? (
+          <ShortcutsModal helixOn={helixOn} onClose={() => setSheet(null)} />
         ) : null}
         {sheet === "run" ? (
           <Modal title="Run" onClose={() => setSheet(null)} shape="sheet">

@@ -31,10 +31,13 @@ export function Modal({
   // Before the dialog is shown, so Escape works as soon as it can be seen.
   useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") (onBack ?? onClose)();
+      if (event.key !== "Escape") return;
+      // Before the code beneath takes it, as Helix's keybindings would if it has the focus.
+      event.stopPropagation();
+      (onBack ?? onClose)();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose, onBack]);
 
   return (

@@ -16,7 +16,7 @@ const EXAMPLES: { say: string; result: string }[] = [
   { say: "change sum to max", result: "    return max(int(n) for n in numbers)" },
 ];
 
-export function Help() {
+export function Help({ onShortcuts }: { onShortcuts: () => void }) {
   return (
     <div class="help">
       <section>
@@ -47,7 +47,11 @@ export function Help() {
         </p>
         <p>
           On a computer, you can hold Ctrl instead of the button: on its own, rather than with
-          another key as for a shortcut.
+          another key as for a shortcut. There are{" "}
+          <button type="button" class="text-button inline" onClick={onShortcuts}>
+            keyboard shortcuts
+          </button>{" "}
+          for running, zen mode and turning between tabs.
         </p>
         <p>
           The button turns green once it's listening; start speaking then. If what's heard often
