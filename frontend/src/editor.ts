@@ -1,3 +1,4 @@
+import { autocompletion } from "@codemirror/autocomplete";
 import {
   defaultKeymap,
   history,
@@ -20,7 +21,18 @@ import { typescript } from "@codemirror/legacy-modes/mode/javascript";
 import { python } from "@codemirror/legacy-modes/mode/python";
 import { rust } from "@codemirror/legacy-modes/mode/rust";
 import { linter, nextDiagnostic, previousDiagnostic, setDiagnostics } from "@codemirror/lint";
-import { LSPClient, serverDiagnostics, type Transport } from "@codemirror/lsp-client";
+import {
+  findReferencesKeymap,
+  formatKeymap,
+  hoverTooltips,
+  jumpToDefinitionKeymap,
+  LSPClient,
+  renameKeymap,
+  serverCompletionSource,
+  serverDiagnostics,
+  signatureHelp,
+  type Transport,
+} from "@codemirror/lsp-client";
 import {
   Compartment,
   EditorSelection,
@@ -121,12 +133,39 @@ const theme = EditorView.theme({
     border: "1px solid var(--border)",
     fontFamily: "var(--mono)",
   },
-  // A compiler's message can run to dozens of lines, which would otherwise cover the code.
-  ".cm-tooltip-lint": {
+  // A compiler's message can run to dozens of lines, which would otherwise cover the code, as
+  // can documentation.
+  ".cm-tooltip-lint, .cm-lsp-hover-tooltip, .cm-lsp-signature-tooltip": {
     maxWidth: "min(80ch, 90vw)",
     maxHeight: "40vh",
     overflow: "auto",
   },
+  ".cm-tooltip-autocomplete ul li[aria-selected]": {
+    background: "var(--selection)",
+    color: "var(--fg)",
+  },
+  // The editor's own dialogs and lists, such as for a new name or a symbol's references, in the
+  // app's colours, with text a finger can tap and an iPhone doesn't zoom in to.
+  ".cm-panels": { background: "var(--surface)", color: "var(--fg)" },
+  ".cm-panels-bottom": { borderTop: "1px solid var(--border)" },
+  ".cm-panel.cm-dialog": { padding: "8px 10px", fontSize: "14px" },
+  ".cm-textfield": {
+    fontSize: "16px",
+    padding: "4px 8px",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    background: "var(--bg)",
+    color: "var(--fg)",
+  },
+  ".cm-button": {
+    padding: "4px 10px",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    backgroundImage: "none",
+    background: "var(--bg)",
+    color: "var(--fg)",
+  },
+  ".cm-lsp-reference-panel": { maxHeight: "30vh", fontSize: "13px" },
 });
 
 const flash = StateEffect.define<{ from: number; to: number } | null>();
@@ -389,9 +428,14 @@ export class CodeEditor {
   }
 
   private keysFor(helix: HelixSetup | null): Extension {
-    if (helix === null)
-      return [history(), keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab])];
     const lsp = this.options.lsp;
+    if (helix === null) {
+      return [
+        history(),
+        lsp ? languageServerKeys() : [],
+        keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+      ];
+    }
     return helixKeybindings({
       keymaps: helix.keymaps,
       options: helix.options,
@@ -596,6 +640,32 @@ export class CodeEditor {
     this.stopPinching();
     this.view.destroy();
   }
+}
+
+/**
+ * What the language server does for the editor's own keybindings, beyond marking problems:
+ * completions as you type, what a function takes as its arguments are typed, and keys to rename
+ * (F2), go to a definition (F12), list references (Shift-F12) and format (Shift-Alt-F). With a
+ * mouse, pointing at something shows its documentation.
+ */
+function languageServerKeys(): Extension {
+  const touch = window.matchMedia("(pointer: coarse)").matches;
+  return [
+    autocompletion({
+      override: [serverCompletionSource],
+      // On a phone's keyboard, Enter is for new lines, unless a completion's been chosen.
+      selectOnOpen: !touch,
+    }),
+    signatureHelp(),
+    // A finger has no way to point without tapping, which moves the cursor.
+    touch ? [] : hoverTooltips(),
+    keymap.of([
+      ...renameKeymap,
+      ...jumpToDefinitionKeymap,
+      ...findReferencesKeymap,
+      ...formatKeymap,
+    ]),
+  ];
 }
 
 /**

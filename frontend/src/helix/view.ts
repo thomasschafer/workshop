@@ -17,6 +17,7 @@ import {
   type LSPClient,
   serverCompletionSource,
   showSignatureHelp,
+  signatureHelp,
 } from "@codemirror/lsp-client";
 import {
   EditorSelection,
@@ -1392,11 +1393,9 @@ function pressKey(helix: HelixView, key: Key): void {
       "S-tab": moveCompletionSelection(false),
       "C-p": moveCompletionSelection(false),
     };
+    // With no completion chosen, Enter is still Helix's.
     const command = completion[key];
-    if (command) {
-      command(view);
-      return;
-    }
+    if (command?.(view)) return;
     if (key === "esc") closeCompletion(view);
   }
   run(helix, helix.handler.handle(key));
@@ -1614,7 +1613,21 @@ export function helixKeybindings(config: HelixConfig): Extension {
       ),
     ),
     config.lsp
-      ? autocompletion({ override: [serverCompletionSource], activateOnTyping: false })
+      ? [
+          autocompletion({
+            // As you type, in insert mode: other modes change the text too, with no wish for
+            // completions, unless they're asked for.
+            override: [
+              (context) =>
+                context.explicit || helixMode(context.state) === "insert"
+                  ? serverCompletionSource(context)
+                  : null,
+            ],
+            // As in Helix, nothing is chosen until it's moved to, so Enter still ends the line.
+            selectOnOpen: false,
+          }),
+          signatureHelp(),
+        ]
       : [],
     theme,
   ];

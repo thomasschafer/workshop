@@ -1,7 +1,7 @@
 // A stand-in for a language server, so the browser tests need none installed. It knows nothing
 // of Python: it works on words. Every `oops` in the file is an error, with a message of several
 // lines, and every `hmm` a warning. A word's definition is its first appearance, its references
-// are all of them, and renaming it changes each. Over an `oops`, it offers to remove it, sending
+// are all of them, and renaming it changes each. It completes a word to the file's other words. Over an `oops`, it offers to remove it, sending
 // the edit only once that's chosen, and to shout it, with the edit straight away.
 
 const documents = new Map();
@@ -62,6 +62,7 @@ const handlers = {
       renameProvider: true,
       hoverProvider: true,
       codeActionProvider: { resolveProvider: true },
+      completionProvider: {},
     },
   }),
   shutdown: () => null,
@@ -93,6 +94,17 @@ const handlers = {
         })),
       },
     };
+  },
+  "textDocument/completion": ({ textDocument: { uri }, position: at }) => {
+    const text = documents.get(uri);
+    const offset = offsetOf(text, at);
+    const typing = wordAt(text, offset);
+    const prefix = typing ? text.slice(typing.from, offset) : "";
+    const words = new Set(text.match(/[A-Za-z_]\w{2,}/g) ?? []);
+    return [...words]
+      .filter((word) => word.startsWith(prefix) && word !== prefix)
+      .sort()
+      .map((label) => ({ label, kind: 6 }));
   },
   "textDocument/hover": ({ textDocument: { uri }, position: at }) => {
     const text = documents.get(uri);
