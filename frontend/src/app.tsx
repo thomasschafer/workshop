@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, type Bootstrap, loginNeeded, type Problem, type Puzzle, type Tab } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
-import { CodeEditor, type Diagnostics, type HelixSetup, hoverText } from "./editor";
+import { CodeEditor, type Diagnostics, type HelixSetup, hoverText, NO_DIAGNOSTICS } from "./editor";
 import { errorMessage } from "./errors";
 import { describeProblems, helixSettings } from "./helix/config";
 import { useConnection } from "./hooks/useConnection";
@@ -47,6 +47,7 @@ import { Modal } from "./views/modal";
 import { MissingPackageBanner, OutdatedPackagesBanner } from "./views/packages";
 import { Picker } from "./views/picker";
 import { ProblemView } from "./views/problem";
+import { ProblemsSheet } from "./views/problems";
 import { describeEnding, initialRunState, RunSheet } from "./views/run";
 import { Settings } from "./views/settings";
 import { Setup } from "./views/setup";
@@ -63,7 +64,7 @@ import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 import { roundCodeScale } from "./zoom";
 
-type Sheet = "run" | "settings" | "help" | "setup" | "bench" | "calibrate" | null;
+type Sheet = "run" | "settings" | "help" | "setup" | "bench" | "calibrate" | "problems" | null;
 
 /** The space kept clear below the code for the cards floating over it. */
 const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
@@ -96,7 +97,7 @@ export function App({ boot }: { boot: Bootstrap }) {
 
   const [cards, setCards] = useState<UtteranceCard[]>([]);
   const [stackHeight, setStackHeight] = useState(0);
-  const [diagnostics, setDiagnostics] = useState<Diagnostics>({ errors: 0, warnings: 0 });
+  const [diagnostics, setDiagnostics] = useState<Diagnostics>(NO_DIAGNOSTICS);
   const [hover, setHover] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [codeConflict, setCodeConflict] = useState<FileVersion | null>(null);
@@ -247,6 +248,7 @@ export function App({ boot }: { boot: Bootstrap }) {
               const opened = await api.open(p);
               if (s.adopt(opened.code)) current.replaceAll(opened.code.text);
             },
+            showProblems: () => setSheet("problems"),
             lineWrapping: () => lineWrappingRef.current,
             setLineWrapping: (enabled) => changeLineWrappingRef.current(enabled),
           },
@@ -324,7 +326,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     setCodeConflict(null);
     setNotesConflict(null);
     setSaveStatus("saved");
-    setDiagnostics({ errors: 0, warnings: 0 });
+    setDiagnostics(NO_DIAGNOSTICS);
     setHover(null);
     setPart2Started(null);
     setFindingSamples([]);
@@ -391,10 +393,7 @@ export function App({ boot }: { boot: Bootstrap }) {
             if (metaRef.current.cursor !== pos) updateMeta({ ...metaRef.current, cursor: pos });
             lookUpType(pos);
           },
-          onDiagnostics: (d) =>
-            setDiagnostics((prev) =>
-              prev.errors === d.errors && prev.warnings === d.warnings ? prev : d,
-            ),
+          onDiagnostics: setDiagnostics,
         });
         created.setBottomInset(insetFor(stackHeightRef.current));
         created.setStatusHost(statusHost.current);
@@ -796,6 +795,8 @@ export function App({ boot }: { boot: Bootstrap }) {
             diagnostics={diagnostics}
             saveStatus={saveStatus}
             hover={hover}
+            showProblem={!helixOn}
+            onProblems={() => setSheet("problems")}
           />
           <div class="editor" ref={editorHost} />
         </div>
@@ -850,6 +851,17 @@ export function App({ boot }: { boot: Bootstrap }) {
         ) : null}
         {sheet === "calibrate" ? (
           <Calibrate onUse={keyOffsets.replace} onClose={() => setSheet(null)} />
+        ) : null}
+        {sheet === "problems" ? (
+          <ProblemsSheet
+            problems={editor.current?.problems() ?? []}
+            current={diagnostics.atCursor}
+            onGoto={(problem) => {
+              editor.current?.gotoProblem(problem);
+              setSheet(null);
+            }}
+            onClose={() => setSheet(null)}
+          />
         ) : null}
         {sheet === "help" ? (
           <Modal title="How Workshop works" onClose={() => setSheet(null)} shape="full">

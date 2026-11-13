@@ -19,12 +19,7 @@ import { haskell } from "@codemirror/legacy-modes/mode/haskell";
 import { typescript } from "@codemirror/legacy-modes/mode/javascript";
 import { python } from "@codemirror/legacy-modes/mode/python";
 import { rust } from "@codemirror/legacy-modes/mode/rust";
-import {
-  forEachDiagnostic,
-  nextDiagnostic,
-  previousDiagnostic,
-  setDiagnostics,
-} from "@codemirror/lint";
+import { linter, nextDiagnostic, previousDiagnostic, setDiagnostics } from "@codemirror/lint";
 import { LSPClient, serverDiagnostics, type Transport } from "@codemirror/lsp-client";
 import {
   Compartment,
@@ -64,6 +59,7 @@ import {
 } from "./helix/view";
 import { adjustCapabilities, quietMessage } from "./lsp";
 import { pinchToZoom } from "./pinch";
+import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
 import { roundCodeScale } from "./zoom";
 
 const LANGUAGES: Record<string, () => Extension> = {
@@ -125,6 +121,12 @@ const theme = EditorView.theme({
     border: "1px solid var(--border)",
     fontFamily: "var(--mono)",
   },
+  // A compiler's message can run to dozens of lines, which would otherwise cover the code.
+  ".cm-tooltip-lint": {
+    maxWidth: "min(80ch, 90vw)",
+    maxHeight: "40vh",
+    overflow: "auto",
+  },
 });
 
 const flash = StateEffect.define<{ from: number; to: number } | null>();
@@ -147,8 +149,30 @@ const changedField = StateField.define<DecorationSet>({
 });
 
 export interface Diagnostics {
-  errors: number;
-  warnings: number;
+  readonly errors: number;
+  readonly warnings: number;
+  /** Hints and notes, which aren't problems but are underlined all the same. */
+  readonly others: number;
+  /** The most serious problem the cursor is on, if it's on any. */
+  readonly atCursor: Problem | null;
+}
+
+export const NO_DIAGNOSTICS: Diagnostics = { errors: 0, warnings: 0, others: 0, atCursor: null };
+
+function sameDiagnostics(a: Diagnostics, b: Diagnostics): boolean {
+  const [x, y] = [a.atCursor, b.atCursor];
+  return (
+    a.errors === b.errors &&
+    a.warnings === b.warnings &&
+    a.others === b.others &&
+    (x === y ||
+      (x !== null &&
+        y !== null &&
+        x.from === y.from &&
+        x.to === y.to &&
+        x.severity === y.severity &&
+        x.message === y.message))
+  );
 }
 
 /** Helix's keybindings, as configured, and what Workshop does for its commands. */
@@ -207,6 +231,8 @@ export class CodeEditor {
   private followSideways = false;
 
   private readonly options: EditorOptions;
+  /** What was last said of the code's problems, so it's only said again when it changes. */
+  private diagnostics = NO_DIAGNOSTICS;
 
   constructor(parent: HTMLElement, options: EditorOptions) {
     this.options = options;
@@ -234,6 +260,11 @@ export class CodeEditor {
         changedField,
         language ? language() : [],
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],
+        // A finger has no way to point without tapping, and a problem's message can be longer
+        // than a phone's screen, so there it's read from the status line instead.
+        window.matchMedia("(pointer: coarse)").matches
+          ? linter(null, { tooltipFilter: () => [] })
+          : [],
         this.inputMode.of(EditorView.contentAttributes.of({ inputmode: "none" })),
         // Keeping the cursor in view only scrolls up and down, unless the user is typing: a long
         // line otherwise leaves every line's start out of sight until they scroll back.
@@ -270,8 +301,11 @@ export class CodeEditor {
           if (update.selectionSet || update.docChanged) {
             options.onCursor(cursorOf(update.state));
           }
-          const diagnostics = countDiagnostics(update.view);
-          options.onDiagnostics(diagnostics);
+          const diagnostics = summarise(update.state);
+          if (!sameDiagnostics(diagnostics, this.diagnostics)) {
+            this.diagnostics = diagnostics;
+            options.onDiagnostics(diagnostics);
+          }
         }),
       ],
     });
@@ -469,6 +503,21 @@ export class CodeEditor {
     return true;
   }
 
+  /** Every problem in the code, in the order they come in it. */
+  problems(): Problem[] {
+    return problemsIn(this.view.state);
+  }
+
+  /** Puts the cursor at the start of a problem, in the middle of the view. */
+  gotoProblem(problem: Problem): void {
+    const pos = Math.min(problem.from, this.view.state.doc.length);
+    this.view.dispatch({
+      selection: EditorSelection.cursor(pos),
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+      userEvent: "select",
+    });
+  }
+
   nextError(): void {
     nextDiagnostic(this.view);
   }
@@ -531,12 +580,9 @@ export class CodeEditor {
   }
 
   diagnosticsText(): string {
-    const lines: string[] = [];
-    forEachDiagnostic(this.view.state, (d, from) => {
-      const line = this.view.state.doc.lineAt(from).number;
-      lines.push(`line ${line} (${d.severity}): ${d.message}`);
-    });
-    return lines.join("\n");
+    return this.problems()
+      .map((p) => `line ${p.line} (${p.severity}): ${p.message}`)
+      .join("\n");
   }
 
   /** Words in the file, used to help speech recognition hear identifiers. */
@@ -600,13 +646,16 @@ function followsSideways(tr: Transaction): boolean {
   );
 }
 
-function countDiagnostics(view: EditorView): Diagnostics {
-  const counts = { errors: 0, warnings: 0 };
-  forEachDiagnostic(view.state, (d) => {
-    if (d.severity === "error") counts.errors++;
-    else if (d.severity === "warning") counts.warnings++;
-  });
-  return counts;
+function summarise(state: EditorState): Diagnostics {
+  const problems = problemsIn(state);
+  const count = (...severities: Severity[]) =>
+    problems.filter((p) => severities.includes(p.severity)).length;
+  return {
+    errors: count("error"),
+    warnings: count("warning"),
+    others: count("info", "hint"),
+    atCursor: problemAt(problems, cursorOf(state)),
+  };
 }
 
 class SocketTransport implements Transport {

@@ -53,6 +53,7 @@ import {
   type WorkspaceEdit,
 } from "../lspActions";
 import { renderMarkdown } from "../markdown";
+import { headline, problemAt, problemsIn } from "../problems";
 import { pasteImpl } from "./commands";
 import {
   fromEditorSelection,
@@ -85,6 +86,8 @@ export interface HelixActions {
   write(): Promise<void>;
   /** Picks up the file as it is on disk, for `:reload`. */
   reload(): Promise<void>;
+  /** Shows every problem the language server has found, with their whole messages. */
+  showProblems(): void;
   setLineWrapping(enabled: boolean): void;
   lineWrapping(): boolean;
 }
@@ -412,6 +415,10 @@ class HelixView implements PluginValue, Host {
     return this.view.state;
   }
 
+  showProblems(): void {
+    this.config.actions.showProblems();
+  }
+
   get panelDom(): StatusPanel {
     return this.panel;
   }
@@ -433,6 +440,9 @@ class HelixView implements PluginValue, Host {
       this.selections = selectionDecorations(update.view);
       this.placeKeyboard();
     }
+    // The status line says what's wrong where the cursor is, which either moving or the
+    // language server's news can change.
+    if (update.transactions.length > 0) this.panel.render();
     // A tap or a change made elsewhere ends whatever was waiting for a key.
     if (!this.dispatching && update.transactions.some((tr) => tr.isUserEvent("select.pointer"))) {
       this.handler.dismissPending();
@@ -1231,12 +1241,31 @@ class StatusPanel {
       );
     }
     const message = editor.status;
+    const problems = problemsIn(this.helix.view.state);
+    const problem = problemAt(problems, helixCursor(this.helix.view.state));
     if (message) {
       parts.push(
         span(message.severity === "error" ? "cm-helix-error" : "cm-helix-message", message.message),
       );
+    } else if (problem) {
+      // Just its first line, which tapping shows the rest of.
+      parts.push(
+        button(`cm-helix-problem severity-${problem.severity}`, headline(problem), () =>
+          this.helix.showProblems(),
+        ),
+      );
     }
     parts.push(span("cm-helix-pending", handler.pendingDisplay()));
+    const errors = problems.filter((p) => p.severity === "error").length;
+    const warnings = problems.filter((p) => p.severity === "warning").length;
+    if (errors + warnings > 0) {
+      const counts = [errors ? `${errors}E` : "", warnings ? `${warnings}W` : ""].join(" ").trim();
+      parts.push(
+        button(`cm-helix-counts severity-${errors ? "error" : "warning"}`, counts, () =>
+          this.helix.showProblems(),
+        ),
+      );
+    }
     this.status.append(...parts);
   }
 }
@@ -1245,6 +1274,15 @@ function span(className: string, text: string): HTMLElement {
   const el = document.createElement("span");
   el.className = className;
   el.textContent = text;
+  return el;
+}
+
+/** Something in the status line to tap or click, which keeps the focus, and a keyboard, where they are. */
+function button(className: string, text: string, onPress: () => void): HTMLElement {
+  const el = span(className, text);
+  el.setAttribute("role", "button");
+  el.addEventListener("pointerdown", (e) => e.preventDefault());
+  el.addEventListener("click", onPress);
   return el;
 }
 

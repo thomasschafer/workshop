@@ -1082,13 +1082,17 @@ async function holdKey(page: Page, key: Locator, during: () => Promise<unknown>)
   }
 }
 
-/** Opens 2017's day 4 on a phone, with Helix's keybindings unless others are given, at its code. */
+/**
+ * Opens 2017's day 4 on a phone, or a computer if asked, with Helix's keybindings unless others
+ * are given, at its code.
+ */
 async function openOnPhone(
   browser: Browser,
   keybindings: "helix" | "default" = "helix",
+  device: "phone" | "computer" = "phone",
 ): Promise<{ context: BrowserContext; phone: Page }> {
   const context = await browser.newContext({
-    ...devices["Pixel 7"],
+    ...(device === "phone" ? devices["Pixel 7"] : {}),
     baseURL: `http://127.0.0.1:${PORT}`,
   });
   const phone = await context.newPage();
@@ -1671,6 +1675,107 @@ test("asks the language server from Helix's own prompt and lists, on Workshop's 
   await type("uu");
   await expect.poll(saved).toBe(original);
   await context.close();
+});
+
+test("says what's wrong where the cursor is, and shows the whole of it when asked", async ({
+  browser,
+}) => {
+  const { context, phone } = await openOnPhone(browser);
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  await phone.getByRole("button", { name: "Type" }).tap();
+  const keyboard = phone.locator(".keyboard");
+  const key = (name: string) => keyboard.getByRole("button", { name, exact: true });
+  const type = async (text: string) => {
+    for (const ch of text) {
+      const plain = PLAIN_KEYS.get(ch);
+      if (plain === undefined) throw new Error(`the keyboard has no key for '${ch}'`);
+      if (plain.shift) await key("Shift").tap();
+      await key(ch === " " ? "Space" : ch).tap();
+    }
+  };
+  await expect(phone.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  await type("ggOoops");
+  await key("Enter").tap();
+  await type("hmm");
+  await key("Escape").tap();
+  await expect.poll(saved).toBe(`oops\nhmm\n${original}`);
+
+  // The count, above the code and in Helix's status line, and the warning the cursor is on: its
+  // first line alone, beneath the keys.
+  await expect(phone.locator(".status-line")).toContainText("1 error, 1 warning");
+  const problem = keyboard.locator(".cm-helix-problem");
+  await expect(problem).toHaveText("hmm looks doubtful");
+  await expect(keyboard.locator(".cm-helix-counts")).toHaveText("1E 1W");
+  await type("k");
+  await expect(problem).toHaveText("oops isn't a thing");
+  // Off the error, there's nothing to say.
+  await type("jj");
+  await expect(problem).toHaveCount(0);
+  await type("gg");
+
+  // Tapping the code where it's underlined moves the cursor, and covers none of it.
+  const oops = await phone.locator(".cm-lintRange-error").boundingBox();
+  if (oops === null) throw new Error("nothing is underlined as an error");
+  await phone.touchscreen.tap(oops.x + oops.width / 2, oops.y + oops.height / 2);
+  await expect(problem).toHaveText("oops isn't a thing");
+  await phone.waitForTimeout(600);
+  await expect(phone.locator(".cm-tooltip")).toHaveCount(0);
+
+  // Tapping what it says shows every problem, each in full, starting at this one, along the
+  // bottom of the screen or over all of it.
+  await problem.tap();
+  const sheet = phone.getByRole("dialog", { name: "2 problems" });
+  await expect(sheet).toBeVisible();
+  const rows = sheet.locator(".problem-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("error, line 1");
+  await expect(rows.first()).toContainText("last line of the error");
+  await expect(rows.first()).toHaveClass(/current/);
+  const height = async () => (await sheet.boundingBox())?.height ?? 0;
+  const short = await height();
+  await sheet.getByRole("button", { name: "Use the whole screen" }).tap();
+  await expect.poll(height).toBeGreaterThan(short + 100);
+  // Choosing one goes to it.
+  await rows.nth(1).tap();
+  await expect(sheet).toBeHidden();
+  await expect(problem).toHaveText("hmm looks doubtful");
+  // The counts open the list too.
+  await keyboard.locator(".cm-helix-counts").tap();
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("button", { name: "Close" }).tap();
+  await type("uu");
+  await expect.poll(saved).toBe(original);
+  await context.close();
+
+  // Without Helix's keybindings there's no status line of its own, so it's said above the code.
+  const { context: desk, phone: computer } = await openOnPhone(browser, "default", "computer");
+  await expect(computer.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  await computer.locator(".cm-content").click();
+  await computer.keyboard.press("ControlOrMeta+Home");
+  await computer.keyboard.type("oops");
+  await computer.keyboard.press("Enter");
+  await expect(computer.locator(".status-line")).toContainText("1 error");
+  await computer.keyboard.press("ArrowUp");
+  const said = computer.locator(".status-problem");
+  await expect(said).toHaveText("oops isn't a thing");
+  await said.click();
+  await expect(computer.getByRole("dialog", { name: "1 problem" })).toContainText(
+    "last line of the error",
+  );
+  await computer.keyboard.press("Escape");
+  // A mouse can still point at it, for a message kept to a size that leaves the code in view.
+  await computer.locator(".cm-lintRange-error").hover();
+  const tooltip = computer.locator(".cm-tooltip-lint");
+  await expect(tooltip).toContainText("oops isn't a thing");
+  const viewport = computer.viewportSize();
+  if (viewport === null) throw new Error("the page has no size");
+  expect((await tooltip.boundingBox())?.height ?? 0).toBeLessThanOrEqual(viewport.height * 0.4 + 1);
+  await computer.locator(".cm-content").click();
+  await computer.keyboard.press("ControlOrMeta+z");
+  await computer.keyboard.press("ControlOrMeta+z");
+  await expect.poll(saved).toBe(original);
+  await desk.close();
 });
 
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({
