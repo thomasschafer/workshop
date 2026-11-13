@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustCapabilities, quietMessage } from "./lsp";
+import { adjustCapabilities, quietMessage, typedEnoughToComplete } from "./lsp";
 import { EXTRA_CAPABILITIES } from "./lspActions";
 
 describe("adjustCapabilities", () => {
@@ -40,5 +40,18 @@ describe("quietMessage", () => {
     for (const type of [2, 3, 4]) {
       expect(quietMessage({ type, message: "Finished loading packages." })).toBe(true);
     }
+  });
+});
+
+describe("typedEnoughToComplete", () => {
+  it("waits for more than a word's first letter", () => {
+    expect(typedEnoughToComplete("  | otherwise = T")).toBe(false);
+    expect(typedEnoughToComplete("  | otherwise = Tr")).toBe(true);
+    expect(typedEnoughToComplete("x'")).toBe(true);
+  });
+
+  it("leaves what isn't part of a word to the server's trigger characters", () => {
+    expect(typedEnoughToComplete("Map.")).toBe(true);
+    expect(typedEnoughToComplete("")).toBe(true);
   });
 });

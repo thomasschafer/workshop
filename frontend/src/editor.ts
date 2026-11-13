@@ -1,4 +1,3 @@
-import { autocompletion } from "@codemirror/autocomplete";
 import {
   defaultKeymap,
   history,
@@ -28,7 +27,6 @@ import {
   jumpToDefinitionKeymap,
   LSPClient,
   renameKeymap,
-  serverCompletionSource,
   serverDiagnostics,
   signatureHelp,
   type Transport,
@@ -69,7 +67,7 @@ import {
   setHelixBottomInset,
   setHelixStatusHost,
 } from "./helix/view";
-import { adjustCapabilities, quietMessage } from "./lsp";
+import { adjustCapabilities, languageServerCompletion, quietMessage } from "./lsp";
 import { pinchToZoom } from "./pinch";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
 import { roundCodeScale } from "./zoom";
@@ -649,11 +647,8 @@ export class CodeEditor {
 function languageServerKeys(): Extension {
   const touch = window.matchMedia("(pointer: coarse)").matches;
   return [
-    autocompletion({
-      override: [serverCompletionSource],
-      // On a phone's keyboard, Enter is for new lines, unless a completion's been chosen.
-      selectOnOpen: !touch,
-    }),
+    // On a phone's keyboard, Enter is for new lines, unless a completion's been chosen.
+    languageServerCompletion({ selectOnOpen: !touch }),
     signatureHelp(),
     // A finger has no way to point without tapping, which moves the cursor.
     touch ? [] : hoverTooltips(),

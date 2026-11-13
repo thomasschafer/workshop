@@ -1989,7 +1989,11 @@ test("completes as it's typed, and renames with the editor's own keys", async ({
   await computer.locator(".cm-content").click();
   expect(original.endsWith("\n")).toBe(true);
   await computer.keyboard.press(`${mod}+End`);
-  await computer.keyboard.type("par");
+  // Not for a word's first letter alone, which would cover the code for any word typed.
+  await computer.keyboard.type("p");
+  await computer.waitForTimeout(800);
+  await expect(completions).toHaveCount(0);
+  await computer.keyboard.type("ar");
   await expect(completions.getByRole("option")).toHaveText(["part", "part1", "part2"]);
   // The list takes no keys for a moment after it comes up or changes, so it isn't chosen from
   // by accident, and it can change again as the server answers for each letter typed.

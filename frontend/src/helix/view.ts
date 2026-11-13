@@ -3,7 +3,6 @@
 
 import {
   acceptCompletion,
-  autocompletion,
   closeCompletion,
   completionStatus,
   moveCompletionSelection,
@@ -15,7 +14,6 @@ import { forEachDiagnostic } from "@codemirror/lint";
 import {
   formatDocument,
   type LSPClient,
-  serverCompletionSource,
   showSignatureHelp,
   signatureHelp,
 } from "@codemirror/lsp-client";
@@ -42,6 +40,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
+import { languageServerCompletion } from "../lsp";
 import {
   type CodeAction,
   codeActions,
@@ -1626,15 +1625,10 @@ export function helixKeybindings(config: HelixConfig): Extension {
     ),
     config.lsp
       ? [
-          autocompletion({
-            // As you type, in insert mode: other modes change the text too, with no wish for
-            // completions, unless they're asked for.
-            override: [
-              (context) =>
-                context.explicit || helixMode(context.state) === "insert"
-                  ? serverCompletionSource(context)
-                  : null,
-            ],
+          languageServerCompletion({
+            // Unasked only in insert mode: other modes change the text too, with no wish for
+            // completions.
+            unasked: (context) => helixMode(context.state) === "insert",
             // As in Helix, nothing is chosen until it's moved to, so Enter still ends the line.
             selectOnOpen: false,
           }),
