@@ -3,12 +3,13 @@
 
 use anyhow::{Context, Result, bail};
 use tokio_util::sync::CancellationToken;
+use workshop_runner::{Ending, Phase};
 
 use crate::aoc::Part;
 use crate::config::Config;
 use crate::language::Puzzle;
 use crate::paths::Paths;
-use crate::runner::{Ending, Phase, RunResult};
+use crate::runner::RunResult;
 use crate::settings::AppSettings;
 use crate::solutions::{Solutions, aoc_client};
 use crate::workspace::Workspace;

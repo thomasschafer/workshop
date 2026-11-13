@@ -148,7 +148,7 @@ impl<'a> Solutions<'a> {
         }
         let args = template::render_all(formatter, &vars)?;
         // The solutions directory, as the solution's own may not have been written yet.
-        runner::format(
+        workshop_runner::format(
             &args,
             &self.config.solutions_dir,
             &self.environment()?,

@@ -1,38 +1,15 @@
-//! Building and running solutions.
+//! Running solutions, and reading their answers from what they print.
 
 use std::path::Path;
-use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde::Serialize;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
-use workshop_common::process::{self, ProcessGroup};
-use workshop_common::template::{self, Vars};
+use workshop_common::template::Vars;
+use workshop_runner::{Ending, Job, Phase};
 
 use crate::language::{LanguageProfile, Puzzle};
-
-/// Output beyond this is dropped, so a runaway print loop can't exhaust memory or the phone.
-const MAX_OUTPUT_BYTES: usize = 64 * 1024;
-/// How long to wait for output after the program has ended. Only a process that escaped its
-/// process group could keep the pipes open longer.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Phase {
-    Build,
-    Run,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum Ending {
-    Exited { code: Option<i32> },
-    TimedOut,
-    Cancelled,
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunResult {
@@ -70,7 +47,6 @@ pub struct RunRequest<'a> {
 }
 
 pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
-    let started = Instant::now();
     std::fs::create_dir_all(request.build_dir)
         .with_context(|| format!("creating {}", request.build_dir.display()))?;
     let dir = request
@@ -86,48 +62,27 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
     if let Some(helpers) = request.helpers {
         vars = vars.set("helpers", helpers.to_string_lossy());
     }
-
-    if let Some(build) = &request.profile.build {
-        let args = template::render_all(build, &vars)?;
-        let output = execute(
-            &args,
-            dir,
-            request.environment,
-            None,
-            request.timeout,
-            request.cancel,
-        )
-        .await?;
-        if output.ending != (Ending::Exited { code: Some(0) }) {
-            return Ok(RunResult {
-                phase: Phase::Build,
-                ending: output.ending,
-                stdout: output.stdout,
-                stderr: output.stderr,
-                duration_ms: elapsed_ms(started),
-                answers: Vec::new(),
-                warnings: Vec::new(),
-            });
-        }
-    }
-
-    let args = template::render_all(&request.profile.run, &vars)?;
-    let output = execute(
-        &args,
+    let outcome = workshop_runner::build_and_run(Job {
+        build: request.profile.build.as_deref(),
+        run: &request.profile.run,
+        vars: &vars,
         dir,
-        request.environment,
-        Some(request.input),
-        request.timeout,
-        request.cancel,
-    )
+        input: request.input,
+        timeout: request.timeout,
+        cancel: request.cancel,
+        environment: request.environment,
+    })
     .await?;
-    let answers: Vec<String> = output
-        .stdout
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(|l| answer(l).to_owned())
-        .collect();
+    let answers: Vec<String> = match outcome.phase {
+        Phase::Build => Vec::new(),
+        Phase::Run => outcome
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| answer(l).to_owned())
+            .collect(),
+    };
     let warnings = answers
         .iter()
         .take(2)
@@ -142,173 +97,14 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
         })
         .collect();
     Ok(RunResult {
-        phase: Phase::Run,
-        ending: output.ending,
-        stdout: output.stdout,
-        stderr: output.stderr,
-        duration_ms: elapsed_ms(started),
+        phase: outcome.phase,
+        ending: outcome.ending,
+        stdout: outcome.stdout,
+        stderr: outcome.stderr,
+        duration_ms: outcome.duration_ms,
         answers,
         warnings,
     })
-}
-
-/// How long a formatter has, which only takes long if something's wrong.
-const FORMAT_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Formats `code` with a formatter that reads it on stdin and writes it to stdout, failing with
-/// what the formatter says if it can't, as for code that doesn't parse.
-pub async fn format(
-    args: &[String],
-    dir: &Path,
-    environment: &[(String, String)],
-    code: &str,
-) -> Result<String> {
-    let (program, rest) = args.split_first().context("empty formatter command")?;
-    let mut command = process::command(program);
-    command
-        .args(rest)
-        .envs(environment.iter().map(|(k, v)| (k, v)))
-        .current_dir(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = process::GroupedChild::spawn(&mut command)
-        .with_context(|| format!("starting `{program}`; is it installed and on your PATH?"))?;
-    let mut stdin = child.child.stdin.take().context("stdin not captured")?;
-    let mut stdout = child.child.stdout.take().context("stdout not captured")?;
-    let mut stderr = child.child.stderr.take().context("stderr not captured")?;
-    let (mut formatted, mut complaint) = (String::new(), String::new());
-    let finished = tokio::time::timeout(FORMAT_TIMEOUT, async {
-        let write = async {
-            stdin.write_all(code.as_bytes()).await?;
-            // Closing stdin tells the formatter the code's all there.
-            drop(stdin);
-            std::io::Result::Ok(())
-        };
-        tokio::try_join!(
-            write,
-            stdout.read_to_string(&mut formatted),
-            stderr.read_to_string(&mut complaint),
-        )?;
-        child.child.wait().await
-    })
-    .await;
-    let status = match finished {
-        Ok(status) => status.with_context(|| format!("running `{program}`"))?,
-        Err(_) => {
-            child.finish();
-            bail!("`{program}` took longer than {}s", FORMAT_TIMEOUT.as_secs());
-        }
-    };
-    child.finish();
-    if !status.success() {
-        bail!("`{program}` couldn't format the code: {}", complaint.trim());
-    }
-    Ok(formatted)
-}
-
-pub struct Output {
-    pub ending: Ending,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-/// Runs a command in its own process group, with a time limit, keeping the start of its output.
-pub async fn execute(
-    args: &[String],
-    dir: &Path,
-    environment: &[(String, String)],
-    stdin: Option<&str>,
-    timeout: Duration,
-    cancel: &CancellationToken,
-) -> Result<Output> {
-    let (program, rest) = args.split_first().context("empty command")?;
-    // Otherwise starting fails as though the program were missing.
-    if !dir.is_dir() {
-        bail!("{} doesn't exist", dir.display());
-    }
-    let mut child = process::command(program)
-        .args(rest)
-        .envs(environment.iter().map(|(k, v)| (k, v)))
-        .current_dir(dir)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("starting `{program}`; is it installed and on your PATH?"))?;
-    let group = ProcessGroup::of(&child);
-
-    let stdin_task = match (child.stdin.take(), stdin) {
-        (Some(mut pipe), Some(input)) => {
-            let input = input.to_owned();
-            Some(tokio::spawn(async move {
-                // The program may exit without reading all its input, which is fine.
-                let _ = pipe.write_all(input.as_bytes()).await;
-            }))
-        }
-        _ => None,
-    };
-    let stdout = read_limited(child.stdout.take().context("stdout not captured")?);
-    let stderr = read_limited(child.stderr.take().context("stderr not captured")?);
-    let stdout = tokio::spawn(stdout);
-    let stderr = tokio::spawn(stderr);
-
-    let ending = tokio::select! {
-        status = child.wait() => Ending::Exited { code: status?.code() },
-        () = tokio::time::sleep(timeout) => Ending::TimedOut,
-        () = cancel.cancelled() => Ending::Cancelled,
-    };
-    // Also stops anything the program left running in the background.
-    group.kill();
-    child.wait().await?;
-    group.finish();
-    if let Some(task) = stdin_task {
-        task.abort();
-    }
-    Ok(Output {
-        ending,
-        stdout: drain(stdout).await?,
-        stderr: drain(stderr).await?,
-    })
-}
-
-async fn drain(task: tokio::task::JoinHandle<Result<String>>) -> Result<String> {
-    let abort = task.abort_handle();
-    match tokio::time::timeout(DRAIN_TIMEOUT, task).await {
-        Ok(output) => output?,
-        Err(_) => {
-            abort.abort();
-            Ok("… output cut off: a process the program started kept running".to_owned())
-        }
-    }
-}
-
-async fn read_limited(mut reader: impl AsyncReadExt + Unpin) -> Result<String> {
-    let mut kept = Vec::new();
-    let mut buf = [0u8; 8192];
-    let mut truncated = false;
-    loop {
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        let room = MAX_OUTPUT_BYTES.saturating_sub(kept.len());
-        kept.extend_from_slice(&buf[..n.min(room)]);
-        truncated |= n > room;
-    }
-    let mut text = String::from_utf8_lossy(&kept).into_owned();
-    if truncated {
-        text.push_str("\n… output truncated");
-    }
-    Ok(text)
-}
-
-fn elapsed_ms(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// The answer a line of output gives. Advent of Code's answers are letters, digits and the odd
@@ -407,40 +203,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn formats_code_through_stdin_and_stdout_in_full() {
-        let dir = tempfile::tempdir().unwrap();
-        // Longer than a run's output is cut to, which formatted code mustn't be.
-        let code = "x = 1\n".repeat(20_000);
-        let args = ["tr", "x", "y"].map(str::to_owned);
-        let formatted = format(&args, dir.path(), &[], &code).await.unwrap();
-        assert_eq!(formatted, code.replace('x', "y"));
-    }
-
-    #[tokio::test]
-    async fn says_why_code_could_not_be_formatted() {
-        let dir = tempfile::tempdir().unwrap();
-        let args = [
-            "sh",
-            "-c",
-            "cat >/dev/null; echo 'line 3: unexpected indent' >&2; exit 2",
-        ]
-        .map(str::to_owned);
-        let err = format(&args, dir.path(), &[], "x").await.unwrap_err();
-        assert!(
-            format!("{err:#}").contains("line 3: unexpected indent"),
-            "{err:#}"
-        );
-    }
-
-    #[tokio::test]
-    async fn says_when_a_formatter_is_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let args = ["workshop-no-such-formatter".to_owned()];
-        let err = format(&args, dir.path(), &[], "x").await.unwrap_err();
-        assert!(format!("{err:#}").contains("is it installed"), "{err:#}");
-    }
-
-    #[tokio::test]
     async fn passes_input_and_reads_answers() {
         let profile = profile(None, &["sh", "{file}"]);
         let result = run_with(
@@ -514,116 +276,5 @@ mod tests {
         .await;
         assert!(result.succeeded(), "{result:?}");
         assert_eq!(result.answers, vec!["from the environment"]);
-    }
-
-    #[tokio::test]
-    async fn stops_at_failed_build() {
-        let profile = profile(
-            Some(&["sh", "-c", "echo bad >&2; exit 3"]),
-            &["sh", "{file}"],
-        );
-        let result = run_with(&profile, "echo 1", "", Duration::from_secs(10)).await;
-        assert_eq!(result.phase, Phase::Build);
-        assert_eq!(result.ending, Ending::Exited { code: Some(3) });
-        assert_eq!(result.stderr.trim(), "bad");
-        assert!(result.answers.is_empty());
-    }
-
-    #[tokio::test]
-    async fn times_out_promptly_even_with_background_processes() {
-        let profile = profile(None, &["sh", "{file}"]);
-        let started = Instant::now();
-        let result = run_with(
-            &profile,
-            "sleep 30 & sleep 30",
-            "",
-            Duration::from_millis(200),
-        )
-        .await;
-        assert_eq!(result.ending, Ending::TimedOut);
-        assert!(!result.succeeded());
-        assert!(
-            started.elapsed() < Duration::from_secs(3),
-            "{:?}",
-            started.elapsed()
-        );
-    }
-
-    #[tokio::test]
-    async fn cancellation_before_starting_still_cancels() {
-        let profile = profile(None, &["sh", "{file}"]);
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("solution.sh");
-        std::fs::write(&file, "sleep 30").unwrap();
-        let cancel = CancellationToken::new();
-        cancel.cancel();
-        let result = run(RunRequest {
-            profile: &profile,
-            file: &file,
-            build_dir: &dir.path().join("build"),
-            puzzle: Puzzle::new(2017, 1).unwrap(),
-            input: "",
-            timeout: Duration::from_secs(30),
-            cancel: &cancel,
-            environment: &[],
-            helpers: None,
-        })
-        .await
-        .unwrap();
-        assert_eq!(result.ending, Ending::Cancelled);
-    }
-
-    #[tokio::test]
-    async fn truncates_huge_output() {
-        let profile = profile(None, &["sh", "{file}"]);
-        let result = run_with(
-            &profile,
-            "yes | head -c 200000",
-            "",
-            Duration::from_secs(10),
-        )
-        .await;
-        assert!(result.stdout.ends_with("output truncated"));
-        assert!(result.stdout.len() < MAX_OUTPUT_BYTES + 100);
-    }
-
-    #[tokio::test]
-    async fn says_when_the_directory_is_missing_rather_than_the_program() {
-        let err = execute(
-            &["sh".to_owned(), "-c".to_owned(), "true".to_owned()],
-            Path::new("/definitely/not/a/dir"),
-            &[],
-            None,
-            Duration::from_secs(5),
-            &CancellationToken::new(),
-        )
-        .await
-        .err()
-        .expect("running in a missing directory should fail")
-        .to_string();
-        assert!(err.contains("/definitely/not/a/dir doesn't exist"), "{err}");
-    }
-
-    #[tokio::test]
-    async fn reports_missing_programs() {
-        let profile = profile(None, &["definitely-not-a-real-program-xyz"]);
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("s");
-        std::fs::write(&file, "").unwrap();
-        let cancel = CancellationToken::new();
-        let err = run(RunRequest {
-            profile: &profile,
-            file: &file,
-            build_dir: dir.path(),
-            puzzle: Puzzle::new(2017, 1).unwrap(),
-            input: "",
-            timeout: Duration::from_secs(1),
-            cancel: &cancel,
-            environment: &[],
-            helpers: None,
-        })
-        .await
-        .unwrap_err();
-        assert!(format!("{err:#}").contains("is it installed"));
     }
 }

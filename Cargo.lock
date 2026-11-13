@@ -3672,6 +3672,7 @@ dependencies = [
  "web-push-native",
  "workshop-common",
  "workshop-provider",
+ "workshop-runner",
  "workshop-toolchain",
 ]
 
@@ -3698,6 +3699,18 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "workshop-common",
+]
+
+[[package]]
+name = "workshop-runner"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tokio-util",
  "workshop-common",
 ]
 
