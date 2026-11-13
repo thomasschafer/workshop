@@ -893,6 +893,7 @@ code {
   font-family: var(--mono);
   font-size: 22px;
   touch-action: none;
+  position: relative;
 }
 
 .keyboard-row-small .key {
@@ -929,6 +930,63 @@ code {
 .key.on {
   background: var(--accent);
   color: var(--accent-fg);
+}
+
+/* Where a key's user touches it, shown once that's been measured. */
+.key-offset {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* Measuring touches: the keyboard where it sits in the app, with what to type above it. */
+.calibrate {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding-top: env(safe-area-inset-top);
+}
+
+.calibrate .sheet-header {
+  padding: 12px 16px;
+}
+
+.calibrate-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.calibrate-body p {
+  margin: 0;
+}
+
+.calibrate-phrase {
+  font-family: var(--mono);
+  font-size: 20px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.calibrate-typed {
+  color: var(--muted);
+}
+
+.calibrate-next {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 3px;
 }
 
 /* Above the key under the finger, which the finger hides. */

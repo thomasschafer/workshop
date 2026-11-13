@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, type ModelsState, type Snippet } from "../api";
 import type { DictationMethod, DictationSupport } from "../dictation";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
+import type { KeyOffsetsState } from "../hooks/useKeyOffsets";
 import type { Packages } from "../hooks/usePackages";
 import {
   notificationsOn,
@@ -54,6 +55,9 @@ interface Props {
   onCodeScale: (scale: number) => void;
   /** Whether Helix's keybindings are on for this device. */
   helixOn: boolean;
+  /** Where the keys of Workshop's own keyboard are touched, where this device types on it. */
+  ownKeyboard: KeyOffsetsState | null;
+  onCalibrate: () => void;
   /** What's wrong with the Helix keys in the config, if anything. */
   helixProblems: string | null;
   onHelix: (enabled: boolean) => void;
@@ -297,6 +301,42 @@ function CodeSizeSection({ scale, onScale }: { scale: number; onScale: (scale: n
   );
 }
 
+/** Where the keys of Workshop's own keyboard are touched: measuring, learning and forgetting it. */
+function OwnKeyboardSection({
+  keyboard,
+  onCalibrate,
+}: {
+  keyboard: KeyOffsetsState;
+  onCalibrate: () => void;
+}) {
+  const learnt = Object.keys(keyboard.offsets).length > 0;
+  return (
+    <>
+      <h2 class="settings-subheading">Workshop's keyboard</h2>
+      <p class="muted small">
+        A touch presses the nearest key, and each key can sit where you touch it rather than where
+        it's drawn, which a minute's typing measures. Kept on this device only.
+      </p>
+      <button type="button" class="pill wide" onClick={onCalibrate}>
+        Measure where you touch the keys
+      </button>
+      <label class="toggle">
+        <input
+          type="checkbox"
+          checked={keyboard.learning}
+          onChange={(e) => keyboard.setLearning((e.target as HTMLInputElement).checked)}
+        />
+        Keep learning as you type
+      </label>
+      {learnt ? (
+        <button type="button" class="pill wide" onClick={keyboard.reset}>
+          Forget what's been learnt
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 function DisplayPage({
   lineWrapping,
   onLineWrapping,
@@ -307,6 +347,8 @@ function DisplayPage({
   helixOn,
   helixProblems,
   onHelix,
+  ownKeyboard,
+  onCalibrate,
 }: Props) {
   return (
     <>
@@ -332,6 +374,7 @@ function DisplayPage({
         Edit with Helix's modal keys, and your own from the config file. Kept on this device only.
       </p>
       {helixOn && helixProblems ? <p class="error-text small">{helixProblems}</p> : null}
+      {ownKeyboard ? <OwnKeyboardSection keyboard={ownKeyboard} onCalibrate={onCalibrate} /> : null}
       {keepScreenOn === null ? (
         <p class="muted">This browser can't keep the screen on.</p>
       ) : (

@@ -10,6 +10,7 @@ import { useDictation } from "./hooks/useDictation";
 import { useDiscussion } from "./hooks/useDiscussion";
 import { type UtteranceDetail, useEditing } from "./hooks/useEditing";
 import { useFileSync } from "./hooks/useFileSync";
+import { useKeyOffsets } from "./hooks/useKeyOffsets";
 import { useLanguageServer } from "./hooks/useLanguageServer";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePackages } from "./hooks/usePackages";
@@ -35,6 +36,7 @@ import {
   warn,
 } from "./utterances";
 import { SpeechBench } from "./views/bench";
+import { Calibrate } from "./views/calibrate";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
@@ -61,7 +63,7 @@ import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 import { roundCodeScale } from "./zoom";
 
-type Sheet = "run" | "settings" | "help" | "setup" | "bench" | null;
+type Sheet = "run" | "settings" | "help" | "setup" | "bench" | "calibrate" | null;
 
 /** The space kept clear below the code for the cards floating over it. */
 const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
@@ -218,6 +220,7 @@ export function App({ boot }: { boot: Bootstrap }) {
   // keys, rather than the phone's.
   const touchScreen = useMediaQuery("(pointer: coarse)");
   const ownKeyboard = helixOn && touchScreen;
+  const keyOffsets = useKeyOffsets();
   const helix = useMemo(() => helixSettings(boot.editor.helix), [boot]);
   // Read through refs, as the editor keeps these for as long as it's open.
   const changeLineWrappingRef = useRef(changeLineWrapping);
@@ -845,6 +848,9 @@ export function App({ boot }: { boot: Bootstrap }) {
             <SpeechBench />
           </Modal>
         ) : null}
+        {sheet === "calibrate" ? (
+          <Calibrate onUse={keyOffsets.replace} onClose={() => setSheet(null)} />
+        ) : null}
         {sheet === "help" ? (
           <Modal title="How Workshop works" onClose={() => setSheet(null)} shape="full">
             <Help />
@@ -877,6 +883,8 @@ export function App({ boot }: { boot: Bootstrap }) {
             onModels={setModels}
             onSetup={() => setSheet("setup")}
             onBench={() => setSheet("bench")}
+            ownKeyboard={ownKeyboard ? keyOffsets : null}
+            onCalibrate={() => setSheet("calibrate")}
             commitAfterStar={commitAfterStar}
             onCommitAfterStar={(enabled) => {
               setCommitAfterStar(enabled);
@@ -953,6 +961,8 @@ export function App({ boot }: { boot: Bootstrap }) {
         <Keyboard
           onKey={(key) => editor.current?.pressKey(key)}
           onLower={() => showKeyboard(false)}
+          offsets={keyOffsets.offsets}
+          onTouch={keyOffsets.onTouch}
           statusHost={placeStatus}
         />
       ) : null}

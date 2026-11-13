@@ -72,3 +72,6 @@ export const dictation = choice<DictationChoice>("workshop:dictation", DICTATION
 
 /** The last day's puzzle offered on opening the app, as `year-day`, so it's offered only once. */
 export const puzzleOffered = new DevicePreference<string>("workshop:puzzle-offered", "", (s) => s);
+
+/** Whether Workshop's own keyboard keeps learning where its keys are touched, as they're typed. */
+export const learnKeys = flag("workshop:learn-keys", true);

@@ -1488,6 +1488,90 @@ test("works on a phone with Helix's keybindings, from Workshop's own keyboard", 
   await context.close();
 });
 
+test("presses the nearest key to a touch on Workshop's keyboard, and measures where keys are touched", async ({
+  browser,
+}) => {
+  test.setTimeout(60_000);
+  const { context, phone } = await openOnPhone(browser);
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const firstLine = () => saved().split("\n")[0];
+  await phone.getByRole("button", { name: "Type" }).tap();
+  const keyboard = phone.locator(".keyboard");
+  const key = (name: string) => keyboard.getByRole("button", { name, exact: true });
+  const boxOf = async (name: string) => {
+    const box = await key(name).boundingBox();
+    if (box === null) throw new Error(`the key ${name} isn't on screen`);
+    return box;
+  };
+  for (const name of ["g", "g", "i"]) await key(name).tap();
+  await expect(phone.locator(".cm-helix-mode")).toHaveText("INS");
+
+  // Between two keys, a touch presses the nearer one.
+  const [q, w, a] = [await boxOf("q"), await boxOf("w"), await boxOf("a")];
+  const gap = w.x - (q.x + q.width);
+  expect(gap).toBeGreaterThan(2);
+  await phone.touchscreen.tap(q.x + q.width + gap * 0.8, q.y + q.height / 2);
+  await expect.poll(firstLine).toBe(`w${original.split("\n")[0]}`);
+  // Beside the keyboard's edge, and between rows, it presses the key nearest.
+  await phone.touchscreen.tap(1, a.y + a.height / 2);
+  await phone.touchscreen.tap(q.x + q.width / 2, q.y + q.height + 2);
+  await expect.poll(firstLine).toBe(`waq${original.split("\n")[0]}`);
+  await key("Escape").tap();
+  await key("u").tap();
+  await expect.poll(saved).toBe(original);
+  await key("Hide keyboard").tap();
+
+  // Typing the phrases a little to the right of every key's middle measures as much.
+  await phone.getByRole("button", { name: "Settings" }).tap();
+  await phone.getByRole("button", { name: /Display/ }).tap();
+  await phone.getByRole("button", { name: "Measure where you touch the keys" }).tap();
+  const measuring = phone.getByRole("dialog", { name: "Measure your typing" });
+  const column = w.x - q.x;
+  const off = Math.round(column * 0.3);
+  const phrase = measuring.locator(".calibrate-phrase");
+  const boxes = new Map<string, { x: number; y: number }>();
+  const middleOf = async (char: string) => {
+    let middle = boxes.get(char);
+    if (middle === undefined) {
+      const box = await measuring
+        .locator(".keyboard")
+        .getByRole("button", { name: char === " " ? "Space" : char, exact: true })
+        .boundingBox();
+      if (box === null) throw new Error(`no key for '${char}'`);
+      middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      boxes.set(char, middle);
+    }
+    return middle;
+  };
+  // Each phrase shows with a mark for a space still to type, which isn't in what's to type.
+  while (await phrase.isVisible()) {
+    const text = ((await phrase.textContent()) ?? "").replace("␣", " ");
+    for (const char of text) {
+      const middle = await middleOf(char);
+      await phone.touchscreen.tap(middle.x + off, middle.y);
+    }
+  }
+  await expect(measuring).toContainText("missed the key they were for");
+  await expect(measuring).toContainText(`${off}px right of the middle of a key`);
+  await measuring.getByRole("button", { name: "Use what was measured" }).tap();
+  await expect(measuring).toBeHidden();
+  const kept = await phone.evaluate(() =>
+    JSON.parse(localStorage.getItem("workshop:key-offsets") ?? "{}"),
+  );
+  expect(kept.q.x).toBeCloseTo(off / column, 1);
+
+  // The keys are now where they were touched: what was the gap on q's right is q's.
+  await phone.getByRole("button", { name: "Type" }).tap();
+  await key("i").tap();
+  await phone.touchscreen.tap(q.x + q.width + gap * 0.8, q.y + q.height / 2);
+  await expect.poll(firstLine).toBe(`q${original.split("\n")[0]}`);
+  await key("Escape").tap();
+  await key("u").tap();
+  await expect.poll(saved).toBe(original);
+  await context.close();
+});
+
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({
   browser,
 }) => {
