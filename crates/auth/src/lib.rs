@@ -1,22 +1,45 @@
 //! Who may use the server: the token, the cookie that keeps it, and the page that asks for it.
 
+use std::path::Path;
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 
-use super::state::Shared;
-use crate::paths::Paths;
-
 const TOKEN_COOKIE: &str = "workshop_token";
 
-// Authentication: the token arrives once in the URL printed by `workshop serve`, and is then
-// kept in an HttpOnly cookie.
-pub(super) async fn auth(State(app): State<Shared>, request: Request, next: Next) -> Response {
-    // What a browser fetches to install Workshop as an app, which may be before it has the
-    // token, and which holds nothing private.
-    if PUBLIC_ASSETS.contains(&request.uri().path()) {
+/// What lets a request through: the server's token, and the paths anyone may fetch.
+pub struct Gate {
+    token: String,
+    public_paths: &'static [&'static str],
+}
+
+impl Gate {
+    /// `public_paths` are served without the token, so they must hold nothing private: such as
+    /// what a browser fetches to install the app, which may be before it has the token.
+    pub fn new(token: String, public_paths: &'static [&'static str]) -> Self {
+        Self {
+            token,
+            public_paths,
+        }
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+}
+
+/// Middleware that only lets through requests with the token. The token arrives once in the URL
+/// printed by `workshop serve`, and is then kept in an HttpOnly cookie.
+pub async fn require_token(
+    State(gate): State<Arc<Gate>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if gate.public_paths.contains(&request.uri().path()) {
         return next.run(request).await;
     }
     let query_token = request.uri().query().and_then(|q| {
@@ -26,7 +49,7 @@ pub(super) async fn auth(State(app): State<Shared>, request: Request, next: Next
             .map(|(_, v)| given_token(v))
     });
     if let Some(token) = query_token {
-        if !constant_time_eq(token.as_bytes(), app.token.as_bytes()) {
+        if !constant_time_eq(token.as_bytes(), gate.token.as_bytes()) {
             return unauthorised(Some(
                 "That isn't Workshop's link or token. Check it was copied in full.",
             ));
@@ -36,7 +59,7 @@ pub(super) async fn auth(State(app): State<Shared>, request: Request, next: Next
         // Requests that change anything are protected by the origin check below.
         let cookie = format!(
             "{TOKEN_COOKIE}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000",
-            app.token
+            gate.token
         );
         let mut response = Redirect::to(request.uri().path()).into_response();
         if let Ok(value) = cookie.parse() {
@@ -46,7 +69,7 @@ pub(super) async fn auth(State(app): State<Shared>, request: Request, next: Next
     }
 
     let authorised = cookie_token(request.headers())
-        .is_some_and(|t| constant_time_eq(t.as_bytes(), app.token.as_bytes()));
+        .is_some_and(|t| constant_time_eq(t.as_bytes(), gate.token.as_bytes()));
     if !authorised {
         return unauthorised(None);
     }
@@ -83,16 +106,6 @@ fn same_origin(headers: &HeaderMap) -> bool {
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
-
-/// Served without the token: see `auth`.
-const PUBLIC_ASSETS: &[&str] = &[
-    "/manifest.webmanifest",
-    "/sw.js",
-    "/icon-192.png",
-    "/icon-512.png",
-    "/icon-maskable-512.png",
-    "/apple-touch-icon.png",
-];
 
 /// The token from what was pasted into the form: the token itself, or the whole link with it,
 /// which the form's submission encodes.
@@ -141,9 +154,9 @@ fn unauthorised(problem: Option<&str>) -> Response {
         .into_response()
 }
 
-pub fn load_or_create_token(paths: &Paths) -> Result<String> {
-    let file = paths.token_file();
-    match std::fs::read_to_string(&file) {
+/// The token kept in `file`, made the first time.
+pub fn load_or_create_token(file: &Path) -> Result<String> {
+    match std::fs::read_to_string(file) {
         Ok(token) if !token.trim().is_empty() => return Ok(token.trim().to_owned()),
         Ok(_) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -154,7 +167,7 @@ pub fn load_or_create_token(paths: &Paths) -> Result<String> {
         rand::random::<u128>(),
         rand::random::<u128>()
     );
-    workshop_common::files::write_private(&file, token.as_bytes())?;
+    workshop_common::files::write_private(file, token.as_bytes())?;
     Ok(token)
 }
 
@@ -162,12 +175,38 @@ pub fn load_or_create_token(paths: &Paths) -> Result<String> {
 mod tests {
     use axum::body::Body;
 
+    use axum::Router;
+    use axum::routing::get;
+
     use super::*;
-    use crate::server::testing::{send, test_app};
+
+    /// A server behind the gate, with the token `secret`.
+    fn test_app() -> Router {
+        let gate = Arc::new(Gate::new("secret".into(), &["/manifest.webmanifest"]));
+        Router::new()
+            .route("/api/bootstrap", get(|| async { "bootstrap" }))
+            .route("/api/state", axum::routing::put(|| async { "saved" }))
+            .fallback(|| async { "page" })
+            .layer(axum::middleware::from_fn_with_state(gate, require_token))
+    }
+
+    async fn send(router: &Router, request: Request) -> Response {
+        use tower::ServiceExt;
+        router.clone().oneshot(request).await.unwrap()
+    }
+
+    #[test]
+    fn keeps_the_token_it_makes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("token");
+        let token = load_or_create_token(&file).unwrap();
+        assert_eq!(token.len(), 64);
+        assert_eq!(load_or_create_token(&file).unwrap(), token);
+    }
 
     #[tokio::test]
     async fn token_link_sets_a_cookie_that_works_after_the_redirect() {
-        let (_dir, router) = test_app().await;
+        let router = test_app();
         let response = send(
             &router,
             Request::get("/?token=secret").body(Body::empty()).unwrap(),
@@ -193,7 +232,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_and_wrong_tokens() {
-        let (_dir, router) = test_app().await;
+        let router = test_app();
         for request in [
             Request::get("/api/bootstrap").body(Body::empty()).unwrap(),
             Request::get("/?token=wrong").body(Body::empty()).unwrap(),
@@ -222,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn serves_what_installing_needs_without_the_token() {
-        let (_dir, router) = test_app().await;
+        let router = test_app();
         let request = Request::get("/manifest.webmanifest")
             .body(Body::empty())
             .unwrap();
@@ -236,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_cross_origin_writes() {
-        let (_dir, router) = test_app().await;
+        let router = test_app();
         let request = Request::put("/api/state")
             .header(header::COOKIE, "workshop_token=secret")
             .header(header::HOST, "laptop.ts.net")

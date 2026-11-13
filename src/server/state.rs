@@ -24,7 +24,8 @@ use crate::workspace::Workspace;
 pub struct App {
     pub(super) config: Config,
     pub(super) paths: Paths,
-    pub(super) token: String,
+    /// Who may use the server.
+    pub(super) gate: Arc<workshop_auth::Gate>,
     pub(super) workspace: Workspace,
     pub(super) aoc: AocClient,
     /// One per provider, each keeping its own process ready.
@@ -55,6 +56,17 @@ pub struct App {
 }
 
 pub(super) type Shared = Arc<App>;
+
+/// What a browser fetches to install Workshop as an app, which may be before it has the token,
+/// and which holds nothing private.
+const PUBLIC_ASSETS: &[&str] = &[
+    "/manifest.webmanifest",
+    "/sw.js",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-maskable-512.png",
+    "/apple-touch-icon.png",
+];
 
 impl App {
     pub fn new(
@@ -100,7 +112,7 @@ impl App {
             lsp_servers: workshop_lsp::Servers::default(),
             config,
             paths,
-            token,
+            gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),
         })
     }
 

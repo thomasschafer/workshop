@@ -116,7 +116,7 @@ pub(super) async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupSta
     let port = app.config.server.bind.port();
     let phone_url = workshop_tailscale::serving_url(port)
         .await
-        .map(|base| format!("{base}/?token={}", app.token));
+        .map(|base| format!("{base}/?token={}", app.gate.token()));
     let phone_qr_svg = phone_url.as_deref().map(qr_svg).transpose()?;
     Ok(Json(SetupState {
         solutions_dir: workshop_common::files::display_path(&app.config.solutions_dir),

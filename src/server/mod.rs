@@ -2,7 +2,6 @@
 //!
 //! Every route is listed in `router`; the handlers live in the module for their area.
 
-mod auth;
 mod bench;
 mod client;
 mod discuss;
@@ -30,7 +29,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use rust_embed::RustEmbed;
 
-pub use auth::load_or_create_token;
 pub use state::App;
 use state::Shared;
 
@@ -128,7 +126,10 @@ pub fn router(app: Shared) -> Router {
     Router::new()
         .nest("/api", api)
         .fallback(static_asset)
-        .layer(middleware::from_fn_with_state(app.clone(), auth::auth))
+        .layer(middleware::from_fn_with_state(
+            app.gate.clone(),
+            workshop_auth::require_token,
+        ))
         .with_state(app)
 }
 
@@ -189,5 +190,33 @@ mod testing {
     pub async fn send(router: &Router, request: Request) -> Response {
         use tower::ServiceExt;
         router.clone().oneshot(request).await.unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::extract::Request;
+    use axum::http::{StatusCode, header};
+
+    use super::testing::{send, test_app};
+
+    #[tokio::test]
+    async fn asks_for_the_token_except_for_what_installing_needs() {
+        let (_dir, router) = test_app().await;
+        let request = Request::get("/api/bootstrap").body(Body::empty()).unwrap();
+        assert_eq!(
+            send(&router, request).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let request = Request::get("/api/bootstrap")
+            .header(header::COOKIE, "workshop_token=secret")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(&router, request).await.status(), StatusCode::OK);
+        let request = Request::get("/manifest.webmanifest")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(&router, request).await.status(), StatusCode::OK);
     }
 }

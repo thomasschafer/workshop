@@ -179,7 +179,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Token { tailscale } => {
-            let token = server::load_or_create_token(&paths)?;
+            let token = workshop_auth::load_or_create_token(&paths.token_file())?;
             if let Some(https_port) = tailscale.https_port() {
                 print_phone_link(config.server.bind, &token, https_port).await
             } else {
@@ -251,7 +251,7 @@ async fn serve(
             "listening on {bind}, which is reachable from other machines. Anyone with the token can run code on this machine."
         );
     }
-    let token = server::load_or_create_token(&paths)?;
+    let token = workshop_auth::load_or_create_token(&paths.token_file())?;
     let app = Arc::new(server::App::new(config, paths, token.clone(), aoc_session)?);
     let listener = match tokio::net::TcpListener::bind(bind).await {
         Ok(listener) => listener,

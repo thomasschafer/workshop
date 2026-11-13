@@ -21,6 +21,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/thomasschafer/workshop"
 
 [workspace.dependencies]
+workshop-auth = { path = "crates/auth" }
 workshop-common = { path = "crates/common" }
 workshop-lsp = { path = "crates/lsp" }
 workshop-provider = { path = "crates/provider" }
@@ -58,6 +59,7 @@ urlencoding = "2.1.3"
 web-push-native = "0.5"
 
 [dependencies]
+workshop-auth.workspace = true
 workshop-common.workspace = true
 workshop-lsp.workspace = true
 workshop-provider.workspace = true

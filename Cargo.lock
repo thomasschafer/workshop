@@ -3670,12 +3670,27 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "web-push-native",
+ "workshop-auth",
  "workshop-common",
  "workshop-lsp",
  "workshop-provider",
  "workshop-runner",
  "workshop-tailscale",
  "workshop-toolchain",
+]
+
+[[package]]
+name = "workshop-auth"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "rand 0.10.3",
+ "tempfile",
+ "tokio",
+ "tower",
+ "urlencoding",
+ "workshop-common",
 ]
 
 [[package]]
