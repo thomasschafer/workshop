@@ -1,0 +1,15 @@
+[package]
+name = "workshop-tracks"
+version = "0.0.0"
+edition.workspace = true
+description = "Tracks of learning, and choosing what to do next across them"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

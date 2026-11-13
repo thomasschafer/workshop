@@ -3674,6 +3674,7 @@ dependencies = [
  "workshop-runner",
  "workshop-tailscale",
  "workshop-toolchain",
+ "workshop-tracks",
 ]
 
 [[package]]
@@ -3784,6 +3785,15 @@ dependencies = [
  "tokio-util",
  "toml",
  "workshop-common",
+]
+
+[[package]]
+name = "workshop-tracks"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

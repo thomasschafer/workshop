@@ -29,6 +29,7 @@ workshop-push = { path = "crates/push" }
 workshop-runner = { path = "crates/runner" }
 workshop-tailscale = { path = "crates/tailscale" }
 workshop-toolchain = { path = "crates/toolchain" }
+workshop-tracks = { path = "crates/tracks" }
 
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws", "macros"] }
@@ -68,6 +69,7 @@ workshop-push.workspace = true
 workshop-runner.workspace = true
 workshop-tailscale.workspace = true
 workshop-toolchain.workspace = true
+workshop-tracks.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true

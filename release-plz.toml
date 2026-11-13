@@ -16,7 +16,7 @@ pr_labels = ["release"]
 # changes go into its changelog and release, and they get no versions or tags of their own.
 [[package]]
 name = "workshop"
-changelog_include = ["workshop-auth", "workshop-common", "workshop-lsp", "workshop-provider", "workshop-push", "workshop-runner", "workshop-tailscale", "workshop-toolchain"]
+changelog_include = ["workshop-auth", "workshop-common", "workshop-lsp", "workshop-provider", "workshop-push", "workshop-runner", "workshop-tailscale", "workshop-toolchain", "workshop-tracks"]
 
 [[package]]
 name = "workshop-auth"
@@ -48,4 +48,8 @@ release = false
 
 [[package]]
 name = "workshop-toolchain"
+release = false
+
+[[package]]
+name = "workshop-tracks"
 release = false
