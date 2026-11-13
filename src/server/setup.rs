@@ -114,7 +114,7 @@ pub(super) async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupSta
         }))
         .await;
     let port = app.config.server.bind.port();
-    let phone_url = crate::tailscale::serving_url(port)
+    let phone_url = workshop_tailscale::serving_url(port)
         .await
         .map(|base| format!("{base}/?token={}", app.token));
     let phone_qr_svg = phone_url.as_deref().map(qr_svg).transpose()?;
@@ -126,7 +126,7 @@ pub(super) async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupSta
         language: app.settings().language,
         has_aoc_session: app.aoc.has_session(),
         providers,
-        tailscale_installed: crate::tailscale::program().is_some(),
+        tailscale_installed: workshop_tailscale::program().is_some(),
         mise_installed: workshop_common::programs::find_program("mise").is_some(),
         toolchain_problem,
         toolchain_install: app.toolchain_install.status(),

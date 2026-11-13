@@ -3671,8 +3671,10 @@ dependencies = [
  "urlencoding",
  "web-push-native",
  "workshop-common",
+ "workshop-lsp",
  "workshop-provider",
  "workshop-runner",
+ "workshop-tailscale",
  "workshop-toolchain",
 ]
 
@@ -3686,6 +3688,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "workshop-lsp"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "workshop-common",
 ]
 
 [[package]]
@@ -3711,6 +3725,17 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "workshop-common",
+]
+
+[[package]]
+name = "workshop-tailscale"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tokio",
  "workshop-common",
 ]
 

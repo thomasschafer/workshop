@@ -600,7 +600,7 @@ mod tests {
         serde_json::from_str(text).unwrap()
     }
 
-    const GREETING: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":7,"rootUri":"file:///aoc","capabilities":{"textDocument":{}}}}"#;
+    const GREETING: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":7,"rootUri":"file:///code","capabilities":{"textDocument":{}}}}"#;
     const GREETED: &str = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
 
     fn open(uri: &str) -> String {
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn refuses_an_editor_that_greets_the_server_differently() {
         let mut proxy = greeted();
-        let other = GREETING.replace("file:///aoc", "file:///elsewhere");
+        let other = GREETING.replace("file:///code", "file:///elsewhere");
         let err = proxy.editor_said(&other).unwrap_err();
         assert!(err.downcast_ref::<DifferentGreeting>().is_some());
     }
@@ -695,16 +695,16 @@ mod tests {
     #[test]
     fn closes_the_files_an_editor_leaves_open() {
         let mut proxy = greeted();
-        proxy.editor_said(&open("file:///aoc/a.py")).unwrap();
-        proxy.editor_said(&open("file:///aoc/b.py")).unwrap();
-        let close = r#"{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///aoc/a.py"}}}"#;
+        proxy.editor_said(&open("file:///code/a.py")).unwrap();
+        proxy.editor_said(&open("file:///code/b.py")).unwrap();
+        let close = r#"{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///code/a.py"}}}"#;
         assert_eq!(proxy.editor_said(close).unwrap().to_server, [close]);
         let told = proxy.editor_gone();
         assert_eq!(told.len(), 1);
         assert_eq!(value(&told[0])["method"], "textDocument/didClose");
         assert_eq!(
             value(&told[0])["params"]["textDocument"]["uri"],
-            "file:///aoc/b.py"
+            "file:///code/b.py"
         );
         // Nothing is left for the editor after to close.
         assert!(proxy.editor_gone().is_empty());

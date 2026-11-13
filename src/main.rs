@@ -6,7 +6,6 @@ mod doctor;
 mod edit;
 mod eval;
 mod language;
-mod lsp;
 mod models;
 mod notify;
 mod paths;
@@ -16,7 +15,6 @@ mod samples;
 mod server;
 mod settings;
 mod solutions;
-mod tailscale;
 mod theme;
 mod updates;
 mod whisper;
@@ -109,10 +107,12 @@ struct TailscaleArgs {
 
 impl TailscaleArgs {
     /// The HTTPS port to serve on with `tailscale serve`, if at all.
-    fn https_port(&self) -> Option<tailscale::HttpsPort> {
+    fn https_port(&self) -> Option<workshop_tailscale::HttpsPort> {
         self.tailscale.then(|| {
-            self.https_port
-                .map_or(tailscale::HttpsPort::Default, tailscale::HttpsPort::Given)
+            self.https_port.map_or(
+                workshop_tailscale::HttpsPort::Default,
+                workshop_tailscale::HttpsPort::Given,
+            )
         })
     }
 }
@@ -240,7 +240,7 @@ async fn serve(
     aoc_session: Option<String>,
     bind: Option<SocketAddr>,
     // The HTTPS port to serve on with `tailscale serve`, if at all.
-    tailscale_https_port: Option<tailscale::HttpsPort>,
+    tailscale_https_port: Option<workshop_tailscale::HttpsPort>,
 ) -> Result<()> {
     if let Some(bind) = bind {
         config.server.bind = bind;
@@ -319,12 +319,12 @@ async fn shutdown_signal() {
 async fn print_phone_link(
     bind: SocketAddr,
     token: &str,
-    https_port: tailscale::HttpsPort,
+    https_port: workshop_tailscale::HttpsPort,
 ) -> Result<()> {
     if !(bind.ip().is_loopback() || bind.ip().is_unspecified()) {
         anyhow::bail!("`--tailscale` forwards to 127.0.0.1, so Workshop must listen there");
     }
-    let base = tailscale::serve(bind.port(), https_port).await?;
+    let base = workshop_tailscale::serve(bind.port(), https_port).await?;
     let url = format!("{base}/?token={token}");
     println!(
         "\nOn your phone, open {url}\nor scan:\n\n{}",
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn parses_tailscale_args() {
-        use tailscale::HttpsPort;
+        use workshop_tailscale::HttpsPort;
 
         let https_port = |args: &[&str]| {
             let tailscale = match Cli::try_parse_from(args).unwrap().command {
