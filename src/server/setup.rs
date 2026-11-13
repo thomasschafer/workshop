@@ -5,13 +5,13 @@ use anyhow::{Context, Result};
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
+use workshop_toolchain::toolchain::Toolchain;
 
 use super::error::{ApiResult, bad_request};
 use super::install::{AfterInstall, InstallStatus, install_with};
 use super::state::Shared;
 use crate::doctor;
 use crate::models;
-use crate::toolchain::Toolchain;
 
 pub(super) async fn run_doctor(State(app): State<Shared>) -> ApiResult<Vec<doctor::Check>> {
     Ok(Json(
@@ -207,7 +207,7 @@ pub(super) async fn install_toolchain(State(app): State<Shared>) -> ApiResult<Se
                 .toolchain
                 .clone()
                 .context("the language has no toolchain")?;
-            crate::toolchain::install(
+            workshop_toolchain::toolchain::install(
                 &profile,
                 &app.config.solutions_dir,
                 &running.cancel,

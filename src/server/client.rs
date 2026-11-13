@@ -4,6 +4,7 @@
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
+use workshop_toolchain::toolchain::Toolchain;
 
 use super::error::ApiResult;
 use super::lsp::file_uri;
@@ -12,7 +13,6 @@ use super::speech::speech_state;
 use super::state::Shared;
 use crate::config::Snippet;
 use crate::models;
-use crate::toolchain::Toolchain;
 use crate::workspace::UiState;
 
 #[derive(Serialize)]

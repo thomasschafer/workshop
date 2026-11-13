@@ -222,7 +222,7 @@ impl Workspace {
         if !path.exists() {
             files::write_atomic(&path, profile.template.as_bytes())?;
             self.ensure_project(profile)?;
-            crate::toolchain::add_to_gitignore(
+            workshop_toolchain::toolchain::add_to_gitignore(
                 &self.solutions_dir,
                 "Build output",
                 &profile.gitignore,
@@ -403,7 +403,7 @@ impl Workspace {
         if let Some(packages) = &profile.packages {
             owned.insert(dir.join(relative_inside(&packages.manifest)?));
         }
-        owned.extend(crate::toolchain::mise_config(dir));
+        owned.extend(workshop_toolchain::toolchain::mise_config(dir));
 
         let years: BTreeSet<u16> = candidates
             .iter()

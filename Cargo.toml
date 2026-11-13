@@ -23,6 +23,7 @@ repository = "https://github.com/thomasschafer/workshop"
 [workspace.dependencies]
 workshop-common = { path = "crates/common" }
 workshop-provider = { path = "crates/provider" }
+workshop-toolchain = { path = "crates/toolchain" }
 
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws", "macros"] }
@@ -56,6 +57,7 @@ web-push-native = "0.5"
 [dependencies]
 workshop-common.workspace = true
 workshop-provider.workspace = true
+workshop-toolchain.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true

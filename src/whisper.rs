@@ -11,7 +11,7 @@ use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 use workshop_common::process::{self, ProcessGroup};
 
-use crate::packages::InstallLog;
+use workshop_toolchain::packages::InstallLog;
 
 /// The Whisper command-line program, from whisper.cpp.
 const PROGRAM: &str = "whisper-cli";

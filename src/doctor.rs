@@ -6,11 +6,11 @@ use std::time::Duration;
 use serde::Serialize;
 use tokio::process::Command;
 use workshop_common::programs::find_program;
+use workshop_toolchain::toolchain::{self, Toolchain};
 
 use crate::config::Config;
 use crate::paths::Paths;
 use crate::solutions::Solutions;
-use crate::toolchain::{self, Toolchain};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -256,7 +256,7 @@ async fn check_toolchain(config: &Config) -> (Toolchain, Option<Check>) {
     }
 }
 
-fn check_packages(packages: &crate::packages::Packages) -> Check {
+fn check_packages(packages: &workshop_toolchain::packages::Packages) -> Check {
     let state = match packages.state() {
         Ok(state) => state,
         Err(err) => {

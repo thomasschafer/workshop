@@ -5,11 +5,11 @@ use anyhow::{Context, Result};
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
+use workshop_toolchain::packages::{Change, Packages, PackagesState, Resolution};
 
 use super::error::{ApiError, ApiResult, bad_request};
 use super::install::{AfterInstall, InstallStatus, install_with};
 use super::state::{App, Shared, lock};
-use crate::packages::{Change, Packages, PackagesState, Resolution};
 
 #[derive(Serialize)]
 pub(super) struct PackagesResponse {

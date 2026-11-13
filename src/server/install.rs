@@ -7,10 +7,10 @@ use anyhow::{Context, Result};
 use axum::http::StatusCode;
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
+use workshop_toolchain::packages::InstallLog;
 
 use super::error::ApiError;
 use super::state::{App, Shared, lock};
-use crate::packages::InstallLog;
 
 pub(super) struct RunningInstall {
     pub(super) cancel: CancellationToken,

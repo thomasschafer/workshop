@@ -8,15 +8,15 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tokio_util::sync::CancellationToken;
 use workshop_common::template::{self, Vars};
+use workshop_toolchain::packages::Packages;
+use workshop_toolchain::toolchain::Toolchain;
 
 use crate::aoc::AocClient;
 use crate::config::Config;
 use crate::language::{LanguageProfile, Puzzle};
-use crate::packages::Packages;
 use crate::paths::Paths;
 use crate::practice::Practice;
 use crate::runner::{self, RunResult};
-use crate::toolchain::Toolchain;
 
 /// The client for Advent of Code, with the practice puzzle served alongside it.
 pub fn aoc_client(config: &Config, paths: &Paths, session: Option<String>) -> Result<AocClient> {

@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_common::template::{self, Vars};
 
-use crate::packages::PackagesProfile;
-use crate::toolchain::ToolchainProfile;
+use workshop_toolchain::packages::PackagesProfile;
+use workshop_toolchain::toolchain::ToolchainProfile;
 
 /// Everything Workshop needs to know to work with one programming language.
 #[derive(Debug, Clone, Deserialize, Serialize)]
