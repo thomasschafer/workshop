@@ -84,7 +84,7 @@ export function onDrawnKey(box: KeyBox, point: Point): boolean {
 }
 
 /** A touch that pressed a key: where it landed from the middle of the key as drawn, in columns. */
-export interface Touch {
+export interface LandedTouch {
   readonly id: string;
   readonly offset: Point;
 }
@@ -99,7 +99,7 @@ export function touchOffset(box: KeyBox, point: Point, column: number): Point {
 export const LEARNING_RATE = 0.04;
 
 /** Moves a key's offset a little towards where it was just touched. */
-export function learn(offsets: KeyOffsets, touch: Touch, rate = LEARNING_RATE): KeyOffsets {
+export function learn(offsets: KeyOffsets, touch: LandedTouch, rate = LEARNING_RATE): KeyOffsets {
   const old = offsets[touch.id] ?? { x: 0, y: 0 };
   const next = clampOffset({
     x: old.x + (touch.offset.x - old.x) * rate,

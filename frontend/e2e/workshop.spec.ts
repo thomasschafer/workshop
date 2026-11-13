@@ -1823,11 +1823,18 @@ test("turns to other tabs in zen mode with two fingers, keeping the keyboard for
   browser,
 }) => {
   const { context, phone } = await openOnPhone(browser);
-  // Phones can't always go full screen where the tests run, which zen mode says and carries on.
+  // Browsers can refuse to go full screen, as they do where some tests run, which zen mode says
+  // in a card and carries on. Made to, so the card is always there to get in the way.
+  await phone.evaluate(() => {
+    Object.defineProperty(document, "fullscreenEnabled", { value: true });
+    document.documentElement.requestFullscreen = () => Promise.reject(new Error("not allowed"));
+  });
   await phone.getByRole("button", { name: "Zen mode" }).tap();
+  await expect(phone.locator(".card")).toContainText("Couldn't go full screen");
   const keyboard = phone.locator(".keyboard");
   const code = phone.locator(".cm-content");
-  const problem = phone.locator(".problem");
+  // Not any `.problem`: a card saying zen mode couldn't go full screen has the class too.
+  const problem = phone.locator(".pane.problem");
   const shown = phone.locator(".zen-tabs .selected");
   await expect(keyboard).toBeVisible();
   await expect(code).toBeVisible();
@@ -1937,7 +1944,7 @@ test("runs, enters zen mode and turns between tabs from the keyboard, and lists 
     computer.evaluate(() => [...(window as unknown as { slidesSeen: Set<string> }).slidesSeen]);
   await computer.keyboard.press("Alt+BracketLeft");
   await expect(computer.locator(".zen-tabs .selected")).toHaveText("Problem");
-  await expect(computer.locator(".problem")).toBeVisible();
+  await expect(computer.locator(".pane.problem")).toBeVisible();
   if (slides) {
     await expect.poll(slidesSeen).toEqual(expect.arrayContaining(["tab-out-right", "tab-in-left"]));
   }

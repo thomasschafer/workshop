@@ -1,10 +1,7 @@
 // Two fingers swept sideways together, which turns to the next tab or the one before. Two, as one
 // finger scrolls code and moves the cursor, and a sweep from the screen's edge goes back.
 
-export interface Point {
-  readonly x: number;
-  readonly y: number;
-}
+import type { Point } from "./touchModel";
 
 export type Fingers = readonly [Point, Point];
 
