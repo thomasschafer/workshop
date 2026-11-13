@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2](https://github.com/thomasschafer/workshop/compare/v0.8.1...v0.8.2) - 2026-11-13
+
+### Other
+
+- Lock a modifier on Workshop's keyboard by tapping it twice quickly
+- Wait for a pause in typing before offering completions
+- Name the card the swipe test waits for, which others can share the screen with
+- Fix the zen mode tests where a browser won't go full screen, and tidy
+- Slide between tabs when they're turned by a sweep or a shortcut
+- Fix what Safari showed of the problem under the cursor and sweeping between tabs
+- Keep the language server for an editor that comes back
+- Move through completions with Helix's keys on any keyboard
+- Complete as you type, and use the language server with the editor's own keys
+- Add keyboard shortcuts for running, zen mode and turning between tabs
+- Turn to other tabs in zen mode, with two fingers on a phone
+- Say what's wrong where the cursor is, and show the whole of it when asked
+- Ask the language server from Helix's own prompt and lists
+- Press the nearest key on Workshop's keyboard, and learn where keys are touched
+- Keep Escape for Helix in zen mode
+- Float Helix's key help in the corner, only as big as it needs
+- Glide the code when Helix's keys scroll it
+- Let the code be pinched down to a tenth of its size
+- Pinch the code to change its text size
+- Type on Workshop's own keyboard with Helix's keybindings on a phone ([#29](https://github.com/thomasschafer/workshop/pull/29))
+- Keep Helix's status line under sheets, and make it taller on phones
+- Make Helix's keybindings work well on a phone ([#28](https://github.com/thomasschafer/workshop/pull/28))
+- Cover the page with the keyboard in zen mode, sizing it to fit
+- Run the code to the top of the screen in zen mode
+- Add zen mode, showing just the code and the keyboard
+- Keep the Discuss draft when switching tabs
+- Wait for the day's heading in the Helix test, which a switching puzzle can show twice
+- Test reading keys from the browser and keymaps from config
+- Add Helix keybindings to the code editor, on per device or from the config
+- Port Helix's editing model and keymap, checked against Helix's own tests
+- Let unwrapped code scroll well past the end of its longest line
+- Bump release-plz/action ([#25](https://github.com/thomasschafer/workshop/pull/25))
+- Bump toml ([#26](https://github.com/thomasschafer/workshop/pull/26))
+- Bump rustls from 0.23.45 to 0.23.46 ([#24](https://github.com/thomasschafer/workshop/pull/24))
+- Bump tokio from 1.53.3 to 1.54.1 in the cargo-minor-and-patch group ([#20](https://github.com/thomasschafer/workshop/pull/20))
+- Bump release-plz/action ([#23](https://github.com/thomasschafer/workshop/pull/23))
+- Read quoted strings and BigInts as answers, and warn about decimal ones
+- Find part 2's sample when the puzzle wraps its answer in brackets, and never run part 1's in its place
+- Keep the coach to the question asked, without raising other problems
+- End saved solutions and notes with a newline
+- Name puzzles in commit messages by year and day only
+- Compare committed paths by component in the commit test
+- Only commit tracked changes and Workshop's own files
+- Keep the puzzle scrolled where it was after looking at another tab
+- Bump libc from 0.2.190 to 0.2.191 in the cargo-minor-and-patch group ([#17](https://github.com/thomasschafer/workshop/pull/17))
+- Bump the github-actions-minor-and-patch group with 2 updates ([#16](https://github.com/thomasschafer/workshop/pull/16))
+- Bump the npm-minor-and-patch group in /frontend with 3 updates ([#18](https://github.com/thomasschafer/workshop/pull/18))
+
 ## [0.8.1](https://github.com/thomasschafer/workshop/compare/v0.8.0...v0.8.1) - 2026-10-24
 
 ### Other
