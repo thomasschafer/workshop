@@ -3644,14 +3644,11 @@ version = "0.8.1"
 dependencies = [
  "anyhow",
  "axum",
- "base64 0.23.1",
  "clap",
  "dirs",
  "futures-util",
- "libc",
  "mime_guess",
  "qrcode",
- "rand 0.10.3",
  "regex",
  "reqwest",
  "rust-embed",
@@ -3669,11 +3666,11 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
- "web-push-native",
  "workshop-auth",
  "workshop-common",
  "workshop-lsp",
  "workshop-provider",
+ "workshop-push",
  "workshop-runner",
  "workshop-tailscale",
  "workshop-toolchain",
@@ -3728,6 +3725,24 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "workshop-common",
+]
+
+[[package]]
+name = "workshop-push"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.23.1",
+ "rand 0.10.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "web-push-native",
  "workshop-common",
 ]
 

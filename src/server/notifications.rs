@@ -34,7 +34,7 @@ pub(super) async fn notifications_subscribed(
 
 pub(super) async fn subscribe_notifications(
     State(app): State<Shared>,
-    Json(subscription): Json<crate::notify::Subscription>,
+    Json(subscription): Json<workshop_push::Subscription>,
 ) -> ApiResult<()> {
     app.notifier
         .subscribe(subscription)
@@ -53,16 +53,16 @@ pub(super) async fn unsubscribe_notifications(
 /// Sends a notification straight away, so a device can check they arrive.
 pub(super) async fn test_notification(
     State(app): State<Shared>,
-    Json(subscription): Json<crate::notify::Subscription>,
+    Json(subscription): Json<workshop_push::Subscription>,
 ) -> ApiResult<()> {
-    let message = crate::notify::Message {
+    let message = workshop_push::Message {
         title: "Workshop".into(),
         body: "Notifications work: you'll hear when each puzzle unlocks.".into(),
         url: "/".into(),
     };
     match app.notifier.send(&subscription, &message).await? {
-        crate::notify::Delivery::Sent => Ok(Json(())),
-        crate::notify::Delivery::Gone => Err(bad_request(
+        workshop_push::Delivery::Sent => Ok(Json(())),
+        workshop_push::Delivery::Gone => Err(bad_request(
             "The browser has ended this device's notifications. Turn them off and on again.",
         )),
     }

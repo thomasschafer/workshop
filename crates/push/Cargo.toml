@@ -1,0 +1,24 @@
+[package]
+name = "workshop-push"
+version = "0.0.0"
+edition.workspace = true
+description = "Notifications sent with Web Push to the devices that asked for them"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+workshop-common.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+web-push-native.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+rand.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

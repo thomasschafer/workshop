@@ -43,7 +43,7 @@ pub struct App {
     pub(super) speech_install: Installs,
     pub(super) dictation: Arc<crate::whisper::Dictation>,
     /// Notifies devices that asked, as puzzles unlock.
-    pub notifier: Arc<crate::notify::Notifier>,
+    pub notifier: Arc<workshop_push::Notifier>,
     /// Whether a newer release is out.
     pub updates: Arc<crate::updates::Updates>,
     /// Packages already found for missing modules, by language and module.
@@ -98,7 +98,7 @@ impl App {
             toolchain_install: Installs::default(),
             speech_install: Installs::default(),
             dictation: Arc::default(),
-            notifier: Arc::new(crate::notify::Notifier::load(&paths)?),
+            notifier: Arc::new(workshop_push::Notifier::load(&paths.data_dir)?),
             updates: Arc::new(crate::updates::Updates::load(
                 &paths,
                 config.server.check_for_updates,

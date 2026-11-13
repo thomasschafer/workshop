@@ -1,4 +1,5 @@
 mod aoc;
+mod calendar;
 mod commands;
 mod config;
 mod discuss;
@@ -280,7 +281,7 @@ async fn serve(
     let warm = app.clone();
     tokio::spawn(async move { warm.warm_up().await });
     let notifier = app.notifier.clone();
-    tokio::spawn(async move { notifier.run().await });
+    tokio::spawn(async move { crate::notify::notify_unlocks(&notifier).await });
     let updates = app.updates.clone();
     tokio::spawn(async move { updates.run().await });
     // Stop straight away rather than waiting for connections to close: the editor's language
