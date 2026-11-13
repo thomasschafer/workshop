@@ -96,17 +96,30 @@ export function labelFor(def: KeyDef, shift: boolean): string {
   return def.label;
 }
 
+/** How soon a modifier has to be tapped again to lock it on, in milliseconds. */
+export const DOUBLE_TAP_MS = 300;
+
 /**
  * Shift, Ctrl and Alt, which work as on a laptop when held, and as one-shot keys when tapped: a
- * tap applies the modifier to the next key, and tapping again before then cancels it.
+ * tap applies the modifier to the next key, and tapping again before then cancels it. Tapped
+ * twice quickly, as on a phone's keyboard, a modifier locks on for every key until it's tapped
+ * again.
  */
 export class ModifierState {
   private readonly armed = new Set<Modifier>();
-  /** The modifiers held down, and whether a key's been pressed with each since. */
-  private readonly held = new Map<Modifier, { used: boolean }>();
+  private readonly locked = new Set<Modifier>();
+  /** When each modifier was last pressed, to tell a double tap. */
+  private readonly pressedAt = new Map<Modifier, number>();
+  /** The modifiers held down, when each was pressed, and whether a key's been pressed since. */
+  private readonly held = new Map<
+    Modifier,
+    { used: boolean; at: number; previous: number | undefined }
+  >();
 
-  press(modifier: Modifier): void {
-    this.held.set(modifier, { used: false });
+  /** Presses a modifier at `now`, in milliseconds. */
+  press(modifier: Modifier, now: number): void {
+    this.held.set(modifier, { used: false, at: now, previous: this.pressedAt.get(modifier) });
+    this.pressedAt.set(modifier, now);
   }
 
   /** Lets go of a modifier, which was a tap, toggling it for the next key, if nothing used it. */
@@ -115,20 +128,37 @@ export class ModifierState {
     if (hold === undefined) return;
     this.held.delete(modifier);
     if (hold.used) return;
-    if (this.armed.has(modifier)) this.armed.delete(modifier);
-    else this.armed.add(modifier);
+    if (this.locked.delete(modifier)) return;
+    if (!this.armed.has(modifier)) {
+      this.armed.add(modifier);
+      return;
+    }
+    this.armed.delete(modifier);
+    if (hold.previous !== undefined && hold.at - hold.previous <= DOUBLE_TAP_MS) {
+      this.locked.add(modifier);
+    }
   }
 
   /** The modifiers on now, which shows on their keys. */
   get current(): Modifiers {
-    const on = (m: Modifier) => this.armed.has(m) || this.held.has(m);
+    const on = (m: Modifier) => this.armed.has(m) || this.held.has(m) || this.locked.has(m);
     return { shift: on("shift"), ctrl: on("ctrl"), alt: on("alt") };
   }
 
-  /** The modifiers for a key pressed now, which uses up those tapped and marks those held. */
+  /** The modifiers locked on, rather than on for the next key alone. */
+  get locks(): Modifiers {
+    const on = (m: Modifier) => this.locked.has(m);
+    return { shift: on("shift"), ctrl: on("ctrl"), alt: on("alt") };
+  }
+
+  /**
+   * The modifiers for a key pressed now, which uses up those tapped and marks those held, so a
+   * tap that follows isn't taken as the second of a double tap.
+   */
   use(): Modifiers {
     const mods = this.current;
     this.armed.clear();
+    this.pressedAt.clear();
     for (const hold of this.held.values()) hold.used = true;
     return mods;
   }

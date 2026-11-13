@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   COLUMNS,
+  DOUBLE_TAP_MS,
   type KeyDef,
   keyFor,
   LAYOUT,
@@ -108,25 +109,58 @@ describe("movesCursor", () => {
 describe("ModifierState", () => {
   it("applies a tapped modifier to the next key only", () => {
     const state = new ModifierState();
-    state.press("shift");
+    state.press("shift", 0);
     state.release("shift");
     expect(state.current.shift).toBe(true);
     expect(state.use().shift).toBe(true);
     expect(state.use().shift).toBe(false);
   });
 
-  it("cancels a tapped modifier when tapped again", () => {
+  it("cancels a tapped modifier when tapped again, not quickly", () => {
     const state = new ModifierState();
-    state.press("ctrl");
+    state.press("ctrl", 0);
     state.release("ctrl");
-    state.press("ctrl");
+    state.press("ctrl", DOUBLE_TAP_MS + 1);
     state.release("ctrl");
     expect(state.current.ctrl).toBe(false);
+    expect(state.use().ctrl).toBe(false);
+  });
+
+  it("locks a modifier on when it's tapped twice quickly, until it's tapped again", () => {
+    const state = new ModifierState();
+    state.press("shift", 0);
+    state.release("shift");
+    state.press("shift", DOUBLE_TAP_MS);
+    state.release("shift");
+    expect(state.locks.shift).toBe(true);
+    expect(state.use().shift).toBe(true);
+    expect(state.use().shift).toBe(true);
+    // Held while locked, it stays locked once let go.
+    state.press("shift", 5000);
+    expect(state.use().shift).toBe(true);
+    state.release("shift");
+    expect(state.use().shift).toBe(true);
+    state.press("shift", 6000);
+    state.release("shift");
+    expect(state.locks.shift).toBe(false);
+    expect(state.use().shift).toBe(false);
+  });
+
+  it("doesn't take a tap after a key as the second of a double tap", () => {
+    const state = new ModifierState();
+    state.press("shift", 0);
+    state.release("shift");
+    expect(state.use().shift).toBe(true);
+    state.press("shift", 100);
+    state.release("shift");
+    expect(state.locks.shift).toBe(false);
+    expect(state.use().shift).toBe(true);
+    expect(state.use().shift).toBe(false);
   });
 
   it("applies a held modifier to every key until it's let go, and not after", () => {
     const state = new ModifierState();
-    state.press("shift");
+    state.press("shift", 0);
     expect(state.use().shift).toBe(true);
     expect(state.use().shift).toBe(true);
     state.release("shift");
@@ -136,9 +170,9 @@ describe("ModifierState", () => {
 
   it("combines held and tapped modifiers", () => {
     const state = new ModifierState();
-    state.press("alt");
+    state.press("alt", 0);
     state.release("alt");
-    state.press("ctrl");
+    state.press("ctrl", 0);
     expect(state.use()).toEqual({ shift: false, ctrl: true, alt: true });
     expect(state.use()).toEqual({ shift: false, ctrl: true, alt: false });
     state.release("ctrl");

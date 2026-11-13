@@ -89,6 +89,7 @@ function measureKeys(root: HTMLElement): {
 export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, statusHost }: Props) {
   const modifiers = useRef(new ModifierState());
   const [mods, setMods] = useState(modifiers.current.current);
+  const [locks, setLocks] = useState(modifiers.current.locks);
   const [down, setDown] = useState<ReadonlySet<string>>(new Set());
   const [preview, setPreview] = useState<Preview | null>(null);
   const root = useRef<HTMLElement>(null);
@@ -118,7 +119,10 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
     };
   }, []);
 
-  const showModifiers = () => setMods(modifiers.current.current);
+  const showModifiers = () => {
+    setMods(modifiers.current.current);
+    setLocks(modifiers.current.locks);
+  };
   const setKeyDown = (id: string, isDown: boolean) =>
     setDown((keys) => {
       const next = new Set(keys);
@@ -148,7 +152,7 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
     setKeyDown(id, true);
     let stop = () => {};
     if (def.kind === "modifier") {
-      modifiers.current.press(def.modifier);
+      modifiers.current.press(def.modifier, event.timeStamp);
       stop = () => modifiers.current.release(def.modifier);
     } else if (repeats(def)) {
       const used = modifiers.current.use();
@@ -203,11 +207,12 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
           {row.keys.map((def) => {
             const id = keyId(def);
             const on = def.kind === "modifier" && mods[def.modifier];
+            const locked = def.kind === "modifier" && locks[def.modifier];
             return (
               <button
                 type="button"
                 key={id}
-                class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${movesCursor(def) ? " key-move" : ""}${on ? " on" : ""}${down.has(id) ? " down" : ""}`}
+                class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${movesCursor(def) ? " key-move" : ""}${on ? " on" : ""}${locked ? " locked" : ""}${down.has(id) ? " down" : ""}`}
                 style={columns(widthOf(def))}
                 tabIndex={-1}
                 aria-label={def.name}

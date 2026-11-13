@@ -1033,6 +1033,18 @@ html[data-tab-turn] .content {
   color: var(--accent-fg);
 }
 
+/* A modifier locked on by a double tap, underlined as a phone's keyboard shows caps lock. */
+.key.locked::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  right: 30%;
+  bottom: 18%;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
 /* Where a key's user touches it, shown once that's been measured. */
 .key-offset {
   position: absolute;

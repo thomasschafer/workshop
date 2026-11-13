@@ -1427,6 +1427,18 @@ test("works on a phone with Helix's keybindings, from Workshop's own keyboard", 
   await expect(key("Shift")).toHaveAttribute("aria-pressed", "false");
   await key("2").tap();
   await expect.poll(() => saved().split("\n")[0]).toBe(`a@2${original.split("\n")[0]}`);
+  // Tapped twice quickly, it locks on for every key until it's tapped again.
+  await key("Shift").tap();
+  await key("Shift").tap();
+  await expect(key("Shift")).toHaveClass(/\blocked\b/);
+  await key("@").tap();
+  await key("#").tap();
+  await expect(key("Shift")).toHaveAttribute("aria-pressed", "true");
+  await key("Shift").tap();
+  await expect(key("Shift")).toHaveAttribute("aria-pressed", "false");
+  await expect(key("Shift")).not.toHaveClass(/\blocked\b/);
+  await key("2").tap();
+  await expect.poll(() => saved().split("\n")[0]).toBe(`a@2@#2${original.split("\n")[0]}`);
   await key("Escape").tap();
   await expect(mode).toHaveText("NOR");
   await type("u");
