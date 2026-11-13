@@ -8,10 +8,10 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
+use workshop_common::process::{self, ProcessGroup};
+use workshop_common::template::{self, Vars};
 
 use crate::language::{LanguageProfile, Puzzle};
-use crate::process::{self, ProcessGroup};
-use crate::template::{self, Vars};
 
 /// Output beyond this is dropped, so a runaway print loop can't exhaust memory or the phone.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;

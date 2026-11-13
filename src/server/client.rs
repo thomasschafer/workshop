@@ -102,7 +102,7 @@ pub(super) async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap>
         has_aoc_session: app.aoc.has_session(),
         theme_css: theme_css(&app),
         commit_after_star: app.settings().commit_after_star(&app.config),
-        solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
+        solutions_dir: workshop_common::files::display_path(&app.config.solutions_dir),
         leaderboard: app.settings().leaderboard,
         update: app.updates.available(),
         editor: app.config.editor.clone(),

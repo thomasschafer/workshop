@@ -62,7 +62,7 @@ pub(super) async fn find_sample(
         reply.elapsed_ms
     );
     let json = serde_json::to_string(&proposal).map_err(anyhow::Error::from)?;
-    crate::paths::write_atomic(&path, json.as_bytes())?;
+    workshop_common::files::write_atomic(&path, json.as_bytes())?;
     Ok(Json(found))
 }
 

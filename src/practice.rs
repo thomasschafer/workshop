@@ -7,9 +7,9 @@ use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use workshop_common::files;
 
 use crate::aoc::{Part, SubmitOutcome};
-use crate::paths;
 
 /// A sled with more than this much is overloaded.
 const LIMIT: u32 = 100;
@@ -102,7 +102,7 @@ impl Practice {
     }
 
     fn save(&self, progress: &Progress) -> Result<()> {
-        paths::write_atomic(
+        files::write_atomic(
             &self.progress_path,
             serde_json::to_string_pretty(progress)?.as_bytes(),
         )

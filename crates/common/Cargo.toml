@@ -1,0 +1,20 @@
+[package]
+name = "workshop-common"
+version = "0.0.0"
+edition.workspace = true
+description = "Child processes, templates, file writes and program lookup shared across Workshop"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+dirs.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[target."cfg(unix)".dependencies]
+libc.workspace = true

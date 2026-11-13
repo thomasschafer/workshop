@@ -14,8 +14,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
+use workshop_common::programs::{find_program, find_program_in};
 
-use crate::doctor::{find_program, find_program_in};
 use crate::packages::{InstallLog, run_logged};
 
 /// How a language's programs are installed with mise.
@@ -74,7 +74,7 @@ impl Toolchain {
         };
         let output = tokio::time::timeout(
             ENV_TIMEOUT,
-            crate::process::command(&mise)
+            workshop_common::process::command(&mise)
                 .args(["env", "--json"])
                 .current_dir(solutions_dir)
                 .stdin(Stdio::null())
@@ -146,7 +146,7 @@ pub async fn install(
         Some(existing) => log.push(format!("Installing what {} lists.", existing.display())),
         None => {
             let path = solutions_dir.join(MISE_FILE);
-            crate::paths::write_atomic(&path, profile.mise.trim_start().as_bytes())?;
+            workshop_common::files::write_atomic(&path, profile.mise.trim_start().as_bytes())?;
             log.push(format!("Wrote {}.", path.display()));
             // Only the file Workshop wrote: one of the user's own is theirs to trust.
             run_logged(
@@ -211,7 +211,7 @@ pub fn add_to_gitignore(solutions_dir: &Path, comment: &str, lines: &[String]) -
         text.push_str(line);
         text.push('\n');
     }
-    crate::paths::write_atomic(&path, text.as_bytes())
+    workshop_common::files::write_atomic(&path, text.as_bytes())
 }
 
 #[cfg(test)]

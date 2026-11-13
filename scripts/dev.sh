@@ -52,7 +52,7 @@ touch "$marker"
 # Commands run in sh, not $SHELL: a login shell such as zsh can reset PATH from the system's
 # profile, losing programs this script was started with, such as the model CLIs.
 watchexec --quiet --postpone --shell sh \
-  --watch src --watch prompts --watch languages --watch providers \
+  --watch src --watch crates --watch prompts --watch languages --watch providers \
   --watch Cargo.toml --watch Cargo.lock --watch config.example.toml \
   -- "cargo build && touch $marker" &
 

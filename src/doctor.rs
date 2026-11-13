@@ -1,12 +1,11 @@
 //! Setup checks, shared by `workshop doctor` and the app.
 
-use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Serialize;
 use tokio::process::Command;
+use workshop_common::programs::find_program;
 
 use crate::config::Config;
 use crate::paths::Paths;
@@ -74,7 +73,10 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
     );
     checks.push(Check::ok(
         "Config",
-        format!("Using {}", crate::paths::display_path(&paths.config_file())),
+        format!(
+            "Using {}",
+            workshop_common::files::display_path(&paths.config_file())
+        ),
     ));
 
     // The providers chosen in the app, which may differ from the config's defaults.
@@ -151,7 +153,7 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
             "Install git.",
         ),
     });
-    let solutions = crate::paths::display_path(&config.solutions_dir);
+    let solutions = workshop_common::files::display_path(&config.solutions_dir);
     checks.push(if config.solutions_dir.join(".git").exists() {
         Check::ok("Solutions repo", solutions)
     } else if config.solutions_dir.exists() && !config.solutions_dir.is_dir() {
@@ -425,34 +427,6 @@ pub async fn output(command: &[String]) -> Option<(bool, String)> {
     ))
 }
 
-/// Finds a program on Workshop's own `PATH`.
-pub fn find_program(program: &str) -> Option<PathBuf> {
-    find_program_in(program, &std::env::var_os("PATH")?)
-}
-
-/// Finds a program on the given search path, or at the path given.
-pub fn find_program_in(program: &str, search_path: &OsStr) -> Option<PathBuf> {
-    let candidate = PathBuf::from(program);
-    if candidate.components().count() > 1 {
-        return candidate.is_file().then_some(candidate);
-    }
-    let extensions: &[&str] = if cfg!(windows) {
-        &["exe", "cmd", "bat"]
-    } else {
-        &[""]
-    };
-    std::env::split_paths(search_path).find_map(|dir| {
-        extensions.iter().find_map(|ext| {
-            let path = if ext.is_empty() {
-                dir.join(program)
-            } else {
-                dir.join(format!("{program}.{ext}"))
-            };
-            path.is_file().then_some(path)
-        })
-    })
-}
-
 pub fn print(checks: &[Check]) {
     for check in checks {
         let mark = match check.status {
@@ -464,17 +438,5 @@ pub fn print(checks: &[Check]) {
         if let Some(fix) = &check.fix {
             println!("    {fix}");
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn finds_programs() {
-        assert!(find_program("definitely-not-a-real-program-xyz").is_none());
-        #[cfg(unix)]
-        assert!(find_program("sh").is_some());
     }
 }

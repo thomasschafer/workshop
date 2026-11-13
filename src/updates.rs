@@ -7,8 +7,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use workshop_common::files;
 
-use crate::paths::{self, Paths};
+use crate::paths::Paths;
 
 const LATEST_URL: &str = "https://api.github.com/repos/thomasschafer/workshop/releases/latest";
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -108,7 +109,7 @@ impl Updates {
             latest: release.tag_name.trim_start_matches('v').to_owned(),
             checked_at: now_secs(),
         };
-        paths::write_atomic(&self.file, &serde_json::to_vec(&checked)?)?;
+        files::write_atomic(&self.file, &serde_json::to_vec(&checked)?)?;
         if newer(&checked.latest, env!("CARGO_PKG_VERSION")) {
             tracing::info!("Workshop {} is out", checked.latest);
         }
@@ -187,7 +188,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::under(dir.path());
         let record = |latest: &str| {
-            paths::write_atomic(
+            files::write_atomic(
                 &paths.data_dir.join("latest-release.json"),
                 &serde_json::to_vec(&Checked {
                     latest: latest.into(),

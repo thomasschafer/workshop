@@ -2,13 +2,13 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
-use crate::process::{self, GroupedChild};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc};
+use workshop_common::process::{self, GroupedChild};
 
-use crate::template::{self, Vars};
+use workshop_common::template::{self, Vars};
 
 /// A model CLI: how to start it, how to give it a prompt and how to read its reply.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -222,11 +222,11 @@ impl ProviderRunner {
     fn system_prompt_file(&self, spec: &CallSpec) -> Result<String> {
         let name = format!(
             "system-prompt-{}.md",
-            crate::workspace::version_of(&spec.system_prompt)
+            workshop_common::files::version_of(&spec.system_prompt)
         );
         let path = self.working_dir.join(name);
         if !path.exists() {
-            crate::paths::write_atomic(&path, spec.system_prompt.as_bytes())?;
+            workshop_common::files::write_atomic(&path, spec.system_prompt.as_bytes())?;
         }
         Ok(path.to_string_lossy().into_owned())
     }

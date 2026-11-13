@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use workshop_common::template::{self, Vars};
 
 use crate::packages::PackagesProfile;
-use crate::template::{self, Vars};
 use crate::toolchain::ToolchainProfile;
 
 /// Everything Workshop needs to know to work with one programming language.
@@ -118,7 +118,7 @@ impl HelpersProfile {
                     std::fs::create_dir_all(parent)
                         .with_context(|| format!("creating {}", parent.display()))?;
                 }
-                crate::paths::write_atomic(&path, text.trim_start().as_bytes())?;
+                workshop_common::files::write_atomic(&path, text.trim_start().as_bytes())?;
             }
         }
         Ok(())

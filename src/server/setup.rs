@@ -119,15 +119,15 @@ pub(super) async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupSta
         .map(|base| format!("{base}/?token={}", app.token));
     let phone_qr_svg = phone_url.as_deref().map(qr_svg).transpose()?;
     Ok(Json(SetupState {
-        solutions_dir: crate::paths::display_path(&app.config.solutions_dir),
+        solutions_dir: workshop_common::files::display_path(&app.config.solutions_dir),
         solutions_repo_exists: app.config.solutions_dir.join(".git").exists(),
-        config_file: crate::paths::display_path(&app.paths.config_file()),
+        config_file: workshop_common::files::display_path(&app.paths.config_file()),
         languages,
         language: app.settings().language,
         has_aoc_session: app.aoc.has_session(),
         providers,
         tailscale_installed: crate::tailscale::program().is_some(),
-        mise_installed: doctor::find_program("mise").is_some(),
+        mise_installed: workshop_common::programs::find_program("mise").is_some(),
         toolchain_problem,
         toolchain_install: app.toolchain_install.status(),
         phone_url,
@@ -184,7 +184,7 @@ pub(super) async fn set_aoc_session(
         ));
     }
     app.aoc.check_session(&session).await?;
-    crate::paths::write_private(&app.paths.aoc_session_file(), session.as_bytes())?;
+    workshop_common::files::write_private(&app.paths.aoc_session_file(), session.as_bytes())?;
     app.aoc.set_session(session);
     Ok(Json(()))
 }

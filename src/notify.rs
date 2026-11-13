@@ -11,8 +11,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use web_push_native::WebPushBuilder;
 use web_push_native::jwt_simple::algorithms::{ECDSAP256PublicKeyLike, ES256KeyPair};
+use workshop_common::files;
 
-use crate::paths::{self, Paths};
+use crate::paths::Paths;
 
 /// Who to contact about these notifications, which push services ask senders for.
 const CONTACT: &str = "https://github.com/thomasschafer/workshop";
@@ -125,7 +126,7 @@ impl Notifier {
                 .with_context(|| format!("reading {}", key_file.display()))?,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 let key = ES256KeyPair::generate();
-                paths::write_private(&key_file, &key.to_bytes())?;
+                files::write_private(&key_file, &key.to_bytes())?;
                 key
             }
             Err(err) => return Err(err).with_context(|| format!("reading {}", key_file.display())),
@@ -172,7 +173,7 @@ impl Notifier {
     }
 
     fn save(&self, subscriptions: &[Subscription]) -> Result<()> {
-        paths::write_private(&self.file, &serde_json::to_vec_pretty(subscriptions)?)
+        files::write_private(&self.file, &serde_json::to_vec_pretty(subscriptions)?)
     }
 
     /// Sends a message to one device.

@@ -154,7 +154,7 @@ pub fn load_or_create_token(paths: &Paths) -> Result<String> {
         rand::random::<u128>(),
         rand::random::<u128>()
     );
-    crate::paths::write_private(&file, token.as_bytes())?;
+    workshop_common::files::write_private(&file, token.as_bytes())?;
     Ok(token)
 }
 

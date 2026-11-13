@@ -12,9 +12,9 @@ use anyhow::{Context, Result, bail};
 use scraper::{ElementRef, Html, Node, Selector};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use workshop_common::files;
 
 use crate::language::Puzzle;
-use crate::paths;
 use crate::practice::Practice;
 
 pub const BASE_URL: &str = "https://adventofcode.com";
@@ -287,7 +287,7 @@ impl AocClient {
             None => {
                 let url = format!("{}/{}/day/{}", self.base_url, puzzle.year, puzzle.day);
                 let html = self.get(&url, Priority::Now).await?;
-                paths::write_atomic(&path, html.as_bytes())?;
+                files::write_atomic(&path, html.as_bytes())?;
                 html
             }
         };
@@ -315,7 +315,7 @@ impl AocClient {
         }
         let url = format!("{}/{}/day/{}/input", self.base_url, puzzle.year, puzzle.day);
         let input = self.get(&url, Priority::Now).await?;
-        paths::write_atomic(&path, input.as_bytes())?;
+        files::write_atomic(&path, input.as_bytes())?;
         Ok(input)
     }
 
@@ -328,7 +328,7 @@ impl AocClient {
                 let html = self
                     .get(&format!("{}/{year}", self.base_url), Priority::Background)
                     .await?;
-                paths::write_atomic(&path, html.as_bytes())?;
+                files::write_atomic(&path, html.as_bytes())?;
                 html
             }
         };
@@ -348,7 +348,7 @@ impl AocClient {
                         Priority::Background,
                     )
                     .await?;
-                paths::write_atomic(&path, html.as_bytes())?;
+                files::write_atomic(&path, html.as_bytes())?;
                 html
             }
         };
@@ -377,7 +377,7 @@ impl AocClient {
                         Priority::Background,
                     )
                     .await?;
-                paths::write_atomic(&path, json.as_bytes())?;
+                files::write_atomic(&path, json.as_bytes())?;
                 json
             }
         };
@@ -501,7 +501,7 @@ impl AocClient {
     }
 }
 
-pub fn read_session(paths: &paths::Paths) -> Result<Option<String>> {
+pub fn read_session(paths: &crate::paths::Paths) -> Result<Option<String>> {
     if let Ok(session) = std::env::var("AOC_SESSION")
         && !session.trim().is_empty()
     {

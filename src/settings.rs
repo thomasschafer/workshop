@@ -3,10 +3,11 @@
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use workshop_common::files;
 
 use crate::config::Config;
 use crate::models::ModelSettings;
-use crate::paths::{self, Paths};
+use crate::paths::Paths;
 use crate::theme::ThemeSettings;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,7 +62,7 @@ impl AppSettings {
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
-        paths::write_atomic(&paths.settings_file(), &serde_json::to_vec_pretty(self)?)
+        files::write_atomic(&paths.settings_file(), &serde_json::to_vec_pretty(self)?)
     }
 
     pub fn validate(&self, config: &Config) -> Result<()> {

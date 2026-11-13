@@ -11,3 +11,13 @@ changelog_update = true
 release_always = false
 semver_check = false
 pr_labels = ["release"]
+
+# The binary is the only thing released. The crates under crates/ are parts of it, so their
+# changes go into its changelog and release, and they get no versions or tags of their own.
+[[package]]
+name = "workshop"
+changelog_include = ["workshop-common"]
+
+[[package]]
+name = "workshop-common"
+release = false

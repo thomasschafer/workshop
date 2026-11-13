@@ -4,9 +4,10 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use workshop_common::files;
 
 use crate::language::{self, LanguageProfile};
-use crate::paths::{self, Paths};
+use crate::paths::Paths;
 use crate::provider::{self, ProviderConfig};
 
 pub const EXAMPLE: &str = include_str!("../config.example.toml");
@@ -258,9 +259,9 @@ impl Config {
     pub fn load_or_init(paths: &Paths) -> Result<Self> {
         let file = paths.config_file();
         if !file.exists() {
-            let prefer_codex = crate::doctor::find_program("claude").is_none()
-                && crate::doctor::find_program("codex").is_some();
-            paths::write_atomic(&file, initial_config(prefer_codex).as_bytes())?;
+            let prefer_codex = workshop_common::programs::find_program("claude").is_none()
+                && workshop_common::programs::find_program("codex").is_some();
+            files::write_atomic(&file, initial_config(prefer_codex).as_bytes())?;
             tracing::info!("wrote an example config to {}", file.display());
         }
         let source = std::fs::read_to_string(&file)
@@ -320,7 +321,7 @@ impl Config {
 
         Ok(Self {
             server: raw.server,
-            solutions_dir: paths::expand_home(&raw.solutions.dir)?,
+            solutions_dir: files::expand_home(&raw.solutions.dir)?,
             language_id: raw.solutions.language,
             commit_after_star: raw.solutions.commit_after_star,
             aoc: raw.aoc,

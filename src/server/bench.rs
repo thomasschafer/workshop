@@ -71,7 +71,7 @@ pub(super) async fn bench_transcribe(
         return Err(bad_request(crate::whisper::INSTALL_HINT));
     };
     let path = bench_dir(&app, &query.session)?.join(format!("{:02}.wav", query.phrase));
-    crate::paths::write_atomic(&path, &wav)?;
+    workshop_common::files::write_atomic(&path, &wav)?;
     let mut transcripts = Vec::new();
     // One at a time, so the timings aren't skewed by models competing for the GPU.
     for (model, _) in &whisper.models {

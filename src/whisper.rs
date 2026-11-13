@@ -9,9 +9,9 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
+use workshop_common::process::{self, ProcessGroup};
 
 use crate::packages::InstallLog;
-use crate::process::{self, ProcessGroup};
 
 /// The Whisper command-line program, from whisper.cpp.
 const PROGRAM: &str = "whisper-cli";
@@ -71,7 +71,7 @@ impl Whisper {
     /// Whisper, if the program is installed; it may have no models yet.
     pub fn find(cache_dir: &Path) -> Option<Self> {
         Some(Self::with_program(
-            crate::doctor::find_program(PROGRAM)?,
+            workshop_common::programs::find_program(PROGRAM)?,
             cache_dir,
         ))
     }
@@ -374,7 +374,9 @@ impl Dictation {
             }
         }
         let vad = Some(models_dir(cache_dir).join(VAD_SOURCE.file)).filter(|p| p.is_file());
-        if crate::doctor::find_program(SERVER_PROGRAM).is_none() || self.server_failed_lately() {
+        if workshop_common::programs::find_program(SERVER_PROGRAM).is_none()
+            || self.server_failed_lately()
+        {
             return;
         }
         if let Err(err) = self.server_url(model, vad.as_deref(), http).await {
@@ -395,7 +397,9 @@ impl Dictation {
         let model = whisper
             .model_path(DICTATION_MODEL)
             .with_context(|| format!("Whisper's {DICTATION_MODEL} model isn't downloaded yet"))?;
-        if crate::doctor::find_program(SERVER_PROGRAM).is_some() && !self.server_failed_lately() {
+        if workshop_common::programs::find_program(SERVER_PROGRAM).is_some()
+            && !self.server_failed_lately()
+        {
             match self
                 .transcribe_with_server(model, whisper.vad.as_deref(), &wav, http)
                 .await
@@ -449,7 +453,7 @@ impl Dictation {
         std::fs::create_dir_all(scratch)
             .with_context(|| format!("creating {}", scratch.display()))?;
         let path = scratch.join(format!("{}-{n}.wav", std::process::id()));
-        crate::paths::write_atomic(&path, wav)?;
+        workshop_common::files::write_atomic(&path, wav)?;
         let transcript = whisper.transcribe(&path, DICTATION_MODEL, None, true).await;
         let _ = std::fs::remove_file(&path);
         Ok(transcript?.text)
@@ -519,7 +523,7 @@ async fn start_server(
     vad: Option<&Path>,
     http: &reqwest::Client,
 ) -> Result<RunningServer> {
-    let program = crate::doctor::find_program(SERVER_PROGRAM)
+    let program = workshop_common::programs::find_program(SERVER_PROGRAM)
         .with_context(|| format!("{SERVER_PROGRAM} isn't installed"))?;
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
         .and_then(|listener| listener.local_addr())

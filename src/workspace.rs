@@ -8,10 +8,11 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use workshop_common::files::{self, version_of};
 
 use crate::aoc::Part;
 use crate::language::{LanguageProfile, Puzzle, relative_inside};
-use crate::paths::{self, Paths};
+use crate::paths::Paths;
 
 const SOLUTIONS_GITIGNORE: &str = "\
 # Advent of Code asks that puzzle inputs and text aren't published. Workshop keeps them outside
@@ -209,7 +210,7 @@ impl Workspace {
             git(&self.solutions_dir, &["init", "--quiet"]).await?;
             let gitignore = self.solutions_dir.join(".gitignore");
             if !gitignore.exists() {
-                paths::write_atomic(&gitignore, SOLUTIONS_GITIGNORE.as_bytes())?;
+                files::write_atomic(&gitignore, SOLUTIONS_GITIGNORE.as_bytes())?;
             }
         }
         Ok(())
@@ -219,7 +220,7 @@ impl Workspace {
     pub fn load_code(&self, profile: &LanguageProfile, puzzle: Puzzle) -> Result<VersionedFile> {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
         if !path.exists() {
-            paths::write_atomic(&path, profile.template.as_bytes())?;
+            files::write_atomic(&path, profile.template.as_bytes())?;
             self.ensure_project(profile)?;
             crate::toolchain::add_to_gitignore(
                 &self.solutions_dir,
@@ -228,7 +229,7 @@ impl Workspace {
             )?;
             let readme = self.solutions_dir.join("README.md");
             if !readme.exists() {
-                paths::write_atomic(&readme, solutions_readme(profile)?.as_bytes())?;
+                files::write_atomic(&readme, solutions_readme(profile)?.as_bytes())?;
             }
         }
         read_versioned(&path)
@@ -273,7 +274,7 @@ impl Workspace {
         }
         let text = with_final_newline(text);
         if text != current.text {
-            paths::write_atomic(path, text.as_bytes())?;
+            files::write_atomic(path, text.as_bytes())?;
         }
         Ok(VersionedFile {
             version: version_of(&text),
@@ -316,7 +317,7 @@ impl Workspace {
     }
 
     pub fn save_day_meta(&self, puzzle: Puzzle, meta: &DayMeta) -> Result<()> {
-        paths::write_atomic(
+        files::write_atomic(
             &self.day_meta_path(puzzle),
             &serde_json::to_vec_pretty(meta)?,
         )
@@ -330,7 +331,7 @@ impl Workspace {
     }
 
     pub fn save_ui_state(&self, state: &UiState) -> Result<()> {
-        paths::write_atomic(&self.paths.state_file(), &serde_json::to_vec_pretty(state)?)
+        files::write_atomic(&self.paths.state_file(), &serde_json::to_vec_pretty(state)?)
     }
 
     /// Commits changes to tracked files and any new files Workshop owns, then pushes if there is
@@ -449,16 +450,6 @@ fn with_final_newline(text: &str) -> String {
     } else {
         format!("{text}\n")
     }
-}
-
-/// A stable hash of the contents (FNV-1a), so versions survive server restarts.
-pub fn version_of(text: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
 }
 
 /// Pushing can need credentials, and there's nobody at the laptop to type them, so git is told
@@ -655,12 +646,6 @@ mod tests {
         let empty = workspace.load_notes(puzzle).unwrap();
         workspace.save_notes(puzzle, "", &empty.version).unwrap();
         assert!(!workspace.notes_path(puzzle).exists());
-    }
-
-    #[test]
-    fn version_is_stable() {
-        assert_eq!(version_of(""), "cbf29ce484222325");
-        assert_ne!(version_of("a"), version_of("b"));
     }
 
     #[tokio::test]

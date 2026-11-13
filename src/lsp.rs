@@ -19,7 +19,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWri
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::process::{self, ProcessGroup};
+use workshop_common::process::{self, ProcessGroup};
 
 /// Larger messages are treated as a protocol error rather than buffered.
 const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;

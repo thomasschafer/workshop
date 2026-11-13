@@ -3670,6 +3670,19 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "web-push-native",
+ "workshop-common",
+]
+
+[[package]]
+name = "workshop-common"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "libc",
+ "tempfile",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

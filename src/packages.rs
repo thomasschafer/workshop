@@ -14,11 +14,11 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio_util::sync::CancellationToken;
+use workshop_common::files;
+use workshop_common::process::{self, ProcessGroup};
+use workshop_common::template::{self, Vars};
 
 use crate::manifest::ManifestFormat;
-use crate::paths;
-use crate::process::{self, ProcessGroup};
-use crate::template::{self, Vars};
 use crate::toolchain::Toolchain;
 
 /// How a language's packages are listed, installed and used.
@@ -336,7 +336,7 @@ impl Packages<'_> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        paths::write_atomic(&path, text.as_bytes())
+        files::write_atomic(&path, text.as_bytes())
     }
 
     pub fn state(&self) -> Result<PackagesState> {
@@ -543,7 +543,7 @@ impl Packages<'_> {
             dir: name,
             packages: packages.clone(),
         };
-        paths::write_atomic(
+        files::write_atomic(
             &self.installed_path(),
             serde_json::to_string_pretty(&installed)?.as_bytes(),
         )?;
@@ -605,7 +605,7 @@ impl Packages<'_> {
         std::fs::create_dir_all(env).with_context(|| format!("creating {}", env.display()))?;
         let args = self.render(&update.command, env, &[])?;
         run_logged(&args, env, self.toolchain.variables(), cancel, log).await?;
-        paths::write_atomic(&self.updated_at_path(), now_secs().to_string().as_bytes())
+        files::write_atomic(&self.updated_at_path(), now_secs().to_string().as_bytes())
     }
 
     async fn run_install(
@@ -673,7 +673,10 @@ impl Packages<'_> {
 /// in `PATH`, and `{venv_bin}`, where a Python virtual environment keeps its programs.
 fn system_vars() -> Vars<'static> {
     Vars::new()
-        .set("path_sep", crate::paths::SEARCH_PATH_SEPARATOR.to_string())
+        .set(
+            "path_sep",
+            workshop_common::programs::SEARCH_PATH_SEPARATOR.to_string(),
+        )
         .set("venv_bin", if cfg!(windows) { "Scripts" } else { "bin" })
 }
 

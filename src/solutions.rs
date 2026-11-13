@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use tokio_util::sync::CancellationToken;
+use workshop_common::template::{self, Vars};
 
 use crate::aoc::AocClient;
 use crate::config::Config;
@@ -15,7 +16,6 @@ use crate::packages::Packages;
 use crate::paths::Paths;
 use crate::practice::Practice;
 use crate::runner::{self, RunResult};
-use crate::template::{self, Vars};
 use crate::toolchain::Toolchain;
 
 /// The client for Advent of Code, with the practice puzzle served alongside it.
@@ -102,7 +102,7 @@ impl<'a> Solutions<'a> {
         if !file.is_file() {
             bail!(
                 "there's no solution for {puzzle} yet: open it in the app, which starts one, or write {}",
-                crate::paths::display_path(&file)
+                workshop_common::files::display_path(&file)
             );
         }
         let build_dir = self
@@ -185,7 +185,7 @@ fn merge_environment(
     for (name, value) in variables {
         match environment.iter_mut().find(|(n, _)| *n == name) {
             Some((_, existing)) => {
-                existing.push(crate::paths::SEARCH_PATH_SEPARATOR);
+                existing.push(workshop_common::programs::SEARCH_PATH_SEPARATOR);
                 existing.push_str(&value);
             }
             None => environment.push((name, value)),
@@ -226,7 +226,10 @@ mod tests {
             [
                 (
                     "PYTHONPATH".to_owned(),
-                    format!("/lib{}/site", crate::paths::SEARCH_PATH_SEPARATOR)
+                    format!(
+                        "/lib{}/site",
+                        workshop_common::programs::SEARCH_PATH_SEPARATOR
+                    )
                 ),
                 ("A".to_owned(), "1".to_owned())
             ]

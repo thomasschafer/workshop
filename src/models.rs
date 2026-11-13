@@ -4,7 +4,6 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::doctor;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,12 +85,14 @@ pub fn options(config: &Config) -> Vec<ProviderOption> {
         .iter()
         .map(|(id, provider)| {
             let program = &provider.command[0];
-            let unavailable = doctor::find_program(program).is_none().then(|| {
-                provider
-                    .install_hint
-                    .clone()
-                    .unwrap_or_else(|| format!("`{program}` isn't installed."))
-            });
+            let unavailable = workshop_common::programs::find_program(program)
+                .is_none()
+                .then(|| {
+                    provider
+                        .install_hint
+                        .clone()
+                        .unwrap_or_else(|| format!("`{program}` isn't installed."))
+                });
             ProviderOption {
                 id: id.clone(),
                 name: provider.display_name(id).to_owned(),

@@ -16,7 +16,7 @@ use tokio::process::Command;
 
 /// The tailscale CLI: on the PATH, or inside the macOS app, which doesn't put it there.
 pub fn program() -> Option<PathBuf> {
-    crate::doctor::find_program("tailscale").or_else(|| {
+    workshop_common::programs::find_program("tailscale").or_else(|| {
         let app = PathBuf::from("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
         (cfg!(target_os = "macos") && app.is_file()).then_some(app)
     })
