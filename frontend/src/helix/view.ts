@@ -1364,40 +1364,51 @@ function leaveToBrowser(helix: HelixView, key: Key): boolean {
   return keyChar(key) === null;
 }
 
+/** The keys Helix's own completion menu takes, and what each does to the completion list. */
+const COMPLETION_KEYS: Readonly<Record<string, (view: EditorView) => boolean>> = {
+  ret: acceptCompletion,
+  tab: moveCompletionSelection(true),
+  "C-n": moveCompletionSelection(true),
+  "S-tab": moveCompletionSelection(false),
+  "C-p": moveCompletionSelection(false),
+};
+
+/**
+ * Gives a key to the completion list, if it's open and takes it. With no completion chosen,
+ * Enter isn't taken, and is still Helix's. Escape closes the list, and goes on to Helix too.
+ */
+function completionTakes(helix: HelixView, key: Key): boolean {
+  const view = helix.view;
+  if (completionStatus(view.state) !== "active" || helix.editor.mode !== "insert") return false;
+  if (COMPLETION_KEYS[key]?.(view)) return true;
+  if (key === "esc") closeCompletion(view);
+  return false;
+}
+
 function onKeyDown(event: KeyboardEvent, helix: HelixView): boolean {
   const view = helix.view;
-  // Completion's keys go to the completion list while it's open.
-  if (completionStatus(view.state) === "active" && helix.editor.mode === "insert") {
-    if (["Enter", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Tab"].includes(event.key))
-      return false;
-    if (event.key === "Escape") closeCompletion(view);
-  }
   const key = keyFromEvent(event);
+  if (key !== null && completionTakes(helix, key)) {
+    event.preventDefault();
+    return true;
+  }
+  // The arrows and paging keys are the completion list's own while it's open.
+  if (
+    completionStatus(view.state) === "active" &&
+    helix.editor.mode === "insert" &&
+    ["ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key)
+  ) {
+    return false;
+  }
   if (key === null || leaveToBrowser(helix, key)) return false;
   event.preventDefault();
   run(helix, helix.handler.handle(key));
   return true;
 }
 
-/**
- * A key from Workshop's own keyboard, which has no key events for CodeMirror to see. While the
- * completion list is open, it takes the keys Helix's own completion menu does.
- */
+/** A key from Workshop's own keyboard, which has no key events for CodeMirror to see. */
 function pressKey(helix: HelixView, key: Key): void {
-  const view = helix.view;
-  if (completionStatus(view.state) === "active" && helix.editor.mode === "insert") {
-    const completion: Record<string, (view: EditorView) => boolean> = {
-      ret: acceptCompletion,
-      tab: moveCompletionSelection(true),
-      "C-n": moveCompletionSelection(true),
-      "S-tab": moveCompletionSelection(false),
-      "C-p": moveCompletionSelection(false),
-    };
-    // With no completion chosen, Enter is still Helix's.
-    const command = completion[key];
-    if (command?.(view)) return;
-    if (key === "esc") closeCompletion(view);
-  }
+  if (completionTakes(helix, key)) return;
   run(helix, helix.handler.handle(key));
 }
 

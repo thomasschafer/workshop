@@ -1930,6 +1930,80 @@ test("runs, enters zen mode and turns between tabs from the keyboard, and lists 
   await context.close();
 });
 
+test("completes as it's typed, and renames with the editor's own keys", async ({ browser }) => {
+  const { context, phone: computer } = await openOnPhone(browser, "default", "computer");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  await expect(computer.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  const completions = computer.locator(".cm-tooltip-autocomplete");
+  const mod = (await computer.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform)))
+    ? "Meta"
+    : "Control";
+  /** Undoes until the file is as it was. */
+  const restore = async (undo: () => Promise<void>) => {
+    for (let i = 0; i < 8 && saved() !== original; i++) {
+      await undo();
+      await computer.waitForTimeout(700);
+    }
+    expect(saved()).toBe(original);
+  };
+
+  // The language server's completions come up as a word's typed, the first chosen for Enter.
+  await computer.locator(".cm-content").click();
+  expect(original.endsWith("\n")).toBe(true);
+  await computer.keyboard.press(`${mod}+End`);
+  await computer.keyboard.type("par");
+  await expect(completions.getByRole("option")).toHaveText(["part", "part1", "part2"]);
+  // The list takes no keys for a moment after it comes up, so it isn't chosen from by accident.
+  await computer.waitForTimeout(200);
+  await computer.keyboard.press("ArrowDown");
+  await computer.keyboard.press("Enter");
+  await expect.poll(() => saved().trimEnd()).toBe(`${original}part1`);
+  await restore(() => computer.keyboard.press(`${mod}+z`));
+
+  // F2 asks for a new name in a dialog in the app's colours, big enough not to be zoomed in to.
+  const line = computer.locator(".cm-line", { hasText: "def part1" });
+  await line.click({ position: { x: 50, y: 8 } });
+  await computer.keyboard.press("F2");
+  const name = computer.locator(".cm-lsp-rename-panel input[name=name]");
+  await expect(name).toHaveValue("part1");
+  await expect(name).toHaveCSS("font-size", "16px");
+  await name.fill("first");
+  await computer.keyboard.press("Enter");
+  await expect.poll(saved).toBe(original.replaceAll("part1", "first"));
+  await computer.locator(".cm-content").click();
+  await restore(() => computer.keyboard.press(`${mod}+z`));
+  await context.close();
+
+  // With Helix's keybindings they come up in insert mode, with none chosen: Enter ends the line,
+  // until Tab has chosen one.
+  const { context: helixContext, phone: helix } = await openOnPhone(browser, "helix", "computer");
+  await expect(helix.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  const offered = helix.locator(".cm-tooltip-autocomplete");
+  await helix.locator(".cm-content").click();
+  await helix.keyboard.type("ggOpri");
+  await expect(offered.getByRole("option")).toHaveText(["print"]);
+  await helix.keyboard.press("Enter");
+  await expect.poll(saved).toBe(`pri\n\n${original}`);
+  await helix.keyboard.type("pri");
+  await expect(offered.getByRole("option")).toHaveText(["print"]);
+  await helix.waitForTimeout(200);
+  await helix.keyboard.press("Tab");
+  await helix.keyboard.press("Enter");
+  await expect.poll(saved).toBe(`pri\nprint\n${original}`);
+  await helix.keyboard.press("Escape");
+  // Other modes change the text without completions coming up.
+  await helix.keyboard.type("x");
+  await helix.waitForTimeout(500);
+  await expect(offered).toHaveCount(0);
+  for (let i = 0; i < 8 && saved() !== original; i++) {
+    await helix.keyboard.type("u");
+    await helix.waitForTimeout(700);
+  }
+  expect(saved()).toBe(original);
+  await helixContext.close();
+});
+
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({
   browser,
 }) => {
