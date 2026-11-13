@@ -2,7 +2,8 @@
 // of Python: it works on words. Every `oops` in the file is an error, with a message of several
 // lines, and every `hmm` a warning. A word's definition is its first appearance, its references
 // are all of them, and renaming it changes each. It completes a word to the file's other words. Over an `oops`, it offers to remove it, sending
-// the edit only once that's chosen, and to shout it, with the edit straight away.
+// the edit only once that's chosen, and to shout it, with the edit straight away. Its hover
+// documentation says which process it is, to tell one server from another.
 
 const documents = new Map();
 
@@ -113,7 +114,7 @@ const handlers = {
       ? {
           contents: {
             kind: "markdown",
-            value: `\`\`\`python\n${word.word}: str\n\`\`\`\nAll about **${word.word}**.`,
+            value: `\`\`\`python\n${word.word}: str\n\`\`\`\nAll about **${word.word}**, from server ${process.pid}.`,
           },
         }
       : null;

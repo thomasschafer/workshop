@@ -50,6 +50,8 @@ pub struct App {
     pub(super) http: reqwest::Client,
     /// Changed to restart language servers, such as after installing packages.
     pub(super) lsp_restarts: tokio::sync::watch::Sender<u64>,
+    /// Language servers whose editors have gone, kept for the next to take over.
+    pub(super) lsp_servers: crate::lsp::Servers,
 }
 
 pub(super) type Shared = Arc<App>;
@@ -95,6 +97,7 @@ impl App {
                 .timeout(Duration::from_secs(15))
                 .build()?,
             lsp_restarts: tokio::sync::watch::Sender::new(0),
+            lsp_servers: crate::lsp::Servers::default(),
             config,
             paths,
             token,

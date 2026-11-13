@@ -27,15 +27,14 @@ pub(super) async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) ->
             }
         };
         let restart = app.lsp_restarts.subscribe();
-        if let Err(err) = crate::lsp::relay(
+        let relayed = app.lsp_servers.relay(
             socket,
             &command,
             &app.config.solutions_dir,
             &environment,
             restart,
-        )
-        .await
-        {
+        );
+        if let Err(err) = relayed.await {
             tracing::warn!("language server: {err:#}");
         }
     })

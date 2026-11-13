@@ -2004,6 +2004,60 @@ test("completes as it's typed, and renames with the editor's own keys", async ({
   await helixContext.close();
 });
 
+test("keeps the language server for an editor that comes back, with its files as they then are", async ({
+  browser,
+}) => {
+  const { context, phone: computer } = await openOnPhone(browser, "helix", "computer");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const status = computer.locator(".status-line");
+  const docs = computer.locator(".cm-helix-info-markdown");
+  /** Which server process answers, by what its documentation says. */
+  const server = async () => {
+    await computer.locator(".cm-content").click();
+    await computer.keyboard.type("gg");
+    await computer.keyboard.press("Space");
+    await computer.keyboard.type("k");
+    const text = (await docs.textContent({ timeout: 10_000 })) ?? "";
+    const pid = /from server (\d+)/.exec(text)?.[1];
+    if (pid === undefined) throw new Error(`the documentation names no server: ${text}`);
+    await computer.keyboard.press("Escape");
+    return pid;
+  };
+  await expect(status).toContainText("no errors", { timeout: 15_000 });
+  const first = await server();
+
+  // An error made before leaving is still there on coming back, found afresh.
+  await computer.keyboard.type("Ooops");
+  await computer.keyboard.press("Escape");
+  await expect(status).toContainText("1 error");
+  await expect.poll(saved).toBe(`oops\n${original}`);
+  await computer.reload();
+  await expect(computer.locator(".cm-content")).toContainText("oops");
+  await expect(status).toContainText("1 error", { timeout: 15_000 });
+  expect(await server()).toBe(first);
+
+  // The server has the file as the editor that came back has it, not as the last one left it.
+  await computer.keyboard.type("ggxd");
+  await expect(status).toContainText("no errors");
+  await expect.poll(saved).toBe(original);
+  await computer.reload();
+  await expect(status).toContainText("no errors", { timeout: 15_000 });
+  expect(await server()).toBe(first);
+
+  // A second editor at once has a server of its own, as one can't serve two.
+  const { context: otherContext, phone: other } = await openOnPhone(browser, "helix", "computer");
+  await expect(other.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  await other.locator(".cm-content").click();
+  await other.keyboard.type("gg");
+  await other.keyboard.press("Space");
+  await other.keyboard.type("k");
+  await expect(other.locator(".cm-helix-info-markdown")).toContainText("from server");
+  await expect(other.locator(".cm-helix-info-markdown")).not.toContainText(`from server ${first}.`);
+  await otherContext.close();
+  await context.close();
+});
+
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({
   browser,
 }) => {
