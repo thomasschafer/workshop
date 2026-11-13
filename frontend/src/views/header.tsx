@@ -2,7 +2,17 @@ import type { Puzzle, Tab } from "../api";
 import { puzzleLabel } from "../puzzle";
 import { ZenButton } from "./zen";
 
-const TABS = ["problem", "code", "notes", "discuss"] as const;
+/** The tabs, in the order they're shown and swept through. */
+export const TABS = ["problem", "code", "notes", "discuss"] as const;
+
+export const tabLabel = (tab: Tab): string =>
+  tab === "discuss" ? "Discuss" : `${tab[0]?.toUpperCase() ?? ""}${tab.slice(1)}`;
+
+/** The tab beside `tab`, or `tab` itself at either end. */
+export function tabBeside(tab: Tab, direction: 1 | -1): Tab {
+  const index = TABS.indexOf(tab);
+  return TABS[Math.max(0, Math.min(TABS.length - 1, index + direction))] ?? tab;
+}
 
 /**
  * The top bar: the open puzzle, which opens the picker, and buttons for zen mode, help and
@@ -80,7 +90,7 @@ export function Tabs({
           class={t === shown ? "selected" : ""}
           onClick={() => onTab(t)}
         >
-          {t === "discuss" ? "Discuss" : t[0]?.toUpperCase() + t.slice(1)}
+          {tabLabel(t)}
         </button>
       ))}
     </nav>

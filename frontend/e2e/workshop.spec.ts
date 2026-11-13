@@ -1125,18 +1125,49 @@ async function pinch(
   to: number,
 ): Promise<void> {
   const steps = 8;
-  const apart = (d: number) => [
-    { x: centre.x - d / 2, y: centre.y, id: 0 },
-    { x: centre.x + d / 2, y: centre.y, id: 1 },
+  const apart = (d: number): TwoFingers => [
+    { x: centre.x - d / 2, y: centre.y },
+    { x: centre.x + d / 2, y: centre.y },
   ];
-  const distances = Array.from({ length: steps + 1 }, (_, i) => from + ((to - from) * i) / steps);
+  await touchWithTwoFingers(
+    phone,
+    Array.from({ length: steps + 1 }, (_, i) => apart(from + ((to - from) * i) / steps)),
+  );
+}
+
+type TwoFingers = [{ x: number; y: number }, { x: number; y: number }];
+
+/** Sweeps two fingers sideways together by `dx` pixels, from either side of `centre`. */
+async function sweep(phone: Page, centre: { x: number; y: number }, dx: number): Promise<void> {
+  const steps = 6;
+  await touchWithTwoFingers(
+    phone,
+    Array.from({ length: steps + 1 }, (_, i): TwoFingers => {
+      const x = centre.x + (dx * i) / steps;
+      return [
+        { x: x - 30, y: centre.y },
+        { x: x + 30, y: centre.y + 20 },
+      ];
+    }),
+  );
+}
+
+/**
+ * Puts two fingers down at the first of `frames`, moves them through the rest, and lifts them.
+ */
+async function touchWithTwoFingers(phone: Page, frames: TwoFingers[]): Promise<void> {
+  const [first, ...rest] = frames;
+  if (first === undefined) throw new Error("two fingers need somewhere to touch");
   if (test.info().project.name === "chromium") {
     const cdp = await phone.context().newCDPSession(phone);
-    const send = (type: "touchStart" | "touchMove" | "touchEnd", d: number | null) =>
-      cdp.send("Input.dispatchTouchEvent", { type, touchPoints: d === null ? [] : apart(d) });
-    await send("touchStart", from);
-    for (const d of distances.slice(1)) {
-      await send("touchMove", d);
+    const send = (type: "touchStart" | "touchMove" | "touchEnd", points: TwoFingers | null) =>
+      cdp.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: (points ?? []).map((p, id) => ({ ...p, id })),
+      });
+    await send("touchStart", first);
+    for (const points of rest) {
+      await send("touchMove", points);
       await phone.evaluate(() => new Promise(requestAnimationFrame));
     }
     await send("touchEnd", null);
@@ -1146,10 +1177,15 @@ async function pinch(
   await phone.evaluate(
     async ({ frames }) => {
       const target = document.querySelector(".cm-editor");
-      if (!target) throw new Error("there's no editor to pinch");
+      if (!target) throw new Error("there's no editor to touch");
       const fire = (type: string, points: { x: number; y: number }[]) => {
         const event = new Event(type, { bubbles: true, cancelable: true });
-        const touches = points.map((p) => ({ clientX: p.x, clientY: p.y, target }));
+        const touches = points.map((p, identifier) => ({
+          clientX: p.x,
+          clientY: p.y,
+          identifier,
+          target,
+        }));
         Object.defineProperty(event, "touches", { value: touches });
         target.dispatchEvent(event);
       };
@@ -1160,7 +1196,7 @@ async function pinch(
       }
       fire("touchend", []);
     },
-    { frames: distances.map(apart) },
+    { frames },
   );
 }
 
@@ -1776,6 +1812,65 @@ test("says what's wrong where the cursor is, and shows the whole of it when aske
   await computer.keyboard.press("ControlOrMeta+z");
   await expect.poll(saved).toBe(original);
   await desk.close();
+});
+
+test("turns to other tabs in zen mode with two fingers, keeping the keyboard for the code", async ({
+  browser,
+}) => {
+  const { context, phone } = await openOnPhone(browser);
+  // Phones can't always go full screen where the tests run, which zen mode says and carries on.
+  await phone.getByRole("button", { name: "Zen mode" }).tap();
+  const keyboard = phone.locator(".keyboard");
+  const code = phone.locator(".cm-content");
+  const problem = phone.locator(".problem");
+  const shown = phone.locator(".zen-tabs .selected");
+  await expect(keyboard).toBeVisible();
+  await expect(code).toBeVisible();
+  await expect(phone.locator("nav.tabs")).toBeHidden();
+  const middle = { x: 200, y: 200 };
+
+  // Sweeping right turns back to the puzzle, still in zen mode, with the keyboard out of the way.
+  await sweep(phone, middle, 150);
+  await expect(problem).toBeVisible();
+  await expect(shown).toHaveText("Problem");
+  await expect(code).toBeHidden();
+  await expect(keyboard).toBeHidden();
+  await expect(phone.locator("nav.tabs")).toBeHidden();
+  await expect(phone.getByRole("button", { name: "Leave zen mode" })).toBeVisible();
+  // There's nothing before the first tab.
+  await sweep(phone, middle, 150);
+  await expect(shown).toHaveText("Problem");
+
+  // Sweeping left turns on through the tabs, and the keyboard comes back with the code.
+  await sweep(phone, middle, -150);
+  await expect(code).toBeVisible();
+  await expect(shown).toHaveText("Code");
+  await expect(keyboard).toBeVisible();
+  await sweep(phone, middle, -150);
+  await expect(phone.locator(".notes textarea")).toBeVisible();
+  await expect(keyboard).toBeHidden();
+  await sweep(phone, middle, 150);
+  await expect(keyboard).toBeVisible();
+
+  // Two fingers on the keyboard are two keys, and a short or slanting sweep is nothing.
+  const box = await keyboard.boundingBox();
+  if (box === null) throw new Error("the keyboard isn't showing");
+  await sweep(phone, { x: 200, y: box.y + box.height / 2 }, 150);
+  await sweep(phone, middle, 40);
+  await expect(code).toBeVisible();
+
+  // Sweeping over the code doesn't change its size, as pinching it does.
+  expect(await phone.evaluate(() => localStorage.getItem("workshop:code-scale"))).toBeNull();
+
+  // With the keyboard lowered, it stays lowered on coming back.
+  await keyboard.getByRole("button", { name: "Hide keyboard" }).tap();
+  await sweep(phone, middle, 150);
+  await sweep(phone, middle, -150);
+  await expect(code).toBeVisible();
+  await expect(keyboard).toBeHidden();
+  await phone.getByRole("button", { name: "Leave zen mode" }).tap();
+  await expect(phone.locator("nav.tabs")).toBeVisible();
+  await context.close();
 });
 
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({

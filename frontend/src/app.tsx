@@ -26,6 +26,7 @@ import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleTitle } from "./puzzle";
 import { sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
+import { watchSwipes } from "./swipe";
 import {
   done,
   type Job,
@@ -40,7 +41,7 @@ import { Calibrate } from "./views/calibrate";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
-import { Header, Tabs } from "./views/header";
+import { Header, Tabs, tabBeside } from "./views/header";
 import { Help } from "./views/help";
 import { Keyboard } from "./views/keyboard";
 import { Modal } from "./views/modal";
@@ -59,6 +60,7 @@ import {
   keepEscape,
   ZenExit,
   ZenKeyboardButton,
+  ZenTabs,
 } from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
@@ -77,7 +79,9 @@ export function App({ boot }: { boot: Bootstrap }) {
   const online = useConnection();
   // Just the code and the keyboard, for typing on a phone without the rest of the app in the way.
   const [zen, setZen] = useState(false);
-  const shownTab: Tab = zen || (wide && tab === "problem") ? "code" : tab;
+  // In zen mode the puzzle has no column, so it's a tab there on any screen.
+  const split = wide && !zen;
+  const shownTab: Tab = split && tab === "problem" ? "code" : tab;
   const [models, setModels] = useState(boot.models);
   const [chosenDiscussModel, setDiscussModel] = useState(boot.state.discuss_model);
   // The chosen discussion model, if the current provider offers it, or its first model.
@@ -646,6 +650,18 @@ export function App({ boot }: { boot: Bootstrap }) {
       (e: unknown) => notify("warn", `Couldn't go full screen: ${errorMessage(e)}`),
     );
   };
+  // In zen mode the tabs are hidden, so on a touch screen two fingers swept sideways turn to the
+  // next one, or back. The keyboard, if it's up, goes while the code isn't showing, and comes
+  // back with it.
+  const app = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = app.current;
+    if (!zen || !touchScreen || root === null) return;
+    return watchSwipes(root, ".keyboard, .modal-backdrop", (direction) =>
+      setTab((current) => tabBeside(current, direction === "left" ? 1 : -1)),
+    );
+  }, [zen, touchScreen]);
+
   const exitZen = () => {
     setZen(false);
     exitFullscreen().catch((e: unknown) =>
@@ -699,7 +715,7 @@ export function App({ boot }: { boot: Bootstrap }) {
       meta={meta}
       onMeta={updateMeta}
       findingSamples={findingSamples}
-      hidden={!wide && (showPicker || shownTab !== "problem")}
+      hidden={!split && (showPicker || shownTab !== "problem")}
       onRefresh={() => puzzle && void loadProblem(puzzle, true)}
       onStartAgain={
         puzzle && isPractice(puzzle)
@@ -713,10 +729,10 @@ export function App({ boot }: { boot: Bootstrap }) {
       }
     />
   ) : null;
-  const split = wide && !showPicker && problemView !== null;
+  const sideBySide = split && !showPicker && problemView !== null;
 
   return (
-    <div class={`app ${split ? "split" : ""} ${zen ? "zen" : ""}`}>
+    <div ref={app} class={`app ${sideBySide ? "split" : ""} ${zen ? "zen" : ""}`}>
       <Header
         showPicker={showPicker}
         puzzle={puzzle}
@@ -730,9 +746,9 @@ export function App({ boot }: { boot: Bootstrap }) {
         onHelp={() => setSheet(sheet === "help" ? null : "help")}
         onSettings={() => setSheet(sheet === "settings" ? null : "settings")}
       />
-      {split ? <aside class="side">{problemView}</aside> : null}
+      {sideBySide ? <aside class="side">{problemView}</aside> : null}
 
-      <Tabs hidden={showPicker} wide={wide} shown={shownTab} onTab={setTab} />
+      <Tabs hidden={showPicker} wide={split} shown={shownTab} onTab={setTab} />
 
       <main class="content" style={{ "--stack-height": `${stackHeight}px` }}>
         <Stack
@@ -752,6 +768,8 @@ export function App({ boot }: { boot: Bootstrap }) {
           onCancelReply={() => setReplying(false)}
           onHeight={setStackHeight}
         />
+        {zen ? <ZenExit onExit={exitZen} /> : null}
+        {zen ? <ZenTabs shown={shownTab} /> : null}
         {showPicker ? (
           <div class="pane">
             <Picker current={puzzle} hasSession={hasSession} onPick={openPuzzle} />
@@ -786,7 +804,6 @@ export function App({ boot }: { boot: Bootstrap }) {
           ref={codePane}
           class={`code-pane ${shownTab === "code" && !showPicker ? "" : "hidden"}`}
         >
-          {zen ? <ZenExit onExit={exitZen} /> : null}
           {zen && ownKeyboard && !keyboard ? (
             <ZenKeyboardButton onClick={() => showKeyboard(true)} />
           ) : null}
@@ -800,7 +817,7 @@ export function App({ boot }: { boot: Bootstrap }) {
           />
           <div class="editor" ref={editorHost} />
         </div>
-        {wide ? null : problemView}
+        {sideBySide ? null : problemView}
         {!showPicker && shownTab === "notes" ? (
           <div class="pane notes">
             <textarea

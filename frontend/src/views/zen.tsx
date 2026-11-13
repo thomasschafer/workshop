@@ -1,4 +1,6 @@
+import type { Tab } from "../api";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
+import { TABS, tabLabel } from "./header";
 
 /** Corner brackets pointing out, to enter zen mode, or in, to leave it. */
 function CornersIcon({ inward }: { inward: boolean }) {
@@ -40,6 +42,23 @@ export function ZenExit({ onExit }: { onExit: () => void }) {
     <button type="button" class="zen-exit" aria-label="Leave zen mode" onClick={onExit}>
       <CornersIcon inward />
     </button>
+  );
+}
+
+/**
+ * Which tab is showing in zen mode, where the tabs themselves are hidden: shown for a moment on
+ * turning to one, then fading out of the way.
+ */
+export function ZenTabs({ shown }: { shown: Tab }) {
+  return (
+    // Keyed by the tab, so turning to another starts the fade again.
+    <div key={shown} class="zen-tabs" role="status">
+      {TABS.map((tab) => (
+        <span key={tab} class={tab === shown ? "selected" : ""}>
+          {tabLabel(tab)}
+        </span>
+      ))}
+    </div>
   );
 }
 

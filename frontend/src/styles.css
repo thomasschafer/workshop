@@ -2196,16 +2196,12 @@ code {
   flex: 0 1 360px;
 }
 
-/* Zen mode: just the code, with Helix's status line if it's on, and the keyboard. */
+/* Zen mode: just the code, or another tab turned to, with Helix's status line if it's on, and
+   the keyboard. */
 .app.zen > .top,
 .app.zen > .tabs,
-.app.zen > .side,
 .app.zen .status-line {
   display: none;
-}
-
-.app.split.zen {
-  display: flex;
 }
 
 /* Full screen hides the status bar, but its space stays inset for the camera; code can show
@@ -2235,6 +2231,40 @@ code {
   background: var(--surface);
   color: var(--muted);
   opacity: 0.8;
+}
+
+/* Which tab zen mode is showing, for a moment after turning to it. */
+.zen-tabs {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+  animation: zen-tabs-fade 1.6s ease-in forwards;
+}
+
+.zen-tabs .selected {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+@keyframes zen-tabs-fade {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 /* Below the way out of zen mode. */

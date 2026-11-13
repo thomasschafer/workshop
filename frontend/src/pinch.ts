@@ -28,7 +28,15 @@ interface Pinch {
   distance: number;
   centre: Point;
   frame: number | null;
+  /**
+   * Whether the fingers have parted or closed enough to be pinching. Until then they may be
+   * sweeping sideways together, which changes tabs, and mustn't change the text's size on the way.
+   */
+  pinching: boolean;
 }
+
+/** How much the distance between the fingers must change, as a fraction, to count as a pinch. */
+const PINCH_START = 0.12;
 
 function distance(a: Touch, b: Touch): number {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -60,6 +68,7 @@ export function pinchToZoom(view: EditorView, options: PinchOptions): () => void
       distance: distance(a, b),
       centre: at,
       frame: null,
+      pinching: false,
     };
   };
 
@@ -93,7 +102,7 @@ export function pinchToZoom(view: EditorView, options: PinchOptions): () => void
       update();
     }
     pinch = null;
-    options.done(p.scale);
+    if (p.pinching) options.done(p.scale);
   };
 
   /**
@@ -115,7 +124,12 @@ export function pinchToZoom(view: EditorView, options: PinchOptions): () => void
     if (!p || !a || !b || more.length > 0) return;
     // The pinch scrolls the code itself, so the browser mustn't scroll it as well.
     if (e.cancelable) e.preventDefault();
-    p.distance = distance(a, b);
+    const apart = distance(a, b);
+    if (!p.pinching) {
+      if (p.startDistance > 0 && Math.abs(apart / p.startDistance - 1) < PINCH_START) return;
+      p.pinching = true;
+    }
+    p.distance = apart;
     p.centre = centre(a, b);
     p.frame ??= requestAnimationFrame(update);
   };
