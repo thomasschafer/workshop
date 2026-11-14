@@ -73,6 +73,9 @@ export interface Deck {
   schedules: Record<string, ItemSchedule>;
   flags: Record<string, { at: number; note: string | null }>;
   skills: { id: string; name: string; mastery: number; items: number; attempted: number }[];
+  /** The skills recent mistakes point to, whose new items come first. Decks saved on a device
+   * by an older Workshop don't have it. */
+  focus?: string[];
   problems: string[];
 }
 

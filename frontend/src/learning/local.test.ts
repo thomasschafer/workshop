@@ -33,6 +33,7 @@ function deck(items: DeckItem[], changes: Partial<Deck> = {}): Deck {
     schedules: {},
     flags: {},
     skills: [],
+    focus: [],
     problems: [],
     ...changes,
   };
@@ -85,6 +86,20 @@ describe("queue", () => {
     const forgotten = [attempt("p/a", LATE_MONDAY - 11 * 60_000, "again")];
     expect(queue(d, "review", forgotten, [], LATE_MONDAY, 0).due.map((i) => i.key)).toEqual([
       "p/a",
+    ]);
+  });
+
+  it("puts new items in the skills recent mistakes point to first", () => {
+    const items = [
+      { ...card("p/a"), skills: ["heaps"] },
+      { ...card("p/b"), skills: ["graphs"] },
+      { ...card("p/c"), skills: ["heaps"] },
+    ];
+    const d = deck(items, { focus: ["graphs"] });
+    expect(queue(d, "review", [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual([
+      "p/b",
+      "p/a",
+      "p/c",
     ]);
   });
 

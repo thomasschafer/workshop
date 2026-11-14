@@ -35,6 +35,7 @@ const DECK: Deck = {
   schedules: {},
   flags: {},
   skills: [],
+  focus: [],
   problems: [],
 };
 

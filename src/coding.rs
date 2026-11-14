@@ -652,22 +652,38 @@ pub fn track(
             destination: open(key),
         })
     } else {
-        // The quickest new item first, so a spare few minutes are enough to start.
+        // In a skill recent mistakes point to, if any are, and then the quickest, so a spare
+        // few minutes are enough to start.
+        let focus = |key: &str| labels.get(key).and_then(|item| planned.focus_of(item));
         let quickest = plan.new.iter().min_by_key(|key| {
-            labels
-                .get(key.as_str())
-                .map_or(u32::MAX, |item| item.minutes)
+            (
+                focus(key).is_none(),
+                labels
+                    .get(key.as_str())
+                    .map_or(u32::MAX, |item| item.minutes),
+            )
         });
-        quickest.map(|key| Step {
-            title: label(key),
-            reason: format!("Something new · {}", week_so_far(planned.week)),
-            // Once the week's target is met, new items wait behind anything else to do.
-            priority: if planned.week.minutes >= planned.week.target {
-                Priority::Browse
-            } else {
-                Priority::New
+        quickest.map(|key| match focus(key) {
+            Some(skill) => Step {
+                title: label(key),
+                reason: format!(
+                    "Practise {skill}, after recent mistakes · {}",
+                    week_so_far(planned.week)
+                ),
+                priority: Priority::Focus,
+                destination: open(key),
             },
-            destination: open(key),
+            None => Step {
+                title: label(key),
+                reason: format!("Something new · {}", week_so_far(planned.week)),
+                // Once the week's target is met, new items wait behind anything else to do.
+                priority: if planned.week.minutes >= planned.week.target {
+                    Priority::Browse
+                } else {
+                    Priority::New
+                },
+                destination: open(key),
+            },
         })
     };
     Some(Track::built_in(

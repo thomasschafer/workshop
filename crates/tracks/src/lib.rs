@@ -141,6 +141,8 @@ pub enum Priority {
     Due,
     /// Started and not finished, such as a problem part-way through.
     Unfinished,
+    /// Something new in a skill the learner has been making mistakes in lately.
+    Focus,
     /// Something new that's ready to start.
     New,
     /// Nothing in particular: the track itself, to choose from.

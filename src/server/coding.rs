@@ -261,6 +261,17 @@ pub(super) async fn submit(
     .map_err(|problem| anyhow::anyhow!("the problem's own programs went wrong: {problem}"))?;
     drop(running);
     let passed = graded.passed();
+    let now = now_ms();
+    // One per submission: the session's start and its count of submissions say which.
+    let id = format!(
+        "submission-{}-{}-{}",
+        found.key(),
+        session.started_at,
+        session.submissions + 1
+    );
+    if let Some(mistake) = crate::mistakes::from_submission(&found.key(), id, now, &graded) {
+        app.learning.store().record_mistakes(&[mistake])?;
+    }
     session.submissions += 1;
     session.passed = passed;
     session.step = if passed {
@@ -270,7 +281,7 @@ pub(super) async fn submit(
     };
     let (session, _) = app
         .problems
-        .save_session(&found, session, now_ms())
+        .save_session(&found, session, now)
         .context("saving the session")?;
     let (ran, total) = match &graded {
         Graded::Ran { results, total } => (
@@ -329,7 +340,7 @@ pub(super) async fn finish(
             .ok_or_else(|| bad_request("The problem hasn't been started."))?;
         let now = now_ms();
         let spent = app.problems.touch(&key, now)?;
-        store.record(
+        app.learning.record(
             &[Attempt {
                 id: body.id,
                 item: key.clone(),
@@ -526,6 +537,16 @@ mod tests {
         assert_eq!(submitted["failure"]["case"]["kind"], "example");
         assert_eq!(submitted["opened"]["session"]["step"], "test");
         assert_eq!(submitted["opened"]["session"]["submissions"], 1);
+        // It's in the mistake log, as a misreading, since an example it could see failed.
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        let logged = &log["mistakes"][0];
+        assert_eq!(logged["source"], "submission");
+        assert_eq!(logged["item"], "sample/first-repeat");
+        assert_eq!(logged["suggested"], "misread");
+        assert!(
+            logged["detail"].as_str().unwrap().contains("example 1"),
+            "{logged}"
+        );
 
         let right = "import sys\nseen = set()\nfor w in sys.stdin.read().split():\n    if w in seen:\n        print(w)\n        break\n    seen.add(w)\nelse:\n    print('none')\n";
         let body = serde_json::json!({ "text": right, "version": code["version"] });

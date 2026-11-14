@@ -15,7 +15,7 @@ export type BuiltInTrackId =
 export type TrackId = BuiltInTrackId | `pack:${string}`;
 
 /** How soon a step should be done: what Continue goes by. */
-export type Priority = "due" | "unfinished" | "new" | "browse";
+export type Priority = "due" | "unfinished" | "focus" | "new" | "browse";
 
 /** Where a step or a track leads in the app. */
 export type Destination =

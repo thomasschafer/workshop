@@ -9,6 +9,7 @@ mod edit;
 mod eval;
 mod language;
 mod learning;
+mod mistakes;
 mod models;
 mod notify;
 mod packs;

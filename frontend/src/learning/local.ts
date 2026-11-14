@@ -91,7 +91,7 @@ export interface Queue {
   due: DeckItem[];
   /** Due, but waiting for tomorrow as today's limit is reached. */
   waiting: number;
-  /** Never attempted, in the deck's order. */
+  /** Never attempted: those in the skills recent mistakes point to first, then in the deck's order. */
   fresh: DeckItem[];
 }
 
@@ -123,10 +123,16 @@ export function queue(
   return {
     due: within.filter(({ item }) => item.track === track).map(({ item }) => item),
     waiting: dueEverywhere.slice(allowed).filter(({ item }) => item.track === track).length,
-    fresh: deck.items.filter(
-      (item) => item.track === track && !wrong.has(item.key) && !scheduled[item.key],
-    ),
+    fresh: deck.items
+      .filter((item) => item.track === track && !wrong.has(item.key) && !scheduled[item.key])
+      // Sorting is stable, so otherwise they keep the deck's order.
+      .sort((a, b) => Number(inFocus(deck, b)) - Number(inFocus(deck, a))),
   };
+}
+
+/** Whether an item practises a skill that recent mistakes point to. */
+function inFocus(deck: Deck, item: DeckItem): boolean {
+  return item.skills.some((skill) => deck.focus?.includes(skill) ?? false);
 }
 
 /** The items for one step: due ones first, then new, until there's a few minutes' worth. */

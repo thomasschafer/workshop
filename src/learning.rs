@@ -46,6 +46,8 @@ pub struct Deck {
     pub schedules: BTreeMap<String, ItemSchedule>,
     pub flags: BTreeMap<String, Flag>,
     pub skills: Vec<DeckSkill>,
+    /// The skills recent mistakes point to, whose new items come first.
+    pub focus: Vec<String>,
     /// What's wrong in the packs, which is left out.
     pub problems: Vec<String>,
 }
@@ -211,6 +213,7 @@ impl Learning {
                 .collect(),
             flags: self.store.flags()?,
             skills,
+            focus: self.focus(&packs, clock.now)?,
             problems: problems(&packs),
         })
     }
@@ -218,9 +221,36 @@ impl Learning {
     /// Records what a device did, then gives it the deck as it now is. Sending the same
     /// attempts again changes nothing.
     pub fn sync(&self, request: &SyncRequest, clock: Clock) -> Result<Deck> {
-        self.store.record(&request.attempts, clock.now)?;
+        self.record(&request.attempts, clock.now)?;
         self.store.record_flags(&request.flags)?;
         self.deck(clock)
+    }
+
+    /// Records attempts, and logs the mistakes the wrong ones show.
+    pub fn record(&self, attempts: &[Attempt], now: i64) -> Result<()> {
+        self.store.record(attempts, now)?;
+        if !attempts
+            .iter()
+            .any(|a| a.rating == workshop_learning::Rating::Again)
+        {
+            return Ok(());
+        }
+        let packs = crate::packs::load(&self.config)?;
+        let items = crate::mistakes::items_by_key(&packs);
+        let mistakes: Vec<_> = attempts
+            .iter()
+            .filter_map(|attempt| {
+                let item = items.get(&attempt.item)?;
+                crate::mistakes::from_attempt(item, attempt)
+            })
+            .collect();
+        self.store.record_mistakes(&mistakes)
+    }
+
+    /// The skills recent mistakes point to.
+    fn focus(&self, packs: &[Pack], now: i64) -> Result<Vec<String>> {
+        let recent = self.store.mistakes(now - crate::mistakes::RECENT_MS)?;
+        Ok(crate::mistakes::focus_skills(packs, &recent))
     }
 
     /// What's due and new in every track, as one plan, with the packs it was made from.
@@ -230,17 +260,26 @@ impl Learning {
         let refs = item_refs(&items);
         let progress = self.progress(clock)?;
         let limits = self.limits();
+        let focus = self.focus(&packs, clock.now)?;
         let plans = workshop_learning::plan(
             &refs,
             &self.store.schedules()?,
             &self.store.flags()?,
             progress,
             limits,
+            &focus,
             self.store.scheduler(),
             clock.now,
         );
         let names = track_names(&packs, &items);
+        let skill_names = packs
+            .iter()
+            .flat_map(|pack| &pack.manifest.skills)
+            .map(|skill| (skill.id.clone(), skill.name.clone()))
+            .collect();
         Ok(Planned {
+            focus,
+            skill_names,
             week: Week {
                 minutes: progress.minutes_this_week,
                 target: limits.weekly_minutes,
@@ -264,7 +303,7 @@ impl Learning {
                 Track {
                     summary: summary(plan, clock),
                     destination: Destination::Practice { track: id.clone() },
-                    next: next_step(id, plan, planned.week),
+                    next: next_step(id, plan, planned),
                     id: id.clone(),
                     name: name.clone(),
                 }
@@ -285,6 +324,10 @@ impl Learning {
 /// Every track's items, by what's to be done with them, and the packs they're from.
 pub struct Planned {
     pub packs: Vec<Pack>,
+    /// The skills recent mistakes point to, most first.
+    pub focus: Vec<String>,
+    /// Every skill's name, by id.
+    pub skill_names: BTreeMap<String, String>,
     pub plans: BTreeMap<TrackId, TrackPlan>,
     /// Each track with items in it, and its name.
     pub names: BTreeMap<TrackId, String>,
@@ -455,7 +498,32 @@ pub fn week_so_far(week: Week) -> String {
     }
 }
 
-fn next_step(id: &TrackId, plan: &TrackPlan, week: Week) -> Option<Step<Destination>> {
+impl Planned {
+    /// The skill to focus on that an item has, if it has one, by name.
+    pub fn focus_of(&self, item: &Item) -> Option<&str> {
+        self.focus
+            .iter()
+            .find(|skill| item.skills.contains(skill))
+            .map(|skill| {
+                self.skill_names
+                    .get(skill)
+                    .map_or(skill.as_str(), String::as_str)
+            })
+    }
+
+    pub fn item(&self, key: &str) -> Option<&Item> {
+        let (pack, item) = key.split_once('/')?;
+        self.packs
+            .iter()
+            .find(|p| p.manifest.id == pack)
+            .and_then(|p| p.item(item))
+    }
+}
+
+/// The step a track suggests, given its plan: due reviews, then something new, sooner if it's
+/// in a skill recent mistakes point to.
+fn next_step(id: &TrackId, plan: &TrackPlan, planned: &Planned) -> Option<Step<Destination>> {
+    let week = planned.week;
     let destination = Destination::Practice { track: id.clone() };
     if !plan.due.is_empty() {
         return Some(Step {
@@ -465,7 +533,18 @@ fn next_step(id: &TrackId, plan: &TrackPlan, week: Week) -> Option<Step<Destinat
             destination,
         });
     }
-    if !plan.new.is_empty() {
+    if let Some(first) = plan.new.first() {
+        if let Some(skill) = planned.item(first).and_then(|item| planned.focus_of(item)) {
+            return Some(Step {
+                title: count(plan.new.len(), "new ", id),
+                reason: format!(
+                    "Practise {skill}, after recent mistakes · {}",
+                    week_so_far(week)
+                ),
+                priority: Priority::Focus,
+                destination,
+            });
+        }
         // Once the week's target is met, new items wait behind anything else to do.
         let priority = if week.minutes >= week.target {
             Priority::Browse
@@ -714,6 +793,48 @@ mod tests {
             )
             .unwrap();
         assert!(deck.flags.is_empty());
+    }
+
+    #[test]
+    fn leans_towards_the_skills_of_recent_mistakes() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let mut wrong = attempt("1", "sample/both-heads", NOW, Rating::Again);
+        wrong.response = Some("1/4".to_owned());
+        learning
+            .sync(
+                &SyncRequest {
+                    attempts: vec![wrong],
+                    flags: Vec::new(),
+                },
+                clock(NOW),
+            )
+            .unwrap();
+        let mistakes = learning.store().mistakes(0).unwrap();
+        assert_eq!(mistakes.len(), 1);
+        assert!(mistakes[0].mistake.detail.starts_with("Answered 1/4"));
+
+        let planned = learning.planned(clock(NOW + 1)).unwrap();
+        assert_eq!(planned.focus, ["probability.conditional"]);
+        let probability = &planned.plans[&TrackId::Probability];
+        let first = planned.item(&probability.new[0]).unwrap();
+        assert!(first.skills.contains(&"probability.conditional".to_owned()));
+        let tracks = learning.tracks(&planned, clock(NOW + 1));
+        let next = tracks
+            .tracks
+            .iter()
+            .find(|track| track.id == TrackId::Probability)
+            .and_then(|track| track.next.clone())
+            .unwrap();
+        assert_eq!(next.priority, Priority::Focus);
+        assert!(
+            next.reason
+                .starts_with("Practise Conditional probability, after recent mistakes"),
+            "{}",
+            next.reason
+        );
+        let deck = learning.deck(clock(NOW + 1)).unwrap();
+        assert_eq!(deck.focus, ["probability.conditional"]);
     }
 
     #[test]

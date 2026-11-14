@@ -13,6 +13,7 @@ mod home;
 mod install;
 mod learning;
 mod lsp;
+mod mistakes;
 mod notifications;
 mod packages;
 mod puzzles;
@@ -47,6 +48,8 @@ pub fn router(app: Shared) -> Router {
         .route("/home", get(home::home))
         .route("/learning/deck", get(learning::deck))
         .route("/learning/sync", post(learning::sync))
+        .route("/mistakes", get(mistakes::mistakes))
+        .route("/mistakes/tag", put(mistakes::tag))
         .route("/coding", get(coding::overview))
         .route("/coding/items/{pack}/{item}/open", post(coding::open))
         .route(

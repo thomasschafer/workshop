@@ -68,7 +68,7 @@ pub struct TrackPlan {
     pub due: Vec<String>,
     /// Due, but over today's limit, so waiting for tomorrow.
     pub waiting: usize,
-    /// Never attempted.
+    /// Never attempted, those in the skills to focus on first.
     pub new: Vec<String>,
     /// Flagged as wrong, so left out.
     pub flagged: usize,
@@ -76,13 +76,16 @@ pub struct TrackPlan {
     pub next_due: Option<i64>,
 }
 
-/// Each track's plan, for the items given. Tracks with none of them aren't included.
+/// Each track's plan, for the items given. Tracks with none of them aren't included. New items
+/// with any of the `focus` skills, such as those of recent mistakes, come first.
+#[allow(clippy::too_many_arguments)]
 pub fn plan(
     items: &[ItemRef<'_>],
     schedules: &BTreeMap<String, ItemSchedule>,
     flags: &BTreeMap<String, Flag>,
     progress: Progress,
     limits: Limits,
+    focus: &[String],
     scheduler: &Scheduler,
     now: i64,
 ) -> BTreeMap<TrackId, TrackPlan> {
@@ -105,6 +108,16 @@ pub fn plan(
                 }
             }
         }
+    }
+    for plan in plans.values_mut() {
+        let in_focus = |key: &String| {
+            items
+                .iter()
+                .find(|item| item.key == key)
+                .is_some_and(|item| item.skills.iter().any(|skill| focus.contains(skill)))
+        };
+        // Stable, so otherwise they stay in the packs' order.
+        plan.new.sort_by_key(|key| !in_focus(key));
     }
     due.sort();
     let allowed = limits.daily_reviews.saturating_sub(progress.reviews_today) as usize;
@@ -198,7 +211,14 @@ mod tests {
             minutes_this_week: 0,
         };
         let plans = plan(
-            &items, &schedules, &flags, progress, limits, &scheduler, NOW,
+            &items,
+            &schedules,
+            &flags,
+            progress,
+            limits,
+            &[],
+            &scheduler,
+            NOW,
         );
         // Two more reviews today: the most overdue two.
         assert_eq!(plans[review].due, ["p/older"]);
@@ -212,8 +232,58 @@ mod tests {
             reviews_today: 10,
             minutes_this_week: 0,
         };
-        let plans = plan(&items, &schedules, &flags, done, limits, &scheduler, NOW);
+        let plans = plan(
+            &items,
+            &schedules,
+            &flags,
+            done,
+            limits,
+            &[],
+            &scheduler,
+            NOW,
+        );
         assert!(plans[review].due.is_empty());
         assert_eq!(plans[review].waiting, 2);
+    }
+
+    #[test]
+    fn puts_new_items_in_skills_to_focus_on_first() {
+        let scheduler = Scheduler::default();
+        let review = &TrackId::Review;
+        let heaps = vec!["heaps".to_owned()];
+        let graphs = vec!["graphs".to_owned()];
+        let items = [
+            ItemRef {
+                key: "p/a",
+                track: review,
+                skills: &heaps,
+            },
+            ItemRef {
+                key: "p/b",
+                track: review,
+                skills: &graphs,
+            },
+            ItemRef {
+                key: "p/c",
+                track: review,
+                skills: &heaps,
+            },
+        ];
+        let limits = Limits {
+            daily_reviews: 5,
+            weekly_minutes: 60,
+            retention: 0.9,
+        };
+        let plans = plan(
+            &items,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Progress::default(),
+            limits,
+            &["graphs".to_owned()],
+            &scheduler,
+            NOW,
+        );
+        assert_eq!(plans[review].new, ["p/b", "p/a", "p/c"]);
     }
 }
