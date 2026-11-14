@@ -7,18 +7,7 @@ import {
   redo,
   undo,
 } from "@codemirror/commands";
-import {
-  bracketMatching,
-  HighlightStyle,
-  indentOnInput,
-  StreamLanguage,
-  syntaxHighlighting,
-} from "@codemirror/language";
-import { go } from "@codemirror/legacy-modes/mode/go";
-import { haskell } from "@codemirror/legacy-modes/mode/haskell";
-import { typescript } from "@codemirror/legacy-modes/mode/javascript";
-import { python } from "@codemirror/legacy-modes/mode/python";
-import { rust } from "@codemirror/legacy-modes/mode/rust";
+import { bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";
 import { nextDiagnostic, previousDiagnostic, setDiagnostics } from "@codemirror/lint";
 import {
   findReferencesKeymap,
@@ -49,7 +38,6 @@ import {
   lineNumbers,
   showDialog,
 } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import { markCursor, minimalChange, unmarkCursor } from "./diff";
 import { errorMessage } from "./errors";
 import { type Formatter, formatCode, formatWhenSettled, languageServerFormatter } from "./format";
@@ -73,31 +61,8 @@ import { adjustCapabilities, languageServerCompletion, quietMessage } from "./ls
 import { applyWorkspaceEdit } from "./lspEdits";
 import { pinchToZoom } from "./pinch";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
+import { LANGUAGES, syntaxHighlighter } from "./syntax";
 import { roundCodeScale } from "./zoom";
-
-const LANGUAGES: Record<string, () => Extension> = {
-  haskell: () => StreamLanguage.define(haskell),
-  python: () => StreamLanguage.define(python),
-  typescript: () => StreamLanguage.define(typescript),
-  go: () => StreamLanguage.define(go),
-  rust: () => StreamLanguage.define(rust),
-};
-
-const highlightStyle = HighlightStyle.define([
-  {
-    tag: [tags.keyword, tags.operatorKeyword, tags.controlKeyword],
-    color: "var(--syntax-keyword)",
-  },
-  { tag: [tags.string, tags.character], color: "var(--syntax-string)" },
-  { tag: [tags.number, tags.bool, tags.atom], color: "var(--syntax-number)" },
-  {
-    tag: [tags.comment, tags.lineComment, tags.blockComment],
-    color: "var(--muted)",
-    fontStyle: "italic",
-  },
-  { tag: [tags.typeName, tags.className], color: "var(--syntax-type)" },
-  { tag: [tags.operator, tags.punctuation], color: "var(--syntax-operator)" },
-]);
 
 const theme = EditorView.theme({
   "&": {
@@ -299,7 +264,7 @@ export class CodeEditor {
         highlightActiveLine(),
         indentOnInput(),
         bracketMatching(),
-        syntaxHighlighting(highlightStyle),
+        syntaxHighlighting(syntaxHighlighter),
         this.keys.of(this.keysFor(options.helix)),
         theme,
         this.wrapping.of(wrapping(options.lineWrapping)),

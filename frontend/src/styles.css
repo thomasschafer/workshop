@@ -1761,6 +1761,32 @@ html[data-tab-turn] .content {
   padding: 0;
 }
 
+/* Highlighted code, in the editor and in Markdown, from syntaxHighlighter in syntax.ts. */
+.syntax-keyword {
+  color: var(--syntax-keyword);
+}
+
+.syntax-string {
+  color: var(--syntax-string);
+}
+
+.syntax-number {
+  color: var(--syntax-number);
+}
+
+.syntax-comment {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.syntax-type {
+  color: var(--syntax-type);
+}
+
+.syntax-operator {
+  color: var(--syntax-operator);
+}
+
 .markdown a {
   color: var(--accent);
 }

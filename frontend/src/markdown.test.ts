@@ -10,7 +10,21 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<ol>");
     expect(html).toContain("<code>seen</code>");
     expect(html).toContain("<em>this</em>");
-    expect(html).toContain('<pre><code class="language-haskell">main = pure ()');
+    expect(html).toContain('<pre><code class="language-haskell">');
+    expect(html.replace(/<[^>]+>/g, "")).toContain("main = pure ()");
+  });
+
+  it("highlights code blocks for the language they're marked with", () => {
+    const html = renderMarkdown(
+      'What does this print?\n\n```rust\nfn main() {\n    println!("a < b");\n}\n```\n',
+    );
+    expect(html).toContain(
+      '<pre><code class="language-rust"><span class="syntax-keyword">fn</span>',
+    );
+    expect(html).toContain("&lt;");
+    expect(html).not.toContain("a < b");
+    const plain = renderMarkdown("```text\na < b\n```");
+    expect(plain).toContain('<pre><code class="language-text">a &lt; b\n</code></pre>');
   });
 
   it("escapes raw HTML", () => {
