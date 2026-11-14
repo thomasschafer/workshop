@@ -12,7 +12,7 @@ use workshop_pack::{Content, Item, Kind, Pack};
 use super::error::{ApiError, ApiResult, bad_request};
 use super::learning::Where;
 use super::state::Shared;
-use crate::grader::{Fix, Marked, Proposed, Review, Verdict, Work};
+use crate::grader::{Answer, Fix, Marked, Proposed, Review, Verdict, Work};
 use crate::learning::{Week, now_ms};
 
 fn packs(app: &Shared) -> Result<Vec<Pack>, ApiError> {
@@ -158,6 +158,9 @@ pub(super) struct MarkBody {
     id: String,
     work: Work,
     text: String,
+    /// Whether it was explained aloud, so `text` is what was heard.
+    #[serde(default)]
+    spoken: bool,
 }
 
 #[derive(Serialize)]
@@ -169,9 +172,10 @@ pub(super) struct MarkedReply {
     due: Option<i64>,
 }
 
-/// Marks a piece of written work with the grader. What it finds goes in the mistake log; a
-/// design or a card's answer also counts as an attempt, rated from the score, which schedules
-/// the item and feeds mastery. A coding plan's attempt is the problem's own, when it's finished.
+/// Marks a piece of work, written or explained aloud, with the grader. What it finds goes in
+/// the mistake log; a design or a card's answer also counts as an attempt, rated from the
+/// score, which schedules the item and feeds mastery. A coding problem's plan and explanation
+/// don't: its attempt is its own, when it's finished.
 pub(super) async fn mark(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
@@ -180,19 +184,35 @@ pub(super) async fn mark(
     let packs = packs(&app)?;
     let (pack, item) = find(&packs, &pack, &item)?;
     let key = format!("{}/{}", pack.manifest.id, item.id);
+    // An explanation of a solution is marked with the solution it explains.
+    let code = if body.work == Work::Explanation {
+        let found = crate::coding::find(&packs, &pack.manifest.id, &item.id)
+            .map_err(|err| bad_request(format!("{err:#}")))?;
+        let session = app
+            .problems
+            .session(&key)?
+            .ok_or_else(|| bad_request("Start the problem before explaining it."))?;
+        let draft = app.problems.draft(&found, session.language)?;
+        Some((session.language.name(), draft.text))
+    } else {
+        None
+    };
+    let answer = Answer {
+        spoken: body.spoken,
+        code: code.as_ref().map(|(name, text)| (*name, text.as_str())),
+        ..Answer::written(&body.text)
+    };
     let error_types = crate::mistakes::error_types(&packs);
     let (runner, spec) =
         app.grader_target(pack.prompt_add_ons.get("grader").map(String::as_str))?;
     let started = now_ms();
-    let marked = crate::grader::mark(runner, &spec, item, body.work, &body.text, &error_types)
+    let marked = crate::grader::mark(runner, &spec, item, body.work, answer, &error_types)
         .await
         .map_err(|err| bad_request(format!("{err:#}")))?;
     let now = now_ms();
     let store = app.learning.store();
     store.record_mistakes(&marked.mistakes(&body.id, &key, now))?;
-    let due = if body.work == Work::Plan {
-        None
-    } else {
+    let due = if body.work.is_attempt() {
         app.learning.record(
             &[Attempt {
                 id: body.id,
@@ -210,6 +230,8 @@ pub(super) async fn mark(
                 .scheduler()
                 .due(schedule, app.config.learning.desired_retention)
         })
+    } else {
+        None
     };
     let rubric = match &item.content {
         Content::Design { rubric, .. } => rubric.clone(),
@@ -441,6 +463,7 @@ mod tests {
     }
 
     const MARKED: &str = r#"{"score": 0.65, "points": [{"point": "Estimates", "met": "partly", "comment": "No storage estimate"}], "findings": [{"error_type": "missed-edge-case", "detail": "Says nothing of codes that collide"}], "feedback": "Size the store, and handle collisions."}"#;
+    const SPOKEN: &str = r#"{"score": 0.9, "points": [{"point": "Gives the card's answer, in any words", "met": "yes", "comment": ""}], "findings": [], "feedback": "Right.", "clarity": {"score": 0.5, "feedback": "Lead with the answer."}}"#;
     const WRONG: &str = r#"{"verdict": "wrong", "explanation": "Removing the smallest is logarithmic.", "fix": {"answer": "O(log n), as the last item sinks from the root.", "explanation": null}}"#;
     const CORRECT: &str = r#"{"verdict": "correct", "explanation": "The card is right."}"#;
 
@@ -449,6 +472,7 @@ mod tests {
         let pack = dir.join("pack");
         crate::pack_files::testing::sample_pack_repo(&pack);
         for (file, text) in [
+            ("spoken.json", SPOKEN),
             ("mark.json", MARKED),
             ("wrong.json", WRONG),
             ("correct.json", CORRECT),
@@ -458,6 +482,7 @@ mod tests {
         let model = fake_discussion_model(
             dir,
             &[
+                ("explained this aloud", "spoken.json"),
                 ("<work>", "mark.json"),
                 ("flagged this card as wrong, saying", "wrong.json"),
                 ("Check this card", "correct.json"),
@@ -571,6 +596,76 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn marks_what_was_explained_aloud_for_clarity_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = app(dir.path());
+        let card = serde_json::json!({
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a51",
+            "work": "card",
+            "text": "it's log n because the last item sinks down",
+            "spoken": true,
+        });
+        let marked = json(
+            send(
+                &router,
+                request(
+                    "POST",
+                    "/api/items/sample/binary-heap-costs/mark",
+                    Some(card),
+                ),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(marked["marked"]["clarity"]["score"], 0.5);
+        // It counts as an attempt, as a written answer does.
+        assert!(marked["due"].as_i64().is_some());
+        let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
+        assert_eq!(deck["schedules"]["sample/binary-heap-costs"]["reviews"], 1);
+
+        // A solution is explained with the code it explains, once the problem's started.
+        let explanation = serde_json::json!({
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a52",
+            "work": "explanation",
+            "text": "I flood each island from its first square",
+            "spoken": true,
+        });
+        let early = send(
+            &router,
+            request(
+                "POST",
+                "/api/items/sample/islands/mark",
+                Some(explanation.clone()),
+            ),
+        )
+        .await;
+        assert_eq!(early.status(), StatusCode::BAD_REQUEST);
+        json(
+            send(
+                &router,
+                request("POST", "/api/coding/items/sample/islands/open", None),
+            )
+            .await,
+        )
+        .await;
+        let marked = json(
+            send(
+                &router,
+                request("POST", "/api/items/sample/islands/mark", Some(explanation)),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(
+            marked["marked"]["clarity"]["feedback"],
+            "Lead with the answer."
+        );
+        assert_eq!(marked["due"], serde_json::Value::Null);
+        let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
+        assert!(deck["schedules"].get("sample/islands").is_none());
     }
 
     #[tokio::test]

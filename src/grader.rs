@@ -37,6 +37,38 @@ pub enum Work {
     Plan,
     /// A card's answer, in the learner's own words.
     Card,
+    /// How a coding problem's solution works, explained once it's been solved or given up
+    /// on, against its approach.
+    Explanation,
+}
+
+impl Work {
+    /// Whether marking it counts as an attempt at the item. A coding problem's attempt is its
+    /// own, when it's finished, so its plan and explanation only add to the mistake log.
+    pub fn is_attempt(self) -> bool {
+        matches!(self, Self::Design | Self::Card)
+    }
+}
+
+/// What the learner gave in, to be marked.
+#[derive(Debug, Clone, Copy)]
+pub struct Answer<'a> {
+    pub text: &'a str,
+    /// Whether it was explained aloud, so it's a transcript, which is also marked for how
+    /// clearly it was put.
+    pub spoken: bool,
+    /// For an explanation of a solution, the learner's code, and its language's name.
+    pub code: Option<(&'a str, &'a str)>,
+}
+
+impl<'a> Answer<'a> {
+    pub fn written(text: &'a str) -> Self {
+        Self {
+            text,
+            spoken: false,
+            code: None,
+        }
+    }
 }
 
 /// The rubric for a piece of work on an item, and what a good answer looks like, if the item
@@ -48,6 +80,14 @@ fn rubric(item: &Item, work: Work) -> Result<(Vec<String>, Option<String>)> {
             vec![
                 "Chooses a method that solves the problem correctly".to_owned(),
                 "Is efficient enough for the sizes of input the problem allows".to_owned(),
+                "Says how the unusual inputs are handled".to_owned(),
+            ],
+            Some(coding.approach.clone()),
+        )),
+        (Work::Explanation, Content::Coding(coding)) => Ok((
+            vec![
+                "Explains why the solution gives the right answer".to_owned(),
+                "Says what the solution costs, in time and space".to_owned(),
                 "Says how the unusual inputs are handled".to_owned(),
             ],
             Some(coding.approach.clone()),
@@ -76,7 +116,7 @@ fn rubric(item: &Item, work: Work) -> Result<(Vec<String>, Option<String>)> {
 pub fn mark_prompt(
     item: &Item,
     work: Work,
-    text: &str,
+    answer: Answer<'_>,
     error_types: &[ErrorType],
 ) -> Result<String> {
     let (rubric, reference) = rubric(item, work)?;
@@ -89,18 +129,39 @@ pub fn mark_prompt(
     }
     out.push_str("</rubric>\n\n");
     if let Some(reference) = reference {
+        let hidden = if work == Work::Explanation {
+            "they've solved it, or given up on it, and may have seen it since"
+        } else {
+            "the learner hasn't seen it"
+        };
         out.push_str(&format!(
-            "<reference>\n{}\n</reference>\n\nThe reference is how it's meant to be answered, for you to mark against; the learner hasn't seen it.\n\n",
+            "<reference>\n{}\n</reference>\n\nThe reference is how it's meant to be answered, for you to mark against; {hidden}.\n\n",
             reference.trim()
         ));
     }
-    out.push_str(&format!("<work>\n{}\n</work>\n\n", text.trim()));
+    if let Some((language, code)) = answer.code {
+        out.push_str(&format!(
+            "<code language=\"{language}\">\n{}\n</code>\n\nThis is the learner's code, which the work explains.\n\n",
+            code.trim_end()
+        ));
+    }
+    out.push_str(&format!("<work>\n{}\n</work>\n\n", answer.text.trim()));
+    if answer.spoken {
+        out.push_str(SPOKEN);
+    }
     out.push_str(&kinds(error_types));
     out.push_str(
-        "Mark the work. Reply with JSON: {\"score\": number from 0 to 1, \"points\": [{\"point\": the rubric point, \"met\": \"yes\" | \"partly\" | \"no\", \"comment\": string}], \"findings\": [{\"error_type\": one of the kinds' ids, \"detail\": string}], \"feedback\": string}",
+        "Mark the work. Reply with JSON: {\"score\": number from 0 to 1, \"points\": [{\"point\": the rubric point, \"met\": \"yes\" | \"partly\" | \"no\", \"comment\": string}], \"findings\": [{\"error_type\": one of the kinds' ids, \"detail\": string}], \"feedback\": string",
     );
+    if answer.spoken {
+        out.push_str(", \"clarity\": {\"score\": number from 0 to 1, \"feedback\": string}");
+    }
+    out.push('}');
     Ok(out)
 }
+
+/// What the grader is told about work explained aloud.
+const SPOKEN: &str = "The learner explained this aloud, and the work is what speech recognition heard. Mark what they meant where a word is plainly misheard, such as one that sounds like the right term, and don't count the way speech is written down against them. Besides marking it against the rubric, judge how clearly they explained it: whether it's in a sensible order, gets to the point, names things precisely and would be easy to follow if heard. The score is for the rubric alone; clarity has its own score and feedback.\n\n";
 
 fn kinds(error_types: &[ErrorType]) -> String {
     let mut out = String::from("<kinds_of_mistake>\n");
@@ -140,6 +201,17 @@ pub struct Marked {
     pub score: f64,
     pub points: Vec<Point>,
     pub findings: Vec<Finding>,
+    pub feedback: String,
+    /// For work explained aloud, how clearly it was put.
+    #[serde(default)]
+    pub clarity: Option<Clarity>,
+}
+
+/// How clearly something explained aloud was put.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Clarity {
+    /// From 0 to 1.
+    pub score: f64,
     pub feedback: String,
 }
 
@@ -186,8 +258,8 @@ fn json_in(reply: &str) -> Result<&str> {
 }
 
 /// Reads the grader's marking, checking it's whole, and dropping kinds of mistake that don't
-/// exist rather than trusting them.
-pub fn parse_marked(reply: &str, error_types: &[ErrorType]) -> Result<Marked> {
+/// exist rather than trusting them. Work explained aloud must have been marked for clarity.
+pub fn parse_marked(reply: &str, error_types: &[ErrorType], spoken: bool) -> Result<Marked> {
     #[derive(Deserialize)]
     struct Raw {
         score: f64,
@@ -195,6 +267,7 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType]) -> Result<Marked> {
         #[serde(default)]
         findings: Vec<RawFinding>,
         feedback: String,
+        clarity: Option<Clarity>,
     }
     #[derive(Deserialize)]
     struct RawFinding {
@@ -206,6 +279,15 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType]) -> Result<Marked> {
     if !(0.0..=1.0).contains(&raw.score) {
         bail!("the grader gave a score of {}, outside 0 to 1", raw.score);
     }
+    let clarity = match (spoken, raw.clarity) {
+        (true, None) => bail!("the grader didn't say how clearly it was explained: {reply}"),
+        (true, Some(clarity)) if !(0.0..=1.0).contains(&clarity.score) => bail!(
+            "the grader gave clarity a score of {}, outside 0 to 1",
+            clarity.score
+        ),
+        (true, clarity) => clarity,
+        (false, _) => None,
+    };
     Ok(Marked {
         score: raw.score,
         points: raw.points,
@@ -220,6 +302,7 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType]) -> Result<Marked> {
             })
             .collect(),
         feedback: raw.feedback,
+        clarity,
     })
 }
 
@@ -229,15 +312,19 @@ pub async fn mark(
     spec: &CallSpec,
     item: &Item,
     work: Work,
-    text: &str,
+    answer: Answer<'_>,
     error_types: &[ErrorType],
 ) -> Result<Marked> {
-    if text.trim().is_empty() {
-        bail!("there's nothing written to mark");
+    if answer.text.trim().is_empty() {
+        bail!(if answer.spoken {
+            "nothing was heard to mark"
+        } else {
+            "there's nothing written to mark"
+        });
     }
-    let prompt = mark_prompt(item, work, text, error_types)?;
+    let prompt = mark_prompt(item, work, answer, error_types)?;
     let reply = runner.call_aside(spec, &prompt, TIMEOUT).await?;
-    parse_marked(&reply.text, error_types)
+    parse_marked(&reply.text, error_types, answer.spoken)
 }
 
 /// The grader's review of a card.
@@ -402,18 +489,28 @@ mod tests {
         let pack = Pack::sample();
         let types = workshop_pack::error_types::built_in();
         let problem = pack.item("islands").unwrap();
-        let prompt = mark_prompt(problem, Work::Plan, "Flood fill each island", &types).unwrap();
+        let prompt = mark_prompt(
+            problem,
+            Work::Plan,
+            Answer::written("Flood fill each island"),
+            &types,
+        )
+        .unwrap();
         assert!(prompt.contains("<work>\nFlood fill each island\n</work>"));
         assert!(prompt.contains("<reference>"));
+        assert!(prompt.contains("the learner hasn't seen it"));
         assert!(prompt.contains("- off-by-one: "));
-        assert!(mark_prompt(problem, Work::Design, "x", &types).is_err());
+        assert!(!prompt.contains("aloud"));
+        assert!(!prompt.contains("clarity"));
+        assert!(mark_prompt(problem, Work::Design, Answer::written("x"), &types).is_err());
 
         let reply = r#"Here it is: ```json
 {"score": 0.5, "points": [{"point": "Chooses a method", "met": "partly", "comment": "ok"}],
  "findings": [{"error_type": "missed-edge-case", "detail": "An empty grid"}, {"error_type": "guess", "detail": "?"}],
  "feedback": "Think about empty grids."}
 ```"#;
-        let marked = parse_marked(reply, &types).unwrap();
+        let marked = parse_marked(reply, &types, false).unwrap();
+        assert_eq!(marked.clarity, None);
         assert_eq!(marked.score, 0.5);
         assert_eq!(marked.points[0].met, Met::Partly);
         assert_eq!(marked.rating(), Rating::Again);
@@ -428,9 +525,51 @@ mod tests {
         assert_eq!(mistakes[0].source, MistakeSource::Grader);
 
         assert!(
-            parse_marked("{\"score\": 2, \"points\": [], \"feedback\": \"\"}", &types).is_err()
+            parse_marked(
+                "{\"score\": 2, \"points\": [], \"feedback\": \"\"}",
+                &types,
+                false
+            )
+            .is_err()
         );
-        assert!(parse_marked("No idea", &types).is_err());
+        assert!(parse_marked("No idea", &types, false).is_err());
+    }
+
+    #[test]
+    fn marks_an_explanation_aloud_for_clarity_too() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let problem = pack.item("islands").unwrap();
+        let answer = Answer {
+            text: "I go through every square and flood each new island",
+            spoken: true,
+            code: Some(("Python", "print(count(grid))\n")),
+        };
+        let prompt = mark_prompt(problem, Work::Explanation, answer, &types).unwrap();
+        assert!(prompt.contains("explained this aloud"));
+        assert!(prompt.contains("<code language=\"Python\">\nprint(count(grid))\n</code>"));
+        assert!(prompt.contains("may have seen it since"));
+        assert!(prompt.contains("- Says what the solution costs, in time and space\n"));
+        assert!(
+            prompt.ends_with("\"clarity\": {\"score\": number from 0 to 1, \"feedback\": string}}")
+        );
+        assert!(!Work::Explanation.is_attempt());
+        assert!(Work::Card.is_attempt());
+        // Only a coding problem's solution can be explained.
+        let card = pack.item("binary-heap-costs").unwrap();
+        assert!(mark_prompt(card, Work::Explanation, answer, &types).is_err());
+
+        let marked = r#"{"score": 0.8, "points": [], "feedback": "Good.", "clarity": {"score": 0.6, "feedback": "Say the cost before the details."}}"#;
+        let marked = parse_marked(marked, &types, true).unwrap();
+        assert_eq!(marked.clarity.unwrap().score, 0.6);
+        // Explained aloud, it must be marked for clarity.
+        let unclear = r#"{"score": 0.8, "points": [], "feedback": "Good."}"#;
+        assert!(parse_marked(unclear, &types, true).is_err());
+        let out_of_range = r#"{"score": 0.8, "points": [], "feedback": "Good.", "clarity": {"score": 7, "feedback": ""}}"#;
+        assert!(parse_marked(out_of_range, &types, true).is_err());
+        // Written, any clarity is ignored rather than shown.
+        let written = r#"{"score": 0.8, "points": [], "feedback": "Good.", "clarity": {"score": 0.6, "feedback": "x"}}"#;
+        assert_eq!(parse_marked(written, &types, false).unwrap().clarity, None);
     }
 
     #[test]
