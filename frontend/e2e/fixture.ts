@@ -1,11 +1,16 @@
 // Builds a self-contained Workshop home for end-to-end tests: Python, a stand-in model, and an
 // invented puzzle already in the cache, so tests need no network, toolchain or model access.
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-export const PORT = 7899;
-export const HOME = join(tmpdir(), "workshop-e2e");
+// Each checkout has its own port and home, so the tests can run in several worktrees at once.
+const checkout = createHash("sha256")
+  .update(resolve(import.meta.dirname))
+  .digest();
+export const PORT = 20_000 + (checkout.readUInt16BE(0) % 10_000);
+export const HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
