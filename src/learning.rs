@@ -442,7 +442,7 @@ fn count(n: usize, before: &str, track: &TrackId) -> String {
     format!("{n} {before}{}", if n == 1 { one } else { many })
 }
 
-fn week_so_far(week: Week) -> String {
+pub fn week_so_far(week: Week) -> String {
     let minutes = if week.target == 1 {
         "minute"
     } else {

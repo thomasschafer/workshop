@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, type Bootstrap } from "../api";
 import { App } from "../app";
+import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
 import { Practice } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
@@ -81,6 +82,15 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
       return <Home onGo={(destination) => void go(destination)} />;
     case "practice":
       return <Practice key={route.track} track={route.track} onHome={goHome} />;
+    case "coding":
+      return (
+        <CodingScreen
+          boot={boot}
+          item={route.item}
+          onHome={goHome}
+          onOpen={(item) => void go({ kind: "coding", item })}
+        />
+      );
     case "advent-of-code":
       return (
         <App

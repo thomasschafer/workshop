@@ -168,7 +168,7 @@ pub(super) async fn run(
 ) -> ApiResult<Graded> {
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
-    let (mut session, code) = current(&app, &found)?;
+    let (session, code) = current(&app, &found)?;
     let running = start_running(&app)?;
     let runtime = crate::coding::runtime(&app.config, &app.paths).await?;
     let graded = workshop_coding::run_examples(
@@ -179,10 +179,6 @@ pub(super) async fn run(
         &running.cancel,
     )
     .await?;
-    session.runs += 1;
-    app.problems
-        .save_session(&found, session, now_ms())
-        .context("saving the session")?;
     Ok(Json(graded))
 }
 
@@ -266,10 +262,12 @@ pub(super) async fn submit(
     drop(running);
     let passed = graded.passed();
     session.submissions += 1;
-    if passed {
-        session.passed = true;
-        session.step = StepName::Review;
-    }
+    session.passed = passed;
+    session.step = if passed {
+        StepName::Review
+    } else {
+        StepName::Test
+    };
     let (session, _) = app
         .problems
         .save_session(&found, session, now_ms())
@@ -382,7 +380,7 @@ pub(super) async fn tutor(
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
     let key = found.key();
-    let mut session = app
+    let session = app
         .problems
         .session(&key)?
         .ok_or_else(|| bad_request("Start the problem before asking about it."))?;
@@ -402,10 +400,6 @@ pub(super) async fn tutor(
     let system =
         discuss::tutor_system_prompt(found.pack.prompt_add_ons.get("tutor").map(String::as_str));
     let spec = app.config.providers[&provider].spec(Role::Discuss, &body.model, system);
-    session.hints += 1;
-    app.problems
-        .save_session(&found, session, now_ms())
-        .context("saving the session")?;
     Ok(super::discuss::stream_reply(
         app.clone(),
         provider,
@@ -530,6 +524,7 @@ mod tests {
             json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
         assert_eq!(submitted["passed"], false);
         assert_eq!(submitted["failure"]["case"]["kind"], "example");
+        assert_eq!(submitted["opened"]["session"]["step"], "test");
         assert_eq!(submitted["opened"]["session"]["submissions"], 1);
 
         let right = "import sys\nseen = set()\nfor w in sys.stdin.read().split():\n    if w in seen:\n        print(w)\n        break\n    seen.add(w)\nelse:\n    print('none')\n";

@@ -85,14 +85,22 @@ test.afterAll(async () => {
 });
 
 test("shows the pack's tracks at home, and continues with something new", async () => {
-  await expect(phone.locator(".track")).toHaveCount(5);
+  await expect(phone.locator(".track")).toHaveCount(6);
   const names = await phone.locator(".track-name").allInnerTexts();
-  expect(names).toEqual(["Advent of Code", "Probability", "Mental maths", "Review", "Estimation"]);
+  expect(names).toEqual([
+    "Advent of Code",
+    "Coding",
+    "Probability",
+    "Mental maths",
+    "Review",
+    "Estimation",
+  ]);
   await expect(phone.locator(".track", { hasText: "Review" })).toContainText("10 new");
-  // Nothing's due yet, so Continue offers something new, in the first track with any.
+  // Nothing's due yet, so Continue offers something new, in the first track with any: the
+  // quickest of the Coding track's, some code to read.
   const next = phone.locator(".continue");
-  await expect(next).toContainText("10 new questions");
-  await expect(next).toContainText("Probability · Something new · 0 of 90 minutes this week");
+  await expect(next).toContainText("Counting copies");
+  await expect(next).toContainText("Coding · Something new · 0 of 90 minutes this week");
   await expect(phone.getByLabel("This week's practice")).toBeVisible();
   // It all fits across a phone's screen.
   const width = phone.viewportSize()?.width ?? 0;
@@ -169,7 +177,7 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
     .poll(() => phone.evaluate(() => navigator.serviceWorker.controller !== null))
     .toBe(true);
   await goHome();
-  await expect(phone.locator(".track")).toHaveCount(5);
+  await expect(phone.locator(".track")).toHaveCount(6);
 
   await context.setOffline(true);
   // Opened afresh with no connection at all, the app still starts, from what the phone kept.

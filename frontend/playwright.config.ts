@@ -1,6 +1,9 @@
 import { delimiter, resolve } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import {
+  CODING_HOME,
+  CODING_PORT,
+  createCodingHome,
   createHome,
   createLearningHome,
   HOME,
@@ -14,6 +17,7 @@ import {
 if (process.env.WORKSHOP_E2E_HOME_READY === undefined) {
   createHome();
   createLearningHome();
+  createCodingHome();
   process.env.WORKSHOP_E2E_HOME_READY = "1";
 }
 
@@ -44,7 +48,11 @@ export default defineConfig({
     },
     { name: "webkit", use: { browserName: "webkit" } },
   ],
-  webServer: [HOME, LEARNING_HOME].map((home) => ({
+  webServer: [
+    { home: HOME, port: PORT },
+    { home: LEARNING_HOME, port: LEARNING_PORT },
+    { home: CODING_HOME, port: CODING_PORT },
+  ].map(({ home, port }) => ({
     command: `${binary} serve`,
     env: {
       WORKSHOP_HOME: home,
@@ -57,7 +65,7 @@ export default defineConfig({
       GIT_COMMITTER_NAME: "Workshop tests",
       GIT_COMMITTER_EMAIL: "tests@example.com",
     },
-    url: `http://127.0.0.1:${home === HOME ? PORT : LEARNING_PORT}/api/bootstrap`,
+    url: `http://127.0.0.1:${port}/api/bootstrap`,
     reuseExistingServer: false,
     // So the server stops what it started, such as whisper-server, as it would when stopped by hand.
     gracefulShutdown: { signal: "SIGTERM" as const, timeout: 5000 },

@@ -1,0 +1,224 @@
+/* The Coding track: its list, and a problem's steps. A problem's code step fills the screen, as
+   the code does in Advent of Code. */
+
+.coding-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.coding-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+
+.coding-item.in_progress,
+.coding-item.due {
+  border-color: var(--accent);
+}
+
+.coding-item:disabled {
+  opacity: 0.55;
+}
+
+.coding-item-name {
+  font-weight: 600;
+}
+
+.coding-item-detail {
+  font-size: 13px;
+}
+
+.coding-problem.coding-at-code {
+  height: 100dvh;
+  min-height: 0;
+}
+
+.coding-steps {
+  width: 100%;
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 4px 16px 8px;
+}
+
+.coding-at-code .coding-steps {
+  max-width: none;
+}
+
+.coding-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.coding-steps ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.coding-step {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.coding-step.current {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.coding-step:disabled {
+  color: var(--faint);
+}
+
+.coding-subheading {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.coding-io {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 12rem;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--active-line);
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: pre;
+}
+
+.coding-reference {
+  max-height: none;
+}
+
+.coding-plan {
+  min-height: 8rem;
+  font: inherit;
+}
+
+.coding-plan-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.coding-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+.coding-dictate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.coding-hearing {
+  font-size: 14px;
+}
+
+.coding-statement > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.coding-work {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.coding-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 0 16px 6px;
+}
+
+.coding-statement.compact[open] {
+  flex-basis: 100%;
+  max-height: 40dvh;
+  overflow: auto;
+}
+
+.coding-hints {
+  margin: 0;
+  padding: 6px 16px 6px 36px;
+  font-size: 14px;
+}
+
+.coding-results {
+  max-height: 40dvh;
+  overflow: auto;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.coding-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.coding-case {
+  padding: 6px 0;
+}
+
+.coding-case-head {
+  margin: 0;
+  font-weight: 600;
+}
+
+.coding-case.right .coding-case-head {
+  color: var(--ok);
+}
+
+.coding-case.wrong .coding-case-head {
+  color: var(--warn);
+}
+
+.coding-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+
+.coding-actions .pill {
+  min-height: 44px;
+}
+
+.pill.rating.suggested {
+  box-shadow: 0 0 0 2px var(--accent);
+}

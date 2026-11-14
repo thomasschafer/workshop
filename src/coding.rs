@@ -22,7 +22,7 @@ use workshop_pack::{Case, Coding, Content, Item, Kind, Language, Pack};
 use workshop_tracks::{Priority, Step, Track, TrackId};
 
 use crate::config::Config;
-use crate::learning::{Planned, Week};
+use crate::learning::{Planned, Week, week_so_far};
 use crate::paths::Paths;
 use crate::tracks::Destination;
 use crate::workspace::{SaveError, VersionedFile, read_versioned, save_versioned};
@@ -640,20 +640,27 @@ pub fn track(
         let recall = labels
             .get(key)
             .is_some_and(|item| item.kind == Kind::Coding);
+        let why = if recall {
+            "Due for review: recall how to solve it"
+        } else {
+            "Due today"
+        };
         Some(Step {
             title: label(key),
-            reason: if recall {
-                "Due for review: recall how to solve it".to_owned()
-            } else {
-                "Due for review".to_owned()
-            },
+            reason: format!("{why} · {}", week_so_far(planned.week)),
             priority: Priority::Due,
             destination: open(key),
         })
     } else {
-        plan.new.first().map(|key| Step {
+        // The quickest new item first, so a spare few minutes are enough to start.
+        let quickest = plan.new.iter().min_by_key(|key| {
+            labels
+                .get(key.as_str())
+                .map_or(u32::MAX, |item| item.minutes)
+        });
+        quickest.map(|key| Step {
             title: label(key),
-            reason: "Something new".to_owned(),
+            reason: format!("Something new · {}", week_so_far(planned.week)),
             // Once the week's target is met, new items wait behind anything else to do.
             priority: if planned.week.minutes >= planned.week.target {
                 Priority::Browse
@@ -860,12 +867,14 @@ mod tests {
         assert_eq!(track.summary, "11 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::New);
+        // The quickest first: code to read, rather than a problem.
         assert_eq!(
             next.destination,
             Destination::Coding {
-                item: Some("sample/common-subsequence".to_owned())
+                item: Some("sample/copies-by-value".to_owned())
             }
         );
+        assert_eq!(next.reason, "Something new · 0 of 90 minutes this week");
 
         let packs = vec![Pack::sample()];
         let found = find(&packs, "sample", "islands").unwrap();

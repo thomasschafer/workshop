@@ -34,6 +34,8 @@ describe("pathOf", () => {
       { screen: "home" },
       { screen: "advent-of-code" },
       { screen: "practice", track: "pack:estimation" },
+      { screen: "coding", item: null },
+      { screen: "coding", item: "sample/islands" },
     ] as const) {
       expect(routeOf(pathOf(route), "")).toEqual(route);
     }
@@ -46,6 +48,19 @@ describe("routeFor", () => {
       screen: "advent-of-code",
     });
     expect(routeFor({ kind: "puzzle_list" })).toEqual({ screen: "advent-of-code" });
+  });
+
+  it("opens the Coding track's items on its screen", () => {
+    expect(routeFor({ kind: "coding", item: "sample/islands" })).toEqual({
+      screen: "coding",
+      item: "sample/islands",
+    });
+    expect(routeOf("/coding/sample/islands", "")).toEqual({
+      screen: "coding",
+      item: "sample/islands",
+    });
+    // An address that isn't an item's shows the list.
+    expect(routeOf("/coding/Sample/x/y", "")).toEqual({ screen: "coding", item: null });
   });
 
   it("practises a track on its own screen", () => {

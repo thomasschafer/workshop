@@ -471,7 +471,7 @@ export async function request<T>(
 }
 
 /** Reads a reply of newline-delimited JSON, handing over each line as it arrives. */
-async function streamLines(
+export async function streamLines(
   method: string,
   path: string,
   body: unknown,

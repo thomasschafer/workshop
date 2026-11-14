@@ -21,7 +21,9 @@ export type Priority = "due" | "unfinished" | "new" | "browse";
 export type Destination =
   | { kind: "puzzle"; puzzle: Puzzle }
   | { kind: "puzzle_list" }
-  | { kind: "practice"; track: TrackId };
+  | { kind: "practice"; track: TrackId }
+  /** The Coding track: one of its items, as `pack/item`, or the list of them. */
+  | { kind: "coding"; item: string | null };
 
 export interface Step {
   title: string;

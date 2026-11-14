@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-const SERVERS = 2;
+const SERVERS = 3;
 const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
 const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
@@ -28,6 +28,10 @@ export const HOME = CHECKOUT_HOME;
 /** A second server, for learning from the sample pack, so its tests start with nothing done. */
 export const LEARNING_PORT = port(1);
 export const LEARNING_HOME = `${CHECKOUT_HOME}-learning`;
+
+/** A third, for the Coding track, whose problems' steps and attempts are its own. */
+export const CODING_PORT = port(2);
+export const CODING_HOME = `${CHECKOUT_HOME}-coding`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -205,6 +209,20 @@ export function createLearningHome(): void {
   writeHome({
     home: LEARNING_HOME,
     port: LEARNING_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
+    model: "fake",
+  });
+}
+
+/** A home for the Coding track, with the sample pack's problems and code to read. */
+export function createCodingHome(): void {
+  writeHome({
+    home: CODING_HOME,
+    port: CODING_PORT,
     year: 2017,
     day: 4,
     puzzle: PUZZLE,
