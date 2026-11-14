@@ -1,6 +1,6 @@
 // Types mirror the grader in src/grader.rs and its routes in src/server/grading.rs.
 
-export type Work = "design" | "plan" | "card";
+export type Work = "design" | "plan" | "card" | "explanation";
 
 export interface Marked {
   /** From 0 to 1. */
@@ -8,6 +8,8 @@ export interface Marked {
   points: { point: string; met: "yes" | "partly" | "no"; comment: string }[];
   findings: { error_type: string | null; detail: string }[];
   feedback: string;
+  /** For work explained aloud, how clearly it was put. */
+  clarity: { score: number; feedback: string } | null;
 }
 
 export interface MarkedReply {

@@ -1,5 +1,6 @@
 // Simulated speech recognition, for tests and the demo: what's "said" is set on the page, and
 // appears word by word as if spoken.
+import type { Locator, Page } from "@playwright/test";
 
 /** Stands in for the browser's speech recognition, and shows taps, which videos don't. */
 export function installSimulatedSpeech(wordsPerSecond: number): void {
@@ -76,4 +77,26 @@ export function installSimulatedSpeech(wordsPerSecond: number): void {
     };
     window.addEventListener("pointerup", hide);
   });
+}
+
+/**
+ * Holds a talk button while saying `text`, letting go once `heard` settles, which should wait
+ * for the words to have been heard.
+ */
+export async function holdToTalk(
+  page: Page,
+  button: Locator,
+  text: string,
+  heard: () => Promise<void>,
+): Promise<void> {
+  await page.evaluate((said) => {
+    (window as unknown as { demoSpeech: { text: string } }).demoSpeech.text = said;
+  }, text);
+  await button.scrollIntoViewIfNeeded();
+  const box = await button.boundingBox();
+  if (box === null) throw new Error("the talk button isn't on screen");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await heard();
+  await page.mouse.up();
 }

@@ -14,9 +14,12 @@ export const gradingApi = {
       (r) => r.items,
     ),
   design: (key: string) => request<DesignOpened>("GET", `/design/${path(key)}`),
-  /** Marks written work with the grader; `id` is the attempt's, for work that counts as one. */
-  mark: (key: string, id: string, work: Work, text: string) =>
-    request<MarkedReply>("POST", `/items/${path(key)}/mark`, { id, work, text }),
+  /**
+   * Marks work with the grader, written or, if `spoken`, what was heard explaining it aloud;
+   * `id` is the attempt's, for work that counts as one.
+   */
+  mark: (key: string, id: string, work: Work, text: string, spoken = false) =>
+    request<MarkedReply>("POST", `/items/${path(key)}/mark`, { id, work, text, spoken }),
   flagged: () => request<{ cards: FlaggedCard[] }>("GET", "/cards/flagged").then((r) => r.cards),
   review: (key: string) =>
     request<{ review: Review; cleared: boolean }>("POST", `/cards/${path(key)}/review`),

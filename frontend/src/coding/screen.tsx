@@ -35,7 +35,12 @@ export function CodingScreen({
       <div class="learn">
         <Header onHome={onHome} onList={() => onOpen(null)} />
         <main class="learn-content">
-          <ItemView key={reading.key} item={reading} onDone={() => onOpen(null)} />
+          <ItemView
+            key={reading.key}
+            item={reading}
+            serverDictation={boot.server_dictation}
+            onDone={() => onOpen(null)}
+          />
         </main>
       </div>
     );

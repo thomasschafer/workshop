@@ -110,7 +110,14 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
         />
       );
     case "practice":
-      return <Practice key={route.track} track={route.track} onHome={goHome} />;
+      return (
+        <Practice
+          key={route.track}
+          track={route.track}
+          serverDictation={boot.server_dictation}
+          onHome={goHome}
+        />
+      );
     case "coding":
       return (
         <CodingScreen

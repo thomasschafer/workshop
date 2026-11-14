@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
+import { ExplainAloud } from "../grading/explain";
 import { MarkedView } from "../grading/marked";
 import type { Marked } from "../grading/types";
 import { useMarkdown } from "../hooks/useMarkdown";
@@ -39,7 +40,16 @@ type Result = { key: string; right: boolean | null };
  * saved on the device as it's given and synced when the server can be reached, so it can be
  * left at any moment, and works offline.
  */
-export function Practice({ track, onHome }: { track: TrackId; onHome: () => void }) {
+export function Practice({
+  track,
+  serverDictation,
+  onHome,
+}: {
+  track: TrackId;
+  /** Whether Whisper is ready on the server, for explaining answers aloud. */
+  serverDictation: boolean;
+  onHome: () => void;
+}) {
   const state = useLearning();
   const deck = state.deck;
   const [chosen, setChosen] = useState<string[] | null>(null);
@@ -114,6 +124,7 @@ export function Practice({ track, onHome }: { track: TrackId; onHome: () => void
             <ItemView
               key={`${current.key}-${results.length}`}
               item={current}
+              serverDictation={serverDictation}
               onDone={(right) => setResults((done) => [...done, { key: current.key, right }])}
             />
           </>
@@ -150,9 +161,11 @@ export function SyncChip({ status }: { status: SyncStatus }) {
 /** One item, until it's answered or marked, and what to do next. */
 export function ItemView({
   item,
+  serverDictation,
   onDone,
 }: {
   item: DeckItem;
+  serverDictation: boolean;
   onDone: (right: boolean | null) => void;
 }) {
   const shown = useRef(Date.now());
@@ -171,6 +184,7 @@ export function ItemView({
       {item.kind === "card" ? (
         <CardView
           item={item}
+          serverDictation={serverDictation}
           onRate={(rating) => {
             record(rating);
             onDone(null);
@@ -234,11 +248,13 @@ export function ItemView({
 
 function CardView({
   item,
+  serverDictation,
   onRate,
   onMarked,
   onFlag,
 }: {
   item: Extract<DeckItem, { kind: "card" }>;
+  serverDictation: boolean;
   onRate: (rating: Rating) => void;
   /** Once the grader has marked an answer in the learner's own words, which it records. */
   onMarked: () => void;
@@ -247,7 +263,8 @@ function CardView({
   const [revealed, setRevealed] = useState(false);
   const [flagging, setFlagging] = useState(false);
   const [note, setNote] = useState("");
-  const [writing, setWriting] = useState(false);
+  /** Answering in the learner's own words, written or explained aloud, for the grader. */
+  const [answering, setAnswering] = useState<"writing" | "aloud" | null>(null);
   const [written, setWritten] = useState("");
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
@@ -338,7 +355,23 @@ function CardView({
             </>
           )}
         </>
-      ) : writing ? (
+      ) : answering === "aloud" ? (
+        <>
+          <ExplainAloud
+            itemKey={item.key}
+            work="card"
+            question="Your answer, explained aloud"
+            serverDictation={serverDictation}
+            onMarked={(reply) => {
+              setMarked(reply.marked);
+              setRevealed(true);
+            }}
+          />
+          <button type="button" class="learn-link" onClick={() => setRevealed(true)}>
+            Show answer
+          </button>
+        </>
+      ) : answering === "writing" ? (
         <form
           class="learn-form"
           onSubmit={(event) => {
@@ -376,9 +409,14 @@ function CardView({
           <button type="button" class="pill primary wide" onClick={() => setRevealed(true)}>
             Show answer
           </button>
-          <button type="button" class="learn-link" onClick={() => setWriting(true)}>
-            Answer in my own words
-          </button>
+          <span class="learn-links">
+            <button type="button" class="learn-link" onClick={() => setAnswering("writing")}>
+              Answer in my own words
+            </button>
+            <button type="button" class="learn-link" onClick={() => setAnswering("aloud")}>
+              Explain it aloud
+            </button>
+          </span>
         </>
       )}
     </>

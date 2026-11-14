@@ -1,6 +1,7 @@
 import { useRef } from "preact/hooks";
 import { useDictation } from "../hooks/useDictation";
 import { usePushToTalk } from "../hooks/usePushToTalk";
+import "./dictate.css";
 
 /**
  * Dictating into a text box, as Workshop dictates code: hold the button and speak, and what's
@@ -11,10 +12,13 @@ export function DictateButton({
   serverDictation,
   onHeard,
   onNotice,
+  label = "Hold to dictate",
 }: {
   serverDictation: boolean;
   onHeard: (text: string) => void;
   onNotice: (text: string) => void;
+  /** What the button says while it isn't held. */
+  label?: string;
 }) {
   const { dictationMethod } = useDictation(serverDictation);
   const presses = useRef(0);
@@ -28,17 +32,13 @@ export function DictateButton({
     onNotice: (_tone, text) => onNotice(text),
   });
   if (dictationMethod === "keyboard") {
-    return <p class="muted coding-hint">To dictate, use your keyboard's microphone.</p>;
+    return <p class="muted dictate-hint">To dictate, use your keyboard's microphone.</p>;
   }
-  const label =
-    talk.held === "starting"
-      ? "Wait…"
-      : talk.held === "listening"
-        ? "Release to add it"
-        : "Hold to dictate";
+  const shown =
+    talk.held === "starting" ? "Wait…" : talk.held === "listening" ? "Release to add it" : label;
   const hearing = talk.live.find((press) => press.text)?.text ?? null;
   return (
-    <span class="coding-dictate">
+    <span class="dictate">
       <button
         type="button"
         class={`pill talk ${talk.held ?? ""}`}
@@ -46,9 +46,9 @@ export function DictateButton({
         onPointerUp={() => void talk.stop()}
         onPointerCancel={() => void talk.stop()}
       >
-        {label}
+        {shown}
       </button>
-      {hearing ? <span class="muted coding-hearing">{hearing}</span> : null}
+      {hearing ? <span class="muted dictate-hearing">{hearing}</span> : null}
     </span>
   );
 }

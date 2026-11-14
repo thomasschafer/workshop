@@ -36,6 +36,10 @@ if (prompt.includes("<work>")) {
         { error_type: "missed-edge-case", detail: `Nothing on the unusual cases in "${work}"` },
       ],
       feedback: "Think about **the unusual cases**.",
+      // Explained aloud, it's marked for clarity too.
+      ...(prompt.includes("explained this aloud")
+        ? { clarity: { score: 0.75, feedback: "Say the cost **before** the details." } }
+        : {}),
     }),
   ]);
   process.exit(0);

@@ -3,6 +3,7 @@ import type { Bootstrap } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
+import { ExplainAloud } from "../grading/explain";
 import { MarkedView } from "../grading/marked";
 import type { Marked } from "../grading/types";
 import { useConnection } from "../hooks/useConnection";
@@ -13,9 +14,9 @@ import { sameOutput } from "../learning/output";
 import { Markdown } from "../learning/practice";
 import type { Rating } from "../learning/types";
 import { LatestSaver, type VersionedSaver } from "../saver";
+import { DictateButton } from "../views/dictate";
 import { Keyboard } from "../views/keyboard";
 import { codingApi } from "./api";
-import { DictateButton } from "./dictate";
 import { EditorPane } from "./editorPane";
 import {
   describeCase,
@@ -295,6 +296,7 @@ export function ProblemView({
   ) : (
     <ReviewStep
       {...shared}
+      serverDictation={boot.server_dictation}
       onFinish={async (rating) => {
         await saver.flush();
         const done = await codingApi.finish(itemKey, newId(), rating);
@@ -459,6 +461,7 @@ function PlanStep({
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState<Marked | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
+  const [aloud, setAloud] = useState(false);
   // The grader marks the plan against the problem's approach, without giving it away, and what
   // it finds goes in the mistake log.
   const check = () => {
@@ -524,6 +527,22 @@ function PlanStep({
         </p>
       ) : null}
       {checked ? <MarkedView marked={checked} /> : null}
+      {aloud ? (
+        <ExplainAloud
+          itemKey={opened.key}
+          work="plan"
+          question={recall ? "From memory, explain how you'd solve it" : "Explain your plan"}
+          serverDictation={boot.server_dictation}
+          onMarked={(_, heard) => {
+            // Explained instead of written, what was said is the plan.
+            if (!session.plan.trim()) change((s) => ({ ...s, plan: heard }), true);
+          }}
+        />
+      ) : (
+        <button type="button" class="learn-link" disabled={!online} onClick={() => setAloud(true)}>
+          Explain your plan aloud, to be marked
+        </button>
+      )}
       {onSolve ? (
         <button type="button" class="learn-link" onClick={onSolve}>
           Solve it again instead
@@ -910,9 +929,11 @@ function ReviewStep({
   opened,
   session,
   online,
+  serverDictation,
   onFinish,
-}: StepProps & { onFinish: (rating: Rating) => Promise<void> }) {
+}: StepProps & { serverDictation: boolean; onFinish: (rating: Rating) => Promise<void> }) {
   const [saving, setSaving] = useState(false);
+  const [aloud, setAloud] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const suggested = suggestedRating(session);
   const solution = opened.solution;
@@ -954,6 +975,19 @@ function ReviewStep({
             ? "Loading how it's solved…"
             : "How it's solved comes from the server, once it can be reached."}
         </p>
+      )}
+      {recall ? null : aloud ? (
+        <ExplainAloud
+          itemKey={opened.key}
+          work="explanation"
+          question="Explain how your solution works, and what it costs"
+          serverDictation={serverDictation}
+          onMarked={() => {}}
+        />
+      ) : (
+        <button type="button" class="learn-link" disabled={!online} onClick={() => setAloud(true)}>
+          Explain your solution aloud, to be marked
+        </button>
       )}
       <p class="learn-question muted">{recall ? "Did your plan match?" : "How did it go?"}</p>
       <div class="learn-ratings">

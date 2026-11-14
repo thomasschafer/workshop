@@ -131,19 +131,6 @@
   font-size: 13px;
 }
 
-.coding-dictate {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.coding-hearing {
-  font-size: 14px;
-}
-
 .coding-statement > summary {
   cursor: pointer;
   font-weight: 600;

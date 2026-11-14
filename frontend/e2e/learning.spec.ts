@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BrowserContext, devices, expect, type Page, test } from "@playwright/test";
 import { LEARNING_HOME, LEARNING_PORT } from "./fixture";
+import { holdToTalk, installSimulatedSpeech } from "./speech";
 
 // The tests share one phone and run in order, like one learner using the app, from a server
 // that starts with nothing done and the sample pack.
@@ -77,6 +78,7 @@ test.beforeAll(async ({ browser }) => {
     baseURL: `http://127.0.0.1:${LEARNING_PORT}`,
   });
   phone = await context.newPage();
+  await phone.addInitScript(installSimulatedSpeech, 20);
   await phone.goto(`/?token=${token()}`);
 });
 
@@ -362,5 +364,47 @@ test("marks a card answered in the learner's own words", async () => {
   };
   expect(log.mistakes.some((m) => m.source === "grader" && m.detail.includes("Roughly"))).toBe(
     true,
+  );
+});
+
+test("explains a card aloud, marked for what's right and how clearly it's put", async () => {
+  await phone.goto("/practice/review");
+  await phone.getByRole("button", { name: "Explain it aloud" }).tap();
+  const explain = phone.getByRole("region", { name: "Explain it aloud" });
+  await holdToTalk(
+    phone,
+    explain.getByRole("button", { name: "Hold to explain" }),
+    "it sinks",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("sinks"),
+  );
+  await holdToTalk(
+    phone,
+    explain.getByRole("button", { name: "Hold to explain" }),
+    "down one path",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("path"),
+  );
+  // Each hold adds to what was said.
+  await expect(explain.getByLabel("What you said")).toHaveText("it sinks down one path");
+  await explain.getByRole("button", { name: "Mark my explanation" }).tap();
+  const marked = phone.getByRole("region", { name: "Marked" });
+  await expect(marked).toContainText("50%");
+  await expect(marked.getByRole("region", { name: "Clarity" })).toContainText(
+    "How clearly you put it: 75%",
+  );
+  await expect(marked.getByRole("region", { name: "Clarity" }).locator("strong")).toHaveText(
+    "before",
+  );
+  await expect(phone.getByRole("region", { name: "Answer" })).toBeVisible();
+  await phone.getByRole("button", { name: "Next" }).tap();
+  // It's an attempt, and its mistakes are in the log, as a written answer's are.
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { source: string; detail: string }[];
+  };
+  expect(
+    log.mistakes.some((m) => m.source === "grader" && m.detail.includes("it sinks down one path")),
+  ).toBe(true);
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
   );
 });

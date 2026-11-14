@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BrowserContext, devices, expect, type Page, test } from "@playwright/test";
 import { CODING_HOME, CODING_PORT } from "./fixture";
-import { installSimulatedSpeech } from "./speech";
+import { holdToTalk, installSimulatedSpeech } from "./speech";
 
 // One learner on one phone, working through a problem of the sample pack's a step at a time,
 // with Helix's keybindings and Workshop's own keyboard, from a server that starts with nothing
@@ -103,7 +103,7 @@ test("understands and plans a problem, each step saved, and carries on after a r
   if (box === null) throw new Error("the dictate button isn't on screen");
   await phone.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await phone.mouse.down();
-  await expect(phone.locator(".coding-hearing")).toContainText("the answer");
+  await expect(phone.locator(".dictate-hearing")).toContainText("the answer");
   await phone.mouse.up();
   await expect(plan).toHaveValue(
     "Keep a set of the words seen so far.\nthe first one already in it is the answer",
@@ -225,6 +225,26 @@ test("submits, shows a small input it fails on, then passes and is reviewed", as
   await expect(phone.getByRole("region", { name: "Approach" })).toContainText("set");
   // Two submissions and a hint, so it's suggested it was hard.
   await expect(phone.locator(".rating.suggested")).toHaveText("Hard");
+
+  // Explained aloud, the solution is marked against the approach, with the code it explains,
+  // and for how clearly it's put; its mistakes are kept, and the attempt is still the rating.
+  await phone.getByRole("button", { name: "Explain your solution aloud, to be marked" }).tap();
+  const explain = phone.getByRole("region", { name: "Explain it aloud" });
+  await holdToTalk(
+    phone,
+    explain.getByRole("button", { name: "Hold to explain" }),
+    "each word goes in a set and the first one seen twice is printed",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("printed"),
+  );
+  await explain.getByRole("button", { name: "Mark my explanation" }).tap();
+  const marked = phone.getByRole("region", { name: "Marked" });
+  await expect(marked.getByRole("region", { name: "Clarity" })).toContainText("75%");
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { item: string; source: string; detail: string }[];
+  };
+  expect(
+    log.mistakes.some((m) => m.item === "sample/first-repeat" && m.detail.includes("seen twice")),
+  ).toBe(true);
   await phone.getByRole("button", { name: "Good" }).tap();
   await expect(phone.getByRole("region", { name: "Done" })).toContainText("comes back in about");
   await expect.poll(() => overviewStatus("sample/first-repeat")).toBe("done");
@@ -238,6 +258,18 @@ test("comes back as a quick recall, comparing the plan with the approach", async
   // The grader checks it first, if asked.
   await phone.getByRole("button", { name: "Check my plan" }).tap();
   await expect(phone.getByRole("region", { name: "Marked" })).toContainText("50%");
+  // Or it's explained aloud, and marked for how clearly it's put too.
+  await phone.getByRole("button", { name: "Explain your plan aloud, to be marked" }).tap();
+  const explain = phone.getByRole("region", { name: "Explain it aloud" });
+  await expect(explain).toContainText("From memory, explain how you'd solve it");
+  await holdToTalk(
+    phone,
+    explain.getByRole("button", { name: "Hold to explain" }),
+    "I keep a set and stop at the first repeat",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("repeat"),
+  );
+  await explain.getByRole("button", { name: "Mark my explanation" }).tap();
+  await expect(phone.getByRole("region", { name: "Clarity" })).toContainText("75%");
   await phone.getByRole("button", { name: "Compare with the approach" }).tap();
   await expect(phone.locator(".coding-step.current")).toHaveText("Review");
   await expect(phone.getByRole("region", { name: "Your plan" })).toContainText(

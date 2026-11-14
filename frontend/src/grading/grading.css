@@ -67,3 +67,37 @@
   flex-direction: column;
   gap: 8px;
 }
+
+.explain {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.explain-hint {
+  margin: 0;
+  font-size: 14px;
+}
+
+blockquote.explain-heard {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  overflow-wrap: anywhere;
+}
+
+textarea.explain-heard {
+  min-height: 6rem;
+}
+
+.marked-clarity {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.marked-clarity > .tracks-heading {
+  margin-bottom: 4px;
+}

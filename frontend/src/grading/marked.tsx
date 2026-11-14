@@ -11,6 +11,14 @@ export function MarkedView({ marked }: { marked: Marked }) {
     <section class="marked" aria-label="Marked">
       <p class="marked-score">{Math.round(marked.score * 100)}%</p>
       <Markdown text={marked.feedback} />
+      {marked.clarity ? (
+        <section class="marked-clarity" aria-label="Clarity">
+          <h3 class="tracks-heading">
+            How clearly you put it: {Math.round(marked.clarity.score * 100)}%
+          </h3>
+          <Markdown text={marked.clarity.feedback} />
+        </section>
+      ) : null}
       <ul class="marked-points">
         {marked.points.map((point) => (
           <li key={point.point} class={`marked-point ${point.met}`}>
