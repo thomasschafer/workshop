@@ -2,7 +2,7 @@
 
 A pack is a directory of things to learn, usually a git repo of its own. Workshop reads it as it is, so you can write and edit items in any editor, and keep your pack private while Workshop stays public. Workshop comes with a small sample pack, in `packs/sample`, which it uses until you configure your own.
 
-What you've done stays in Workshop's own data, never in the pack: attempts, when each item is due again, and cards you've flagged.
+What you've done stays in Workshop's own data, never in the pack: attempts, when each item is due again, cards you've flagged, and your code and plans for coding problems.
 
 ## Layout
 
@@ -12,10 +12,11 @@ my-pack/
   items/
     cards/heaps.md       an item in one file
     probability/dice.md
-    coding/two-sums/     an item with files of its own, such as solutions
+    coding/pair-sums/    an item with files of its own, such as solutions
       item.md
       reference.py
       ...
+    reading/lifetimes.md
   prompts/
     examiner.md          a prompt add-on
 ```
@@ -47,7 +48,8 @@ skills = ["probability.conditional"]
 mastery = 0.8                    # the default
 by = "2027-06-30"                # optional
 
-# Text added to a coach role's instructions, to shape its style for this pack.
+# Text added to a coach role's instructions, to shape its style for this pack. The tutor gives
+# hints on coding problems.
 [prompts]
 tutor = "prompts/tutor.md"
 examiner = "prompts/examiner.md"
@@ -81,7 +83,7 @@ Every item can have:
 
 | Field | |
 | --- | --- |
-| `kind` | `card`, `mental-maths`, `probability`, `coding` or `design`. Required. |
+| `kind` | `card`, `mental-maths`, `probability`, `coding`, `reading` or `design`. Required. |
 | `skills` | The skills it practises, from `pack.toml`. Required. |
 | `id` | Lowercase letters and digits, in words joined by hyphens. Defaults to the file's name, or the directory's for an `item.md`. Your history is kept by id, so changing it starts the item afresh. |
 | `title` | What it's called in lists, if not the start of its prompt. |
@@ -162,20 +164,85 @@ Answers can be typed as fractions, decimals or percentages. `## Solution` (requi
 
 ### Coding
 
-A problem to solve in code, as a directory with an `item.md` and its files. In the Coding track by default.
+A problem to solve in code, in Python or Rust, as a directory with an `item.md` and its files. In the Coding track by default. Programs read their input on stdin and print their answer; outputs are compared line by line, ignoring whitespace at the ends of lines and blank lines before and after.
 
 ```toml
 kind = "coding"
-skills = ["algorithms.graphs"]
-languages = ["python", "rust"]     # what it can be solved in
-read_only = ["cpp"]                # languages whose reference can be read, but not written in
-reference = ["reference.py", "reference.rs"]
-brute_force = "brute.py"           # slow but obviously right
-tests = "tests.toml"               # hand-written cases
-inputs = "inputs.py"               # prints a random input for the seed it's given
+skills = ["algorithms.hashing"]
+languages = ["python", "rust"]             # what it can be solved in
+reference = ["reference.py", "reference.rs"] # a solution known to be right, in each language
+starter = ["starter.py", "starter.rs"]       # what the learner starts with, in each language
+brute_force = "brute.py"                   # slow but obviously right
+inputs = "inputs.py"                       # prints a random input
+tests = "tests.toml"                       # examples, and hidden tests
+random_inputs = 100                        # optional: how many random inputs the check compares on
 ```
 
-The check compares the reference solutions with the brute force on random inputs from `inputs`, and runs the tests against each reference. Sections: `## Hints` and `## Notes`. For now `workshop pack check` checks a coding item's files are in place; running them comes with the Coding track.
+Each language needs a reference solution and a starter, told apart by their files' extensions: `.py` for Python, `.rs` for Rust. A starter usually reads the input and leaves a function to fill in, so the learner can get straight to the problem on a phone; it must build, unfinished as it is. The brute force and the inputs program can be in either language.
+
+The inputs program is run with two arguments, a seed and a size from 1 to 10, and prints one input. It must make the same input from the same seed, and should make bigger inputs for bigger sizes. Inputs are tried from the smallest size up, so the input a wrong solution is first found failing on, which the learner is shown, is a small one.
+
+`tests.toml` has the examples the learner sees and can run while coding, and the tests kept from them until they submit, at least one of each:
+
+```toml
+[[example]]
+input = """
+5 6
+1 5 3 3 2
+"""
+output = "2"
+
+[[test]]
+input = "1 2\n1\n"
+output = "0"
+```
+
+Sections: `## Approach` (required), how it's meant to be solved, shown once it's solved and when it comes back for review; `## Hints`, a list of nudges from gentlest to most telling, which the learner can reveal one at a time; and `## Notes`.
+
+`workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. It needs Python and Rust installed; an item that can't be run for want of one is reported as skipped rather than failed.
+
+A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed or dictated; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution. When it comes back for review, it's usually to recall the approach: writing down how to solve it, then comparing that with the item's approach, which takes a few minutes rather than solving it again. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
+
+### Reading
+
+Code to read, and a question about it, such as what it prints, what's wrong with it, or what it costs. In the Coding track by default, and short, so it works offline. The prompt shows the code in one code block, marked `cpp`, `python` or `rust`; C++ is only for reading.
+
+Either the question is what the code prints, which the learner types:
+
+````markdown
++++
+kind = "reading"
+skills = ["cpp.semantics"]
+prints = "-3 -1"
++++
+What does this print?
+
+```cpp
+#include <iostream>
+
+int main() {
+    std::cout << -7 / 2 << " " << -7 % 2 << "\n";
+}
+```
+
+## Explanation
+
+Integer division rounds towards zero, and the remainder takes the sign of the number divided.
+````
+
+or it's a choice, with `choices` and `answer`, the right one, counting from 1:
+
+```toml
+choices = ["Nothing: it prints 1", "It reads memory that's been freed", "It doesn't compile"]
+answer = 2
+
+[check]
+expect = "sanitizer-error"
+```
+
+`## Explanation` (required) is shown after answering.
+
+The check builds and runs the code. For what it prints, the code must print exactly that. For a choice, `[check]` says what the code must do: `expect = "compiles"`, the default; `"compile-error"`, failing to build; `"sanitizer-error"`, for C++, stopped by the address and undefined behaviour sanitizers, such as for reading freed memory; or `"output"`, printing the `output` given, such as a count of the copies or moves the code makes, to show what it costs. Without a C++ compiler (`c++`, `clang++` or `g++`), C++ items are reported as skipped.
 
 ### Design
 
@@ -226,4 +293,4 @@ loop {
 workshop pack check ~/my-pack
 ```
 
-reads every item, runs each one's check, and lists what's wrong, exiting with an error if anything is. Without a path, it checks the packs in your config, or the sample pack if there are none. CI runs it on the sample pack.
+reads every item, runs each one's check, and lists what's wrong, exiting with an error if anything is. Items that can't be checked here, such as C++ without a compiler, are listed as skipped, with what to install, and don't count as wrong. Without a path, it checks the packs in your config, or the sample pack if there are none. CI runs it on the sample pack.

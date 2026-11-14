@@ -61,7 +61,7 @@ This gives Workshop an HTTPS address on your tailnet, and prints a link and QR c
 
 The first time you open Workshop, a short setup walks you through choosing your language and model and logging in to Advent of Code. If you'd rather not paste your session cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
-Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on or the cards due for review. Below it are the tracks: Advent of Code, and tracks of short items from a pack.
+Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on or the cards due for review. Below it are the tracks: Advent of Code, Coding, and tracks of short items from a pack.
 
 ## Packs and practice
 
@@ -71,7 +71,13 @@ Practice comes in steps of a few minutes, and each answer is saved as you give i
 
 Short items work offline: once a phone has opened Workshop, it keeps what it needs to practise, and syncs your answers when it can reach the server again.
 
-`workshop pack check` checks every item in a pack: that it can be read, that a probability question's simulation agrees with its answer, and that a mental maths template makes sensible questions.
+## Coding
+
+The Coding track has problems to solve in Python or Rust, fully on a phone, and C++ to read. A problem is a chain of short steps: understand it, by working out what an example prints; plan, typed or dictated; code, in Workshop's editor, with Helix's keybindings and Workshop's own keyboard if you like, and the language server; then submit it, to hidden tests and a comparison with a slow but sure solution on random inputs, which shows you a small input it fails on if it's wrong. Last, compare it with how it's meant to be solved, and say how it went. Each step is saved as you go, your code included, so you can stop at any moment and Continue picks up where you were, on any device.
+
+A tutor gives hints that don't give the problem away, through your discussion model. Problems come back for review as a quick recall of how to solve them, or solved again if they went badly. Code to read asks what it prints, what's wrong with it or what it costs, and works offline; running code and the tutor need the server.
+
+`workshop pack check` checks every item in a pack: that it can be read, that a probability question's simulation agrees with its answer, that a mental maths template makes sensible questions, that a coding problem's solutions pass its tests and agree with its brute force on random inputs, and that code to read does what its answer says.
 
 To try Workshop before logging in, or outside December, open the practice puzzle from the bottom of the puzzle list.
 
