@@ -4,10 +4,11 @@
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
-use workshop_pack::{Coding, Content, Item, Reading, ReadingCheck, Verdict, output};
+use workshop_pack::{Coding, Content, Item, Language, Reading, ReadingCheck, Verdict, output};
 
 use crate::grade::{self, Graded, Oracle, describe};
-use crate::programs::{Built, Flavour, Runtime};
+use crate::programs::{Built, Flavour, Run, Runtime};
+use workshop_runner::Ending;
 
 /// Checks items' programs by building and running them, for `Pack::check`.
 pub struct Checker {
@@ -195,8 +196,14 @@ pub async fn check_reading(
     reading: &Reading,
     cancel: &CancellationToken,
 ) -> Result<Verdict> {
-    let flavour = match reading.check {
-        ReadingCheck::SanitizerError => Flavour::Sanitized,
+    if let Err(problem) = reading.check.fits(reading.language) {
+        return Ok(Verdict::Failed(problem));
+    }
+    // Rust code is run as a debug build, as it usually is while it's written, so an overflow
+    // panics. C++ is only built with sanitizers when the answer is that they find something, as
+    // they change what the code does.
+    let flavour = match (reading.language, &reading.check) {
+        (Language::Rust, _) | (Language::Cpp, ReadingCheck::SanitizerError) => Flavour::Checked,
         _ => Flavour::Plain,
     };
     let built = runtime
@@ -243,21 +250,59 @@ pub async fn check_reading(
                 ))
             }
         }
-        ReadingCheck::SanitizerError => {
-            let found = run.stderr.contains("Sanitizer") || run.stderr.contains("runtime error");
-            if !run.succeeded() && found {
-                Verdict::Passed("the sanitizers stop the code, as the answer says".to_owned())
+        ReadingCheck::Runs => {
+            if run.succeeded() {
+                Verdict::Passed("the code runs without an error".to_owned())
             } else {
                 Verdict::Failed(format!(
-                    "built with sanitizers, the code ran without them finding anything, though the answer says they should:\n{}",
+                    "the code {}, though the answer says it runs without an error:\n{}",
+                    describe(&run),
                     run.stderr.trim_end()
                 ))
             }
         }
+        ReadingCheck::SanitizerError => {
+            let found = run.stderr.contains("Sanitizer") || run.stderr.contains("runtime error");
+            stopped(
+                &run,
+                found,
+                "the sanitizers stop the code",
+                "built with sanitizers, the code ran without being stopped by them",
+            )
+        }
+        ReadingCheck::Panics => stopped(
+            &run,
+            run.stderr.contains("panicked at"),
+            "the code panics",
+            "the code ran without panicking",
+        ),
+        ReadingCheck::Raises => stopped(
+            &run,
+            run.stderr.contains("Traceback (most recent call last)"),
+            "the code stops with an exception",
+            "the code ran without stopping with an exception",
+        ),
         ReadingCheck::Compiles | ReadingCheck::CompileError => {
             unreachable!("decided once it's built")
         }
     })
+}
+
+/// Whether a run stopped with the error the answer says it should, which `found` says was seen.
+fn stopped(run: &Run, found: bool, passed: &str, failed: &str) -> Verdict {
+    if run.ending == Ending::TimedOut {
+        Verdict::Failed(format!(
+            "{}, though the answer says it stops with an error",
+            describe(run)
+        ))
+    } else if !run.succeeded() && found {
+        Verdict::Passed(format!("{passed}, as the answer says"))
+    } else {
+        Verdict::Failed(format!(
+            "{failed}, though the answer says it should:\n{}",
+            run.stderr.trim_end()
+        ))
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -292,23 +337,255 @@ mod tests {
         let report = pack.check(&checker).await;
         let failures: Vec<String> = report.failures().iter().map(ToString::to_string).collect();
         assert!(failures.is_empty(), "{failures:#?}");
-        let has_cpp = checker.runtime.find("c++").is_some()
-            || checker.runtime.find("clang++").is_some()
-            || checker.runtime.find("g++").is_some();
+        let has_cpp = has_cpp(&checker.runtime);
         for checked in &report.items {
             match &checked.verdict {
                 Verdict::Passed(_) => {}
                 // Only C++ can be missing where the tests run, as Python and Rust are needed for
                 // Workshop's own.
                 Verdict::Skipped(reason) => {
-                    assert!(
-                        !has_cpp && checked.path.contains("/reading/"),
-                        "{}: {reason}",
-                        checked.path
+                    let item = pack.items.iter().find(|i| i.path == checked.path).unwrap();
+                    let in_cpp = matches!(
+                        &item.content,
+                        Content::Reading(reading) if reading.language == Language::Cpp
                     );
+                    assert!(!has_cpp && in_cpp, "{}: {reason}", checked.path);
                     assert!(reason.contains("no C++ compiler"), "{reason}");
                 }
                 Verdict::Failed(_) => unreachable!("listed above"),
+            }
+        }
+    }
+
+    fn has_cpp(runtime: &Runtime) -> bool {
+        ["c++", "clang++", "g++"]
+            .iter()
+            .any(|compiler| runtime.find(compiler).is_some())
+    }
+
+    #[tokio::test]
+    async fn checks_reading_items_in_each_language_by_what_it_means_there() {
+        use workshop_pack::Question;
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime {
+            scratch: dir.path().to_owned(),
+            environment: Vec::new(),
+            build_timeout: Duration::from_secs(60),
+            run_timeout: Duration::from_secs(20),
+            sandbox: Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
+        };
+        let prints = |output: &str| ReadingCheck::Prints(output.to_owned());
+        let borrowed_after_move = "fn main() {\n    let a = String::from(\"x\");\n    let b = a;\n    println!(\"{a} {b}\");\n}\n";
+        // black_box keeps the compiler from seeing the overflow coming, and refusing to build it.
+        let overflows = "fn main() {\n    let x: u8 = 255;\n    println!(\"{}\", x + std::hint::black_box(1));\n}\n";
+        let use_after_free = "#include <iostream>\n#include <vector>\nint main() {\n    std::vector<int> v = {1};\n    int& first = v[0];\n    v.push_back(2);\n    std::cout << first << \"\\n\";\n}\n";
+        let cases: &[(Language, &str, ReadingCheck, bool, &str)] = &[
+            (
+                Language::Python,
+                "print(1 + 2)\n",
+                prints("3"),
+                true,
+                "prints what",
+            ),
+            (
+                Language::Python,
+                "print(1 + 2)\n",
+                prints("4"),
+                false,
+                "but it prints",
+            ),
+            (
+                Language::Python,
+                "x = [1]\n",
+                ReadingCheck::Runs,
+                true,
+                "runs",
+            ),
+            (
+                Language::Python,
+                "{}['k']\n",
+                ReadingCheck::Runs,
+                false,
+                "KeyError",
+            ),
+            (
+                Language::Python,
+                "{}['k']\n",
+                ReadingCheck::Raises,
+                true,
+                "exception",
+            ),
+            (
+                Language::Python,
+                "print(1)\n",
+                ReadingCheck::Raises,
+                false,
+                "without stopping",
+            ),
+            // A syntax error isn't an exception the code raises as it runs.
+            (
+                Language::Python,
+                "def (:\n",
+                ReadingCheck::Raises,
+                false,
+                "SyntaxError",
+            ),
+            (
+                Language::Python,
+                "print(1)\n",
+                ReadingCheck::Compiles,
+                false,
+                "doesn't fit",
+            ),
+            (
+                Language::Python,
+                "def (:\n",
+                ReadingCheck::CompileError,
+                false,
+                "doesn't fit",
+            ),
+            (
+                Language::Rust,
+                overflows,
+                ReadingCheck::Panics,
+                true,
+                "panics",
+            ),
+            (
+                Language::Rust,
+                overflows,
+                ReadingCheck::Runs,
+                false,
+                "overflow",
+            ),
+            (
+                Language::Rust,
+                overflows,
+                ReadingCheck::Compiles,
+                true,
+                "builds",
+            ),
+            (
+                Language::Rust,
+                "fn main() { println!(\"{}\", 6 * 7); }\n",
+                prints("42"),
+                true,
+                "prints what",
+            ),
+            (
+                Language::Rust,
+                "fn main() {}\n",
+                ReadingCheck::Panics,
+                false,
+                "without panicking",
+            ),
+            (
+                Language::Rust,
+                borrowed_after_move,
+                ReadingCheck::CompileError,
+                true,
+                "fails to build",
+            ),
+            (
+                Language::Rust,
+                borrowed_after_move,
+                ReadingCheck::Compiles,
+                false,
+                "borrow of moved value",
+            ),
+            (
+                Language::Rust,
+                "fn main() {}\n",
+                ReadingCheck::CompileError,
+                false,
+                "builds, though",
+            ),
+            (
+                Language::Rust,
+                overflows,
+                ReadingCheck::SanitizerError,
+                false,
+                "doesn't fit",
+            ),
+            (
+                Language::Rust,
+                overflows,
+                ReadingCheck::Raises,
+                false,
+                "doesn't fit",
+            ),
+            (
+                Language::Cpp,
+                use_after_free,
+                ReadingCheck::SanitizerError,
+                true,
+                "sanitizers stop",
+            ),
+            (
+                Language::Cpp,
+                "int main() {}\n",
+                ReadingCheck::SanitizerError,
+                false,
+                "without being stopped",
+            ),
+            (
+                Language::Cpp,
+                "int main() { return 1; }\n",
+                ReadingCheck::Runs,
+                false,
+                "crashed",
+            ),
+            (
+                Language::Cpp,
+                "int main() { x; }\n",
+                ReadingCheck::CompileError,
+                true,
+                "fails to build",
+            ),
+            (
+                Language::Cpp,
+                "int main() {}\n",
+                ReadingCheck::Panics,
+                false,
+                "doesn't fit",
+            ),
+            (
+                Language::Cpp,
+                "int main() {}\n",
+                ReadingCheck::Raises,
+                false,
+                "doesn't fit",
+            ),
+        ];
+        let has_cpp = has_cpp(&runtime);
+        for (language, code, check, passes, says) in cases {
+            let reading = Reading {
+                language: *language,
+                code: (*code).to_owned(),
+                question: Question::Choice {
+                    choices: vec!["a".to_owned(), "b".to_owned()],
+                    answer: 0,
+                },
+                check: check.clone(),
+                explanation: String::new(),
+            };
+            let verdict = check_reading(&runtime, &reading, &CancellationToken::new())
+                .await
+                .unwrap();
+            let case = format!("{} {check:?}: {verdict:?}", language.name());
+            match verdict {
+                Verdict::Passed(why) => {
+                    assert!(*passes, "{case}");
+                    assert!(why.contains(says), "{case}");
+                }
+                Verdict::Failed(why) => {
+                    assert!(!*passes, "{case}");
+                    assert!(why.contains(says), "{case}");
+                }
+                Verdict::Skipped(why) => {
+                    assert!(*language == Language::Cpp && !has_cpp, "{case}");
+                    assert!(why.contains("no C++ compiler"), "{case}");
+                }
             }
         }
     }

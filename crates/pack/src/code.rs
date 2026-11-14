@@ -5,8 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A language a pack's programs are written in. Learners write code in Python and Rust; C++ is
-/// for reading.
+/// A language a pack's programs are written in. Learners write code in Python and Rust, and
+/// read code in any of them; C++ is only for reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -148,17 +148,89 @@ pub enum Question {
     Choice { choices: Vec<String>, answer: usize },
 }
 
-/// What building and running the code must do for the item's answer to be right.
+/// What building and running the code must do for the item's answer to be right. Which of
+/// these an item can use depends on its language: see [`ReadingCheck::fits`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadingCheck {
     /// It builds and runs, printing this.
     Prints(String),
-    /// It builds without errors.
+    /// It builds without errors. For Rust and C++.
     Compiles,
-    /// It fails to build.
+    /// It fails to build. For Rust and C++.
     CompileError,
+    /// It builds and runs to the end without an error.
+    Runs,
     /// Built with sanitizers, it stops with an error they found, such as reading freed memory.
+    /// For C++.
     SanitizerError,
+    /// It panics as it runs, such as on an integer overflowing in a debug build. For Rust.
+    Panics,
+    /// It stops with an exception it doesn't catch. For Python.
+    Raises,
+}
+
+impl ReadingCheck {
+    /// What an item asking for a choice is checked by when it doesn't say: that the code builds,
+    /// or for Python, which isn't built ahead of running, that it runs.
+    pub fn default_for(language: Language) -> Self {
+        match language {
+            Language::Python => Self::Runs,
+            Language::Rust | Language::Cpp => Self::Compiles,
+        }
+    }
+
+    /// As written in an item's `[check]`.
+    fn expect(&self) -> &'static str {
+        match self {
+            Self::Prints(_) => "output",
+            Self::Compiles => "compiles",
+            Self::CompileError => "compile-error",
+            Self::Runs => "runs",
+            Self::SanitizerError => "sanitizer-error",
+            Self::Panics => "panic",
+            Self::Raises => "exception",
+        }
+    }
+
+    /// Whether it means anything for code in this language, or why not.
+    pub fn fits(&self, language: Language) -> Result<(), String> {
+        // How each language stops at a mistake it finds as the code runs.
+        let failure = match language {
+            Language::Python => "exception",
+            Language::Rust => "panic",
+            Language::Cpp => "sanitizer-error",
+        };
+        let instead = match (self, language) {
+            (Self::Prints(_) | Self::Runs, _)
+            | (Self::Compiles | Self::CompileError, Language::Rust | Language::Cpp)
+            | (Self::SanitizerError, Language::Cpp)
+            | (Self::Panics, Language::Rust)
+            | (Self::Raises, Language::Python) => return Ok(()),
+            (Self::Compiles, _) => {
+                "Python isn't built ahead of running it, so nothing is compiled; use expect = \"runs\" for code that runs without an error".to_owned()
+            }
+            (Self::CompileError, _) => {
+                "Python isn't built ahead of running it, so there are no compile errors; use expect = \"exception\" for code that stops with one".to_owned()
+            }
+            (Self::SanitizerError, _) => format!(
+                "sanitizers are only for C++; for {}, use expect = \"{failure}\"",
+                language.name()
+            ),
+            (Self::Panics, _) => format!(
+                "panics are Rust's; for {}, use expect = \"{failure}\"",
+                language.name()
+            ),
+            (Self::Raises, _) => format!(
+                "expect = \"exception\" is for Python; for {}, use expect = \"{failure}\"",
+                language.name()
+            ),
+        };
+        Err(format!(
+            "expect = \"{}\" doesn't fit {} code: {instead}",
+            self.expect(),
+            language.name()
+        ))
+    }
 }
 
 const MAX_RANDOM_INPUTS: u32 = 10_000;
@@ -366,16 +438,14 @@ impl Reading {
                 );
             }
             (Some(check), None) => check,
-            (None, None) => ReadingCheck::Compiles,
+            (None, None) => ReadingCheck::default_for(language),
             (None, Some(check)) => match (check.expect.as_str(), check.output) {
                 ("compiles", None) => ReadingCheck::Compiles,
                 ("compile-error", None) => ReadingCheck::CompileError,
-                ("sanitizer-error", None) if language == Language::Cpp => {
-                    ReadingCheck::SanitizerError
-                }
-                ("sanitizer-error", None) => {
-                    return Err("sanitizers are only for C++".to_owned());
-                }
+                ("runs", None) => ReadingCheck::Runs,
+                ("sanitizer-error", None) => ReadingCheck::SanitizerError,
+                ("panic", None) => ReadingCheck::Panics,
+                ("exception", None) => ReadingCheck::Raises,
                 ("output", Some(output)) => ReadingCheck::Prints(output),
                 ("output", None) => {
                     return Err("with expect = \"output\", give the output it prints".to_owned());
@@ -385,11 +455,12 @@ impl Reading {
                 }
                 (other, None) => {
                     return Err(format!(
-                        "expect can be compiles, compile-error, sanitizer-error or output, not {other:?}"
+                        "expect can be compiles, compile-error, runs, sanitizer-error, panic, exception or output, not {other:?}"
                     ));
                 }
             },
         };
+        check.fits(language)?;
         Ok(Self {
             language,
             code,

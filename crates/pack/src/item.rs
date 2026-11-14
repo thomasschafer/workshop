@@ -845,9 +845,116 @@ mod tests {
     }
 
     fn reading(fields: &str) -> String {
+        reading_in("cpp", "int main() {}", fields)
+    }
+
+    fn reading_in(fence: &str, code: &str, fields: &str) -> String {
         format!(
-            "+++\nkind = \"reading\"\nskills = [\"dice\"]\n{fields}+++\nWhat does it print?\n\n```cpp\nint main() {{}}\n```\n\n## Explanation\n\nNothing.\n"
+            "+++\nkind = \"reading\"\nskills = [\"dice\"]\n{fields}+++\nWhat does it print?\n\n```{fence}\n{code}\n```\n\n## Explanation\n\nNothing.\n"
         )
+    }
+
+    fn reading_check(fence: &str, expect: &str) -> Result<crate::ReadingCheck, String> {
+        let fields =
+            format!("choices = [\"a\", \"b\"]\nanswer = 1\n[check]\nexpect = \"{expect}\"\n");
+        let item = parse(&reading_in(fence, "x", &fields))?;
+        let Content::Reading(reading) = item.content else {
+            panic!("not reading");
+        };
+        Ok(reading.check)
+    }
+
+    #[test]
+    fn reads_reading_items_in_each_language() {
+        use crate::{Language, ReadingCheck};
+        for (fence, language, default) in [
+            ("python", Language::Python, ReadingCheck::Runs),
+            ("py", Language::Python, ReadingCheck::Runs),
+            ("rust", Language::Rust, ReadingCheck::Compiles),
+            ("rs", Language::Rust, ReadingCheck::Compiles),
+            ("cpp", Language::Cpp, ReadingCheck::Compiles),
+            ("c++", Language::Cpp, ReadingCheck::Compiles),
+        ] {
+            let item = parse(&reading_in(
+                fence,
+                "x",
+                "choices = [\"a\", \"b\"]\nanswer = 1\n",
+            ))
+            .unwrap();
+            let Content::Reading(reading) = item.content else {
+                panic!("not reading");
+            };
+            assert_eq!(reading.language, language, "{fence}");
+            assert_eq!(reading.check, default, "{fence}");
+            let prints = parse(&reading_in(fence, "x", "prints = \"1\"\n")).unwrap();
+            let Content::Reading(prints) = prints.content else {
+                panic!("not reading");
+            };
+            assert_eq!(
+                prints.check,
+                ReadingCheck::Prints("1".to_owned()),
+                "{fence}"
+            );
+            assert_eq!(
+                reading_check(fence, "runs"),
+                Ok(ReadingCheck::Runs),
+                "{fence}"
+            );
+        }
+        assert_eq!(
+            reading_check("rust", "compiles"),
+            Ok(ReadingCheck::Compiles)
+        );
+        assert_eq!(
+            reading_check("rust", "compile-error"),
+            Ok(ReadingCheck::CompileError)
+        );
+        assert_eq!(reading_check("rust", "panic"), Ok(ReadingCheck::Panics));
+        assert_eq!(
+            reading_check("cpp", "compile-error"),
+            Ok(ReadingCheck::CompileError)
+        );
+        assert_eq!(
+            reading_check("cpp", "sanitizer-error"),
+            Ok(ReadingCheck::SanitizerError)
+        );
+        assert_eq!(
+            reading_check("python", "exception"),
+            Ok(ReadingCheck::Raises)
+        );
+    }
+
+    #[test]
+    fn refuses_checks_that_dont_fit_the_language() {
+        for (fence, expect, says) in [
+            ("python", "compiles", "use expect = \"runs\""),
+            ("python", "compile-error", "use expect = \"exception\""),
+            (
+                "python",
+                "sanitizer-error",
+                "for Python, use expect = \"exception\"",
+            ),
+            ("python", "panic", "for Python, use expect = \"exception\""),
+            (
+                "rust",
+                "sanitizer-error",
+                "for Rust, use expect = \"panic\"",
+            ),
+            ("rust", "exception", "for Rust, use expect = \"panic\""),
+            ("cpp", "panic", "for C++, use expect = \"sanitizer-error\""),
+            (
+                "cpp",
+                "exception",
+                "for C++, use expect = \"sanitizer-error\"",
+            ),
+        ] {
+            let err = reading_check(fence, expect).unwrap_err();
+            assert!(
+                err.contains(&format!("expect = \"{expect}\" doesn't fit")),
+                "{err}"
+            );
+            assert!(err.contains(says), "{fence} {expect}: {err}");
+        }
     }
 
     #[test]

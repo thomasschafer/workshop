@@ -34,12 +34,15 @@ pub struct Runtime {
 /// The C++ compilers to look for, in order.
 const CPP_COMPILERS: &[&str] = &["c++", "clang++", "g++"];
 
-/// How a program is built: plainly, or with C++'s sanitizers, which stop it at the first sign
-/// of undefined behaviour such as reading memory that's been freed.
+/// How a program is built: plainly, or with the checks a language can add for mistakes found
+/// as it runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flavour {
     Plain,
-    Sanitized,
+    /// For C++, with the sanitizers, which stop it at the first sign of undefined behaviour,
+    /// such as reading memory that's been freed. For Rust, as a debug build, which panics on an
+    /// integer overflowing and checks `debug_assert!`. Python checks as it runs anyway.
+    Checked,
 }
 
 /// A program that's been built, ready to run.
@@ -106,16 +109,17 @@ impl Runtime {
                         "Rust isn't installed: install it from https://rustup.rs".to_owned()
                     );
                 }
-                let mut args = owned(&[
-                    "rustc",
-                    "--edition",
-                    "2024",
-                    "-O",
-                    "--crate-name",
-                    "main",
-                    "-o",
-                    &binary(),
-                ]);
+                let mut args = owned(&["rustc", "--edition", "2024"]);
+                match flavour {
+                    Flavour::Plain => args.push("-O".to_owned()),
+                    Flavour::Checked => args.extend(owned(&[
+                        "-C",
+                        "debug-assertions=on",
+                        "-C",
+                        "overflow-checks=on",
+                    ])),
+                }
+                args.extend(owned(&["--crate-name", "main", "-o", &binary()]));
                 // rustc links with `cc`, which may need to be the compiler behind a shim.
                 if let Some(cc) = self.find("cc") {
                     let linker = self.sandbox.program(&cc);
@@ -137,7 +141,7 @@ impl Runtime {
                 let mut args = owned(&[&compiler, "-std=c++17", "-o", &binary()]);
                 match flavour {
                     Flavour::Plain => args.push("-O1".to_owned()),
-                    Flavour::Sanitized => args.extend(owned(&[
+                    Flavour::Checked => args.extend(owned(&[
                         "-O0",
                         "-g",
                         "-fno-omit-frame-pointer",
