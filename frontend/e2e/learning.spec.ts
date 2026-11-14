@@ -285,13 +285,13 @@ test("works through a design session in stages, with the coach, stopping and car
   await phone.goto("/");
   await phone.getByRole("switch", { name: /I've got a while/ }).tap();
   const next = phone.locator(".continue");
-  await expect(next).toContainText("Design a service that turns long links");
+  await expect(next).toContainText("Design a key-value store spread across many machines");
   await next.tap();
-  await expect(phone).toHaveURL(/\/design\/sample\/link-shortener$/);
+  await expect(phone).toHaveURL(/\/design\/sample\/key-value-store$/);
   await phone.getByRole("button", { name: "Start the session" }).tap();
 
   const stage = phone.getByRole("region", { name: "Clarify the requirements" });
-  await stage.getByLabel("Your notes").fill("Make short links, and send whoever opens one on.");
+  await stage.getByLabel("Your notes").fill("Keep values by key, on many machines.");
   const coach = phone.getByRole("region", { name: "Coach" });
   await coach.getByRole("button", { name: "Ask the coach" }).tap();
   await expect(coach.locator(".design-turn.coach")).toHaveText(
@@ -301,23 +301,23 @@ test("works through a design session in stages, with the coach, stopping and car
   await holdToTalk(
     phone,
     coach.getByRole("button", { name: "Hold to dictate" }),
-    "links last a year",
-    () => expect(coach.locator(".dictate-hearing")).toContainText("year"),
+    "values are small",
+    () => expect(coach.locator(".dictate-hearing")).toContainText("small"),
   );
-  await expect(coach.getByLabel("Your answer to the coach")).toHaveValue("links last a year");
+  await expect(coach.getByLabel("Your answer to the coach")).toHaveValue("values are small");
   await coach.getByRole("button", { name: "Answer the coach" }).tap();
   await expect(coach.locator(".design-turn")).toHaveCount(3);
-  await expect(coach.locator(".design-turn.learner")).toHaveText("links last a year");
+  await expect(coach.locator(".design-turn.learner")).toHaveText("values are small");
 
   await phone.getByRole("button", { name: "Next: estimate the scale" }).tap();
   await phone
     .getByRole("region", { name: "Estimate the scale" })
     .getByLabel("Your notes")
-    .fill("A hundred links made a second, and ten thousand opened.");
+    .fill("A thousand writes a second, and ten thousand reads.");
   // Saved as it goes: a reload, or coming back later, carries on from here.
   await expect
     .poll(async () => {
-      const response = await phone.request.get("/api/design/sample/link-shortener");
+      const response = await phone.request.get("/api/design/sample/key-value-store");
       const opened = (await response.json()) as {
         session: { stage: string; work: { scale?: { notes: string } } } | null;
       };
@@ -327,10 +327,12 @@ test("works through a design session in stages, with the coach, stopping and car
   await phone.reload();
   await expect(
     phone.getByRole("region", { name: "Estimate the scale" }).getByLabel("Your notes"),
-  ).toHaveValue(/ten thousand opened/);
+  ).toHaveValue(/ten thousand reads/);
   await phone.getByRole("button", { name: "Stop here for now" }).tap();
   await expect(phone).toHaveURL(/\/design$/);
-  await expect(phone.getByRole("button", { name: /links/ })).toContainText("In progress, at scale");
+  await expect(phone.getByRole("button", { name: /key-value/ })).toContainText(
+    "In progress, at scale",
+  );
   await goHome();
   await expect(next).toContainText("Where you left off: estimate the scale");
   // Without a while, it's not offered, but it's still in the track, where it was left.
@@ -339,20 +341,20 @@ test("works through a design session in stages, with the coach, stopping and car
   const design = phone.locator(".track", { hasText: "System design" });
   await expect(design).toContainText("1 in progress");
   await design.tap();
-  await phone.getByRole("button", { name: /links/ }).tap();
+  await phone.getByRole("button", { name: /key-value/ }).tap();
   await expect(phone.locator(".step.current")).toHaveText("Scale");
   // The stages already reached can be gone back to.
   await phone.locator(".step", { hasText: "Requirements" }).tap();
   await expect(
     phone.getByRole("region", { name: "Clarify the requirements" }).getByLabel("Your notes"),
-  ).toHaveValue(/short links/);
+  ).toHaveValue(/by key/);
   await phone.locator(".step", { hasText: "Scale" }).tap();
 
   await phone.getByRole("button", { name: "Next: outline the design" }).tap();
   const components = phone.getByRole("region", { name: "Components" });
   await components.getByRole("button", { name: "Add a component" }).tap();
   await components.getByLabel("Component 1", { exact: true }).fill("API");
-  await components.getByLabel("What component 1 does").fill("Makes and opens links");
+  await components.getByLabel("What component 1 does").fill("Takes reads and writes");
   await components.getByLabel("What component 1 talks to").fill("Cache, Store");
   await components.getByRole("button", { name: "Add a component" }).tap();
   await components.getByLabel("Component 2", { exact: true }).fill("Cache");
@@ -366,12 +368,12 @@ test("works through a design session in stages, with the coach, stopping and car
   await phone
     .getByRole("region", { name: "Deep-dive one component" })
     .getByLabel("Your notes")
-    .fill("Codes come from a counter, split into ranges per server.");
+    .fill("Keys are spread by consistent hashing, with three copies of each.");
   await phone.getByRole("button", { name: "Next: trade-offs and failure modes" }).tap();
   await phone
     .getByRole("region", { name: "Trade-offs and failure modes" })
     .getByLabel("Your notes")
-    .fill("If the cache fails, opens go to the store, which must take the load.");
+    .fill("If the cache fails, reads go to the store, which must take the load.");
   const width = phone.viewportSize()?.width ?? 0;
   expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     width,
@@ -382,14 +384,14 @@ test("works through a design session in stages, with the coach, stopping and car
   await expect(marked).toContainText("Mistakes, kept in your log");
   await phone.getByRole("button", { name: "Done" }).tap();
   await expect(phone).toHaveURL(/\/design$/);
-  await expect(phone.getByRole("button", { name: /links/ })).toContainText("last time 90%");
+  await expect(phone.getByRole("button", { name: /key-value/ })).toContainText("last time 90%");
   // The whole session went to the grader, components and the coach's questions too.
   const log = (await (await phone.request.get("/api/mistakes")).json()) as {
     mistakes: { item: string; detail: string }[];
   };
-  const found = log.mistakes.find((m) => m.item === "sample/link-shortener");
-  expect(found?.detail).toContain("- API: Makes and opens links (talks to Cache, Store)");
-  expect(found?.detail).toContain("Learner: links last a year");
+  const found = log.mistakes.find((m) => m.item === "sample/key-value-store");
+  expect(found?.detail).toContain("- API: Takes reads and writes (talks to Cache, Store)");
+  expect(found?.detail).toContain("Learner: values are small");
   expect(found?.detail).toContain("## Deep-dive one component: Store");
 });
 

@@ -37,6 +37,10 @@ id = "systems.networking"
 name = "Networking"
 
 [[skills]]
+id = "systems.scaling"
+name = "Scaling"
+
+[[skills]]
 id = "arithmetic.multiplication"
 name = "Multiplication"
 
@@ -127,3 +131,16 @@ skills = [
 
 [prompts]
 tutor = "prompts/tutor.md"
+
+# Styles the examiner can take in timed rounds, chosen as a round starts.
+[[examiner_styles]]
+id = "steady"
+name = "Steady"
+description = "Gives a hint when you ask, keeps an eye on the time, and asks a follow-up or two"
+prompt = "prompts/examiner-steady.md"
+
+[[examiner_styles]]
+id = "probing"
+name = "Probing"
+description = "Gives few hints, asks you to justify each claim, and changes the problem to see what holds"
+prompt = "prompts/examiner-probing.md"

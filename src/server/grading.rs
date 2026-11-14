@@ -388,7 +388,7 @@ mod tests {
         let list =
             json(send(&router, request("GET", "/api/design?utc_offset=0", None)).await).await;
         let items = list["items"].as_array().unwrap();
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 4);
         assert_eq!(items[0]["status"], "new");
         let opened = json(
             send(

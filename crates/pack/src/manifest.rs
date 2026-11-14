@@ -22,6 +22,21 @@ pub struct Manifest {
     /// Kinds of mistake the pack adds to the built-in ones, for its mistake log.
     pub error_types: Vec<ErrorType>,
     pub prompts: Prompts,
+    /// Styles the examiner can take in timed rounds, for the learner to choose from.
+    pub examiner_styles: Vec<ExaminerStyleRef>,
+}
+
+/// A style the examiner can take, as `pack.toml` lists it: a prompt add-on of its own, added to
+/// the examiner's instructions after the pack's `examiner` add-on.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExaminerStyleRef {
+    pub id: String,
+    pub name: String,
+    /// What it's like, such as how many hints it gives, in a line.
+    pub description: String,
+    /// The add-on's file, relative to the pack.
+    pub prompt: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
@@ -137,6 +152,8 @@ struct RawManifest {
     error_types: Vec<ErrorType>,
     #[serde(default)]
     prompts: Prompts,
+    #[serde(default)]
+    examiner_styles: Vec<ExaminerStyleRef>,
 }
 
 #[derive(Deserialize)]
@@ -276,6 +293,19 @@ impl Manifest {
             }
             error_types.push(error_type);
         }
+        let mut styles: Vec<ExaminerStyleRef> = Vec::new();
+        for style in raw.examiner_styles {
+            if !is_slug(&style.id) {
+                return Err(format!(
+                    "the examiner style id {:?} should be lowercase letters and digits, in words joined by hyphens",
+                    style.id
+                ));
+            }
+            if styles.iter().any(|s| s.id == style.id) {
+                return Err(format!("the examiner style {:?} is listed twice", style.id));
+            }
+            styles.push(style);
+        }
         Ok(Self {
             id: raw.id,
             name: raw.name,
@@ -285,6 +315,7 @@ impl Manifest {
             goals,
             error_types,
             prompts: raw.prompts,
+            examiner_styles: styles,
         })
     }
 

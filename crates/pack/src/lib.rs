@@ -46,6 +46,19 @@ pub struct Pack {
     pub problems: Vec<Problem>,
     /// The text added to each coach role's instructions, by role, such as `tutor`.
     pub prompt_add_ons: BTreeMap<String, String>,
+    /// Styles the examiner can take, with their add-ons read; those whose add-on couldn't be
+    /// read are left out.
+    pub examiner_styles: Vec<ExaminerStyle>,
+}
+
+/// A style the examiner can take in timed rounds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExaminerStyle {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// Added to the examiner's instructions.
+    pub prompt: String,
 }
 
 /// Something in a pack that's wrong, and where.
@@ -106,6 +119,32 @@ impl Pack {
                 None => problems.push(Problem {
                     path: "pack.toml".to_owned(),
                     message: format!("the {role}'s prompt add-on {file:?} isn't in the pack"),
+                }),
+            }
+        }
+
+        let mut examiner_styles = Vec::new();
+        for style in &manifest.examiner_styles {
+            match files
+                .get(&style.prompt)
+                .map(|bytes| std::str::from_utf8(bytes))
+            {
+                Some(Ok(text)) => examiner_styles.push(ExaminerStyle {
+                    id: style.id.clone(),
+                    name: style.name.clone(),
+                    description: style.description.clone(),
+                    prompt: text.trim().to_owned(),
+                }),
+                Some(Err(_)) => problems.push(Problem {
+                    path: style.prompt.clone(),
+                    message: format!("the examiner style {:?}'s add-on isn't UTF-8", style.id),
+                }),
+                None => problems.push(Problem {
+                    path: "pack.toml".to_owned(),
+                    message: format!(
+                        "the examiner style {:?}'s add-on {:?} isn't in the pack",
+                        style.id, style.prompt
+                    ),
                 }),
             }
         }
@@ -190,6 +229,7 @@ impl Pack {
             drafts,
             problems,
             prompt_add_ons,
+            examiner_styles,
         })
     }
 
@@ -524,6 +564,54 @@ mod tests {
             "{}",
             flat.problems[0]
         );
+    }
+
+    #[test]
+    fn reads_the_examiners_styles() {
+        let sample = Pack::sample();
+        let ids: Vec<&str> = sample
+            .examiner_styles
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(ids, ["steady", "probing"]);
+        assert!(sample.examiner_styles[0].prompt.starts_with("Be steady"));
+
+        let style = |id: &str, file: &str| {
+            format!(
+                "[[examiner_styles]]\nid = \"{id}\"\nname = \"N\"\ndescription = \"D\"\nprompt = \"{file}\"\n"
+            )
+        };
+        let pack = Pack::from_files(files(&[
+            (
+                "pack.toml",
+                &format!(
+                    "{MANIFEST}{}{}",
+                    style("kind", "prompts/kind.md"),
+                    style("gone", "prompts/gone.md")
+                ),
+            ),
+            ("prompts/kind.md", "  Be kind.\n"),
+        ]))
+        .unwrap();
+        // A style whose add-on isn't there is left out, and said to be.
+        assert_eq!(pack.examiner_styles.len(), 1);
+        assert_eq!(pack.examiner_styles[0].prompt, "Be kind.");
+        assert!(pack.problems[0].message.contains("\"gone\"'s add-on"));
+
+        for (manifest, message) in [
+            (
+                format!("{MANIFEST}{}", style("Bad", "x.md")),
+                "should be lowercase",
+            ),
+            (
+                format!("{MANIFEST}{}{}", style("a", "x.md"), style("a", "y.md")),
+                "listed twice",
+            ),
+        ] {
+            let err = Manifest::parse(&manifest).unwrap_err();
+            assert!(err.contains(message), "{err}");
+        }
     }
 
     #[tokio::test]
