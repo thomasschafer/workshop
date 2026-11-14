@@ -103,6 +103,7 @@ export function Home({
                   [
                     [{ screen: "goals", goal: null }, "Goals", "How close each goal is"],
                     [{ screen: "mistakes" }, "Mistakes", "What's gone wrong, by kind"],
+                    [{ screen: "pack" }, "Packs", "Flagged cards, and keeping packs up to date"],
                   ] as const
                 ).map(([route, name, summary]) => (
                   <li key={name}>

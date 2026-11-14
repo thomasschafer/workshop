@@ -1,0 +1,15 @@
+.pack-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pack-fix {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+}

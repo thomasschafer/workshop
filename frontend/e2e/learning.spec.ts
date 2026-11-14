@@ -85,12 +85,13 @@ test.afterAll(async () => {
 });
 
 test("shows the pack's tracks at home, and continues with something new", async () => {
-  await expect(phone.locator(".track")).toHaveCount(6);
+  await expect(phone.locator(".track")).toHaveCount(7);
   const names = await phone.locator(".track-name").allInnerTexts();
   expect(names).toEqual([
     "Advent of Code",
     "Coding",
     "Probability",
+    "System design",
     "Mental maths",
     "Review",
     "Estimation",
@@ -224,6 +225,49 @@ test("shows progress towards each of the pack's goals", async () => {
   await expect(phone).toHaveURL(/\/goals$/);
 });
 
+test("has the grader check a flagged card, and unflags it", async () => {
+  await goHome();
+  await phone.getByRole("button", { name: /^Packs/ }).tap();
+  await expect(phone).toHaveURL(/\/pack$/);
+  const card = phone.getByRole("list", { name: "Flagged cards" }).getByRole("listitem");
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText("You said: The example contradicts the answer");
+  await card.getByRole("button", { name: "Ask the grader" }).tap();
+  const fix = card.getByRole("region", { name: "Proposed fix" });
+  await expect(fix).toContainText("A corrected answer.");
+  // The sample pack is built in, so its cards can't be changed; the fix can be turned down.
+  await fix.getByRole("button", { name: "Approve fix" }).tap();
+  await expect(phone.getByRole("alert")).toContainText("sample pack is built into Workshop");
+  await fix.getByRole("button", { name: "Turn down" }).tap();
+  await expect(fix).toHaveCount(0);
+  await card.getByRole("button", { name: "Unflag" }).tap();
+  await expect(phone.getByText("No cards are flagged.")).toBeVisible();
+  await expect.poll(async () => Object.keys((await serverDeck()).flags)).toEqual([]);
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+});
+
+test("answers a design prompt in writing, marked by the grader", async () => {
+  await goHome();
+  await phone.locator(".track", { hasText: "System design" }).tap();
+  await expect(phone).toHaveURL(/\/design$/);
+  await phone.getByRole("button", { name: /^Design a service that turns long links/ }).tap();
+  await expect(phone).toHaveURL(/\/design\/sample\/link-shortener$/);
+  await phone
+    .getByLabel(/^Your design/)
+    .fill("Codes from a counter, and a cache in front of the store.");
+  await phone.getByRole("button", { name: "Mark it" }).tap();
+  const marked = phone.getByRole("region", { name: "Marked" });
+  await expect(marked).toContainText("90%");
+  await expect(marked).toContainText("Partly");
+  await expect(marked).toContainText("Mistakes, kept in your log");
+  await phone.getByRole("button", { name: "Done" }).tap();
+  await expect(phone).toHaveURL(/\/design$/);
+  await expect(phone.getByRole("button", { name: /links/ })).toContainText("last time 90%");
+});
+
 test("practises offline on a phone, keeping answers across a reload, and syncs them later", async () => {
   // The app is kept on the phone by its service worker, once that's in charge of the page.
   await phone.evaluate(async () => {
@@ -234,7 +278,7 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
     .poll(() => phone.evaluate(() => navigator.serviceWorker.controller !== null))
     .toBe(true);
   await goHome();
-  await expect(phone.locator(".track")).toHaveCount(6);
+  await expect(phone.locator(".track")).toHaveCount(7);
 
   await context.setOffline(true);
   // Opened afresh with no connection at all, the app still starts, from what the phone kept.
@@ -298,4 +342,21 @@ test("counts what was done towards the week, and offers more", async () => {
   // Every answer's in, so nothing's waiting on this phone.
   await expect(phone.locator(".home-pending")).toHaveCount(0);
   await expect(phone.locator(".track", { hasText: "Probability" })).toContainText("7 new");
+});
+
+test("marks a card answered in the learner's own words", async () => {
+  await phone.goto("/practice/review");
+  await phone.getByRole("button", { name: "Answer in my own words" }).tap();
+  await phone.getByLabel("Your answer, in your own words").fill("Roughly the log of n");
+  await phone.getByRole("button", { name: "Mark my answer" }).tap();
+  await expect(phone.getByRole("region", { name: "Marked" })).toContainText("50%");
+  await expect(phone.getByRole("region", { name: "Answer" })).toBeVisible();
+  await phone.getByRole("button", { name: "Next" }).tap();
+  await expect(phone.locator(".learn-count")).toHaveText("2 of 3");
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { source: string; detail: string }[];
+  };
+  expect(log.mistakes.some((m) => m.source === "grader" && m.detail.includes("Roughly"))).toBe(
+    true,
+  );
 });

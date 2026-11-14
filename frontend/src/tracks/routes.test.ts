@@ -47,6 +47,8 @@ describe("pathOf", () => {
       { screen: "coding", item: null },
       { screen: "coding", item: "sample/islands" },
       { screen: "mistakes" },
+      { screen: "design", item: null },
+      { screen: "design", item: "sample/link-shortener" },
       { screen: "goals", goal: null },
       { screen: "goals", goal: "quick-arithmetic" },
       { screen: "pack" },

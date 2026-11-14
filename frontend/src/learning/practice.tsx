@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { errorMessage } from "../errors";
+import { gradingApi } from "../grading/api";
+import { MarkedView } from "../grading/marked";
+import type { Marked } from "../grading/types";
 import { useMarkdown } from "../hooks/useMarkdown";
 import type { TrackId } from "../tracks/types";
 import { displayNumber, grade } from "./grading";
@@ -171,6 +175,11 @@ export function ItemView({
             record(rating);
             onDone(null);
           }}
+          onMarked={() => {
+            // The grader's attempt is the server's, so the deck catches up with it.
+            void learning().sync();
+            onDone(null);
+          }}
           onFlag={(note) => {
             learning().flag({
               id: newId(),
@@ -226,24 +235,52 @@ export function ItemView({
 function CardView({
   item,
   onRate,
+  onMarked,
   onFlag,
 }: {
   item: Extract<DeckItem, { kind: "card" }>;
   onRate: (rating: Rating) => void;
+  /** Once the grader has marked an answer in the learner's own words, which it records. */
+  onMarked: () => void;
   onFlag: (note: string) => void;
 }) {
   const [revealed, setRevealed] = useState(false);
   const [flagging, setFlagging] = useState(false);
   const [note, setNote] = useState("");
+  const [writing, setWriting] = useState(false);
+  const [written, setWritten] = useState("");
+  const [marking, setMarking] = useState(false);
+  const [markError, setMarkError] = useState<string | null>(null);
+  const [marked, setMarked] = useState<Marked | null>(null);
+  const mark = () => {
+    setMarking(true);
+    setMarkError(null);
+    gradingApi
+      .mark(item.key, newId(), "card", written)
+      .then(
+        (reply) => {
+          setMarked(reply.marked);
+          setRevealed(true);
+        },
+        (e: unknown) => setMarkError(errorMessage(e)),
+      )
+      .finally(() => setMarking(false));
+  };
   return (
     <>
       <Markdown text={item.prompt} class="learn-prompt" />
       {revealed ? (
         <>
+          {marked ? <MarkedView marked={marked} /> : null}
           <section class="learn-answer" aria-label="Answer">
             <Markdown text={item.answer} />
             {item.explanation ? <Markdown text={item.explanation} class="muted" /> : null}
           </section>
+          {marked && !flagging ? (
+            <button type="button" class="pill primary wide" onClick={onMarked}>
+              Next
+            </button>
+          ) : null}
           {flagging ? (
             <form
               class="learn-flag"
@@ -269,6 +306,10 @@ function CardView({
                 </button>
               </span>
             </form>
+          ) : marked ? (
+            <button type="button" class="learn-link" onClick={() => setFlagging(true)}>
+              This is wrong
+            </button>
           ) : (
             <>
               <p class="learn-question muted">How well did you know it?</p>
@@ -297,10 +338,48 @@ function CardView({
             </>
           )}
         </>
+      ) : writing ? (
+        <form
+          class="learn-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            mark();
+          }}
+        >
+          <label class="learn-question muted" for="card-own-words">
+            Your answer, in your own words
+          </label>
+          <textarea
+            id="card-own-words"
+            class="written"
+            rows={4}
+            value={written}
+            readOnly={marking}
+            onInput={(event) => setWritten(event.currentTarget.value)}
+          />
+          {markError ? (
+            <p class="error-text" role="alert">
+              {markError}
+            </p>
+          ) : null}
+          <span class="learn-actions">
+            <button type="button" class="pill" onClick={() => setRevealed(true)}>
+              Show answer
+            </button>
+            <button type="submit" class="pill primary" disabled={marking || !written.trim()}>
+              {marking ? "Marking…" : "Mark my answer"}
+            </button>
+          </span>
+        </form>
       ) : (
-        <button type="button" class="pill primary wide" onClick={() => setRevealed(true)}>
-          Show answer
-        </button>
+        <>
+          <button type="button" class="pill primary wide" onClick={() => setRevealed(true)}>
+            Show answer
+          </button>
+          <button type="button" class="learn-link" onClick={() => setWriting(true)}>
+            Answer in my own words
+          </button>
+        </>
       )}
     </>
   );

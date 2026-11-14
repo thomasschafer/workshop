@@ -1,0 +1,69 @@
+.marked {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.marked-score {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.marked-points,
+.marked-findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.marked-point {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+}
+
+.marked-point.yes {
+  border-left-color: var(--ok);
+}
+
+.marked-point.no {
+  border-left-color: var(--warn);
+}
+
+.marked-met {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.marked-findings li {
+  overflow-wrap: anywhere;
+}
+
+.written {
+  width: 100%;
+  min-height: 10rem;
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  resize: vertical;
+}
+
+.design-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

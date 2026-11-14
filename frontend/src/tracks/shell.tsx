@@ -3,8 +3,10 @@ import { api, type Bootstrap } from "../api";
 import { App } from "../app";
 import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
+import { DesignScreen } from "../grading/design";
 import { Practice } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
+import { PackScreen } from "../pack/screen";
 import { GoalsScreen } from "../progress/goals";
 import { MistakesScreen } from "../progress/mistakes";
 import { Home } from "./home";
@@ -85,6 +87,16 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
       return <Home onGo={(destination) => void go(destination)} onOpen={open} />;
     case "mistakes":
       return <MistakesScreen onHome={goHome} />;
+    case "pack":
+      return <PackScreen onHome={goHome} />;
+    case "design":
+      return (
+        <DesignScreen
+          item={route.item}
+          onHome={goHome}
+          onOpen={(item) => open({ screen: "design", item })}
+        />
+      );
     case "goals":
       return (
         <GoalsScreen

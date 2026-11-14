@@ -235,6 +235,9 @@ test("comes back as a quick recall, comparing the plan with the approach", async
   await expect(phone.locator(".coding-step")).toHaveText(["Plan", "Review"]);
   const plan = phone.getByLabel("From memory: how would you solve it?");
   await plan.fill("A set, stopping at the first word already in it");
+  // The grader checks it first, if asked.
+  await phone.getByRole("button", { name: "Check my plan" }).tap();
+  await expect(phone.getByRole("region", { name: "Marked" })).toContainText("50%");
   await phone.getByRole("button", { name: "Compare with the approach" }).tap();
   await expect(phone.locator(".coding-step.current")).toHaveText("Review");
   await expect(phone.getByRole("region", { name: "Your plan" })).toContainText(

@@ -25,6 +25,36 @@ if (prompt.includes("Find part 1's example.") && prompt.includes("+2, -5, +4")) 
   process.exit(0);
 }
 
+// The grader, marking written work or checking a card.
+if (prompt.includes("<work>")) {
+  const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";
+  await reply([
+    JSON.stringify({
+      score: work.includes("cache") ? 0.9 : 0.5,
+      points: [{ point: "The first point", met: "partly", comment: "Say more." }],
+      findings: [
+        { error_type: "missed-edge-case", detail: `Nothing on the unusual cases in "${work}"` },
+      ],
+      feedback: "Think about **the unusual cases**.",
+    }),
+  ]);
+  process.exit(0);
+}
+if (prompt.includes("flagged this card as wrong, saying")) {
+  await reply([
+    JSON.stringify({
+      verdict: "wrong",
+      explanation: "The fake grader agrees it's wrong.",
+      fix: { answer: "A corrected answer.", explanation: null },
+    }),
+  ]);
+  process.exit(0);
+}
+if (prompt.includes("Check this card for mistakes.")) {
+  await reply([JSON.stringify({ verdict: "correct", explanation: "It's right." })]);
+  process.exit(0);
+}
+
 // A discussion prompt lists the conversation, with the user's turns as "Them: ...".
 const asked = prompt.match(/^Them: .*$/gm);
 if (asked) {

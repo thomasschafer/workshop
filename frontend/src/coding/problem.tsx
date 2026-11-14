@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks"
 import type { Bootstrap } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
+import { gradingApi } from "../grading/api";
+import { MarkedView } from "../grading/marked";
+import type { Marked } from "../grading/types";
 import { useConnection } from "../hooks/useConnection";
 import { useConversation } from "../hooks/useConversation";
 import { useEditorSettings } from "../hooks/useEditorSettings";
@@ -453,6 +456,22 @@ function PlanStep({
 }: StepProps & { boot: Bootstrap; onNext: () => void; onSolve: (() => void) | null }) {
   const recall = session.mode === "recall";
   const setPlan = (plan: string) => change((s) => ({ ...s, plan }));
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<Marked | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  // The grader marks the plan against the problem's approach, without giving it away, and what
+  // it finds goes in the mistake log.
+  const check = () => {
+    setChecking(true);
+    setCheckError(null);
+    gradingApi
+      .mark(opened.key, newId(), "plan", session.plan)
+      .then(
+        (reply) => setChecked(reply.marked),
+        (e: unknown) => setCheckError(errorMessage(e)),
+      )
+      .finally(() => setChecking(false));
+  };
   return (
     <main class="learn-content">
       <Statement opened={opened} open />
@@ -486,11 +505,25 @@ function PlanStep({
         />
         <span class="learn-actions">
           <TutorButton online={online} openTutor={openTutor} />
+          <button
+            type="button"
+            class="pill"
+            disabled={!online || checking || !session.plan.trim()}
+            onClick={check}
+          >
+            {checking ? "Checking…" : "Check my plan"}
+          </button>
           <button type="submit" class="pill primary">
             {recall ? "Compare with the approach" : "Next: code"}
           </button>
         </span>
       </form>
+      {checkError ? (
+        <p class="error-text" role="alert">
+          {checkError}
+        </p>
+      ) : null}
+      {checked ? <MarkedView marked={checked} /> : null}
       {onSolve ? (
         <button type="button" class="learn-link" onClick={onSolve}>
           Solve it again instead

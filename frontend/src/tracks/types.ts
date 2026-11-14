@@ -23,7 +23,9 @@ export type Destination =
   | { kind: "puzzle_list" }
   | { kind: "practice"; track: TrackId }
   /** The Coding track: one of its items, as `pack/item`, or the list of them. */
-  | { kind: "coding"; item: string | null };
+  | { kind: "coding"; item: string | null }
+  /** Design prompts: one of them, as `pack/item`, or the list of them. */
+  | { kind: "design"; item: string | null };
 
 export interface Step {
   title: string;
