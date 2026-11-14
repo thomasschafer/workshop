@@ -75,7 +75,8 @@
   gap: 8px;
 }
 
-.track {
+.track,
+.home-link {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -90,11 +91,13 @@
   text-align: left;
 }
 
-.track-name {
+.track-name,
+.home-link-name {
   font-weight: 600;
 }
 
-.track-summary {
+.track-summary,
+.home-link-summary {
   font-size: 14px;
   color: var(--muted);
 }

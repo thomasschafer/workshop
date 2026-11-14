@@ -1,0 +1,56 @@
+.progress-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.progress-counts,
+.progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-counts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.progress-row-title {
+  font-weight: 600;
+}
+
+.progress-tag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.progress-tag select,
+.progress-filter select {
+  max-width: 100%;
+  min-height: 36px;
+}

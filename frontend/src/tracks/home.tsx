@@ -4,10 +4,20 @@ import { loadMarkdown } from "../hooks/useMarkdown";
 import { learning } from "../learning/sync";
 import { tracksApi } from "./api";
 import "./home.css";
+import type { Route } from "./routes";
 import type { Destination, Home as HomeState, Track } from "./types";
 
-/** The home screen: one button that continues with the next best step, and the tracks. */
-export function Home({ onGo }: { onGo: (destination: Destination) => void }) {
+/**
+ * The home screen: one button that continues with the next best step, the tracks, and the
+ * screens about how it's going.
+ */
+export function Home({
+  onGo,
+  onOpen,
+}: {
+  onGo: (destination: Destination) => void;
+  onOpen: (route: Route) => void;
+}) {
   const [home, setHome] = useState<HomeState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -79,6 +89,23 @@ export function Home({ onGo }: { onGo: (destination: Destination) => void }) {
                     <button type="button" class="track" onClick={() => onGo(track.destination)}>
                       <span class="track-name">{track.name}</span>
                       <span class="track-summary">{track.summary}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <section aria-labelledby="progress-heading">
+              <h2 id="progress-heading" class="tracks-heading">
+                Progress
+              </h2>
+              <ul class="tracks">
+                {(
+                  [[{ screen: "mistakes" }, "Mistakes", "What's gone wrong, by kind"]] as const
+                ).map(([route, name, summary]) => (
+                  <li key={name}>
+                    <button type="button" class="home-link" onClick={() => onOpen(route)}>
+                      <span class="home-link-name">{name}</span>
+                      <span class="home-link-summary">{summary}</span>
                     </button>
                   </li>
                 ))}

@@ -23,6 +23,16 @@ describe("routeOf", () => {
     expect(routeOf("/practice/Not%20a%20track", "")).toEqual({ screen: "home" });
   });
 
+  it("shows the mistake log, goals and packs at their own addresses", () => {
+    expect(routeOf("/mistakes", "")).toEqual({ screen: "mistakes" });
+    expect(routeOf("/goals/quick-arithmetic", "")).toEqual({
+      screen: "goals",
+      goal: "quick-arithmetic",
+    });
+    expect(routeOf("/goals/Not a goal", "")).toEqual({ screen: "goals", goal: null });
+    expect(routeOf("/pack", "")).toEqual({ screen: "pack" });
+  });
+
   it("opens Advent of Code for a puzzle a notification asked for at the home address", () => {
     expect(routeOf("/", "?open=2026-4")).toEqual({ screen: "advent-of-code" });
   });
@@ -36,6 +46,10 @@ describe("pathOf", () => {
       { screen: "practice", track: "pack:estimation" },
       { screen: "coding", item: null },
       { screen: "coding", item: "sample/islands" },
+      { screen: "mistakes" },
+      { screen: "goals", goal: null },
+      { screen: "goals", goal: "quick-arithmetic" },
+      { screen: "pack" },
     ] as const) {
       expect(routeOf(pathOf(route), "")).toEqual(route);
     }

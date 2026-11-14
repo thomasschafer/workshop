@@ -167,6 +167,39 @@ test("checks mental maths as it's typed, right or wrong", async () => {
   await expect.poll(() => scheduled("mental-maths")).toBe(3);
 });
 
+test("keeps a log of mistakes, whose kinds can be confirmed or changed", async () => {
+  await goHome();
+  await phone.getByRole("button", { name: /^Mistakes/ }).tap();
+  await expect(phone).toHaveURL(/\/mistakes$/);
+  // The card forgotten, and the two sums gone wrong.
+  const rows = phone.getByRole("list", { name: "Mistakes" }).getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  const unknown = rows.filter({ hasText: "Didn't know" });
+  await expect(unknown).toContainText("Answer");
+  await expect(unknown.getByLabel("Kind of mistake")).toHaveValue("concept-gap");
+  await unknown.getByRole("button", { name: "Confirm" }).tap();
+  await expect(unknown).toContainText("Confirmed");
+
+  const wrong = rows.filter({ hasText: "Answered 0" });
+  await wrong.getByLabel("Kind of mistake").selectOption("misread");
+  await expect(wrong).toContainText("Suggested");
+  await expect(phone.locator(".progress-counts")).toContainText("Concept gap");
+
+  // Only one kind shown, when asked.
+  await phone.getByLabel("Show").selectOption("misread");
+  await expect(rows).toHaveCount(1);
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+  const log = await (await phone.request.get("/api/mistakes")).json();
+  const tags = (log as { mistakes: { confirmed: string | null }[] }).mistakes
+    .map((m) => m.confirmed)
+    .filter((tag) => tag !== null)
+    .sort();
+  expect(tags).toEqual(["concept-gap", "misread"]);
+});
+
 test("practises offline on a phone, keeping answers across a reload, and syncs them later", async () => {
   // The app is kept on the phone by its service worker, once that's in charge of the page.
   await phone.evaluate(async () => {

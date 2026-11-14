@@ -5,12 +5,21 @@ export type Route =
   | { screen: "home" }
   | { screen: "advent-of-code" }
   | { screen: "practice"; track: TrackId }
-  | { screen: "coding"; item: string | null };
+  | { screen: "coding"; item: string | null }
+  | { screen: "mistakes" }
+  /** Progress towards a goal of the packs', by its id, or the list of goals. */
+  | { screen: "goals"; goal: string | null }
+  /** The packs: topping them up, items waiting for approval, importing and flagged items. */
+  | { screen: "pack" };
 
 const HOME_PATH = "/";
 const ADVENT_OF_CODE_PATH = "/advent-of-code";
 const PRACTICE_PATH = "/practice/";
 const CODING_PATH = "/coding";
+const MISTAKES_PATH = "/mistakes";
+const GOALS_PATH = "/goals";
+const PACK_PATH = "/pack";
+const SLUG = /^[a-z0-9-]+$/;
 
 /**
  * The screen an address shows. A notification about a puzzle used to lead to the home address
@@ -30,11 +39,17 @@ export function routeOf(pathname: string, search: string): Route {
   if (pathname === CODING_PATH) return { screen: "coding", item: null };
   if (pathname.startsWith(`${CODING_PATH}/`)) {
     const [pack, item, ...rest] = pathname.slice(CODING_PATH.length + 1).split("/");
-    const slug = /^[a-z0-9-]+$/;
-    if (pack && item && rest.length === 0 && slug.test(pack) && slug.test(item)) {
+    if (pack && item && rest.length === 0 && SLUG.test(pack) && SLUG.test(item)) {
       return { screen: "coding", item: `${pack}/${item}` };
     }
     return { screen: "coding", item: null };
+  }
+  if (pathname === MISTAKES_PATH) return { screen: "mistakes" };
+  if (pathname === PACK_PATH) return { screen: "pack" };
+  if (pathname === GOALS_PATH) return { screen: "goals", goal: null };
+  if (pathname.startsWith(`${GOALS_PATH}/`)) {
+    const goal = pathname.slice(GOALS_PATH.length + 1);
+    return { screen: "goals", goal: SLUG.test(goal) ? goal : null };
   }
   if (new URLSearchParams(search).has("open")) return { screen: "advent-of-code" };
   return { screen: "home" };
@@ -50,6 +65,12 @@ export function pathOf(route: Route): string {
       return `${PRACTICE_PATH}${encodeURIComponent(route.track)}`;
     case "coding":
       return route.item === null ? CODING_PATH : `${CODING_PATH}/${route.item}`;
+    case "mistakes":
+      return MISTAKES_PATH;
+    case "goals":
+      return route.goal === null ? GOALS_PATH : `${GOALS_PATH}/${route.goal}`;
+    case "pack":
+      return PACK_PATH;
   }
 }
 

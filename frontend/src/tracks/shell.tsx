@@ -5,6 +5,7 @@ import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
 import { Practice } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
+import { MistakesScreen } from "../progress/mistakes";
 import { Home } from "./home";
 import { pathOf, type Route, routeFor, routeOf } from "./routes";
 import type { Destination } from "./types";
@@ -72,14 +73,17 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
     return onNotificationOpen((year, day) => void go({ kind: "puzzle", puzzle: { year, day } }));
   }, [route.screen]);
 
-  const goHome = () => {
-    history.pushState(null, "", pathOf({ screen: "home" }));
-    setRoute({ screen: "home" });
+  const open = (next: Route) => {
+    history.pushState(null, "", pathOf(next));
+    setRoute(next);
   };
+  const goHome = () => open({ screen: "home" });
 
   switch (route.screen) {
     case "home":
-      return <Home onGo={(destination) => void go(destination)} />;
+      return <Home onGo={(destination) => void go(destination)} onOpen={open} />;
+    case "mistakes":
+      return <MistakesScreen onHome={goHome} />;
     case "practice":
       return <Practice key={route.track} track={route.track} onHome={goHome} />;
     case "coding":
