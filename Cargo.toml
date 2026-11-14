@@ -23,6 +23,7 @@ repository = "https://github.com/thomasschafer/workshop"
 [workspace.dependencies]
 workshop-auth = { path = "crates/auth" }
 workshop-common = { path = "crates/common" }
+workshop-learning = { path = "crates/learning" }
 workshop-lsp = { path = "crates/lsp" }
 workshop-pack = { path = "crates/pack" }
 workshop-provider = { path = "crates/provider" }
@@ -37,6 +38,7 @@ axum = { version = "0.8.9", features = ["ws", "macros"] }
 base64 = "0.23"
 clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"
+fsrs = { version = "7.0.0", default-features = false }
 futures-util = "0.3.34"
 libc = "0.2.190"
 mime_guess = "2.0.5"
@@ -45,6 +47,7 @@ rand = "0.10.3"
 regex = "1.13.1"
 rhai = { version = "1.27.0", features = ["no_module", "only_i64"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "form", "gzip", "http2", "multipart"] }
+rusqlite = { version = "0.42.0", features = ["bundled"] }
 rust-embed = "8.13.0"
 scraper = "0.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -65,6 +68,7 @@ web-push-native = "0.5"
 [dependencies]
 workshop-auth.workspace = true
 workshop-common.workspace = true
+workshop-learning.workspace = true
 workshop-lsp.workspace = true
 workshop-pack.workspace = true
 workshop-provider.workspace = true

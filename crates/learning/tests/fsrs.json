@@ -1,0 +1,134 @@
+[
+  {
+    "attempts": [
+      [
+        0.0,
+        "good"
+      ]
+    ],
+    "stability": 3.9221,
+    "difficulty": 3.5307243,
+    "stability_fast": 3.13768,
+    "due_in_days": 4.777724733796297
+  },
+  {
+    "attempts": [
+      [
+        0.0,
+        "again"
+      ]
+    ],
+    "stability": 0.1104,
+    "difficulty": 6.1686,
+    "stability_fast": 0.08832,
+    "due_in_days": 0.006944444444444444
+  },
+  {
+    "attempts": [
+      [
+        0.0,
+        "easy"
+      ]
+    ],
+    "stability": 11.7841,
+    "difficulty": 1.0,
+    "stability_fast": 9.427279,
+    "due_in_days": 53.86939238425926
+  },
+  {
+    "attempts": [
+      [
+        0.0,
+        "hard"
+      ]
+    ],
+    "stability": 2.2395,
+    "difficulty": 5.261278,
+    "stability_fast": 1.7916001,
+    "due_in_days": 0.5974597916666666
+  },
+  {
+    "attempts": [
+      [
+        0.0,
+        "good"
+      ],
+      [
+        3.0,
+        "good"
+      ],
+      [
+        9.5,
+        "good"
+      ]
+    ],
+    "stability": 21.145472,
+    "difficulty": 3.46504,
+    "stability_fast": 496.0255,
+    "due_in_days": 60.348857870370374
+  },
+  {
+    "attempts": [
+      [
+        0.0,
+        "good"
+      ],
+      [
+        0.01,
+        "again"
+      ],
+      [
+        1.0,
+        "good"
+      ]
+    ],
+    "stability": 2.7018085,
+    "difficulty": 9.01946,
+    "stability_fast": 18.935362,
+    "due_in_days": 0.28276100694444445
+  },
+  {
+    "attempts": [
+      [
+        0.0,
+        "again"
+      ],
+      [
+        0.007,
+        "again"
+      ],
+      [
+        0.5,
+        "hard"
+      ],
+      [
+        2.25,
+        "easy"
+      ]
+    ],
+    "stability": 0.86764616,
+    "difficulty": 8.639682,
+    "stability_fast": 56.27535,
+    "due_in_days": 0.09571581018518519
+  },
+  {
+    "attempts": [
+      [
+        0.0,
+        "easy"
+      ],
+      [
+        40.0,
+        "again"
+      ],
+      [
+        0.2,
+        "good"
+      ]
+    ],
+    "stability": 4.7527046,
+    "difficulty": 8.295229,
+    "stability_fast": 26.952541,
+    "due_in_days": 1.297314872685185
+  }
+]
