@@ -20,6 +20,7 @@ interface Deck {
     prompt: string;
     answer?: number;
     instances?: { prompt: string; answer: number }[];
+    tolerance?: { absolute: number; relative: number; factor?: number };
   }[];
   schedules: Record<string, { reviews: number }>;
   flags: Record<string, { note: string | null }>;
@@ -735,4 +736,32 @@ test("ends a round left for over half an hour, marked but not counted as an atte
       .getByRole("listitem")
       .filter({ hasText: "Flood fill" }),
   ).toHaveCount(1);
+});
+
+test("marks an estimate right within its bounds, saying how close it must be", async () => {
+  await phone.goto("/");
+  await phone.locator(".track", { hasText: "Estimation" }).tap();
+  await expect(phone.getByRole("heading", { name: "Estimation" })).toBeVisible();
+  // An answer just inside the bounds is close enough, and one ten times off isn't.
+  for (const [scale, verdict] of [
+    ["inside", "Close enough"],
+    ["far", "Not close enough"],
+  ] as const) {
+    const shown = (await phone.locator(".learn-prompt").innerText()).trim();
+    const deck = await serverDeck();
+    const item = deck.items.find((i) => i.instances?.some((x) => x.prompt === shown));
+    const exact = item?.instances?.find((x) => x.prompt === shown)?.answer;
+    const tolerance = item?.tolerance;
+    if (exact === undefined || tolerance === undefined) throw new Error(`no estimate ${shown}`);
+    const bound = tolerance.factor
+      ? `within a factor of ${tolerance.factor}`
+      : `within ${tolerance.relative * 100}%`;
+    await expect(phone.locator(".learn-estimate")).toHaveText(`An estimate: ${bound} counts.`);
+    const inside = tolerance.factor
+      ? exact * tolerance.factor * 0.9
+      : exact * (1 + tolerance.relative * 0.8);
+    await answer(String(scale === "inside" ? inside : exact * 10));
+    await expect(phone.locator(".learn-verdict")).toContainText(`${verdict}: it's `);
+    await phone.getByRole("button", { name: "Next" }).tap();
+  }
 });

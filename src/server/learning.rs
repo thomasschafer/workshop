@@ -80,7 +80,7 @@ mod tests {
         let response = send(&router, request).await;
         assert_eq!(response.status(), StatusCode::OK);
         let deck = json(response).await;
-        assert_eq!(deck["items"].as_array().unwrap().len(), 34);
+        assert_eq!(deck["items"].as_array().unwrap().len(), 42);
         assert_eq!(deck["limits"]["daily_reviews"], 40);
         assert_eq!(deck["limits"]["daily_new"], 10);
         assert_eq!(deck["progress"]["new_today"], 0);

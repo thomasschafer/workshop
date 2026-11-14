@@ -61,6 +61,14 @@ id = "estimation.magnitudes"
 name = "Orders of magnitude"
 
 [[skills]]
+id = "estimation.arithmetic"
+name = "Rough arithmetic"
+
+[[skills]]
+id = "estimation.growth"
+name = "Growth and compounding"
+
+[[skills]]
 id = "probability.counting"
 name = "Counting outcomes"
 

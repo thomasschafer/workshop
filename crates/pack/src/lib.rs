@@ -437,6 +437,7 @@ fn check_without_programs(item: &Item) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use workshop_tracks::TrackId;
 
     fn files(entries: &[(&str, &str)]) -> BTreeMap<String, Vec<u8>> {
         entries
@@ -467,8 +468,25 @@ mod tests {
         let failures: Vec<String> = report.failures().iter().map(ToString::to_string).collect();
         assert!(failures.is_empty(), "{failures:#?}");
         for kind in [Kind::Card, Kind::MentalMaths, Kind::Probability] {
+            // Mental maths templates come in two tracks: exact sums, and estimates.
+            for track in [
+                TrackId::Review,
+                TrackId::MentalMaths,
+                TrackId::Probability,
+                TrackId::Pack("estimation".parse().unwrap()),
+            ] {
+                let count = pack
+                    .items
+                    .iter()
+                    .filter(|item| item.kind == kind && item.track == track)
+                    .count();
+                assert!(
+                    count == 0 || (8..=12).contains(&count),
+                    "{count} of {kind:?} in {track}"
+                );
+            }
             let count = pack.items.iter().filter(|item| item.kind == kind).count();
-            assert!((8..=12).contains(&count), "{count} of {kind:?}");
+            assert!(count >= 8, "{count} of {kind:?}");
         }
         // Coding items' programs are checked by workshop-coding, which runs them.
         let coding = pack.items.iter().filter(|i| i.kind == Kind::Coding).count();

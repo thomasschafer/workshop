@@ -768,7 +768,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let deck = learning(dir.path()).deck(clock(NOW)).unwrap();
         // Coding problems aren't short, so aren't in it; code to read is.
-        assert_eq!(deck.items.len(), 34);
+        assert_eq!(deck.items.len(), 42);
         assert!(deck.problems.is_empty());
         let names: Vec<&str> = deck.tracks.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
