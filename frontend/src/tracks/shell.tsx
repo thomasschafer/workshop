@@ -5,6 +5,7 @@ import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
 import { Practice } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
+import { GoalsScreen } from "../progress/goals";
 import { MistakesScreen } from "../progress/mistakes";
 import { Home } from "./home";
 import { pathOf, type Route, routeFor, routeOf } from "./routes";
@@ -84,6 +85,14 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
       return <Home onGo={(destination) => void go(destination)} onOpen={open} />;
     case "mistakes":
       return <MistakesScreen onHome={goHome} />;
+    case "goals":
+      return (
+        <GoalsScreen
+          goal={route.goal}
+          onHome={goHome}
+          onOpen={(goal) => open({ screen: "goals", goal })}
+        />
+      );
     case "practice":
       return <Practice key={route.track} track={route.track} onHome={goHome} />;
     case "coding":

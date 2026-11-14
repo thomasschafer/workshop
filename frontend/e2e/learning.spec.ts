@@ -200,6 +200,30 @@ test("keeps a log of mistakes, whose kinds can be confirmed or changed", async (
   expect(tags).toEqual(["concept-gap", "misread"]);
 });
 
+test("shows progress towards each of the pack's goals", async () => {
+  await goHome();
+  await phone.getByRole("button", { name: /^Goals/ }).tap();
+  await expect(phone).toHaveURL(/\/goals$/);
+  await expect(phone.locator(".home-link")).toHaveCount(3);
+  await phone.getByRole("button", { name: /^Quick arithmetic/ }).tap();
+  await expect(phone).toHaveURL(/\/goals\/quick-arithmetic$/);
+  await expect(phone.getByRole("heading", { name: "Quick arithmetic" })).toBeVisible();
+  await expect(phone.getByRole("region", { name: "Summary" })).toContainText(
+    "Each skill to 80% mastered",
+  );
+  // The sums answered count towards multiplication's mastery, and the trend ends there.
+  await expect(phone.getByLabel("Multiplication mastered")).toBeVisible();
+  await expect(phone.getByRole("img", { name: /^Average mastery went from 0% to/ })).toBeVisible();
+  await expect(phone.getByRole("heading", { name: "Weakest" })).toBeVisible();
+  await expect(phone.getByRole("heading", { name: "Recent mistakes, by kind" })).toBeVisible();
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+  await phone.getByRole("button", { name: "Every goal" }).tap();
+  await expect(phone).toHaveURL(/\/goals$/);
+});
+
 test("practises offline on a phone, keeping answers across a reload, and syncs them later", async () => {
   // The app is kept on the phone by its service worker, once that's in charge of the page.
   await phone.evaluate(async () => {

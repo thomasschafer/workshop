@@ -100,7 +100,10 @@ export function Home({
               </h2>
               <ul class="tracks">
                 {(
-                  [[{ screen: "mistakes" }, "Mistakes", "What's gone wrong, by kind"]] as const
+                  [
+                    [{ screen: "goals", goal: null }, "Goals", "How close each goal is"],
+                    [{ screen: "mistakes" }, "Mistakes", "What's gone wrong, by kind"],
+                  ] as const
                 ).map(([route, name, summary]) => (
                   <li key={name}>
                     <button type="button" class="home-link" onClick={() => onOpen(route)}>

@@ -7,6 +7,7 @@ mod discuss;
 mod doctor;
 mod edit;
 mod eval;
+mod goals;
 mod language;
 mod learning;
 mod mistakes;

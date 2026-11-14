@@ -49,6 +49,7 @@ pub fn router(app: Shared) -> Router {
         .route("/learning/deck", get(learning::deck))
         .route("/learning/sync", post(learning::sync))
         .route("/mistakes", get(mistakes::mistakes))
+        .route("/goals", get(mistakes::goals))
         .route("/mistakes/tag", put(mistakes::tag))
         .route("/coding", get(coding::overview))
         .route("/coding/items/{pack}/{item}/open", post(coding::open))

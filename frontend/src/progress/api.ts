@@ -1,8 +1,12 @@
 import { request } from "../api";
 import { utcOffset } from "../learning/local";
-import type { MistakeLog } from "./types";
+import type { GoalProgress, MistakeLog } from "./types";
 
 export const progressApi = {
+  goals: () =>
+    request<{ goals: GoalProgress[] }>("GET", `/goals?utc_offset=${utcOffset()}`).then(
+      (r) => r.goals,
+    ),
   mistakes: () => request<MistakeLog>("GET", `/mistakes?utc_offset=${utcOffset()}`),
   /** Sets the kind of a mistake, or with null goes back to the one suggested. */
   tag: (id: string, errorType: string | null) =>

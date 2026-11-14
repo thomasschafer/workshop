@@ -1,4 +1,5 @@
-//! The mistake log: browsing it, and confirming or changing the kind of each mistake.
+//! The mistake log, browsing it and confirming or changing the kind of each mistake, and the
+//! progress towards each goal that the mistakes are part of.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -14,6 +15,18 @@ pub(super) async fn mistakes(State(app): State<Shared>, Query(at): Query<Where>)
     let packs = crate::packs::load(&app.config.learning)?;
     let mistakes = app.learning.store().mistakes(0)?;
     Ok(Json(crate::mistakes::log(&packs, mistakes, clock.now)))
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct Goals {
+    goals: Vec<crate::goals::GoalProgress>,
+}
+
+pub(super) async fn goals(State(app): State<Shared>, Query(at): Query<Where>) -> ApiResult<Goals> {
+    let clock = at.clock()?;
+    Ok(Json(Goals {
+        goals: app.learning.goals(clock.now)?,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -122,5 +135,17 @@ mod tests {
         let missing = serde_json::json!({ "id": "nothing-here", "error_type": "misread" });
         let response = send(&router, request("PUT", "/api/mistakes/tag", missing)).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let get = Request::get("/api/goals?utc_offset=0")
+            .header(header::COOKIE, "workshop_token=secret")
+            .body(Body::empty())
+            .unwrap();
+        let goals = json(send(&router, get).await).await;
+        let probability = &goals["goals"][1];
+        assert_eq!(probability["id"], "probability-foundations");
+        assert_eq!(probability["target"], 0.7);
+        assert_eq!(probability["mistakes"][0]["error_type"], "misread");
+        assert_eq!(probability["skills"][0]["id"], "probability.counting");
+        assert_eq!(probability["skills"][0]["name"], "Counting outcomes");
     }
 }

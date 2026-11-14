@@ -53,6 +53,49 @@ pub struct Goal {
     pub by: Option<String>,
 }
 
+impl Goal {
+    /// The day it's wanted by, in days since 1 January 1970, if it has one.
+    pub fn by_day(&self) -> Option<i64> {
+        self.by.as_deref().and_then(days_since_1970)
+    }
+}
+
+/// A date written as `YYYY-MM-DD`, in days since 1 January 1970.
+fn days_since_1970(date: &str) -> Option<i64> {
+    let mut parts = date.split('-');
+    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+    let (year, month, day): (i64, i64, i64) =
+        (year.parse().ok()?, month.parse().ok()?, day.parse().ok()?);
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days_in_month = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    if !(1..=12).contains(&month) || day < 1 || day > days_in_month[(month - 1) as usize] {
+        return None;
+    }
+    // Howard Hinnant's days_from_civil.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let year_of_era = y - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
 /// Text added to a coach role's instructions, from files in the pack, such as to shape the
 /// examiner's style.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -188,6 +231,14 @@ impl Manifest {
                     goal.id
                 ));
             }
+            if let Some(by) = &goal.by
+                && days_since_1970(by).is_none()
+            {
+                return Err(format!(
+                    "the goal {:?} is wanted by {by:?}, which should be a date such as 2027-06-30",
+                    goal.id
+                ));
+            }
             let mastery = goal.mastery.unwrap_or(DEFAULT_GOAL_MASTERY);
             if !(mastery > 0.0 && mastery <= 1.0) {
                 return Err(format!(
@@ -315,6 +366,12 @@ mod tests {
             TrackId::Pack("estimation".parse().unwrap())
         );
         assert!(manifest.track("chess").is_err());
+        assert_eq!(manifest.goals[0].by_day(), None);
+        assert_eq!(days_since_1970("1970-01-01"), Some(0));
+        assert_eq!(days_since_1970("2026-09-21"), Some(20_717));
+        assert_eq!(days_since_1970("2024-02-29"), Some(19_782));
+        assert_eq!(days_since_1970("2023-02-29"), None);
+        assert_eq!(days_since_1970("next june"), None);
         let types = manifest.all_error_types();
         assert_eq!(types[0].id, "misread");
         assert_eq!(types.last().unwrap().id, "sign-error");
@@ -347,6 +404,10 @@ mod tests {
             (
                 "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"a\"]\nmastery = 1.5",
                 "at most 1",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"a\"]\nby = \"soon\"",
+                "should be a date",
             ),
             (
                 "id = \"x\"\nname = \"x\"\n[[error_types]]\nid = \"off-by-one\"\nname = \"O\"\ndescription = \"d\"",

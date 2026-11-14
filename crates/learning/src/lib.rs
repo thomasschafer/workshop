@@ -10,7 +10,7 @@ pub mod plan;
 pub mod schedule;
 pub mod store;
 
-pub use mastery::{SkillMastery, mastery};
+pub use mastery::{SkillMastery, history, mastery};
 pub use mistakes::{Mistake, MistakeSource, NewMistake};
 pub use plan::{Clock, ItemRef, Limits, Progress, TrackPlan, plan};
 pub use schedule::{ItemSchedule, Rating, Scheduler};

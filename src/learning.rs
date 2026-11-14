@@ -247,6 +247,21 @@ impl Learning {
         self.store.record_mistakes(&mistakes)
     }
 
+    /// How each of the packs' goals is going.
+    pub fn goals(&self, now: i64) -> Result<Vec<crate::goals::GoalProgress>> {
+        let packs = crate::packs::load(&self.config)?;
+        let items = practised(&packs);
+        let recent = self.store.mistakes(now - crate::mistakes::RECENT_MS)?;
+        Ok(crate::goals::progress(
+            &packs,
+            &item_refs(&items),
+            &self.store.all_attempts()?,
+            &recent,
+            self.store.scheduler(),
+            now,
+        ))
+    }
+
     /// The skills recent mistakes point to.
     fn focus(&self, packs: &[Pack], now: i64) -> Result<Vec<String>> {
         let recent = self.store.mistakes(now - crate::mistakes::RECENT_MS)?;

@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::plan::ItemRef;
 use crate::schedule::{ItemSchedule, Scheduler};
+use crate::store::Attempt;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SkillMastery {
@@ -51,6 +52,38 @@ pub fn mastery(
         .collect()
 }
 
+/// Mastery of every skill as it was at each of `times`, worked out from the attempts made by
+/// then, for showing how it's changed. `attempts` must be in the order they were made.
+pub fn history(
+    items: &[ItemRef<'_>],
+    attempts: &[Attempt],
+    scheduler: &Scheduler,
+    times: &[i64],
+) -> Vec<Vec<SkillMastery>> {
+    let mut by_item: BTreeMap<&str, Vec<&Attempt>> = BTreeMap::new();
+    for attempt in attempts {
+        by_item.entry(&attempt.item).or_default().push(attempt);
+    }
+    times
+        .iter()
+        .map(|&at| {
+            let schedules: BTreeMap<String, ItemSchedule> = by_item
+                .iter()
+                .filter_map(|(item, attempts)| {
+                    let before = attempts
+                        .iter()
+                        .filter(|a| a.answered_at <= at)
+                        .map(|a| (a.answered_at, a.rating));
+                    scheduler
+                        .replay(before)
+                        .map(|schedule| ((*item).to_owned(), schedule))
+                })
+                .collect();
+            mastery(items, &schedules, scheduler, at)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use workshop_tracks::TrackId;
@@ -86,5 +119,49 @@ mod tests {
         assert_eq!(mastery[1].skill, "sums");
         assert_eq!(mastery[1].mastery, recall / 2.0);
         assert_eq!((mastery[1].items, mastery[1].attempted), (2, 1));
+    }
+
+    #[test]
+    fn works_out_mastery_as_it_was() {
+        let scheduler = Scheduler::default();
+        let now = 1_790_000_000_000;
+        let sums = vec!["sums".to_owned()];
+        let track = TrackId::MentalMaths;
+        let items = [ItemRef {
+            key: "p/a",
+            track: &track,
+            skills: &sums,
+        }];
+        let attempt = |id: &str, at: i64| Attempt {
+            id: id.to_owned(),
+            item: "p/a".to_owned(),
+            answered_at: at,
+            duration_ms: 1000,
+            rating: Rating::Good,
+            response: None,
+            seed: None,
+        };
+        let attempts = [attempt("1", now - 10 * DAY_MS), attempt("2", now - DAY_MS)];
+        let history = history(
+            &items,
+            &attempts,
+            &scheduler,
+            &[now - 20 * DAY_MS, now - 5 * DAY_MS, now],
+        );
+        assert_eq!(history[0][0].mastery, 0.0);
+        let once = scheduler
+            .replay([(now - 10 * DAY_MS, Rating::Good)])
+            .unwrap();
+        assert_eq!(
+            history[1][0].mastery,
+            scheduler.recall(&once, now - 5 * DAY_MS)
+        );
+        let twice = scheduler
+            .replay([
+                (now - 10 * DAY_MS, Rating::Good),
+                (now - DAY_MS, Rating::Good),
+            ])
+            .unwrap();
+        assert_eq!(history[2][0].mastery, scheduler.recall(&twice, now));
     }
 }
