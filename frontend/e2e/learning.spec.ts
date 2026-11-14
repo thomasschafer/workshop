@@ -472,6 +472,8 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
   await phone.goto("/practice/probability");
   await expect(phone.getByRole("heading", { name: "Probability" })).toBeVisible();
   await expect(phone.locator(".learn-sync")).toContainText("Offline");
+  // Answers can be fractions or percentages, which a phone's number pad can't type.
+  await expect(phone.getByLabel("Your answer")).toHaveAttribute("inputmode", "text");
 
   await answer(await answerShown());
   await expect(phone.locator(".learn-verdict")).toHaveText("Right");

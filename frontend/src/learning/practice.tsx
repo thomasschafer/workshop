@@ -217,6 +217,7 @@ export function ItemView({
           prompt={nextInstance(item.instances, learning().attempts, item.key)}
           tolerance={item.tolerance}
           estimate={describeTolerance(item.tolerance)}
+          numbersOnly={item.instances.every((instance) => instance.answer >= 0)}
           onAnswer={(instance, response, right) => {
             record(right ? "good" : "again", {
               ...(response === null ? {} : { response }),
@@ -531,6 +532,7 @@ function TypedAnswer({
   tolerance,
   estimate = null,
   markdown = false,
+  numbersOnly = false,
   onAnswer,
   onNext,
 }: {
@@ -539,6 +541,11 @@ function TypedAnswer({
   /** How close an estimate must be, such as "within 5%", shown with the question; null if exact. */
   estimate?: string | null;
   markdown?: boolean;
+  /**
+   * Whether a phone's number pad is enough to answer. It has no "/", "%" or, on some phones, "-",
+   * so fractions, percentages and negative numbers need the full keyboard.
+   */
+  numbersOnly?: boolean;
   onAnswer: (instance: Instance, response: string | null, right: boolean) => void;
   onNext: (right: boolean) => void;
 }) {
@@ -587,7 +594,7 @@ function TypedAnswer({
           id="learn-response"
           ref={input}
           type="text"
-          inputMode="decimal"
+          inputMode={numbersOnly ? "decimal" : "text"}
           autoComplete="off"
           autoCorrect="off"
           spellcheck={false}
