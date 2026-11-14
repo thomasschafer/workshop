@@ -1,7 +1,10 @@
 //! The tracks on the home screen, of which Advent of Code is one, and where each of their steps
 //! leads in the app.
 
-use serde::Serialize;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use workshop_tracks::{Priority, Step, Track, TrackId};
 
 use crate::calendar::{days_in, is_unlocked, todays_puzzle};
@@ -25,6 +28,42 @@ pub enum Destination {
     /// Timed rounds: one of an item, as `pack/item`, under way or to start, or the list of
     /// them.
     Round { item: Option<String> },
+}
+
+/// The long item done last, so the next can be from another track.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LastLong {
+    track: TrackId,
+    at: i64,
+}
+
+fn last_long_file(data_dir: &Path) -> PathBuf {
+    data_dir.join("last-long.json")
+}
+
+/// The track of the long item done last, such as a design session or a timed round, if one's
+/// been done.
+pub fn last_long(data_dir: &Path) -> Result<Option<TrackId>> {
+    let path = last_long_file(data_dir);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => {
+            let last: LastLong = serde_json::from_str(&text)
+                .with_context(|| format!("reading {}", path.display()))?;
+            Ok(Some(last.track))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+/// Notes that a long item in `track` has just been done.
+pub fn done_long(data_dir: &Path, track: TrackId, at: i64) -> Result<()> {
+    let last = LastLong { track, at };
+    workshop_common::files::write_atomic(
+        &last_long_file(data_dir),
+        &serde_json::to_vec_pretty(&last)?,
+    )
 }
 
 /// What the Advent of Code track is worked out from.

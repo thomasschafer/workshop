@@ -244,37 +244,54 @@ impl<D: Clone> Home<D> {
     /// pressing as each other, the track listed first.
     ///
     /// Long items are only offered when the learner has a while, and then they come first,
-    /// as that's what the learner asked for: the most pressing of them, unless none is more
-    /// than something to browse, when the usual step is better.
+    /// as that's what the learner asked for. One that's unfinished comes first of all. Otherwise
+    /// they take turns, so neither design sessions nor timed rounds crowd out the other: the
+    /// first track listed with a long item other than `last_long`, the track of the long item
+    /// done last. How pressing each is otherwise, such as a round in a skill with recent
+    /// mistakes, doesn't count, as each is a sitting's work whatever's in it. If no long item
+    /// is more than something to browse, the usual step is better.
     pub fn new(
         tracks: impl IntoIterator<Item = Option<Track<D>>>,
         time: Time,
+        last_long: Option<&TrackId>,
     ) -> Result<Self, TrackError> {
         let mut tracks: Vec<Track<D>> = tracks.into_iter().flatten().collect();
         tracks.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(pair) = tracks.windows(2).find(|pair| pair[0].id == pair[1].id) {
             return Err(TrackError::DuplicateTrack(pair[0].id.clone()));
         }
-        let most_pressing = |long: bool| {
+        let next = |track: &Track<D>, step: &Step<D>, long: bool| Next {
+            track: track.id.clone(),
+            step: step.clone(),
+            long,
+        };
+        let usual = || {
             tracks
                 .iter()
-                .filter_map(|track| {
-                    let step = if long { &track.long } else { &track.next };
-                    step.as_ref().map(|step| (track, step))
-                })
+                .filter_map(|track| track.next.as_ref().map(|step| (track, step)))
                 .min_by_key(|(_, step)| step.priority)
-                .map(|(track, step)| Next {
-                    track: track.id.clone(),
-                    step: step.clone(),
-                    long,
-                })
+                .map(|(track, step)| next(track, step, false))
         };
         let next = match time {
-            Time::Short => most_pressing(false),
-            Time::AWhile => match most_pressing(true) {
-                Some(long) if long.step.priority < Priority::Browse => Some(long),
-                long => most_pressing(false).or(long),
-            },
+            Time::Short => usual(),
+            Time::AWhile => {
+                let long: Vec<(&Track<D>, &Step<D>)> = tracks
+                    .iter()
+                    .filter_map(|track| track.long.as_ref().map(|step| (track, step)))
+                    .collect();
+                let unfinished = long
+                    .iter()
+                    .find(|(_, step)| step.priority == Priority::Unfinished);
+                let turn = long
+                    .iter()
+                    .filter(|(_, step)| step.priority < Priority::Browse)
+                    .min_by_key(|(track, _)| Some(&track.id) == last_long);
+                match unfinished.or(turn) {
+                    Some((track, step)) => Some(next(track, step, true)),
+                    None => usual()
+                        .or_else(|| long.first().map(|(track, step)| next(track, step, true))),
+                }
+            }
         };
         Ok(Self { next, tracks })
     }
@@ -367,6 +384,7 @@ mod tests {
                 track(TrackId::AdventOfCode, None),
             ],
             Time::Short,
+            None,
         )
         .unwrap();
         let ids: Vec<TrackId> = home.tracks.iter().map(|t| t.id.clone()).collect();
@@ -386,6 +404,7 @@ mod tests {
                 track(TrackId::Review, Some(step("cards", Priority::Due))),
             ],
             Time::Short,
+            None,
         )
         .unwrap();
         let next = home.next.unwrap();
@@ -401,6 +420,7 @@ mod tests {
                 track(TrackId::Coding, Some(step("first", Priority::New))),
             ],
             Time::Short,
+            None,
         )
         .unwrap();
         assert_eq!(home.next.unwrap().track, TrackId::Coding);
@@ -411,6 +431,7 @@ mod tests {
         let err = Home::new(
             [track(TrackId::Coding, None), track(TrackId::Coding, None)],
             Time::Short,
+            None,
         )
         .unwrap_err();
         assert_eq!(err, TrackError::DuplicateTrack(TrackId::Coding));
@@ -434,16 +455,58 @@ mod tests {
                 ),
                 with_long(
                     track(TrackId::Rounds, None),
-                    step("timed round", Priority::Due),
+                    step("timed round", Priority::Focus),
                 ),
             ]
         };
-        let short = Home::new(tracks(), Time::Short).unwrap().next.unwrap();
+        let short = Home::new(tracks(), Time::Short, None)
+            .unwrap()
+            .next
+            .unwrap();
         assert_eq!((short.step.title.as_str(), short.long), ("cards", false));
-        // With a while, the most pressing long item comes first, even before due reviews.
-        let long = Home::new(tracks(), Time::AWhile).unwrap().next.unwrap();
-        assert_eq!((long.step.title.as_str(), long.long), ("timed round", true));
-        assert_eq!(long.track, TrackId::Rounds);
+        // With a while, a long item comes first, even before due reviews. A round in a skill
+        // with recent mistakes doesn't outrank a new design session: the first listed goes
+        // first.
+        let long = Home::new(tracks(), Time::AWhile, None)
+            .unwrap()
+            .next
+            .unwrap();
+        assert_eq!(
+            (long.step.title.as_str(), long.long),
+            ("design session", true)
+        );
+        assert_eq!(long.track, TrackId::SystemDesign);
+    }
+
+    #[test]
+    fn takes_turns_between_long_items_unless_one_is_unfinished() {
+        let tracks = |round: Priority| {
+            [
+                with_long(
+                    track(TrackId::SystemDesign, None),
+                    step("design session", Priority::Due),
+                ),
+                with_long(track(TrackId::Rounds, None), step("timed round", round)),
+            ]
+        };
+        let after = |last: TrackId, round: Priority| {
+            Home::new(tracks(round), Time::AWhile, Some(&last))
+                .unwrap()
+                .next
+                .unwrap()
+                .step
+                .title
+        };
+        assert_eq!(after(TrackId::SystemDesign, Priority::New), "timed round");
+        assert_eq!(after(TrackId::Rounds, Priority::New), "design session");
+        assert_eq!(after(TrackId::Rounds, Priority::Focus), "design session");
+        // Unfinished work comes first, whoever's turn it is.
+        assert_eq!(after(TrackId::Rounds, Priority::Unfinished), "timed round");
+        // Something only to browse doesn't get a turn.
+        assert_eq!(
+            after(TrackId::SystemDesign, Priority::Browse),
+            "design session"
+        );
     }
 
     #[test]
@@ -457,7 +520,10 @@ mod tests {
                 ),
             ]
         };
-        let next = Home::new(tracks(), Time::AWhile).unwrap().next.unwrap();
+        let next = Home::new(tracks(), Time::AWhile, None)
+            .unwrap()
+            .next
+            .unwrap();
         assert_eq!(next.step.title, "cards");
         // With nothing else, the long item is still better than nothing.
         let only = Home::new(
@@ -466,6 +532,7 @@ mod tests {
                 step("any round", Priority::Browse),
             )],
             Time::AWhile,
+            None,
         )
         .unwrap();
         assert_eq!(only.next.unwrap().step.title, "any round");
@@ -475,6 +542,7 @@ mod tests {
                 step("any round", Priority::Browse),
             )],
             Time::Short,
+            None,
         )
         .unwrap();
         assert_eq!(none.next, None);
@@ -488,6 +556,7 @@ mod tests {
                 Some(step("2025 · day 3", Priority::Unfinished)),
             )],
             Time::Short,
+            None,
         )
         .unwrap();
         let json = serde_json::to_value(&home).unwrap();

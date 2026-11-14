@@ -439,6 +439,7 @@ pub(super) async fn end(
         None
     };
     app.rounds.remove(&key)?;
+    crate::tracks::done_long(&app.paths.data_dir, workshop_tracks::TrackId::Rounds, now)?;
     let rubric = marked.points.iter().map(|p| p.point.clone()).collect();
     Ok(Json(Ended {
         ending,

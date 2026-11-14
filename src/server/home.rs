@@ -74,7 +74,8 @@ pub(super) async fn home(
     let tracks = std::iter::once(advent_of_code.track())
         .chain(learning)
         .map(Some);
-    let home = Home::new(tracks, query.time).map_err(anyhow::Error::from)?;
+    let last_long = crate::tracks::last_long(&app.paths.data_dir)?;
+    let home = Home::new(tracks, query.time, last_long.as_ref()).map_err(anyhow::Error::from)?;
     Ok(Json(HomeScreen {
         home,
         week,

@@ -119,6 +119,13 @@ pub(super) async fn mark(
         store.record_mistakes(&findings)?;
         None
     };
+    if body.work == Work::Design {
+        crate::tracks::done_long(
+            &app.paths.data_dir,
+            workshop_tracks::TrackId::SystemDesign,
+            now,
+        )?;
+    }
     let rubric = match &item.content {
         Content::Design { rubric, .. } => rubric.clone(),
         _ => marked.points.iter().map(|p| p.point.clone()).collect(),

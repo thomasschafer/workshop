@@ -289,11 +289,10 @@ test("offers long items only with a while, which turns itself off once the sitti
   await expect(next).not.toContainText("long");
   await toggle.tap();
   await expect(next).toContainText("Continue · long");
-  // A timed round in the skill recent mistakes point to comes before anything new.
-  await expect(next).toContainText("Fewest hops between towns");
-  await expect(next).toContainText(
-    "Timed rounds · Practise Graph algorithms, after recent mistakes",
-  );
+  // Long items take turns, and a timed round in the skill recent mistakes point to doesn't
+  // outrank a new design session: with neither done yet, the design session goes first.
+  await expect(next).toContainText("System design · Something new");
+  await expect(next).not.toContainText("Timed rounds");
   // Still on after a reload, in the same sitting.
   await phone.reload();
   await expect(toggle).toBeChecked();

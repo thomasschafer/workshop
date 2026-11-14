@@ -323,6 +323,11 @@ pub(super) async fn finish(
         now,
     )?;
     app.design_sessions.remove(&key)?;
+    crate::tracks::done_long(
+        &app.paths.data_dir,
+        workshop_tracks::TrackId::SystemDesign,
+        now,
+    )?;
     let due = store.schedules()?.get(&key).map(|schedule| {
         store
             .scheduler()
@@ -551,6 +556,17 @@ mod tests {
         assert!(previous.contains("## Estimate the scale\n\n100 opens a second"));
         let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
         assert_eq!(log["mistakes"][0]["detail"], "Nothing on expiry");
+        // Long items take turns: after a design session, a timed round.
+        let home = json(
+            send(
+                &router,
+                request("GET", "/api/home?utc_offset=0&time=a_while", None),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(home["continue"]["track"], "rounds");
+        assert_eq!(home["continue"]["long"], true);
         let again = send(
             &router,
             request(
