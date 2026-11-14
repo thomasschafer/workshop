@@ -83,14 +83,14 @@ test("reads code and says what it prints, checked on the phone", async () => {
 test("understands and plans a problem, each step saved, and carries on after a reload", async () => {
   await phone.locator(".coding-item", { hasText: "The first word to repeat" }).tap();
   await expect(phone).toHaveURL(/\/coding\/sample\/first-repeat$/);
-  await expect(phone.locator(".coding-step.current")).toHaveText("Understand");
+  await expect(phone.locator(".step.current")).toHaveText("Understand");
   await expect(phone.getByRole("region", { name: "Example 1" })).toContainText("the tide came in");
   await phone.getByLabel("What should it print?").fill("the");
   await phone.getByRole("button", { name: "Check" }).tap();
   await expect(phone.locator(".learn-verdict")).toHaveText("Right");
   await phone.getByRole("button", { name: "Next: plan" }).tap();
 
-  await expect(phone.locator(".coding-step.current")).toHaveText("Plan");
+  await expect(phone.locator(".step.current")).toHaveText("Plan");
   const plan = phone.getByLabel("How will you solve it?");
   await plan.fill("Keep a set of the words seen so far.");
   // Held to dictate, what's said is added on a line of its own.
@@ -118,19 +118,19 @@ test("understands and plans a problem, each step saved, and carries on after a r
     })
     .toBe("plan");
   await phone.reload();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Plan");
+  await expect(phone.locator(".step.current")).toHaveText("Plan");
   await expect(phone.getByLabel("How will you solve it?")).toHaveValue(/first one already in it/);
   await phone.getByRole("banner").getByRole("button", { name: "Home" }).tap();
   const next = phone.locator(".continue");
   await expect(next).toContainText("The first word to repeat");
   await expect(next).toContainText("Where you left off, planning");
   await next.tap();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Plan");
+  await expect(phone.locator(".step.current")).toHaveText("Plan");
 });
 
 test("codes on the phone with Helix's keys, its own keyboard and the language server", async () => {
   await phone.getByRole("button", { name: "Next: code" }).tap();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Code");
+  await expect(phone.locator(".step.current")).toHaveText("Code");
   const editor = phone.locator(".cm-content");
   await expect(editor).toContainText("def first_repeat");
   // The editor and the keyboard fit on the phone's screen, without scrolling sideways.
@@ -176,7 +176,7 @@ test("codes on the phone with Helix's keys, its own keyboard and the language se
   // Code saved elsewhere is on the server, and the editor picks it up when it's opened.
   await writeCode("print('none')\n");
   await phone.reload();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Code");
+  await expect(phone.locator(".step.current")).toHaveText("Code");
   await expect(editor).toContainText("print('none')");
   await phone.getByRole("button", { name: "Run examples" }).tap();
   const results = phone.getByRole("region", { name: "Examples run" });
@@ -195,7 +195,7 @@ test("submits, shows a small input it fails on, then passes and is reviewed", as
   );
   await phone.reload();
   await phone.getByRole("button", { name: "Submit" }).tap();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Test");
+  await expect(phone.locator(".step.current")).toHaveText("Test");
   const results = phone.getByRole("region", { name: "Test results" });
   await expect(results).toContainText("then went wrong", { timeout: 30_000 });
   await expect(results).toContainText("A random input of size");
@@ -220,7 +220,7 @@ test("submits, shows a small input it fails on, then passes and is reviewed", as
   );
   await phone.reload();
   await phone.getByRole("button", { name: "Submit" }).tap();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Review", { timeout: 30_000 });
+  await expect(phone.locator(".step.current")).toHaveText("Review", { timeout: 30_000 });
   await expect(phone.locator(".learn-verdict")).toHaveText("Solved: it passed every test.");
   await expect(phone.getByRole("region", { name: "Approach" })).toContainText("set");
   // Two submissions and a hint, so it's suggested it was hard.
@@ -252,7 +252,7 @@ test("submits, shows a small input it fails on, then passes and is reviewed", as
 
 test("comes back as a quick recall, comparing the plan with the approach", async () => {
   await phone.goto("/coding/sample/first-repeat");
-  await expect(phone.locator(".coding-step")).toHaveText(["Plan", "Review"]);
+  await expect(phone.locator(".step")).toHaveText(["Plan", "Review"]);
   const plan = phone.getByLabel("From memory: how would you solve it?");
   await plan.fill("A set, stopping at the first word already in it");
   // The grader checks it first, if asked.
@@ -271,7 +271,7 @@ test("comes back as a quick recall, comparing the plan with the approach", async
   await explain.getByRole("button", { name: "Mark my explanation" }).tap();
   await expect(phone.getByRole("region", { name: "Clarity" })).toContainText("75%");
   await phone.getByRole("button", { name: "Compare with the approach" }).tap();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Review");
+  await expect(phone.locator(".step.current")).toHaveText("Review");
   await expect(phone.getByRole("region", { name: "Your plan" })).toContainText(
     "Keep a set of the words seen so far.",
   );
@@ -302,6 +302,6 @@ test("says clearly that problems need the server, while code to read works offli
   await expect(phone.locator(".error-text")).toContainText("need the server");
   await context.setOffline(false);
   await phone.getByRole("button", { name: "Try again" }).tap();
-  await expect(phone.locator(".coding-step.current")).toHaveText("Understand");
+  await expect(phone.locator(".step.current")).toHaveText("Understand");
   await expect(phone.locator(".learn-sync")).toHaveCount(0);
 });

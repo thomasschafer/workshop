@@ -16,6 +16,7 @@ import type { Rating } from "../learning/types";
 import { LatestSaver, type VersionedSaver } from "../saver";
 import { DictateButton } from "../views/dictate";
 import { Keyboard } from "../views/keyboard";
+import { StepNav } from "../views/steps";
 import { codingApi } from "./api";
 import { EditorPane } from "./editorPane";
 import {
@@ -311,24 +312,14 @@ export function ProblemView({
       class={`learn coding-problem ${session.step === "code" || session.step === "test" ? "coding-at-code" : ""}`}
     >
       {header}
-      <nav class="coding-steps" aria-label="Steps">
-        <h1 class="coding-title">{opened.label}</h1>
-        <ol>
-          {steps.map((step) => (
-            <li key={step}>
-              <button
-                type="button"
-                class={`coding-step ${step === session.step ? "current" : ""}`}
-                aria-current={step === session.step ? "step" : undefined}
-                disabled={!reached(session.mode, session.step, step) || finished !== null}
-                onClick={() => goTo(step)}
-              >
-                {STEP_LABELS[step]}
-              </button>
-            </li>
-          ))}
-        </ol>
-      </nav>
+      <StepNav
+        title={opened.label}
+        steps={steps}
+        current={session.step}
+        label={(step) => STEP_LABELS[step]}
+        reachable={(step) => reached(session.mode, session.step, step) && finished === null}
+        onGo={goTo}
+      />
       {offlineBanner}
       {notice ? (
         <div class="banner" role="status">

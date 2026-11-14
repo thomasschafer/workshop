@@ -47,50 +47,8 @@
   min-height: 0;
 }
 
-.coding-steps {
-  width: 100%;
-  max-width: 36rem;
-  margin: 0 auto;
-  padding: 4px 16px 8px;
-}
-
-.coding-at-code .coding-steps {
+.coding-at-code .steps {
   max-width: none;
-}
-
-.coding-title {
-  margin: 0 0 6px;
-  font-size: 17px;
-}
-
-.coding-steps ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-}
-
-.coding-step {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.coding-step.current {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-
-.coding-step:disabled {
-  color: var(--faint);
 }
 
 .coding-subheading {
