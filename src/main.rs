@@ -4,6 +4,7 @@ mod calendar;
 mod coding;
 mod commands;
 mod config;
+mod design;
 mod discuss;
 mod doctor;
 mod edit;

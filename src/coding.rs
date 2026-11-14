@@ -34,10 +34,6 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How many random inputs a submission is compared with the brute force on.
 pub const SUBMIT_RANDOM_INPUTS: u32 = 30;
 
-/// The longest time between two saves of a problem that counts as time spent on it, so a
-/// problem left open while the learner does something else counts for no more.
-const MAX_GAP_MS: i64 = 2 * 60 * 1000;
-
 /// Where and how coding items' programs are built and run: in Workshop's build directory, with
 /// the solutions' toolchain, if mise provides one.
 pub async fn runtime(config: &Config, paths: &Paths) -> Result<workshop_coding::Runtime> {
@@ -505,7 +501,7 @@ impl Problems {
 
 /// The time between a session's last save and now that counts as time spent on it.
 fn spent(session: &Session, now: i64) -> i64 {
-    (now - session.updated_at).clamp(0, MAX_GAP_MS)
+    workshop_sessions::spent(session.updated_at, now)
 }
 
 /// The Cargo package Rust drafts are binaries of, for rust-analyzer.
@@ -741,7 +737,7 @@ mod tests {
         // Left for an hour, it only counts for a couple of minutes.
         assert_eq!(
             problems.touch(&found.key(), NOW + 3_600_000).unwrap(),
-            MAX_GAP_MS
+            workshop_sessions::MAX_STEP_GAP_MS
         );
         let saved = problems.session(&found.key()).unwrap().unwrap();
         // Starting again carries on where it was left.

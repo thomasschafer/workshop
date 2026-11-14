@@ -6,6 +6,7 @@ mod author;
 mod bench;
 mod client;
 mod coding;
+mod design;
 mod discuss;
 mod edit;
 mod error;
@@ -53,8 +54,12 @@ pub fn router(app: Shared) -> Router {
         .route("/learning/sync", post(learning::sync))
         .route("/mistakes", get(mistakes::mistakes))
         .route("/goals", get(mistakes::goals))
-        .route("/design", get(grading::design_list))
-        .route("/design/{pack}/{item}", get(grading::design_open))
+        .route("/design", get(design::list))
+        .route("/design/{pack}/{item}", get(design::open))
+        .route("/design/{pack}/{item}/start", post(design::start))
+        .route("/design/{pack}/{item}/session", put(design::save))
+        .route("/design/{pack}/{item}/coach", post(design::coach))
+        .route("/design/{pack}/{item}/finish", post(design::finish))
         .route("/items/{pack}/{item}/mark", post(grading::mark))
         .route("/cards/flagged", get(grading::flagged))
         .route("/packs", get(packs::packs))

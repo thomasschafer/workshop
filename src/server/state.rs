@@ -57,6 +57,8 @@ pub struct App {
     pub(super) learning: crate::learning::Learning,
     /// Coding problems' sessions and drafts.
     pub(super) problems: crate::coding::Problems,
+    /// Design prompts' sessions, worked through in stages.
+    pub(super) design_sessions: workshop_sessions::Saved<workshop_sessions::design::Session>,
     /// Fixes to cards the grader has proposed, waiting for approval.
     pub(super) card_fixes: crate::grader::Fixes,
     /// The author's queue, questions and last run.
@@ -125,6 +127,9 @@ impl App {
             lsp_servers: workshop_lsp::Servers::default(),
             learning: crate::learning::Learning::open(&config.learning, &paths.data_dir)?,
             problems: crate::coding::Problems::new(&paths.data_dir),
+            design_sessions: workshop_sessions::Saved::new(
+                paths.data_dir.join("design").join("sessions"),
+            ),
             card_fixes: crate::grader::Fixes::new(&paths.data_dir),
             author: crate::author::Desk::new(&paths.data_dir),
             author_running: std::sync::atomic::AtomicBool::new(false),
@@ -187,16 +192,19 @@ impl App {
         &self,
         add_on: Option<&str>,
     ) -> Result<(&ProviderRunner, CallSpec)> {
+        self.coach_target(crate::grader::system_prompt(add_on))
+    }
+
+    /// The runner and call for a coach that isn't talked to through the discussion screen, such
+    /// as the grader or the examiner: the discussion provider's first model, with these
+    /// instructions.
+    pub(super) fn coach_target(&self, system: String) -> Result<(&ProviderRunner, CallSpec)> {
         let provider = self.model_settings().discuss_provider;
         let model = crate::models::discuss_models(&self.config, &provider)
             .into_iter()
             .next()
-            .with_context(|| format!("{provider} has no discussion models to grade with"))?;
-        let spec = self.config.providers[&provider].spec(
-            Role::Discuss,
-            &model,
-            crate::grader::system_prompt(add_on),
-        );
+            .with_context(|| format!("{provider} has no discussion models to coach with"))?;
+        let spec = self.config.providers[&provider].spec(Role::Discuss, &model, system);
         Ok((&self.runners[&provider], spec))
     }
 

@@ -1,25 +1,28 @@
-//! The grader: marking written work, the System design track's prompts, and checking cards
-//! flagged as wrong, with fixes for the learner to approve.
+//! The grader: marking work, written or explained aloud, and checking cards flagged as wrong,
+//! with fixes for the learner to approve.
 
 use anyhow::Context;
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use workshop_learning::{Attempt, FlagChange};
-use workshop_pack::{Content, Item, Kind, Pack};
+use workshop_pack::{Content, Item, Pack};
 
 use super::error::{ApiError, ApiResult, bad_request};
-use super::learning::Where;
 use super::state::Shared;
 use crate::grader::{Answer, Fix, Marked, Proposed, Review, Verdict, Work};
-use crate::learning::{Week, now_ms};
+use crate::learning::now_ms;
 
-fn packs(app: &Shared) -> Result<Vec<Pack>, ApiError> {
+pub(super) fn packs(app: &Shared) -> Result<Vec<Pack>, ApiError> {
     Ok(crate::packs::load(&app.config.learning)?)
 }
 
-fn find<'a>(packs: &'a [Pack], pack: &str, item: &str) -> Result<(&'a Pack, &'a Item), ApiError> {
+pub(super) fn find<'a>(
+    packs: &'a [Pack],
+    pack: &str,
+    item: &str,
+) -> Result<(&'a Pack, &'a Item), ApiError> {
     packs
         .iter()
         .find(|p| p.manifest.id == pack)
@@ -30,125 +33,6 @@ fn find<'a>(packs: &'a [Pack], pack: &str, item: &str) -> Result<(&'a Pack, &'a 
                 serde_json::json!({ "error": format!("there's no item {pack}/{item}") }),
             )
         })
-}
-
-#[derive(Serialize)]
-pub(super) struct DesignList {
-    items: Vec<DesignListed>,
-    week: Week,
-}
-
-#[derive(Serialize)]
-pub(super) struct DesignListed {
-    key: String,
-    label: String,
-    skills: Vec<String>,
-    minutes: u32,
-    /// "due", "new" or "done".
-    status: &'static str,
-    /// The grader's last score, from 0 to 1, if it's been answered.
-    last_score: Option<f64>,
-}
-
-/// The System design track: its prompts, and where each one is.
-pub(super) async fn design_list(
-    State(app): State<Shared>,
-    Query(at): Query<Where>,
-) -> ApiResult<DesignList> {
-    let clock = at.clock()?;
-    let planned = app.learning.planned(clock)?;
-    let plan = planned.plans.get(&workshop_tracks::TrackId::SystemDesign);
-    let items = planned
-        .packs
-        .iter()
-        .flat_map(|pack| {
-            pack.items
-                .iter()
-                .filter(|item| item.kind == Kind::Design)
-                .map(move |item| (format!("{}/{}", pack.manifest.id, item.id), item))
-        })
-        .map(|(key, item)| {
-            let status = if plan.is_some_and(|p| p.due.contains(&key)) {
-                "due"
-            } else if plan.is_some_and(|p| p.new.contains(&key)) {
-                "new"
-            } else {
-                "done"
-            };
-            let last_score = app
-                .learning
-                .store()
-                .attempts(&key)
-                .ok()
-                .and_then(|attempts| attempts.last().map(|a| score_of(a.rating)));
-            Ok(DesignListed {
-                label: item.label(),
-                skills: item.skills.clone(),
-                minutes: item.minutes,
-                status,
-                last_score,
-                key,
-            })
-        })
-        .collect::<Result<_, ApiError>>()?;
-    Ok(Json(DesignList {
-        items,
-        week: planned.week,
-    }))
-}
-
-/// Roughly the score an attempt's rating stands for, for showing how the last one went.
-fn score_of(rating: workshop_learning::Rating) -> f64 {
-    match rating {
-        workshop_learning::Rating::Again => 0.3,
-        workshop_learning::Rating::Hard => 0.7,
-        workshop_learning::Rating::Good => 0.9,
-        workshop_learning::Rating::Easy => 1.0,
-    }
-}
-
-#[derive(Serialize)]
-pub(super) struct DesignOpened {
-    key: String,
-    label: String,
-    /// In Markdown.
-    prompt: String,
-    skills: Vec<String>,
-    minutes: u32,
-    source: Option<String>,
-    /// What the learner wrote last time, if they've answered it before.
-    previous: Option<String>,
-}
-
-pub(super) async fn design_open(
-    State(app): State<Shared>,
-    Path((pack, item)): Path<(String, String)>,
-) -> ApiResult<DesignOpened> {
-    let packs = packs(&app)?;
-    let (pack, item) = find(&packs, &pack, &item)?;
-    if item.kind != Kind::Design {
-        return Err(bad_request(format!(
-            "{} isn't a design prompt",
-            item.label()
-        )));
-    }
-    let key = format!("{}/{}", pack.manifest.id, item.id);
-    let previous = app
-        .learning
-        .store()
-        .attempts(&key)?
-        .into_iter()
-        .rev()
-        .find_map(|attempt| attempt.response);
-    Ok(Json(DesignOpened {
-        key,
-        label: item.label(),
-        prompt: item.prompt.clone(),
-        skills: item.skills.clone(),
-        minutes: item.minutes,
-        source: item.source.clone(),
-        previous,
-    }))
 }
 
 #[derive(Deserialize)]
@@ -165,11 +49,11 @@ pub(super) struct MarkBody {
 
 #[derive(Serialize)]
 pub(super) struct MarkedReply {
-    marked: Marked,
+    pub(super) marked: Marked,
     /// The rubric's points, now it's been marked against them.
-    rubric: Vec<String>,
+    pub(super) rubric: Vec<String>,
     /// When it comes back, for work that counts as an attempt, in milliseconds since 1970.
-    due: Option<i64>,
+    pub(super) due: Option<i64>,
 }
 
 /// Marks a piece of work, written or explained aloud, with the grader. What it finds goes in

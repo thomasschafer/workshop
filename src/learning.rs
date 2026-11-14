@@ -318,9 +318,15 @@ impl Learning {
         })
     }
 
-    /// The tracks of short items, from a plan, and of design prompts. The Coding track, whose
-    /// problems are worked on over several steps, is the coding module's.
-    pub fn tracks(&self, planned: &Planned, clock: Clock) -> Tracks {
+    /// The tracks of short items, from a plan, and of design prompts, with the design sessions
+    /// in progress. The Coding track, whose problems are worked on over several steps, is the
+    /// coding module's.
+    pub fn tracks(
+        &self,
+        planned: &Planned,
+        clock: Clock,
+        designs: &BTreeMap<String, workshop_sessions::design::Session>,
+    ) -> Tracks {
         let tracks = planned
             .names
             .iter()
@@ -328,7 +334,7 @@ impl Learning {
             .map(|(id, name)| {
                 let plan = &planned.plans[id];
                 if *id == TrackId::SystemDesign {
-                    return design_track(plan, planned);
+                    return design_track(plan, planned, designs);
                 }
                 Track {
                     summary: summary(plan, clock),
@@ -505,27 +511,54 @@ fn seed_base(key: &str) -> u64 {
 }
 
 /// The System design track. Its prompts are worked through in design sessions, which take a
-/// while, so Continue only suggests one when the learner has a while.
-fn design_track(plan: &TrackPlan, planned: &Planned) -> Track<Destination> {
+/// while, so Continue only suggests one when the learner has a while: the session worked on
+/// most recently, then one that's due, then something new.
+fn design_track(
+    plan: &TrackPlan,
+    planned: &Planned,
+    designs: &BTreeMap<String, workshop_sessions::design::Session>,
+) -> Track<Destination> {
     let destination = Destination::Design { item: None };
-    let long = plan
-        .due
-        .first()
-        .map(|key| (key, Priority::Due, "Due for review"))
+    let unfinished = designs
+        .iter()
+        .filter(|(key, _)| planned.item(key).is_some())
+        .max_by_key(|(_, session)| session.updated_at)
+        .map(|(key, session)| {
+            let reason = format!(
+                "Where you left off: {}",
+                session.stage.name().to_lowercase()
+            );
+            (key, Priority::Unfinished, reason)
+        });
+    let long = unfinished
         .or_else(|| {
-            plan.new
-                .first()
-                .map(|key| (key, Priority::New, "Something new"))
+            plan.due.first().map(|key| {
+                let reason = format!("Due for review · {}", week_so_far(planned.week));
+                (key, Priority::Due, reason)
+            })
         })
-        .map(|(key, priority, why)| Step {
+        .or_else(|| {
+            plan.new.first().map(|key| {
+                let reason = format!("Something new · {}", week_so_far(planned.week));
+                (key, Priority::New, reason)
+            })
+        })
+        .map(|(key, priority, reason)| Step {
             title: planned.item(key).map_or_else(|| key.clone(), Item::label),
-            reason: format!("{why} · {}", week_so_far(planned.week)),
+            reason,
             priority,
             destination: Destination::Design {
                 item: Some(key.clone()),
             },
         });
+    let in_progress = designs
+        .keys()
+        .filter(|key| planned.item(key).is_some())
+        .count();
     let mut parts = Vec::new();
+    if in_progress > 0 {
+        parts.push(format!("{in_progress} in progress"));
+    }
     if !plan.due.is_empty() {
         parts.push(format!("{} due", plan.due.len()));
     }
@@ -688,7 +721,7 @@ mod tests {
 
     fn tracks_at(learning: &Learning, clock: Clock) -> Tracks {
         let planned = learning.planned(clock).unwrap();
-        learning.tracks(&planned, clock)
+        learning.tracks(&planned, clock, &BTreeMap::new())
     }
 
     fn attempt(id: &str, item: &str, at: i64, rating: Rating) -> Attempt {
@@ -888,7 +921,7 @@ mod tests {
         let probability = &planned.plans[&TrackId::Probability];
         let first = planned.item(&probability.new[0]).unwrap();
         assert!(first.skills.contains(&"probability.conditional".to_owned()));
-        let tracks = learning.tracks(&planned, clock(NOW + 1));
+        let tracks = learning.tracks(&planned, clock(NOW + 1), &BTreeMap::new());
         let next = tracks
             .tracks
             .iter()

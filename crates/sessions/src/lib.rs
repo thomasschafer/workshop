@@ -13,6 +13,17 @@ use serde::{Deserialize, Serialize};
 
 pub use saved::Saved;
 
+/// The longest time between two changes to something done over several steps that counts as
+/// time spent on it, so one left open while the learner does something else counts for no
+/// more.
+pub const MAX_STEP_GAP_MS: i64 = 2 * 60 * 1000;
+
+/// The time between something's last change, at `last`, and `now` that counts as time spent
+/// on it.
+pub fn spent(last: i64, now: i64) -> i64 {
+    (now - last).clamp(0, MAX_STEP_GAP_MS)
+}
+
 /// Who said something in a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,4 +55,16 @@ pub fn conversation(turns: &[Turn]) -> String {
             format!("{who}: {}\n", turn.text.trim())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_time_spent_up_to_a_couple_of_minutes_at_a_time() {
+        assert_eq!(spent(1000, 6000), 5000);
+        assert_eq!(spent(0, 3_600_000), MAX_STEP_GAP_MS);
+        assert_eq!(spent(6000, 1000), 0);
+    }
 }
