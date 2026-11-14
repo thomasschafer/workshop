@@ -2058,6 +2058,78 @@ test("completes as it's typed, and renames with the editor's own keys", async ({
   await helixContext.close();
 });
 
+test("imports what's completed, however the language server adds the import", async ({
+  browser,
+}) => {
+  const { context, phone: computer } = await openOnPhone(browser, "default", "computer");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  await expect(computer.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  const completions = computer.locator(".cm-tooltip-autocomplete");
+  const mod = (await computer.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform)))
+    ? "Meta"
+    : "Control";
+  const restore = async () => {
+    for (let i = 0; i < 8 && saved() !== original; i++) {
+      await computer.keyboard.press(`${mod}+z`);
+      await computer.waitForTimeout(700);
+    }
+    expect(saved()).toBe(original);
+  };
+  const complete = async (typed: string, label: string) => {
+    await computer.locator(".cm-content").click();
+    await computer.keyboard.press(`${mod}+End`);
+    await computer.keyboard.type(typed);
+    await expect(completions.getByRole("option")).toHaveText([label]);
+    await computer.waitForTimeout(700);
+    await computer.keyboard.press("Enter");
+    // Typing before the list closes can lose what's chosen, with or without an import.
+    await expect(completions).toHaveCount(0);
+  };
+
+  // With a command the server runs once it's chosen, which asks for the import to be added.
+  await complete("fetchB", "fetchByCommand");
+  await expect
+    .poll(() => saved().trimEnd())
+    .toBe(`from fake import fetchByCommand\n${original}fetchByCommand`);
+  await restore();
+
+  // With the import given only once the server's asked for the completion in full.
+  await complete("fetchO", "fetchOnResolve");
+  await expect
+    .poll(() => saved().trimEnd())
+    .toBe(`from fake import fetchOnResolve\n${original}fetchOnResolve`);
+  await restore();
+
+  // With the import sent alongside a snippet, whose field is then typed over.
+  await complete("fetchS", "fetchSnippet");
+  await computer.keyboard.type("home");
+  await expect
+    .poll(() => saved().trimEnd())
+    .toBe(`from fake import fetchSnippet\n${original}fetchSnippet(home)`);
+  await restore();
+  await context.close();
+
+  // Helix's keybindings, as on a phone, import it too.
+  const { context: helixContext, phone: helix } = await openOnPhone(browser, "helix", "computer");
+  await expect(helix.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  const offered = helix.locator(".cm-tooltip-autocomplete");
+  await helix.locator(".cm-content").click();
+  await helix.keyboard.type("ggOfetchB");
+  await expect(offered.getByRole("option")).toHaveText(["fetchByCommand"]);
+  await helix.waitForTimeout(700);
+  await helix.keyboard.press("Tab");
+  await helix.keyboard.press("Enter");
+  await expect.poll(saved).toBe(`from fake import fetchByCommand\nfetchByCommand\n${original}`);
+  await helix.keyboard.press("Escape");
+  for (let i = 0; i < 8 && saved() !== original; i++) {
+    await helix.keyboard.type("u");
+    await helix.waitForTimeout(700);
+  }
+  expect(saved()).toBe(original);
+  await helixContext.close();
+});
+
 test("keeps the language server for an editor that comes back, with its files as they then are", async ({
   browser,
 }) => {

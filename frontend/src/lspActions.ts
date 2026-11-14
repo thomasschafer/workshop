@@ -22,7 +22,7 @@ export interface TextEdit {
   readonly newText: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -56,10 +56,50 @@ export function locations(result: unknown): Location[] {
   });
 }
 
+/** Reads a server's text edits, throwing for any that can't be, rather than leaving them out. */
+export function textEdits(edits: unknown): TextEdit[] {
+  if (!Array.isArray(edits)) throw new Error("the language server sent edits that can't be read");
+  return edits.map((e: unknown) => {
+    if (!isRecord(e) || !isRange(e.range) || typeof e.newText !== "string") {
+      throw new Error("the language server sent an edit that can't be read");
+    }
+    return { range: e.range, newText: e.newText };
+  });
+}
+
 /** A language server's edit across files, as it sends one. */
 export interface WorkspaceEdit {
   readonly changes?: Readonly<Record<string, readonly TextEdit[]>>;
   readonly documentChanges?: readonly unknown[];
+}
+
+/**
+ * The edits a workspace edit makes to each file's text, and how many files it would otherwise
+ * touch, by creating, renaming or deleting them, which Workshop leaves alone.
+ */
+export function editsByFile(edit: WorkspaceEdit): {
+  byFile: Map<string, TextEdit[]>;
+  elsewhere: number;
+} {
+  const byFile = new Map<string, TextEdit[]>();
+  let elsewhere = 0;
+  const add = (file: string, edits: unknown) => {
+    byFile.set(file, [...(byFile.get(file) ?? []), ...textEdits(edits)]);
+  };
+  if (edit.documentChanges) {
+    for (const change of edit.documentChanges) {
+      const document = isRecord(change) ? change.textDocument : undefined;
+      if (isRecord(change) && isRecord(document) && typeof document.uri === "string") {
+        add(document.uri, change.edits);
+      } else {
+        // Creating, renaming or deleting a file.
+        elsewhere++;
+      }
+    }
+  } else if (edit.changes) {
+    for (const [file, edits] of Object.entries(edit.changes)) add(file, edits);
+  }
+  return { byFile, elsewhere };
 }
 
 /**
@@ -70,36 +110,10 @@ export function editsFor(
   edit: WorkspaceEdit,
   uri: string,
 ): { edits: TextEdit[]; elsewhere: number } {
-  const byFile = new Map<string, TextEdit[]>();
-  let elsewhere = 0;
-  const add = (file: string, edits: readonly unknown[]) => {
-    const kept = byFile.get(file) ?? [];
-    for (const e of edits) {
-      if (!isRecord(e) || !isRange(e.range) || typeof e.newText !== "string") {
-        throw new Error("the language server sent an edit that can't be read");
-      }
-      kept.push({ range: e.range, newText: e.newText });
-    }
-    byFile.set(file, kept);
-  };
-  if (edit.documentChanges) {
-    for (const change of edit.documentChanges) {
-      const document = isRecord(change) ? change.textDocument : undefined;
-      if (isRecord(change) && isRecord(document) && typeof document.uri === "string") {
-        if (!Array.isArray(change.edits)) {
-          throw new Error("the language server sent an edit that can't be read");
-        }
-        add(document.uri, change.edits);
-      } else {
-        // Creating, renaming or deleting a file.
-        elsewhere++;
-      }
-    }
-  } else if (edit.changes) {
-    for (const [file, edits] of Object.entries(edit.changes)) add(file, edits);
-  }
-  for (const [file, edits] of byFile) if (file !== uri && edits.length > 0) elsewhere++;
-  return { edits: byFile.get(uri) ?? [], elsewhere };
+  const { byFile, elsewhere } = editsByFile(edit);
+  let others = elsewhere;
+  for (const [file, edits] of byFile) if (file !== uri && edits.length > 0) others++;
+  return { edits: byFile.get(uri) ?? [], elsewhere: others };
 }
 
 /** Something a language server offers to do, as `textDocument/codeAction` lists them. */
@@ -155,15 +169,21 @@ const CODE_ACTION_KINDS = [
 
 /**
  * What Workshop does beyond its language client, for the capabilities the client offers as it
- * connects: code actions that come with their edits, or that can be asked for them.
+ * connects: code actions that come with their edits, or that can be asked for them; completions
+ * whose other edits, such as an import, can be asked for once one's chosen; and edits a server
+ * asks to make, as it does for a completion that runs a command.
  */
 export const EXTRA_CAPABILITIES = {
-  codeAction: {
-    codeActionLiteralSupport: { codeActionKind: { valueSet: CODE_ACTION_KINDS } },
-    resolveSupport: { properties: ["edit"] },
-    dataSupport: true,
-    disabledSupport: true,
+  textDocument: {
+    codeAction: {
+      codeActionLiteralSupport: { codeActionKind: { valueSet: CODE_ACTION_KINDS } },
+      resolveSupport: { properties: ["edit"] },
+      dataSupport: true,
+      disabledSupport: true,
+    },
+    completion: { completionItem: { resolveSupport: { properties: ["additionalTextEdits"] } } },
   },
+  workspace: { applyEdit: true },
 };
 
 /** The text of hover documentation, which servers send as markdown, plain text, or a mix. */

@@ -68,6 +68,7 @@ import {
   setHelixStatusHost,
 } from "./helix/view";
 import { adjustCapabilities, languageServerCompletion, quietMessage } from "./lsp";
+import { applyWorkspaceEdit } from "./lspEdits";
 import { pinchToZoom } from "./pinch";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
 import { roundCodeScale } from "./zoom";
@@ -721,15 +722,37 @@ function summarise(state: EditorState): Diagnostics {
   };
 }
 
+/** Requests from the server that Workshop answers itself, as its language client can't. */
+type ServerRequests = Readonly<Record<string, (params: unknown) => unknown>>;
+
 class SocketTransport implements Transport {
   private readonly handlers = new Set<(value: string) => void>();
 
-  constructor(private readonly socket: WebSocket) {
+  constructor(
+    private readonly socket: WebSocket,
+    private readonly requests: ServerRequests,
+  ) {
     socket.addEventListener("message", (event) => {
-      if (typeof event.data === "string") {
-        for (const handler of this.handlers) handler(event.data);
-      }
+      if (typeof event.data !== "string") return;
+      if (this.answer(event.data)) return;
+      for (const handler of this.handlers) handler(event.data);
     });
+  }
+
+  /** Answers a request from the server that Workshop handles. Returns whether it was one. */
+  private answer(data: string): boolean {
+    const message = JSON.parse(data) as { id?: number | string; method?: string; params?: unknown };
+    const handle = message.method === undefined ? undefined : this.requests[message.method];
+    if (message.id === undefined || handle === undefined) return false;
+    let reply: object;
+    try {
+      reply = { result: handle(message.params) ?? null };
+    } catch (error) {
+      console.error(error);
+      reply = { error: { code: -32603, message: String(error) } };
+    }
+    this.socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, ...reply }));
+    return true;
   }
 
   send(message: string): void {
@@ -796,7 +819,11 @@ export class LanguageServerConnection {
       this.retryDelay = MIN_RECONNECT_MS;
       // Until the server has initialised, the diagnostics on screen may be stale.
       this.client
-        .connect(new SocketTransport(socket))
+        .connect(
+          new SocketTransport(socket, {
+            "workspace/applyEdit": (params) => applyWorkspaceEdit(this.client, params),
+          }),
+        )
         .initializing.then(() => {
           if (this.socket === socket) this.onStatus("ready");
         })

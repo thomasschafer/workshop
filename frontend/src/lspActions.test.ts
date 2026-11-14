@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codeActions, editsFor, hoverMarkdown, locations } from "./lspActions";
+import { codeActions, editsByFile, editsFor, hoverMarkdown, locations } from "./lspActions";
 
 const range = (line: number, from: number, to: number) => ({
   start: { line, character: from },
@@ -71,6 +71,26 @@ describe("editsFor", () => {
     expect(() =>
       editsFor({ documentChanges: [{ textDocument: { uri: here }, edits: "all" }] }, here),
     ).toThrow();
+  });
+});
+
+describe("editsByFile", () => {
+  const edit = { range: range(0, 0, 3), newText: "new" };
+
+  it("sorts edits by the file they change, counting files created, renamed or deleted", () => {
+    const { byFile, elsewhere } = editsByFile({
+      documentChanges: [
+        { textDocument: { uri: "file:///a.py", version: 3 }, edits: [edit] },
+        { textDocument: { uri: "file:///b.py", version: 1 }, edits: [edit] },
+        { textDocument: { uri: "file:///a.py", version: 3 }, edits: [edit] },
+        { kind: "rename", oldUri: "file:///b.py", newUri: "file:///c.py" },
+      ],
+    });
+    expect([...byFile]).toEqual([
+      ["file:///a.py", [edit, edit]],
+      ["file:///b.py", [edit]],
+    ]);
+    expect(elsewhere).toBe(1);
   });
 });
 

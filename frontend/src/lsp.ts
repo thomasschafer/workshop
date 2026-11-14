@@ -1,11 +1,20 @@
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
-import { serverCompletionSource } from "@codemirror/lsp-client";
 import type { Extension } from "@codemirror/state";
-import { EXTRA_CAPABILITIES } from "./lspActions";
+import { EXTRA_CAPABILITIES, isRecord } from "./lspActions";
+import { serverCompletionSource } from "./lspCompletion";
 
 interface Message {
   method?: string;
-  params?: { capabilities?: { textDocument?: Record<string, unknown> } };
+  params?: { capabilities?: Record<string, unknown> & { textDocument?: Record<string, unknown> } };
+}
+
+/** Adds `extra` to `target`, keeping what's in each of its sections that `extra` doesn't set. */
+function merge(target: Record<string, unknown>, extra: Readonly<Record<string, unknown>>): void {
+  for (const [key, value] of Object.entries(extra)) {
+    const existing = target[key];
+    if (isRecord(existing) && isRecord(value)) merge(existing, value);
+    else target[key] = value;
+  }
 }
 
 /**
@@ -13,17 +22,18 @@ interface Message {
  *
  * Pull diagnostics go: the client offers them but only shows the diagnostics a server sends
  * unasked, and servers that can be asked, such as Deno's, then wait to be asked and send nothing.
- * Code actions are added, which Workshop asks for itself.
+ * Code actions are added, which Workshop asks for itself, along with what Workshop does to finish
+ * a completion: asking for its other edits, and making edits the server asks for.
  */
 export function adjustCapabilities(message: string): string {
   const parsed = JSON.parse(message) as Message;
   if (parsed.method !== "initialize") return message;
-  const textDocument = parsed.params?.capabilities?.textDocument;
-  if (textDocument === undefined) {
+  const capabilities = parsed.params?.capabilities;
+  if (capabilities?.textDocument === undefined) {
     throw new Error("the language client connected without saying what it can do");
   }
-  delete textDocument.diagnostic;
-  Object.assign(textDocument, EXTRA_CAPABILITIES);
+  delete capabilities.textDocument.diagnostic;
+  merge(capabilities, EXTRA_CAPABILITIES);
   return JSON.stringify(parsed);
 }
 

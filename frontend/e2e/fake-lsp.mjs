@@ -4,8 +4,14 @@
 // are all of them, and renaming it changes each. It completes a word to the file's other words. Over an `oops`, it offers to remove it, sending
 // the edit only once that's chosen, and to shout it, with the edit straight away. Its hover
 // documentation says which process it is, to tell one server from another.
+//
+// It also completes three names that need importing, each imported the way one kind of server
+// does it: `fetchByCommand` with a command it runs to ask the client to add the import, as the
+// Haskell language server does; `fetchOnResolve` with the import given only once it's asked for
+// the completion in full; and `fetchSnippet`, a snippet sent with its import.
 
 const documents = new Map();
+let nextRequest = 0;
 
 function send(message) {
   const body = JSON.stringify({ jsonrpc: "2.0", ...message });
@@ -54,6 +60,12 @@ function diagnose(uri) {
   send({ method: "textDocument/publishDiagnostics", params: { uri, diagnostics } });
 }
 
+/** An edit adding an import of `name` at the top of the file. */
+const importOf = (name) => ({
+  range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+  newText: `from fake import ${name}\n`,
+});
+
 const handlers = {
   initialize: () => ({
     capabilities: {
@@ -63,7 +75,8 @@ const handlers = {
       renameProvider: true,
       hoverProvider: true,
       codeActionProvider: { resolveProvider: true },
-      completionProvider: {},
+      completionProvider: { resolveProvider: true },
+      executeCommandProvider: { commands: ["fake.import"] },
     },
   }),
   shutdown: () => null,
@@ -102,10 +115,44 @@ const handlers = {
     const typing = wordAt(text, offset);
     const prefix = typing ? text.slice(typing.from, offset) : "";
     const words = new Set(text.match(/[A-Za-z_]\w{2,}/g) ?? []);
-    return [...words]
-      .filter((word) => word.startsWith(prefix) && word !== prefix)
-      .sort()
-      .map((label) => ({ label, kind: 6 }));
+    const imported = [
+      {
+        label: "fetchByCommand",
+        kind: 3,
+        command: {
+          title: "import",
+          command: "fake.import",
+          arguments: [{ uri, name: "fetchByCommand" }],
+        },
+      },
+      { label: "fetchOnResolve", kind: 3, data: { uri, name: "fetchOnResolve" } },
+      {
+        label: "fetchSnippet",
+        kind: 3,
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a snippet, not a template
+        insertText: "fetchSnippet(${1:url})",
+        insertTextFormat: 2,
+        additionalTextEdits: [importOf("fetchSnippet")],
+      },
+    ];
+    return [
+      ...[...words]
+        .filter((word) => word.startsWith(prefix) && word !== prefix)
+        .sort()
+        .map((label) => ({ label, kind: 6 })),
+      ...(prefix === "" ? [] : imported.filter(({ label }) => label.startsWith(prefix))),
+    ];
+  },
+  "completionItem/resolve": (item) =>
+    item.data ? { ...item, additionalTextEdits: [importOf(item.data.name)] } : item,
+  "workspace/executeCommand": ({ command, arguments: [{ uri, name }] }) => {
+    if (command !== "fake.import") throw new Error(`no command ${command}`);
+    send({
+      id: `fake-${nextRequest++}`,
+      method: "workspace/applyEdit",
+      params: { edit: { changes: { [uri]: [importOf(name)] } } },
+    });
+    return null;
   },
   "textDocument/hover": ({ textDocument: { uri }, position: at }) => {
     const text = documents.get(uri);

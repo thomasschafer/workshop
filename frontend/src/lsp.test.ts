@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { adjustCapabilities, quietMessage, typedEnoughToComplete } from "./lsp";
-import { EXTRA_CAPABILITIES } from "./lspActions";
 
 describe("adjustCapabilities", () => {
-  it("stops the client offering pull diagnostics, and offers code actions", () => {
+  it("stops the client offering pull diagnostics, and adds what Workshop does to what it offers", () => {
+    const completion = { completionItem: { snippetSupport: true }, contextSupport: true };
     const initialize = JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
       params: {
         rootUri: "file:///aoc",
-        capabilities: { textDocument: { hover: {}, diagnostic: {} }, window: {} },
+        capabilities: { textDocument: { hover: {}, diagnostic: {}, completion }, window: {} },
       },
     });
     expect(JSON.parse(adjustCapabilities(initialize))).toEqual({
@@ -19,7 +19,21 @@ describe("adjustCapabilities", () => {
       method: "initialize",
       params: {
         rootUri: "file:///aoc",
-        capabilities: { textDocument: { hover: {}, ...EXTRA_CAPABILITIES }, window: {} },
+        capabilities: {
+          textDocument: {
+            hover: {},
+            codeAction: expect.objectContaining({ resolveSupport: { properties: ["edit"] } }),
+            completion: {
+              completionItem: {
+                snippetSupport: true,
+                resolveSupport: { properties: ["additionalTextEdits"] },
+              },
+              contextSupport: true,
+            },
+          },
+          window: {},
+          workspace: { applyEdit: true },
+        },
       },
     });
   });
