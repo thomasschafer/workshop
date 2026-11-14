@@ -1,0 +1,60 @@
+# The author
+
+The author writes new items for a pack of your own: for the skills you're weakest in, those in your goals first, and the kinds of mistake you make most. One model writes them, a model from another provider checks each one, and every item must pass its mechanical check, as `workshop pack check` runs it, before it's accepted.
+
+Run it with `workshop author`, or with the Top up button under Packs in the app. It doesn't run on a schedule of its own; to run it regularly, schedule `workshop author` yourself, such as with cron:
+
+```sh
+# Each night at 2am. Use the full path to workshop, as cron's PATH is short.
+0 2 * * * /usr/local/bin/workshop author >> ~/workshop-author.log 2>&1
+```
+
+## How a run goes
+
+1. Workshop copies your pack into a directory of its own, leaving out anything hidden, such as `.git`. The writer, by default the newest Opus through Claude Code, works in the copy with tools that can't reach anything else (see below), and writes at most `max_items` new items under `items/`. It's told the pack's format, your weakest skills, your most common kinds of mistake with some examples, the drafts waiting in `drafts/`, and your answers to its earlier questions. It can make an item from a draft, and delete the draft.
+2. Anything else the writer changed in the copy, such as `pack.toml` or an existing item, is put back, and the run's summary says so. Items over the cap are left out.
+3. Each new item's check runs. The writer gets `fix_rounds` turns to fix those that fail, and those that still fail are left out. An item that can't be checked on this machine, such as C++ without a compiler, is left out too, as it hasn't been shown to be right.
+4. The reviewer, by default the newest Sol through Codex, with no tools, solves each item without seeing its answer, then compares its answer with the item's and says whether the item is right and unambiguous. Where an answer is a number, as for probability and mental maths, Workshop also compares them itself, and a mismatch counts as an objection whatever the reviewer says.
+5. If the reviewer objects, the writer can revise the item, which is checked again, or say why it stands, and the reviewer looks again, for up to `discussion_rounds` rounds.
+6. Items they agree on are written into your pack and committed, if the pack is a git repo, on whatever branch it's on, with a message listing them. Nothing is ever pushed. Items they still disagree on wait under Packs, Waiting for approval, with the item and what each model said; approving one checks it again before adding and committing it.
+
+The writer can ask you questions, such as which topics you'd like more of. Each goes out as a notification to devices that turned them on, and waits under Packs for your answer, which the next run is told. The run carries on without waiting.
+
+Only one run happens at a time, from the app or the command.
+
+## Settings
+
+Under `[author]` in your config:
+
+```toml
+[author]
+writer = { provider = "claude", model = "opus" }
+reviewer = { provider = "codex", model = "sol" }
+max_items = 5
+discussion_rounds = 2
+fix_rounds = 2
+timeout_minutes = 20
+```
+
+The writer's provider needs an `[agent]` command, which the built-in Claude Code and Codex providers have. The reviewer must use a different provider from the writer, so an item is never checked by the model that wrote it. A pack's `prompts.author` add-on is added to both models' instructions.
+
+## What the writer can reach
+
+The writer is the only role in Workshop with tools. Every other role, the tutor and grader included, runs with tools turned off, as described in the README.
+
+The writer only ever works in the copy of your pack, which has no `.git` or other hidden files, so no repository, hooks or credentials of yours are in it. Workshop itself reads what changed in the copy, keeps only new files under `items/` and deleted drafts, writes those into your pack, and commits them. The models never run git, and nothing is pushed.
+
+How tightly the writer is kept to the copy depends on its CLI:
+
+- **Claude Code** runs in its restricted mode, started in the copy, with only its file tools (Read, Edit, Write, Glob and Grep): it has no tool that runs commands or code, and none that fetches from the web. Restricted mode keeps the file tools to the working directory; edits there are accepted, and anything that would ask permission is refused, as there's nobody to answer. Your own Claude Code settings, MCP servers and slash commands aren't loaded. This is Claude Code's own permission system rather than the operating system's: it relies on Claude Code enforcing it correctly, and settings managed by an administrator for your machine still apply.
+- **Codex** runs in its workspace-write sandbox, with the copy as its workspace and no network. The sandbox is the operating system's (Seatbelt on macOS, Landlock on Linux), and stops its commands writing anywhere but the copy, including temporary directories, and reaching the network. It doesn't stop them reading: Codex can read any file your user can, and could put what it reads into an item. Your own Codex config and rules aren't loaded, approvals are off, and its tools besides its shell and file edits are switched off.
+
+Either way, the model is told what to write about, which includes your mistakes and answers, and sends that to its provider, as every role does.
+
+Checking an item runs its programs. For a coding problem, that's the reference solutions, brute force and inputs program the writer wrote, which are built and run on your machine as `workshop pack check` runs any pack's, without a sandbox. Only use the author with a coding toolchain on a machine where you're content for model-written programs to run, as the app already runs your own and the pack's.
+
+## Running it safely the first time
+
+- Commit or stash anything in your pack first, so the author's commit is easy to look over, and to undo with `git revert` if you don't want it. Workshop only commits the files it writes, and leaves anything else you've staged alone.
+- Start small, with `max_items = 1` or 2.
+- Look at what it wrote with `git show` before pushing your pack anywhere.

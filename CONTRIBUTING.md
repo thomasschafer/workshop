@@ -12,7 +12,7 @@ mise run check-fast  # formatting, lints, types and unit tests, in seconds
 mise run check       # all of that and the browser tests, as CI does
 ```
 
-The Rust server is in `src/`, and what it shares between tracks is in crates of its own under `crates/`: the model providers, building and running code, toolchains and packages, the language server relay, Tailscale serving, the token that guards the server, Web Push notifications, and the tracks themselves. Packs and their checks are in `crates/pack`, building and running coding problems' and reading items' programs in `crates/coding`, and the log of attempts, scheduling and mastery in `crates/learning`. They're parts of the one binary, never published on their own. The TypeScript frontend, built with Vite and CodeMirror 6, is in `frontend/`, with the home screen and its tracks in `frontend/src/tracks/`, practising short items in `frontend/src/learning/`, and the Coding track in `frontend/src/coding/`. Advent of Code and the Coding track share the editor's settings through `useEditorSettings`, the language server through `useLanguageServer`, and the coaches' conversations through `useConversation`.
+The Rust server is in `src/`, and what it shares between tracks is in crates of its own under `crates/`: the model providers, building and running code, toolchains and packages, the language server relay, Tailscale serving, the token that guards the server, Web Push notifications, and the tracks themselves. Packs and their checks are in `crates/pack`, building and running coding problems' and reading items' programs in `crates/coding`, the log of attempts and mistakes, scheduling and mastery in `crates/learning`, and the author's runs in `crates/author`. They're parts of the one binary, never published on their own. The TypeScript frontend, built with Vite and CodeMirror 6, is in `frontend/`, with the home screen and its tracks in `frontend/src/tracks/`, practising short items in `frontend/src/learning/`, the Coding track in `frontend/src/coding/`, the grader's screens in `frontend/src/grading/`, the mistake log and goals in `frontend/src/progress/`, and the Packs screen, with the author, in `frontend/src/pack/`. Advent of Code and the Coding track share the editor's settings through `useEditorSettings`, the language server through `useLanguageServer`, and the coaches' conversations through `useConversation`.
 
 The app schedules and grades answers given offline itself, until they reach the server, so its scheduling and grading must agree with the server's. Both are tested against the same cases, in `crates/learning/tests/fsrs.json`, `crates/pack/tests/grading.json` and `crates/pack/tests/output.json`; after a deliberate change to scheduling, run `UPDATE_FIXTURES=1 cargo test -p workshop-learning` and check what changed.
 
@@ -20,7 +20,7 @@ The sample pack in `packs/sample` must pass `workshop pack check`, which a test 
 
 Tests must never use real Advent of Code puzzle text or inputs; invent your own.
 
-Tests don't call model CLIs. If you change the edit prompt (`prompts/edit.md`) or a language's dictation hints, run the edit evals before and after, and include the summaries in your pull request:
+Tests don't call model CLIs: they use stand-ins, such as `frontend/e2e/fake-model.mjs` and the author's `fake-author.mjs` and `fake-reviewer.mjs`, or scripts that the Rust tests write. If you change the edit prompt (`prompts/edit.md`) or a language's dictation hints, run the edit evals before and after, and include the summaries in your pull request:
 
 ```sh
 mise run eval                             # every case in evals/
@@ -216,7 +216,7 @@ A provider describes a model CLI: the command to start it, how to send it the pr
 
 Besides `{model}` and `{system_prompt}`, `command` can use `{system_prompt_file}`, the path of a file holding the system prompt, for CLIs that read their instructions from a file, and `{effort}`.
 
-Every provider must run the model with tools disabled. The edit model must never be able to run commands or change files; it can only reply with text.
+Every provider must run the model with tools disabled. The edit model must never be able to run commands or change files; it can only reply with text. The one exception is a provider's `[agent]` command, which only the author's writer uses: it's started in a copy of the pack, given as `{dir}`, and must keep its tools there as tightly as the CLI allows, as the built-in ones do. Explain what it guarantees in the provider's comments, and in [docs/author.md](docs/author.md).
 
 Here is a provider for a hypothetical `acme` CLI that reads the prompt on stdin and prints its reply:
 

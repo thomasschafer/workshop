@@ -26,6 +26,8 @@ The Workshop server runs arbitrary code on your machine and spends your model su
 - reading or writing files outside the directories Workshop is meant to use
 - leaking secrets such as your Workshop token or Advent of Code session cookie
 
+The author's writer is the one model with tools, confined to a copy of your pack: [docs/author.md](docs/author.md) describes how, and the limits of each model CLI's confinement, such as Codex being able to read files outside the copy. A way for the writer to change anything outside its copy, or for anything it writes besides new items under `items/` to reach your pack, is in scope.
+
 Out of scope:
 
 - anything that requires an attacker to already have a valid token, or to control your shell or user account

@@ -81,6 +81,14 @@ A tutor gives hints that don't give the problem away, through your discussion mo
 
 To try Workshop before logging in, or outside December, open the practice puzzle from the bottom of the puzzle list.
 
+## Mistakes, goals and the grader
+
+Wrong answers, failed submissions and what the grader finds go into a mistake log, each tagged with a kind of mistake, such as an off-by-one or a misreading, which you can confirm or change; a pack can add kinds of its own. Practice, and Continue, lean towards the skills your recent mistakes are in. Each goal a pack defines has a page showing its skills against the goal's target, how it's changed over the last few weeks, how long is left, and what's weakest.
+
+The grader, through your discussion model, marks written work against a rubric: answers to design prompts, a coding problem's plan, and a card answered in your own words. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
+
+The author writes new items for a pack of your own, for what you're weakest in and the mistakes you make most: one model writes them, a model from another provider solves each blind and reviews it, and each must pass its check. Run it with `workshop author`, or Top up under Packs in the app; [docs/author.md](docs/author.md) describes it. Questions you've found elsewhere can be added to a pack as drafts, under Packs or with `workshop pack import`, for the author to make into items.
+
 ## Configuration
 
 Most things can be changed in the app under Settings, including the model, colour theme, and committing (and pushing) after each star. Workshop also writes a commented config file on first run; `workshop doctor` shows where it is. The defaults:
@@ -139,7 +147,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for adding a language or a model CLI.
 
 Workshop runs code and spends your model subscription, so it only listens on localhost by default and every request needs the token. Use `workshop serve --tailscale` rather than binding to other interfaces.
 
-The model never gets to run commands or change files. With Claude Code, it's given no tools at all. Codex can't be run entirely without tools, so Workshop turns off every tool it can, runs Codex in its read-only sandbox, and stops it, making no edit, the moment it starts to use one.
+The model never gets to run commands or change files, except the author's writer, below. With Claude Code, it's given no tools at all. Codex can't be run entirely without tools, so Workshop turns off every tool it can, runs Codex in its read-only sandbox, and stops it, making no edit, the moment it starts to use one.
+
+The author's writer is the only model with tools, and only in a copy of your pack: with Claude Code, just its file tools, in its restricted mode; with Codex, in its workspace-write sandbox with no network. [docs/author.md](docs/author.md) says what each guarantees, and what it doesn't.
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 

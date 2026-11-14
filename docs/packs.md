@@ -57,7 +57,8 @@ name = "Unit slip"
 description = "Mixed up units, such as seconds and milliseconds"
 
 # Text added to a coach role's instructions, to shape its style for this pack. The tutor gives
-# hints on coding problems.
+# hints on coding problems; the grader marks written work and checks cards; the author writes
+# new items (see docs/author.md).
 [prompts]
 tutor = "prompts/tutor.md"
 examiner = "prompts/examiner.md"
@@ -109,7 +110,7 @@ A question and its answer, which you mark yourself after seeing the answer: Agai
 
 Sections: `## Answer` (required) and `## Explanation`.
 
-If a card is wrong, flag it in the app with "This is wrong". It's left out of practice until you fix it and clear the flag.
+If a card is wrong, flag it in the app with "This is wrong". It's left out of practice until you fix it and clear the flag, under Packs in the app, where the grader can also check it: it unflags a card it finds right, and proposes a fix for one it doesn't, which is written to the card's file, and committed if the pack is a git repo, once you approve it. You can also answer a card in your own words, for the grader to mark.
 
 ### Mental maths
 
@@ -273,7 +274,7 @@ Design a service that shortens links.
 - Says what happens when a store is unavailable
 ```
 
-`## Rubric` is a list, one point per line. `## Notes` is optional.
+`## Rubric` is a list, one point per line. `## Notes` is optional. You answer in writing, and the grader marks it against the rubric, which counts as an attempt rated from its score.
 
 ## Drafts
 
