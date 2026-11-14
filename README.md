@@ -187,4 +187,6 @@ mise run build   # a release binary with the frontend embedded
 
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
 
+The track icons in `frontend/src/tracks/icons.tsx` are from [Lucide](https://lucide.dev), under the ISC licence, whose notice is at the top of that file.
+
 Most of `frontend/src/helix`, the Helix keybindings, is ported from [Helix](https://github.com/helix-editor/helix). The ported files are under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/), as Helix is, and each says so at its top.

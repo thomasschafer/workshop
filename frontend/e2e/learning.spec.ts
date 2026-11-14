@@ -124,6 +124,31 @@ test("shows the pack's tracks at home, and continues with something new", async 
     "Review",
     "Estimation",
   ]);
+  // Each has an icon of its own, the pack's track the one its pack.toml chooses.
+  const icons = await phone
+    .locator(".track .track-icon")
+    .evaluateAll((svgs) => svgs.map((svg) => svg.getAttribute("data-icon")));
+  expect(icons).toEqual(["star", "code", "dice", "network", "sigma", "history", "approximately"]);
+  // Drawn in the theme's accent colour, light or dark, beside the name.
+  for (const colorScheme of ["light", "dark"] as const) {
+    await phone.emulateMedia({ colorScheme });
+    const { icon, accent } = await phone
+      .locator(".track .track-icon")
+      .first()
+      .evaluate((svg) => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--accent)";
+        document.body.append(probe);
+        const accent = getComputedStyle(probe).color;
+        probe.remove();
+        return { icon: getComputedStyle(svg).color, accent };
+      });
+    expect(icon).toBe(accent);
+  }
+  await phone.emulateMedia({ colorScheme: null });
+  const iconBox = await phone.locator(".track .track-icon").first().boundingBox();
+  const nameBox = await phone.locator(".track-name").first().boundingBox();
+  expect(iconBox && nameBox && iconBox.x + iconBox.width < nameBox.x).toBe(true);
   await expect(phone.locator(".track", { hasText: "Review" })).toContainText("10 new");
   // Nothing's due yet, so Continue offers something new, in the first track with any: the
   // quickest of the Coding track's, some code to read.
@@ -174,6 +199,10 @@ test("reviews cards a few at a time, saving each, and flags one that's wrong", a
 test("checks mental maths as it's typed, right or wrong", async () => {
   await phone.locator(".track", { hasText: "Mental maths" }).tap();
   await expect(phone.locator(".learn-count")).toHaveText("1 of 3");
+  // The track's icon is beside its name at the top, too.
+  await expect(
+    phone.getByRole("heading", { name: "Mental maths" }).locator('[data-icon="sigma"]'),
+  ).toBeVisible();
   // Phones offer a keypad for numbers.
   await expect(phone.getByLabel("Your answer")).toHaveAttribute("inputmode", "decimal");
 

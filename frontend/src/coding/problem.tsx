@@ -13,7 +13,9 @@ import { newId } from "../learning/local";
 import { sameOutput } from "../learning/output";
 import { Markdown } from "../learning/practice";
 import type { Rating } from "../learning/types";
+import { HomeButton } from "../progress/page";
 import { LatestSaver, type VersionedSaver } from "../saver";
+import { TrackIcon } from "../tracks/icons";
 import { DictateButton } from "../views/dictate";
 import { Keyboard } from "../views/keyboard";
 import { StepNav } from "../views/steps";
@@ -193,12 +195,8 @@ export function ProblemView({
   const header = (
     <header class="top">
       <span class="header-start">
-        <button type="button" class="icon-button home-button" aria-label="Home" onClick={onHome}>
-          ⌂
-        </button>
-        <button type="button" class="text-button" onClick={onList}>
-          Coding
-        </button>
+        <HomeButton onHome={onHome} />
+        <CodingLink onList={onList} />
       </span>
       {online ? null : (
         <span class="learn-sync offline" role="status">
@@ -1051,5 +1049,15 @@ function Finished({
         ) : null}
       </section>
     </main>
+  );
+}
+
+/** Back to the list of the Coding track's items, from one of them. */
+export function CodingLink({ onList }: { onList: () => void }) {
+  return (
+    <button type="button" class="text-button track-link" onClick={onList}>
+      <TrackIcon icon="code" size={16} />
+      Coding
+    </button>
   );
 }

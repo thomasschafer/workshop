@@ -18,7 +18,7 @@ use workshop_learning::{
 };
 use workshop_pack::number::Tolerance;
 use workshop_pack::{Content, Item, Pack};
-use workshop_tracks::{Priority, Step, Track, TrackId};
+use workshop_tracks::{Priority, Step, Track, TrackIcon, TrackId};
 
 use crate::config::LearningConfig;
 use crate::tracks::Destination;
@@ -56,6 +56,7 @@ pub struct Deck {
 pub struct DeckTrack {
     pub id: TrackId,
     pub name: String,
+    pub icon: TrackIcon,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,7 +199,7 @@ impl Learning {
             .collect();
         let tracks = track_names(&packs, &shorts)
             .into_iter()
-            .map(|(id, name)| DeckTrack { id, name })
+            .map(|(id, (name, icon))| DeckTrack { id, name, icon })
             .collect();
         let keys: std::collections::BTreeSet<&str> =
             shorts.iter().map(|s| s.key.as_str()).collect();
@@ -350,7 +351,7 @@ impl Learning {
             .names
             .iter()
             .filter(|(id, _)| **id != TrackId::Coding)
-            .map(|(id, name)| {
+            .map(|(id, (name, icon))| {
                 let plan = &planned.plans[id];
                 if *id == TrackId::SystemDesign {
                     return design_track(plan, planned, designs);
@@ -362,6 +363,7 @@ impl Learning {
                     long: None,
                     id: id.clone(),
                     name: name.clone(),
+                    icon: *icon,
                 }
             })
             .collect();
@@ -385,8 +387,8 @@ pub struct Planned {
     /// Every skill's name, by id.
     pub skill_names: BTreeMap<String, String>,
     pub plans: BTreeMap<TrackId, TrackPlan>,
-    /// Each track with items in it, and its name.
-    pub names: BTreeMap<TrackId, String>,
+    /// Each track with items in it, and its name and icon.
+    pub names: BTreeMap<TrackId, (String, TrackIcon)>,
     pub week: Week,
     pub problems: Vec<String>,
 }
@@ -433,25 +435,30 @@ fn item_refs<'a>(shorts: &'a [Short<'a>]) -> Vec<ItemRef<'a>> {
 }
 
 /// The tracks with these items in them, in the order the home screen shows them, and their
-/// names. Two packs' tracks with the same id are one track.
-fn track_names(packs: &[Pack], shorts: &[Short<'_>]) -> BTreeMap<TrackId, String> {
+/// names and icons. Two packs' tracks with the same id are one track.
+fn track_names(packs: &[Pack], shorts: &[Short<'_>]) -> BTreeMap<TrackId, (String, TrackIcon)> {
     shorts
         .iter()
         .map(|short| {
             let id = short.item.track.clone();
-            let name = match &id {
+            let label = match &id {
                 TrackId::Pack(pack_track) => packs
                     .iter()
                     .flat_map(|pack| &pack.manifest.tracks)
                     .find(|track| track.id == *pack_track)
-                    .map(|track| track.name.clone())
+                    .map(|track| (track.name.clone(), track.icon))
                     .expect("an item's pack track is checked to be in its pack"),
-                built_in => built_in
-                    .built_in_name()
-                    .expect("every other track is built in")
-                    .to_owned(),
+                built_in => (
+                    built_in
+                        .built_in_name()
+                        .expect("every other track is built in")
+                        .to_owned(),
+                    built_in
+                        .built_in_icon()
+                        .expect("every built-in track has an icon"),
+                ),
             };
-            (id, name)
+            (id, label)
         })
         .collect()
 }

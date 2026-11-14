@@ -4,6 +4,7 @@ import { loadMarkdown } from "../hooks/useMarkdown";
 import { learning } from "../learning/sync";
 import { tracksApi } from "./api";
 import "./home.css";
+import { TrackIcon } from "./icons";
 import type { Route } from "./routes";
 import { aWhile as hasAWhile, setAWhile } from "./sitting";
 import type { Destination, Home as HomeState, Track } from "./types";
@@ -124,8 +125,13 @@ export function Home({
                 {home.tracks.map((track) => (
                   <li key={track.id}>
                     <button type="button" class="track" onClick={() => onGo(track.destination)}>
-                      <span class="track-name">{track.name}</span>
-                      <span class="track-summary">{track.summary}</span>
+                      <span class="track-icon-box">
+                        <TrackIcon icon={track.icon} />
+                      </span>
+                      <span class="track-text">
+                        <span class="track-name">{track.name}</span>
+                        <span class="track-summary">{track.summary}</span>
+                      </span>
                     </button>
                   </li>
                 ))}

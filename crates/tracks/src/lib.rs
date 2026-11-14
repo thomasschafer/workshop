@@ -30,15 +30,120 @@ pub enum TrackId {
 /// The prefix that keeps a pack's track IDs apart from the built-in ones.
 const PACK_PREFIX: &str = "pack:";
 
-const BUILT_IN: &[(TrackId, &str, &str)] = &[
-    (TrackId::AdventOfCode, "advent-of-code", "Advent of Code"),
-    (TrackId::Coding, "coding", "Coding"),
-    (TrackId::Probability, "probability", "Probability"),
-    (TrackId::SystemDesign, "system-design", "System design"),
-    (TrackId::Rounds, "rounds", "Timed rounds"),
-    (TrackId::MentalMaths, "mental-maths", "Mental maths"),
-    (TrackId::Review, "review", "Review"),
+const BUILT_IN: &[(TrackId, &str, &str, TrackIcon)] = &[
+    (
+        TrackId::AdventOfCode,
+        "advent-of-code",
+        "Advent of Code",
+        TrackIcon::Star,
+    ),
+    (TrackId::Coding, "coding", "Coding", TrackIcon::Code),
+    (
+        TrackId::Probability,
+        "probability",
+        "Probability",
+        TrackIcon::Dice,
+    ),
+    (
+        TrackId::SystemDesign,
+        "system-design",
+        "System design",
+        TrackIcon::Network,
+    ),
+    (TrackId::Rounds, "rounds", "Timed rounds", TrackIcon::Timer),
+    (
+        TrackId::MentalMaths,
+        "mental-maths",
+        "Mental maths",
+        TrackIcon::Sigma,
+    ),
+    (TrackId::Review, "review", "Review", TrackIcon::History),
 ];
+
+/// The small picture beside a track's name, to tell tracks apart at a glance. The app draws
+/// each one, by name; a pack can give its own tracks any of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrackIcon {
+    Star,
+    Code,
+    Dice,
+    Network,
+    Timer,
+    Sigma,
+    History,
+    /// Stacked layers: a pack's track's, unless it chooses another.
+    Layers,
+    Approximately,
+    Book,
+    Chart,
+    Flask,
+    Languages,
+    Lightbulb,
+    Puzzle,
+    Radical,
+    Shapes,
+}
+
+impl TrackIcon {
+    /// Every icon, in the order the docs list them.
+    pub const ALL: [TrackIcon; 17] = [
+        Self::Star,
+        Self::Code,
+        Self::Dice,
+        Self::Network,
+        Self::Timer,
+        Self::Sigma,
+        Self::History,
+        Self::Layers,
+        Self::Approximately,
+        Self::Book,
+        Self::Chart,
+        Self::Flask,
+        Self::Languages,
+        Self::Lightbulb,
+        Self::Puzzle,
+        Self::Radical,
+        Self::Shapes,
+    ];
+
+    /// What a pack's track has when the pack doesn't choose.
+    pub const PACK_DEFAULT: TrackIcon = Self::Layers;
+
+    /// Its name, as `pack.toml` and the app write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Star => "star",
+            Self::Code => "code",
+            Self::Dice => "dice",
+            Self::Network => "network",
+            Self::Timer => "timer",
+            Self::Sigma => "sigma",
+            Self::History => "history",
+            Self::Layers => "layers",
+            Self::Approximately => "approximately",
+            Self::Book => "book",
+            Self::Chart => "chart",
+            Self::Flask => "flask",
+            Self::Languages => "languages",
+            Self::Lightbulb => "lightbulb",
+            Self::Puzzle => "puzzle",
+            Self::Radical => "radical",
+            Self::Shapes => "shapes",
+        }
+    }
+}
+
+impl FromStr for TrackIcon {
+    type Err = TrackError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|icon| icon.name() == text)
+            .ok_or_else(|| TrackError::UnknownIcon(text.to_owned()))
+    }
+}
 
 impl TrackId {
     /// Whether a pack's items can be in it. Advent of Code's puzzles aren't a pack's, and timed
@@ -51,8 +156,16 @@ impl TrackId {
     pub fn built_in_name(&self) -> Option<&'static str> {
         BUILT_IN
             .iter()
-            .find(|(id, _, _)| id == self)
-            .map(|(_, _, name)| *name)
+            .find(|(id, _, _, _)| id == self)
+            .map(|(_, _, name, _)| *name)
+    }
+
+    /// A built-in track's icon. A pack chooses its own tracks'.
+    pub fn built_in_icon(&self) -> Option<TrackIcon> {
+        BUILT_IN
+            .iter()
+            .find(|(id, _, _, _)| id == self)
+            .map(|(_, _, _, icon)| *icon)
     }
 }
 
@@ -61,9 +174,9 @@ impl fmt::Display for TrackId {
         match self {
             Self::Pack(id) => write!(f, "{PACK_PREFIX}{}", id.0),
             built_in => {
-                let (_, slug, _) = BUILT_IN
+                let (_, slug, _, _) = BUILT_IN
                     .iter()
-                    .find(|(id, _, _)| id == built_in)
+                    .find(|(id, _, _, _)| id == built_in)
                     .expect("every built-in track is listed in BUILT_IN");
                 f.write_str(slug)
             }
@@ -80,8 +193,8 @@ impl FromStr for TrackId {
         }
         BUILT_IN
             .iter()
-            .find(|(_, slug, _)| *slug == text)
-            .map(|(id, _, _)| id.clone())
+            .find(|(_, slug, _, _)| *slug == text)
+            .map(|(id, _, _, _)| id.clone())
             .ok_or_else(|| TrackError::UnknownTrack(text.to_owned()))
     }
 }
@@ -138,6 +251,11 @@ pub enum TrackError {
         "{0:?} can't be a pack's track ID: use lowercase letters and digits, in words joined by hyphens"
     )]
     InvalidPackTrack(String),
+    #[error(
+        "there's no icon called {0:?}: choose one of {icons}",
+        icons = TrackIcon::ALL.map(TrackIcon::name).join(", ")
+    )]
+    UnknownIcon(String),
     #[error("the {0} track is listed twice")]
     DuplicateTrack(TrackId),
 }
@@ -175,6 +293,7 @@ pub struct Step<D> {
 pub struct Track<D> {
     pub id: TrackId,
     pub name: String,
+    pub icon: TrackIcon,
     /// A line about where the learner is in it.
     pub summary: String,
     /// Where opening the track leads.
@@ -193,9 +312,13 @@ impl<D> Track<D> {
             .built_in_name()
             .expect("only built-in tracks are made with Track::built_in")
             .to_owned();
+        let icon = id
+            .built_in_icon()
+            .expect("every built-in track has an icon");
         Self {
             id,
             name,
+            icon,
             summary,
             destination,
             next,
@@ -313,6 +436,7 @@ mod tests {
     fn track(id: TrackId, next: Option<Step<&'static str>>) -> Option<Track<&'static str>> {
         Some(Track {
             name: id.to_string(),
+            icon: TrackIcon::PACK_DEFAULT,
             id,
             summary: String::new(),
             destination: "the track",
@@ -371,6 +495,39 @@ mod tests {
             TrackId::Pack("graphs".parse().unwrap()).built_in_name(),
             None
         );
+    }
+
+    #[test]
+    fn gives_built_in_tracks_icons_and_reads_icon_names() {
+        assert_eq!(TrackId::Probability.built_in_icon(), Some(TrackIcon::Dice));
+        assert_eq!(
+            TrackId::Pack("graphs".parse().unwrap()).built_in_icon(),
+            None
+        );
+        for icon in TrackIcon::ALL {
+            assert_eq!(icon.name().parse::<TrackIcon>().unwrap(), icon);
+            assert_eq!(
+                serde_json::to_string(&icon).unwrap(),
+                format!("\"{}\"", icon.name())
+            );
+        }
+        let err = "rocket".parse::<TrackIcon>().unwrap_err().to_string();
+        assert!(err.contains("\"rocket\""), "{err}");
+        assert!(err.contains("dice, network"), "{err}");
+    }
+
+    /// The app draws every icon the server can send, by the same name.
+    #[test]
+    fn the_app_draws_every_icon() {
+        let app = include_str!("../../../frontend/src/tracks/icons.tsx");
+        for icon in TrackIcon::ALL {
+            assert!(
+                app.contains(&format!("\n  {}: ", icon.name()))
+                    || app.contains(&format!("\n  \"{}\": ", icon.name())),
+                "frontend/src/tracks/icons.tsx doesn't draw {:?}",
+                icon.name()
+            );
+        }
     }
 
     #[test]

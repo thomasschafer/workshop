@@ -5,6 +5,7 @@ import { ExplainAloud } from "../grading/explain";
 import { MarkedView } from "../grading/marked";
 import type { Marked } from "../grading/types";
 import { useMarkdown } from "../hooks/useMarkdown";
+import { HomeButton, TrackTitle } from "../progress/page";
 import type { TrackId } from "../tracks/types";
 import { displayNumber, grade } from "./grading";
 import { newId, nextInstance, progress, queue, step, utcOffset } from "./local";
@@ -76,10 +77,8 @@ export function Practice({
   const header = (
     <header class="top">
       <span class="header-start">
-        <button type="button" class="icon-button home-button" aria-label="Home" onClick={onHome}>
-          ⌂
-        </button>
-        <h1 class="app-title">{name}</h1>
+        <HomeButton onHome={onHome} />
+        <TrackTitle title={name} icon={deck?.tracks.find((t) => t.id === track)?.icon} />
       </span>
       <SyncChip status={state.syncStatus} />
     </header>

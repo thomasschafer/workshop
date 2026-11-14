@@ -69,6 +69,10 @@ test("reads code and says what it prints, checked on the phone", async () => {
   await phone.locator(".coding-item", { hasText: "Dividing negative numbers" }).tap();
   await expect(phone).toHaveURL(/\/coding\/sample\/negative-division$/);
   await expect(phone.locator(".learn-prompt")).toContainText("std::cout");
+  // The way back to the list carries the track's icon.
+  await expect(
+    phone.getByRole("button", { name: "Coding" }).locator('[data-icon="code"]'),
+  ).toBeVisible();
   await phone.getByLabel("What it prints").fill("-4 1");
   await phone.getByRole("button", { name: "Check" }).tap();
   await expect(phone.locator(".learn-verdict")).toHaveText("It prints:");

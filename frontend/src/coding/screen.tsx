@@ -4,9 +4,10 @@ import { errorMessage } from "../errors";
 import { useConnection } from "../hooks/useConnection";
 import { ItemView, SyncChip, useLearning } from "../learning/practice";
 import "../learning/practice.css";
+import { HomeButton, TrackTitle } from "../progress/page";
 import "./coding.css";
 import { codingApi } from "./api";
-import { ProblemView } from "./problem";
+import { CodingLink, ProblemView } from "./problem";
 import { STEP_LABELS } from "./steps";
 import type { Listed, Overview, Status } from "./types";
 
@@ -61,16 +62,8 @@ function Header({ onHome, onList }: { onHome: () => void; onList?: () => void })
   return (
     <header class="top">
       <span class="header-start">
-        <button type="button" class="icon-button home-button" aria-label="Home" onClick={onHome}>
-          ⌂
-        </button>
-        {onList ? (
-          <button type="button" class="text-button" onClick={onList}>
-            Coding
-          </button>
-        ) : (
-          <h1 class="app-title">Coding</h1>
-        )}
+        <HomeButton onHome={onHome} />
+        {onList ? <CodingLink onList={onList} /> : <TrackTitle title="Coding" icon="code" />}
       </span>
       <SyncChip status={learning.syncStatus} />
     </header>

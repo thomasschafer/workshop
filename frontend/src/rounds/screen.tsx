@@ -71,11 +71,11 @@ function RoundList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: stri
     </li>
   );
   return (
-    <Page title="Timed rounds" onHome={onHome}>
+    <Page title="Timed rounds" icon="timer" onHome={onHome}>
       {overview === null ? (
         <Loading error={error} onRetry={() => setAttempt((n) => n + 1)} />
       ) : overview.items.length === 0 ? (
-        <p class="muted">
+        <p class="empty">
           Your packs have no coding problems, probability questions or design prompts to make a
           round of.
         </p>
@@ -162,14 +162,14 @@ function RoundItem({
 
   if (opened === null) {
     return (
-      <Page title="Timed rounds" onHome={onHome}>
+      <Page title="Timed rounds" icon="timer" onHome={onHome}>
         <Loading error={error} onRetry={() => setAttempt((n) => n + 1)} />
       </Page>
     );
   }
   if (opened.round) {
     return (
-      <Page title="Timed rounds" onHome={onHome}>
+      <Page title="Timed rounds" icon="timer" onHome={onHome}>
         <RoundView
           opened={opened}
           round={opened.round}
@@ -180,7 +180,7 @@ function RoundItem({
     );
   }
   return (
-    <Page title="Timed rounds" onHome={onHome}>
+    <Page title="Timed rounds" icon="timer" onHome={onHome}>
       <h2 class="design-stage-name">{opened.label}</h2>
       <section class="design-intro" aria-label="Timed round">
         <p class="muted">

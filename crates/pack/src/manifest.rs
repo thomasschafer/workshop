@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use serde::Deserialize;
-use workshop_tracks::{PackTrackId, TrackId};
+use workshop_tracks::{PackTrackId, TrackIcon, TrackId};
 
 use crate::error_types::{self, ErrorType};
 
@@ -54,6 +54,8 @@ pub struct PackTrack {
     pub id: PackTrackId,
     pub name: String,
     pub summary: Option<String>,
+    /// One of the icons the app has, chosen by name, or a default for a pack's tracks.
+    pub icon: TrackIcon,
 }
 
 /// Something the learner is working towards: a set of skills, each to be mastered to a level.
@@ -162,6 +164,7 @@ struct RawTrack {
     id: String,
     name: String,
     summary: Option<String>,
+    icon: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -222,10 +225,17 @@ impl Manifest {
             if tracks.iter().any(|t: &PackTrack| t.id == id) {
                 return Err(format!("the track {:?} is listed twice", track.id));
             }
+            let icon = match &track.icon {
+                Some(icon) => icon
+                    .parse()
+                    .map_err(|err| format!("the track {:?}: {err}", track.id))?,
+                None => TrackIcon::PACK_DEFAULT,
+            };
             tracks.push(PackTrack {
                 id,
                 name: track.name,
                 summary: track.summary,
+                icon,
             });
         }
         let mut goals = Vec::new();
@@ -368,6 +378,11 @@ mod tests {
         [[tracks]]
         id = "estimation"
         name = "Estimation"
+        icon = "approximately"
+
+        [[tracks]]
+        id = "graph-search"
+        name = "Graph search"
 
         [[goals]]
         id = "quick-sums"
@@ -400,6 +415,8 @@ mod tests {
             TrackId::Pack("estimation".parse().unwrap())
         );
         assert!(manifest.track("chess").is_err());
+        assert_eq!(manifest.tracks[0].icon, TrackIcon::Approximately);
+        assert_eq!(manifest.tracks[1].icon, TrackIcon::PACK_DEFAULT);
         assert_eq!(manifest.goals[0].by_day(), None);
         assert_eq!(days_since_1970("1970-01-01"), Some(0));
         assert_eq!(days_since_1970("2026-09-21"), Some(20_717));
@@ -430,6 +447,10 @@ mod tests {
             (
                 "id = \"x\"\nname = \"x\"\n[[tracks]]\nid = \"review\"\nname = \"R\"",
                 "built-in",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[tracks]]\nid = \"t\"\nname = \"T\"\nicon = \"rocket\"",
+                "no icon called \"rocket\"",
             ),
             (
                 "id = \"x\"\nname = \"x\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"nope\"]",

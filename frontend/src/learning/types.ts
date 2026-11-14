@@ -1,6 +1,6 @@
 // Types mirror the deck in src/learning.rs and the log in crates/learning.
 
-import type { TrackId } from "../tracks/types";
+import type { TrackIcon as TrackIconName, TrackId } from "../tracks/types";
 
 export type Rating = "again" | "hard" | "good" | "easy";
 
@@ -72,7 +72,8 @@ export interface Deck {
   /** When the learner's day and week began, as the deck was made. */
   day_start: number;
   week_start: number;
-  tracks: { id: TrackId; name: string }[];
+  /** A deck saved by an older version has no icons. */
+  tracks: { id: TrackId; name: string; icon?: TrackIconName }[];
   items: DeckItem[];
   schedules: Record<string, ItemSchedule>;
   flags: Record<string, { at: number; note: string | null }>;

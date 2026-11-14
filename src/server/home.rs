@@ -124,6 +124,9 @@ mod tests {
             ]
         );
         assert_eq!(home["tracks"][0]["name"], "Advent of Code");
+        // Built-in tracks have their own icons, and the sample pack chooses one for its track.
+        assert_eq!(home["tracks"][0]["icon"], "star");
+        assert_eq!(home["tracks"][6]["icon"], "approximately");
         assert_eq!(
             home["week"],
             serde_json::json!({ "minutes": 0, "target": 90 })

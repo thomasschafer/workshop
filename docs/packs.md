@@ -42,6 +42,7 @@ name = "Conditional probability"
 id = "estimation"
 name = "Estimation"
 summary = "Quick numbers for back-of-the-envelope sums"
+icon = "approximately"           # optional: see below
 
 # Something to work towards: a set of skills, each to reach a mastery from 0 to 1.
 [[goals]]
@@ -75,6 +76,8 @@ name = "Steady"
 description = "Gives a hint when you ask, and asks a follow-up or two"
 prompt = "prompts/examiner-steady.md"
 ```
+
+A track's `icon` is shown beside its name. It's one of the icons the built-in tracks use, `star`, `code`, `dice`, `network`, `timer`, `sigma` and `history`, or one of `layers`, `approximately`, `book`, `chart`, `flask`, `languages`, `lightbulb`, `puzzle`, `radical` and `shapes`. Without one, a pack's track has `layers`.
 
 Every item names at least one skill, and every skill it names must be listed here. Mastery of a skill comes from how well you've recalled its items lately, so goals can show progress as you go.
 

@@ -97,6 +97,7 @@ name = "What C++ code costs"
 id = "estimation"
 name = "Estimation"
 summary = "Quick numbers for back-of-the-envelope sums"
+icon = "approximately"
 
 [[goals]]
 id = "quick-arithmetic"

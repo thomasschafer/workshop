@@ -91,6 +91,29 @@
   text-align: left;
 }
 
+.track {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+}
+
+.track-icon-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.track-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .track-name,
 .home-link-name {
   font-weight: 600;

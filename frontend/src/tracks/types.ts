@@ -12,6 +12,26 @@ export type BuiltInTrackId =
   | "mental-maths"
   | "review";
 
+/** The icons a track can have, drawn by `icons.tsx`: the built-in tracks', and more for packs. */
+export type TrackIcon =
+  | "star"
+  | "code"
+  | "dice"
+  | "network"
+  | "timer"
+  | "sigma"
+  | "history"
+  | "layers"
+  | "approximately"
+  | "book"
+  | "chart"
+  | "flask"
+  | "languages"
+  | "lightbulb"
+  | "puzzle"
+  | "radical"
+  | "shapes";
+
 /** A built-in track, or one a pack defines, as `pack:` and its ID within the pack. */
 export type TrackId = BuiltInTrackId | `pack:${string}`;
 
@@ -41,6 +61,7 @@ export interface Step {
 export interface Track {
   id: TrackId;
   name: string;
+  icon: TrackIcon;
   /** A line about where the learner is in it. */
   summary: string;
   /** Where opening the track leads. */

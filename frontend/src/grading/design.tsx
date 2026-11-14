@@ -42,11 +42,11 @@ function DesignList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
     gradingApi.designs().then(setItems, (e: unknown) => setError(errorMessage(e)));
   }, [attempt]);
   return (
-    <Page title="System design" onHome={onHome}>
+    <Page title="System design" icon="network" onHome={onHome}>
       {items === null ? (
         <Loading error={error} onRetry={() => setAttempt((n) => n + 1)} />
       ) : items.length === 0 ? (
-        <p class="muted">Your packs have no design prompts.</p>
+        <p class="empty">Your packs have no design prompts.</p>
       ) : (
         <ul class="design-list">
           {items.map((item) => (
@@ -105,13 +105,13 @@ function DesignItem({
 
   if (opened === null) {
     return (
-      <Page title="System design" onHome={onHome}>
+      <Page title="System design" icon="network" onHome={onHome}>
         <Loading error={error} onRetry={() => setAttempt((n) => n + 1)} />
       </Page>
     );
   }
   return (
-    <Page title="System design" onHome={onHome}>
+    <Page title="System design" icon="network" onHome={onHome}>
       {opened.session ? (
         <DesignSessionView
           opened={opened}

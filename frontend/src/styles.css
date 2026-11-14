@@ -314,9 +314,26 @@ html[data-tab-turn] .content {
 }
 
 .app-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   font-size: 15px;
   margin: 0;
   padding: 6px 0;
+}
+
+/* A track's icon, wherever it's shown: a line drawing in the accent colour, so it reads as a
+   marker beside the track's name rather than as text. */
+.track-icon {
+  flex: none;
+  color: var(--accent);
+}
+
+.track-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .editor {
