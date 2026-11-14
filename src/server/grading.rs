@@ -512,7 +512,7 @@ mod tests {
         let router = test_app_in(
             dir.path(),
             &format!(
-                "{model}\n[providers.grader]\ncommand = [\"sh\", {:?}]\ninput = \"stdin\"\noutput = \"text\"\ndiscuss_models = [\"careful\"]\n\n[models.grader]\nprovider = \"grader\"\n\n[learning]\npacks = [{:?}]\n",
+                "{model}\n[providers.grader]\ncommand = [\"sh\", {:?}]\ninput = \"stdin\"\noutput = \"text\"\ndiscuss_models = [\"careful\"]\nedit_models = [\"careful\"]\n\n[models.grader]\nprovider = \"grader\"\n\n# Every model it uses is a fake, so saving the choice below needs no model CLI installed.\n[models.edit]\nprovider = \"grader\"\nmodel = \"careful\"\n\n[learning]\npacks = [{:?}]\n",
                 grader.display().to_string(),
                 pack.display().to_string()
             ),
