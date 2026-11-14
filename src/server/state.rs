@@ -59,6 +59,10 @@ pub struct App {
     pub(super) problems: crate::coding::Problems,
     /// Fixes to cards the grader has proposed, waiting for approval.
     pub(super) card_fixes: crate::grader::Fixes,
+    /// The author's queue, questions and last run.
+    pub(super) author: crate::author::Desk,
+    /// Whether the author is running from the app.
+    pub(super) author_running: std::sync::atomic::AtomicBool,
     /// Each coding problem's brute force and inputs program, built, with the random cases made
     /// with them so far, by item and what's in them.
     pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
@@ -122,6 +126,8 @@ impl App {
             learning: crate::learning::Learning::open(&config.learning, &paths.data_dir)?,
             problems: crate::coding::Problems::new(&paths.data_dir),
             card_fixes: crate::grader::Fixes::new(&paths.data_dir),
+            author: crate::author::Desk::new(&paths.data_dir),
+            author_running: std::sync::atomic::AtomicBool::new(false),
             oracles: tokio::sync::Mutex::default(),
             config,
             paths,

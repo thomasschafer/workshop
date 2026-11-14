@@ -81,6 +81,24 @@ weekly_minutes = 90
 # more reviews.
 desired_retention = 0.9
 
+# The author writes new items for your pack, for what you're weakest in and the mistakes you make
+# most, from `workshop author` or the app's top-up button. It needs a pack of your own, and never
+# pushes. See docs/author.md.
+[author]
+# Writes items, with its tools kept to a copy of your pack. "opus" is always the newest Opus.
+writer = { provider = "claude", model = "opus" }
+# Solves each item blind and reviews it, with no tools. It must use another provider; for Codex, a
+# family such as "sol" means the newest model in it.
+reviewer = { provider = "codex", model = "sol" }
+# The most new items a run writes.
+max_items = 5
+# Rounds of discussion when the two disagree, before an item waits for your approval in the app.
+discussion_rounds = 2
+# Rounds the writer gets to fix items whose checks fail.
+fix_rounds = 2
+# The longest a model may take over one turn.
+timeout_minutes = 20
+
 # Snippets you can insert by saying "snippet <name>", or from the snippet menu.
 # [[snippets]]
 # name = "parse ints"

@@ -1,4 +1,5 @@
 mod aoc;
+mod author;
 mod calendar;
 mod coding;
 mod commands;
@@ -97,6 +98,16 @@ enum Command {
     Pack {
         #[command(subcommand)]
         command: PackCommand,
+    },
+    /// Write new items for your pack, for the skills you're weakest in and the mistakes you make
+    /// most: one model writes them, another reviews each blind, and every item must pass its
+    /// check. What both agree on is added to the pack and committed, never pushed; the rest wait
+    /// for your approval in the app. Schedule it yourself, such as with cron, if you'd like it
+    /// to run regularly.
+    Author {
+        /// The pack to write for, by its id, if you have more than one.
+        #[arg(long)]
+        pack: Option<String>,
     },
     /// Print the link, including the access token, for opening Workshop.
     Token {
@@ -269,6 +280,19 @@ async fn main() -> Result<()> {
                     .commit
                     .map_or_else(String::new, |c| format!(", in commit {c}"))
             );
+            Ok(())
+        }
+        Command::Author { pack } => {
+            let learning = learning::Learning::open(&config.learning, &paths.data_dir)?;
+            let desk = author::Desk::new(&paths.data_dir);
+            let notifier = Arc::new(workshop_push::Notifier::load(&paths.data_dir)?);
+            println!("The author is writing; this can take a while.");
+            let last =
+                author::run(&config, &paths, &learning, &desk, notifier, pack.as_deref()).await?;
+            print!("{}", author::summary(&last));
+            if last.error.is_some() {
+                std::process::exit(1);
+            }
             Ok(())
         }
         Command::Token { tailscale } => {

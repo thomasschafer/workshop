@@ -247,6 +247,18 @@ impl Learning {
         self.store.record_mistakes(&mistakes)
     }
 
+    /// How well each skill is known now, over the items there's practice of.
+    pub fn skill_mastery(&self, now: i64) -> Result<Vec<SkillMastery>> {
+        let packs = crate::packs::load(&self.config)?;
+        let items = practised(&packs);
+        Ok(workshop_learning::mastery(
+            &item_refs(&items),
+            &self.store.schedules()?,
+            self.store.scheduler(),
+            now,
+        ))
+    }
+
     /// How each of the packs' goals is going.
     pub fn goals(&self, now: i64) -> Result<Vec<crate::goals::GoalProgress>> {
         let packs = crate::packs::load(&self.config)?;

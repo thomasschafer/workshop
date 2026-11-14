@@ -25,6 +25,7 @@ struct RawConfig {
     snippets: Vec<Snippet>,
     editor: EditorConfig,
     learning: RawLearningConfig,
+    author: AuthorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,6 +49,54 @@ pub struct LearningConfig {
     /// How likely the learner should be to recall an item when it next comes up.
     pub desired_retention: f64,
 }
+
+/// The author: the models that write items and review them, and how much a run may do.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct AuthorConfig {
+    /// Writes items, with tools confined to a copy of the pack: a strong model.
+    pub writer: AuthorModel,
+    /// Solves each item blind and reviews it, with no tools: a model from another provider.
+    pub reviewer: AuthorModel,
+    /// The most new items a run writes.
+    pub max_items: usize,
+    /// Rounds of discussion when the writer and reviewer disagree, before an item waits for
+    /// approval.
+    pub discussion_rounds: usize,
+    /// Rounds the writer gets to fix items whose checks fail.
+    pub fix_rounds: usize,
+    /// The longest a model may take over one turn.
+    pub timeout_minutes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorModel {
+    pub provider: String,
+    pub model: String,
+}
+
+impl Default for AuthorConfig {
+    fn default() -> Self {
+        Self {
+            writer: AuthorModel {
+                provider: "claude".into(),
+                model: "opus".into(),
+            },
+            reviewer: AuthorModel {
+                provider: "codex".into(),
+                model: "sol".into(),
+            },
+            max_items: 5,
+            discussion_rounds: 2,
+            fix_rounds: 2,
+            timeout_minutes: 20,
+        }
+    }
+}
+
+/// The most items a run may be set to write, so a mistake in the config can't spend hours.
+const MAX_ITEMS_PER_RUN: usize = 50;
 
 /// The range of retention FSRS schedules well for: below it items come back too rarely to
 /// learn, and above it far too often.
@@ -291,6 +340,7 @@ pub struct Config {
     pub snippets: Vec<Snippet>,
     pub editor: EditorConfig,
     pub learning: LearningConfig,
+    pub author: AuthorConfig,
 }
 
 impl Config {
@@ -360,6 +410,22 @@ impl Config {
             }
         }
 
+        let author = raw.author;
+        for (role, choice) in [("writer", &author.writer), ("reviewer", &author.reviewer)] {
+            if !providers.contains_key(&choice.provider) {
+                bail!(
+                    "[author] {role} uses unknown provider {:?}",
+                    choice.provider
+                );
+            }
+        }
+        if !(1..=MAX_ITEMS_PER_RUN).contains(&author.max_items) {
+            bail!("[author] max_items should be from 1 to {MAX_ITEMS_PER_RUN}");
+        }
+        if author.timeout_minutes == 0 {
+            bail!("[author] timeout_minutes should be at least 1");
+        }
+
         let learning = raw.learning;
         if !RETENTION.contains(&learning.desired_retention) {
             bail!(
@@ -395,6 +461,7 @@ impl Config {
                 weekly_minutes: learning.weekly_minutes,
                 desired_retention: learning.desired_retention,
             },
+            author,
         })
     }
 }

@@ -304,6 +304,12 @@ impl ProviderRunner {
         parse_model_catalog(&String::from_utf8_lossy(&output.stdout))
     }
 
+    /// The call with its model resolved, as a family name such as "sol" is to the newest model in
+    /// the family, for running the model some other way, such as as an agent.
+    pub async fn resolved(&self, spec: &CallSpec) -> CallSpec {
+        self.resolve(spec).await
+    }
+
     /// Starts a process for `spec` so the next `call` with the same spec skips start-up.
     pub async fn warm(&self, spec: &CallSpec) -> Result<()> {
         if !self.provider.prespawn {

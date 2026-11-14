@@ -2,6 +2,7 @@
 //!
 //! Every route is listed in `router`; the handlers live in the module for their area.
 
+mod author;
 mod bench;
 mod client;
 mod coding;
@@ -58,6 +59,10 @@ pub fn router(app: Shared) -> Router {
         .route("/cards/flagged", get(grading::flagged))
         .route("/packs", get(packs::packs))
         .route("/packs/import", post(packs::import))
+        .route("/author", get(author::author))
+        .route("/author/run", post(author::top_up))
+        .route("/author/queue/{id}", post(author::decide))
+        .route("/author/questions/{id}", post(author::answer))
         .route("/cards/{pack}/{item}/review", post(grading::review))
         .route("/cards/{pack}/{item}/fix", post(grading::fix))
         .route("/mistakes/tag", put(mistakes::tag))

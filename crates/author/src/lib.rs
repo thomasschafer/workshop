@@ -526,7 +526,11 @@ async fn failures(
     items: &[Written],
     programs: &dyn Programs,
 ) -> Result<BTreeMap<String, String>> {
-    let pack = Pack::from_files(staging::read(copy)?)?;
+    let mut pack = Pack::from_files(staging::read(copy)?)?;
+    // Only these items are checked: the rest of the pack is as it was, and its coding problems
+    // take a while to build.
+    pack.items
+        .retain(|i| items.iter().any(|item| item.path == i.path));
     let report = pack.check(programs).await;
     let mut failing = BTreeMap::new();
     for item in items {
