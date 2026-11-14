@@ -9,6 +9,9 @@
 // does it: `fetchByCommand` with a command it runs to ask the client to add the import, as the
 // Haskell language server does; `fetchOnResolve` with the import given only once it's asked for
 // the completion in full; and `fetchSnippet`, a snippet sent with its import.
+//
+// It formats by squeezing runs of spaces within a line to one and dropping spaces at the ends of
+// lines, sending the whole file back as one edit, as some servers do.
 
 const documents = new Map();
 let nextRequest = 0;
@@ -76,6 +79,7 @@ const handlers = {
       hoverProvider: true,
       codeActionProvider: { resolveProvider: true },
       completionProvider: { resolveProvider: true },
+      documentFormattingProvider: true,
       executeCommandProvider: { commands: ["fake.import"] },
     },
   }),
@@ -142,6 +146,17 @@ const handlers = {
         .map((label) => ({ label, kind: 6 })),
       ...(prefix === "" ? [] : imported.filter(({ label }) => label.startsWith(prefix))),
     ];
+  },
+  "textDocument/formatting": ({ textDocument: { uri } }) => {
+    const text = documents.get(uri);
+    const formatted = text
+      .split("\n")
+      .map((line) => {
+        const indent = /^ */.exec(line)[0];
+        return indent + line.slice(indent.length).replace(/ {2,}/g, " ").trimEnd();
+      })
+      .join("\n");
+    return [{ range: rangeOf(text, 0, text.length), newText: formatted }];
   },
   "completionItem/resolve": (item) =>
     item.data ? { ...item, additionalTextEdits: [importOf(item.data.name)] } : item,

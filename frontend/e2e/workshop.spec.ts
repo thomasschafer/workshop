@@ -2130,6 +2130,72 @@ test("imports what's completed, however the language server adds the import", as
   await helixContext.close();
 });
 
+test("formats the code when asked, before a run, and once Helix is left alone", async ({
+  browser,
+}) => {
+  const { context, phone: computer } = await openOnPhone(browser, "default", "computer");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  // Saving ends the file with a new line, which what's typed at its end doesn't have.
+  const savedText = () => saved().trimEnd();
+  await expect(computer.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  const mod = (await computer.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform)))
+    ? "Meta"
+    : "Control";
+  const restore = async (undo: () => Promise<void>) => {
+    for (let i = 0; i < 8 && saved() !== original; i++) {
+      await undo();
+      await computer.waitForTimeout(700);
+    }
+    expect(saved()).toBe(original);
+  };
+
+  // With the editor's own keys, nothing's formatted for pausing.
+  await computer.locator(".cm-content").click();
+  await computer.keyboard.press(`${mod}+End`);
+  await computer.keyboard.type("total  =  1");
+  await computer.waitForTimeout(4000);
+  expect(savedText()).toBe(`${original}total  =  1`);
+
+  // Shift-Alt-F formats it, leaving the cursor where it was in the code, and undoes on its own.
+  await computer.keyboard.press("Shift+Alt+KeyF");
+  await expect.poll(savedText).toBe(`${original}total = 1`);
+  await computer.keyboard.type("0");
+  await expect.poll(savedText).toBe(`${original}total = 10`);
+  await computer.keyboard.press(`${mod}+z`);
+  await computer.keyboard.press(`${mod}+z`);
+  await expect.poll(savedText).toBe(`${original}total  =  1`);
+
+  // Running formats it first.
+  await computer.getByRole("button", { name: "Run", exact: true }).click();
+  await computer.getByRole("button", { name: "Run real input" }).click();
+  // Whatever the solution does, it's run as formatted.
+  await expect(computer.locator(".run-result")).toContainText("Real input", RUN);
+  expect(savedText()).toBe(`${original}total = 1`);
+  await computer.getByRole("button", { name: "Close" }).click();
+  await computer.locator(".cm-content").click();
+  await restore(() => computer.keyboard.press(`${mod}+z`));
+  await context.close();
+
+  // With Helix's keys, it's formatted once it's been left in normal mode for a moment.
+  const { context: helixContext, phone: helix } = await openOnPhone(browser, "helix", "computer");
+  await expect(helix.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  await helix.locator(".cm-content").click();
+  await helix.keyboard.type("ggOy  =  2");
+  await helix.waitForTimeout(4000);
+  expect(saved()).toBe(`y  =  2\n${original}`);
+  await helix.keyboard.press("Escape");
+  await expect.poll(saved, { timeout: 8000 }).toBe(`y = 2\n${original}`);
+  // As a step of its own to undo, which isn't then formatted again.
+  await helix.keyboard.type("u");
+  await expect.poll(saved).toBe(`y  =  2\n${original}`);
+  await helix.waitForTimeout(4000);
+  expect(saved()).toBe(`y  =  2\n${original}`);
+  await helix.keyboard.type("u");
+  await expect.poll(saved).toBe(original);
+  await helixContext.close();
+});
+
 test("keeps the language server for an editor that comes back, with its files as they then are", async ({
   browser,
 }) => {

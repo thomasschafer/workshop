@@ -188,6 +188,7 @@ export function App({ boot }: { boot: Bootstrap }) {
     updateMeta,
     findSamples,
     notify,
+    formatBeforeRun: () => editor.current?.formatBeforeRun() ?? Promise.resolve(),
   });
   const { question, setQuestion, replying, setReplying, doEdit, enqueue } = useEditing({
     queue,
@@ -397,6 +398,8 @@ export function App({ boot }: { boot: Bootstrap }) {
           codeScale: preferences.codeScale.get(),
           onCodeScale: (scale) => changeCodeScaleRef.current(scale),
           helix: helixSetupRef.current(fileName(opened.file_uri)),
+          formatter: boot.language.has_formatter ? (code) => api.format(puzzle, code) : null,
+          formatAutomatically: boot.editor.format_automatically,
           lsp: lsp
             ? {
                 client: lsp.client,

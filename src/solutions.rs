@@ -15,6 +15,7 @@ use crate::packages::Packages;
 use crate::paths::Paths;
 use crate::practice::Practice;
 use crate::runner::{self, RunResult};
+use crate::template::{self, Vars};
 use crate::toolchain::Toolchain;
 
 /// The client for Advent of Code, with the practice puzzle served alongside it.
@@ -123,6 +124,38 @@ impl<'a> Solutions<'a> {
         .await
         .with_context(|| format!("running {puzzle}"))?;
         Ok(self.shorten_paths(result))
+    }
+
+    /// Formats a puzzle's solution with the language's formatter, as `code`, which may not be
+    /// saved yet.
+    pub async fn format(&self, puzzle: Puzzle, code: &str) -> Result<String> {
+        let profile = self.language();
+        let formatter = profile
+            .formatter
+            .as_ref()
+            .with_context(|| format!("{} has no formatter set up", profile.name))?;
+        let file = profile.solution_path(&self.config.solutions_dir, puzzle)?;
+        let dir = file
+            .parent()
+            .context("solution file has no parent directory")?;
+        let mut vars = Vars::new()
+            .set("file", file.to_string_lossy())
+            .set("dir", dir.to_string_lossy())
+            .set("year", puzzle.year_label())
+            .set("day", puzzle.day.to_string());
+        if let Some(helpers) = self.helpers_dir()? {
+            vars = vars.set("helpers", helpers.to_string_lossy().into_owned());
+        }
+        let args = template::render_all(formatter, &vars)?;
+        // The solutions directory, as the solution's own may not have been written yet.
+        runner::format(
+            &args,
+            &self.config.solutions_dir,
+            &self.environment()?,
+            code,
+        )
+        .await
+        .with_context(|| format!("formatting {puzzle}"))
     }
 
     /// Shows paths in the solutions directory relative to it, as compilers and tracebacks give

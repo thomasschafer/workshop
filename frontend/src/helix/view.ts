@@ -11,12 +11,7 @@ import {
 import { redo, undo } from "@codemirror/commands";
 import { getIndentation, IndentContext } from "@codemirror/language";
 import { forEachDiagnostic } from "@codemirror/lint";
-import {
-  formatDocument,
-  type LSPClient,
-  showSignatureHelp,
-  signatureHelp,
-} from "@codemirror/lsp-client";
+import { type LSPClient, showSignatureHelp, signatureHelp } from "@codemirror/lsp-client";
 import {
   EditorSelection,
   EditorState,
@@ -40,6 +35,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
+import { errorMessage } from "../errors";
 import { languageServerCompletion } from "../lsp";
 import {
   type CodeAction,
@@ -88,6 +84,8 @@ export interface HelixActions {
   reload(): Promise<void>;
   /** Shows every problem the language server has found, with their whole messages. */
   showProblems(): void;
+  /** Formats the code, returning whether that changed it, or throws saying why it can't. */
+  format(): Promise<boolean>;
   setLineWrapping(enabled: boolean): void;
   lineWrapping(): boolean;
 }
@@ -760,7 +758,13 @@ class HelixView implements PluginValue, Host {
         await this.config.actions.reload();
         return;
       case "format":
-        needsLsp(() => formatDocument(view));
+        try {
+          editor.setStatus(
+            (await this.config.actions.format()) ? "Formatted" : "Nothing to format",
+          );
+        } catch (error) {
+          editor.setError(`Couldn't format the code: ${errorMessage(error)}`);
+        }
         return;
       case "goto_definition":
         return this.withLsp((lsp) =>

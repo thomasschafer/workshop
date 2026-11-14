@@ -22,6 +22,8 @@ interface Options {
   updateMeta: (next: DayMeta) => void;
   findSamples: (p: Puzzle, loaded: Problem) => Promise<void>;
   notify: (tone: "info" | "error", text: string) => void;
+  /** Formats the code, if that's done automatically, so what's run is formatted. */
+  formatBeforeRun: () => Promise<void>;
 }
 
 /** Running the solution and submitting its answer, and what the Run sheet shows of them. */
@@ -38,6 +40,7 @@ export function useRun({
   updateMeta,
   findSamples,
   notify,
+  formatBeforeRun,
 }: Options) {
   const [run, setRun] = useState<RunState>(initialRunState);
 
@@ -60,6 +63,7 @@ export function useRun({
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
     try {
       if (waitForEdits) await queue.idle();
+      await formatBeforeRun();
       try {
         // The run reads the code and the chosen sample from the server.
         await saver.current?.flush();

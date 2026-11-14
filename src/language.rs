@@ -28,6 +28,10 @@ pub struct LanguageProfile {
     /// Sent to the language server as it starts, for servers that need settings to work at all.
     #[serde(default)]
     pub lsp_options: Option<serde_json::Value>,
+    /// Formats a solution given on stdin, writing it to stdout, for a language whose language
+    /// server doesn't format. Takes the same placeholders as `run`.
+    #[serde(default)]
+    pub formatter: Option<Vec<String>>,
     pub template: String,
     /// How the language is spoken, given to the edit model.
     pub dictation_hints: String,

@@ -78,12 +78,25 @@ pub struct DiscussModelConfig {
 }
 
 /// How the code editor behaves with a keyboard.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct EditorConfig {
     /// The keybindings, until chosen on a device in the app.
     pub keybindings: Keybindings,
+    /// Formats the code before each run, and with Helix's keybindings, once it's been left in
+    /// normal mode for a moment.
+    pub format_automatically: bool,
     pub helix: HelixConfig,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            keybindings: Keybindings::default(),
+            format_automatically: true,
+            helix: HelixConfig::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]

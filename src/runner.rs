@@ -152,6 +152,61 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
     })
 }
 
+/// How long a formatter has, which only takes long if something's wrong.
+const FORMAT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Formats `code` with a formatter that reads it on stdin and writes it to stdout, failing with
+/// what the formatter says if it can't, as for code that doesn't parse.
+pub async fn format(
+    args: &[String],
+    dir: &Path,
+    environment: &[(String, String)],
+    code: &str,
+) -> Result<String> {
+    let (program, rest) = args.split_first().context("empty formatter command")?;
+    let mut command = process::command(program);
+    command
+        .args(rest)
+        .envs(environment.iter().map(|(k, v)| (k, v)))
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = process::GroupedChild::spawn(&mut command)
+        .with_context(|| format!("starting `{program}`; is it installed and on your PATH?"))?;
+    let mut stdin = child.child.stdin.take().context("stdin not captured")?;
+    let mut stdout = child.child.stdout.take().context("stdout not captured")?;
+    let mut stderr = child.child.stderr.take().context("stderr not captured")?;
+    let (mut formatted, mut complaint) = (String::new(), String::new());
+    let finished = tokio::time::timeout(FORMAT_TIMEOUT, async {
+        let write = async {
+            stdin.write_all(code.as_bytes()).await?;
+            // Closing stdin tells the formatter the code's all there.
+            drop(stdin);
+            std::io::Result::Ok(())
+        };
+        tokio::try_join!(
+            write,
+            stdout.read_to_string(&mut formatted),
+            stderr.read_to_string(&mut complaint),
+        )?;
+        child.child.wait().await
+    })
+    .await;
+    let status = match finished {
+        Ok(status) => status.with_context(|| format!("running `{program}`"))?,
+        Err(_) => {
+            child.finish();
+            bail!("`{program}` took longer than {}s", FORMAT_TIMEOUT.as_secs());
+        }
+    };
+    child.finish();
+    if !status.success() {
+        bail!("`{program}` couldn't format the code: {}", complaint.trim());
+    }
+    Ok(formatted)
+}
+
 pub struct Output {
     pub ending: Ending,
     pub stdout: String,
@@ -312,6 +367,7 @@ mod tests {
             run: run.iter().map(|s| (*s).to_owned()).collect(),
             lsp: None,
             lsp_options: None,
+            formatter: None,
             template: String::new(),
             dictation_hints: String::new(),
             packages: None,
@@ -348,6 +404,40 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn formats_code_through_stdin_and_stdout_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        // Longer than a run's output is cut to, which formatted code mustn't be.
+        let code = "x = 1\n".repeat(20_000);
+        let args = ["tr", "x", "y"].map(str::to_owned);
+        let formatted = format(&args, dir.path(), &[], &code).await.unwrap();
+        assert_eq!(formatted, code.replace('x', "y"));
+    }
+
+    #[tokio::test]
+    async fn says_why_code_could_not_be_formatted() {
+        let dir = tempfile::tempdir().unwrap();
+        let args = [
+            "sh",
+            "-c",
+            "cat >/dev/null; echo 'line 3: unexpected indent' >&2; exit 2",
+        ]
+        .map(str::to_owned);
+        let err = format(&args, dir.path(), &[], "x").await.unwrap_err();
+        assert!(
+            format!("{err:#}").contains("line 3: unexpected indent"),
+            "{err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn says_when_a_formatter_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let args = ["workshop-no-such-formatter".to_owned()];
+        let err = format(&args, dir.path(), &[], "x").await.unwrap_err();
+        assert!(format!("{err:#}").contains("is it installed"), "{err:#}");
     }
 
     #[tokio::test]

@@ -46,6 +46,10 @@ models = ["sonnet", "opus", "fable"]
 # Each device can choose for itself in the app, under Settings, Display.
 keybindings = "default"
 
+# Format the code with the language server, or the language's formatter, before each run, and
+# with Helix's keybindings once it's been left in normal mode for a few seconds after a change.
+format_automatically = true
+
 # Helix's own options, named as in Helix's [editor] config, and its keymaps as in its [keys]
 # tables, under [editor.helix.keys.normal], [editor.helix.keys.select] and
 # [editor.helix.keys.insert]. These are the options Workshop follows, with Helix's defaults:

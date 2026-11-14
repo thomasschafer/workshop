@@ -26,6 +26,8 @@ export interface FoundSample {
 
 export interface EditorConfig {
   keybindings: "default" | "helix";
+  /** Whether to format before each run, and once Helix has been left in normal mode a moment. */
+  format_automatically: boolean;
   /** Helix's options, as named in Helix's config, and its keymaps under `keys`. */
   helix: HelixConfigJson;
 }
@@ -54,6 +56,8 @@ export interface Bootstrap {
     editor_mode: string;
     lsp_language_id: string;
     has_lsp: boolean;
+    /** Whether the language has a formatter of its own, used instead of the language server's. */
+    has_formatter: boolean;
     root_uri: string;
     /** Sent to the language server as it starts. */
     lsp_options: unknown;
@@ -540,6 +544,8 @@ export const api = {
     request<FoundSample | null>("POST", `${day(p)}/sample/${part}`),
   run: (p: Puzzle, input: "sample" | "real", part: number) =>
     request<RunResult>("POST", `${day(p)}/run`, { input, part }),
+  format: (p: Puzzle, code: string) =>
+    request<{ code: string }>("POST", `${day(p)}/format`, { code }).then((r) => r.code),
   cancelRun: () => request<null>("POST", "/run/cancel"),
   submit: (p: Puzzle, part: number, answer: string) =>
     request<{

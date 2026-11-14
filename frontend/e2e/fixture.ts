@@ -43,6 +43,8 @@ function pythonProfile(): string {
     [/^lookup = .*\n/m, ""],
     // A stand-in for the language server, so its errors and answers are the tests' own.
     [/^lsp = .*$/m, `lsp = ["node", ${JSON.stringify(fakeLsp)}]`],
+    // Formatting is the stand-in language server's, rather than Ruff's.
+    [/^formatter = .*\n/m, ""],
     [/^\[(packages|helpers|toolchain)/gm, "[languages.python.$1"],
   ];
   let profile = builtin;

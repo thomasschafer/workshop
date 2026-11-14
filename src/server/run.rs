@@ -62,6 +62,27 @@ pub(super) async fn run(
     ))
 }
 
+#[derive(Deserialize)]
+pub(super) struct FormatBody {
+    code: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct Formatted {
+    code: String,
+}
+
+/// Formats a solution with the language's formatter, for languages whose server doesn't.
+pub(super) async fn format(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+    Json(body): Json<FormatBody>,
+) -> ApiResult<Formatted> {
+    let puzzle = puzzle(year, day)?;
+    let code = app.solutions().await?.format(puzzle, &body.code).await?;
+    Ok(Json(Formatted { code }))
+}
+
 pub(super) async fn cancel_run(State(app): State<Shared>) -> ApiResult<()> {
     if let Some(cancel) = lock(&app.current_run).as_ref() {
         cancel.cancel();

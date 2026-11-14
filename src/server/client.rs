@@ -45,6 +45,8 @@ struct LanguageInfo {
     editor_mode: String,
     lsp_language_id: String,
     has_lsp: bool,
+    /// Whether the language has a formatter of its own, used instead of the language server's.
+    has_formatter: bool,
     root_uri: String,
     lsp_options: Option<serde_json::Value>,
     /// For recognising a missing package in errors, if the language has packages.
@@ -73,6 +75,11 @@ pub(super) async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap>
         .as_ref()
         .and_then(|c| c.first())
         .is_some_and(|p| toolchain.find_program(p).is_some());
+    let has_formatter = language
+        .formatter
+        .as_ref()
+        .and_then(|c| c.first())
+        .is_some_and(|p| toolchain.find_program(p).is_some());
     Ok(Json(Bootstrap {
         state: app.workspace.load_ui_state()?,
         language: LanguageInfo {
@@ -81,6 +88,7 @@ pub(super) async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap>
             editor_mode: language.editor_mode.clone(),
             lsp_language_id: language.lsp_language_id.clone(),
             has_lsp,
+            has_formatter,
             root_uri: file_uri(&app.config.solutions_dir),
             lsp_options: language.lsp_options.clone(),
             packages: language.packages.as_ref().map(|p| PackageHints {

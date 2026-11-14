@@ -12,6 +12,9 @@ run = ["python3", "{file}"]
 
 lsp = ["pyright-langserver", "--stdio"]
 
+# Pyright doesn't format, so Ruff does. It reads the solution on stdin and writes it to stdout.
+formatter = ["ruff", "format", "--stdin-filename", "{file}", "-"]
+
 template = '''
 import sys
 
@@ -101,6 +104,8 @@ python = "3.13"
 # Pyright, the language server for error underlines and types, runs on Node.
 node = "lts"
 "npm:pyright" = "latest"
+# Ruff formats solutions.
+ruff = "latest"
 '''
 
 [packages]

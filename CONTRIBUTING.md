@@ -82,7 +82,7 @@ Then:
 
 Commands are lists of arguments, not shell strings. The placeholders are `{file}`, `{dir}` (the solution's directory), `{build_dir}` (a scratch directory outside the solutions repo, for build output), `{year}` (`practice` for the practice puzzle) and `{day}`; `{day:02}` pads with zeros. An unknown placeholder is an error. Commands run in the solution's directory.
 
-`lsp_options` is sent to the language server as it starts, for servers that need settings to work at all, such as Deno's `{ enable = true }`. `gitignore` lists lines added to the solutions repo's `.gitignore` with the first solution, for build output written inside it, such as Cargo's `/target/`.
+`lsp_options` is sent to the language server as it starts, for servers that need settings to work at all, such as Deno's `{ enable = true }`. Code is formatted by the language server, unless the profile has a `formatter`, for a language whose server doesn't format, such as Python with Pyright: a command that reads the code on stdin and writes it formatted to stdout, with the same placeholders, run in the solutions directory. `gitignore` lists lines added to the solutions repo's `.gitignore` with the first solution, for build output written inside it, such as Cargo's `/target/`.
 
 ### Starting part 2
 

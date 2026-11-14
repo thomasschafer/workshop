@@ -22,7 +22,6 @@ import { rust } from "@codemirror/legacy-modes/mode/rust";
 import { nextDiagnostic, previousDiagnostic, setDiagnostics } from "@codemirror/lint";
 import {
   findReferencesKeymap,
-  formatKeymap,
   hoverTooltips,
   jumpToDefinitionKeymap,
   LSPClient,
@@ -48,9 +47,12 @@ import {
   highlightActiveLine,
   keymap,
   lineNumbers,
+  showDialog,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { markCursor, minimalChange, unmarkCursor } from "./diff";
+import { errorMessage } from "./errors";
+import { type Formatter, formatCode, formatWhenSettled, languageServerFormatter } from "./format";
 import type { HelixOptions } from "./helix/editor";
 import { isHelixTransaction } from "./helix/editor";
 import type { KeyTrieNode, Mode } from "./helix/keymap";
@@ -220,7 +222,8 @@ function sameDiagnostics(a: Diagnostics, b: Diagnostics): boolean {
 export interface HelixSetup {
   keymaps: Record<Mode, KeyTrieNode>;
   options: Partial<HelixOptions>;
-  actions: HelixActions;
+  /** What Workshop does for Helix's commands, but formatting, which the editor does itself. */
+  actions: Omit<HelixActions, "format">;
   /** The file's name, for messages such as `:w`'s. */
   documentName: string;
 }
@@ -235,6 +238,10 @@ export interface EditorOptions {
   /** Called with the scale the text was pinched to. */
   onCodeScale: (scale: number) => void;
   lsp: { client: LSPClient; uri: string; languageId: string } | null;
+  /** The language's own formatter, used instead of the language server's, if it has one. */
+  formatter: Formatter | null;
+  /** Whether to format before each run, and once Helix has been left in normal mode a moment. */
+  formatAutomatically: boolean;
   /** Helix's keybindings, or null for CodeMirror's own. */
   helix: HelixSetup | null;
   onChange: (text: string) => void;
@@ -299,6 +306,7 @@ export class CodeEditor {
         this.scale.of(scaled(options.codeScale)),
         this.inset.of([]),
         changedField,
+        options.formatAutomatically ? formatWhenSettled(() => this.format()) : [],
         language ? language() : [],
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],
         this.inputMode.of(EditorView.contentAttributes.of({ inputmode: "none" })),
@@ -431,6 +439,23 @@ export class CodeEditor {
         history(),
         lsp ? languageServerKeys() : [],
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+        // Shift-Alt-F formats, read by where the key is rather than what it types, which on a Mac
+        // is a character such as Ï, that CodeMirror's keymaps don't take for a shortcut.
+        EditorView.domEventHandlers({
+          keydown: (event, view) => {
+            const { code, shiftKey, altKey, ctrlKey, metaKey } = event;
+            if (code !== "KeyF" || !shiftKey || !altKey || ctrlKey || metaKey) return false;
+            event.preventDefault();
+            this.format().catch((error: unknown) =>
+              showDialog(view, {
+                label: `Couldn't format the code: ${errorMessage(error)}`,
+                class: "cm-lsp-message cm-lsp-message-error",
+                top: true,
+              }),
+            );
+            return true;
+          },
+        }),
       ];
     }
     return helixKeybindings({
@@ -439,12 +464,52 @@ export class CodeEditor {
       language: this.options.mode,
       documentName: helix.documentName,
       lsp: lsp ? { client: lsp.client, uri: lsp.uri } : null,
-      actions: helix.actions,
+      actions: { ...helix.actions, format: () => this.format() },
     });
   }
 
   private lineNumbersFor(helix: HelixSetup | null): Extension {
     return helix?.options.lineNumbers === "relative" ? relativeLineNumbers() : lineNumbers();
+  }
+
+  /**
+   * Formats the code with the language's formatter, or else the language server, changing only
+   * what formatting changes. Returns whether it changed anything; throws if it can't format.
+   */
+  format(): Promise<boolean> {
+    return formatCode(this.view, this.formatter());
+  }
+
+  /**
+   * Formats the code before it's run, if formatting is automatic. Running doesn't wait long for
+   * it, and goes ahead with the code as it is if it can't be formatted, such as if it doesn't
+   * parse, which running will show.
+   */
+  async formatBeforeRun(): Promise<void> {
+    if (!this.options.formatAutomatically) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tooLong = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, FORMAT_BEFORE_RUN_MS);
+    });
+    try {
+      await Promise.race([this.format(), tooLong]);
+    } catch (error) {
+      console.info("[format]", error);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private formatter(): Formatter {
+    if (this.options.formatter !== null) return this.options.formatter;
+    const lsp = this.options.lsp;
+    if (lsp === null) throw new Error("there's nothing to format this language with");
+    if (lsp.client.serverCapabilities === null) {
+      throw new Error("the language server hasn't started yet");
+    }
+    const formatter = languageServerFormatter(lsp.client, this.view);
+    if (formatter === null) throw new Error("the language server doesn't format code");
+    return formatter;
   }
 
   /** Scales the text from its usual size. */
@@ -653,12 +718,7 @@ function languageServerKeys(): Extension {
     signatureHelp(),
     // A finger has no way to point without tapping, which moves the cursor.
     touch ? [] : hoverTooltips(),
-    keymap.of([
-      ...renameKeymap,
-      ...jumpToDefinitionKeymap,
-      ...findReferencesKeymap,
-      ...formatKeymap,
-    ]),
+    keymap.of([...renameKeymap, ...jumpToDefinitionKeymap, ...findReferencesKeymap]),
   ];
 }
 
@@ -771,6 +831,9 @@ class SocketTransport implements Transport {
 }
 
 export type LanguageServerStatus = "connecting" | "ready" | "reconnecting";
+
+/** How long a run waits for the code to be formatted first. */
+const FORMAT_BEFORE_RUN_MS = 3000;
 
 const MIN_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 30_000;

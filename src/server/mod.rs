@@ -113,6 +113,7 @@ pub fn router(app: Shared) -> Router {
         .route("/puzzles/{year}/{day}/problem", get(puzzles::problem))
         .route("/puzzles/{year}/{day}/input", get(puzzles::input))
         .route("/puzzles/{year}/{day}/run", post(run::run))
+        .route("/puzzles/{year}/{day}/format", post(run::format))
         .route("/puzzles/{year}/{day}/submit", post(run::submit))
         .route(
             "/puzzles/{year}/{day}/sample/{part}",
