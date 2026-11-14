@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use workshop_provider::{CallSpec, ProviderRunner, Role};
@@ -57,6 +57,8 @@ pub struct App {
     pub(super) learning: crate::learning::Learning,
     /// Coding problems' sessions and drafts.
     pub(super) problems: crate::coding::Problems,
+    /// Fixes to cards the grader has proposed, waiting for approval.
+    pub(super) card_fixes: crate::grader::Fixes,
     /// Each coding problem's brute force and inputs program, built, with the random cases made
     /// with them so far, by item and what's in them.
     pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
@@ -119,6 +121,7 @@ impl App {
             lsp_servers: workshop_lsp::Servers::default(),
             learning: crate::learning::Learning::open(&config.learning, &paths.data_dir)?,
             problems: crate::coding::Problems::new(&paths.data_dir),
+            card_fixes: crate::grader::Fixes::new(&paths.data_dir),
             oracles: tokio::sync::Mutex::default(),
             config,
             paths,
@@ -170,6 +173,25 @@ impl App {
             edit::system_prompt(self.language()),
         );
         (&self.runners[&choice.provider], spec)
+    }
+
+    /// The runner and call for the grader: the discussion provider's first model, with the
+    /// pack's add-on to the grader's instructions.
+    pub(super) fn grader_target(
+        &self,
+        add_on: Option<&str>,
+    ) -> Result<(&ProviderRunner, CallSpec)> {
+        let provider = self.model_settings().discuss_provider;
+        let model = crate::models::discuss_models(&self.config, &provider)
+            .into_iter()
+            .next()
+            .with_context(|| format!("{provider} has no discussion models to grade with"))?;
+        let spec = self.config.providers[&provider].spec(
+            Role::Discuss,
+            &model,
+            crate::grader::system_prompt(add_on),
+        );
+        Ok((&self.runners[&provider], spec))
     }
 
     pub(super) async fn warm_edit_model(&self) {

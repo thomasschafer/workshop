@@ -19,6 +19,9 @@ pub enum Destination {
     Practice { track: TrackId },
     /// The Coding track: one of its items, as `pack/item`, or the list of them.
     Coding { item: Option<String> },
+    /// Design prompts, answered in writing and marked by the grader: one, as `pack/item`, or
+    /// the list of them.
+    Design { item: Option<String> },
 }
 
 /// What the Advent of Code track is worked out from.

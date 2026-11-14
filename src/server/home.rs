@@ -101,6 +101,7 @@ mod tests {
                 "advent-of-code",
                 "coding",
                 "probability",
+                "system-design",
                 "mental-maths",
                 "review",
                 "pack:estimation"

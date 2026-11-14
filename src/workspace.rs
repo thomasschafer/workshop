@@ -467,7 +467,7 @@ fn with_final_newline(text: &str) -> String {
 /// not to prompt and is given up on after a while.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
-async fn git(dir: &Path, args: &[&str]) -> Result<String> {
+pub(crate) async fn git(dir: &Path, args: &[&str]) -> Result<String> {
     let mut command = Command::new("git");
     command
         .args(args)

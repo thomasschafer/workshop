@@ -345,6 +345,49 @@ impl Item {
     }
 }
 
+/// An item's file with one of its `## ` sections' text replaced, added at the end if it isn't
+/// there, or with `None`, removed, leaving the rest of the file as it was.
+pub fn replace_section(source: &str, heading: &str, text: Option<&str>) -> String {
+    let mut out = String::new();
+    let mut in_code = false;
+    let mut inside = false;
+    let mut found = false;
+    let new_section = |out: &mut String| {
+        if let Some(text) = text {
+            out.push_str(&format!("## {heading}\n\n{}\n\n", text.trim()));
+        }
+    };
+    for line in source.split_inclusive('\n') {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+        }
+        if !in_code && let Some(name) = line.trim_end().strip_prefix("## ") {
+            if inside {
+                inside = false;
+            }
+            if name.trim() == heading {
+                inside = true;
+                found = true;
+                new_section(&mut out);
+                continue;
+            }
+        }
+        if !inside {
+            out.push_str(line);
+        }
+    }
+    if !found && text.is_some() {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        if !out.ends_with("\n\n") {
+            out.push('\n');
+        }
+        new_section(&mut out);
+    }
+    format!("{}\n", out.trim_end())
+}
+
 fn split_front_matter(source: &str) -> Result<(&str, &str), String> {
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let rest = source
@@ -618,6 +661,23 @@ fn code_block(text: &str, language: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replaces_a_section_and_keeps_the_rest() {
+        let card = "+++\nkind = \"card\"\nskills = [\"a\"]\n+++\nQ?\n\n## Answer\n\nOld.\n\n```\n## Not a heading\n```\n\n## Explanation\n\nWhy.\n";
+        let fixed = replace_section(card, "Answer", Some("New."));
+        assert_eq!(
+            fixed,
+            "+++\nkind = \"card\"\nskills = [\"a\"]\n+++\nQ?\n\n## Answer\n\nNew.\n\n## Explanation\n\nWhy.\n"
+        );
+        let without = replace_section(card, "Explanation", None);
+        assert!(without.ends_with("## Not a heading\n```\n"), "{without}");
+        let added = replace_section(&without, "Explanation", Some("Because."));
+        assert!(
+            added.ends_with("```\n\n## Explanation\n\nBecause.\n"),
+            "{added}"
+        );
+    }
 
     fn manifest() -> Manifest {
         Manifest::parse(

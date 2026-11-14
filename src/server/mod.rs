@@ -9,6 +9,7 @@ mod discuss;
 mod edit;
 mod error;
 mod git;
+mod grading;
 mod home;
 mod install;
 mod learning;
@@ -50,6 +51,12 @@ pub fn router(app: Shared) -> Router {
         .route("/learning/sync", post(learning::sync))
         .route("/mistakes", get(mistakes::mistakes))
         .route("/goals", get(mistakes::goals))
+        .route("/design", get(grading::design_list))
+        .route("/design/{pack}/{item}", get(grading::design_open))
+        .route("/items/{pack}/{item}/mark", post(grading::mark))
+        .route("/cards/flagged", get(grading::flagged))
+        .route("/cards/{pack}/{item}/review", post(grading::review))
+        .route("/cards/{pack}/{item}/fix", post(grading::fix))
         .route("/mistakes/tag", put(mistakes::tag))
         .route("/coding", get(coding::overview))
         .route("/coding/items/{pack}/{item}/open", post(coding::open))
@@ -207,10 +214,36 @@ mod testing {
 
     pub async fn test_app() -> (tempfile::TempDir, Router) {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = Config::parse("").unwrap();
-        config.solutions_dir = dir.path().join("aoc");
-        let app = App::new(config, Paths::under(dir.path()), "secret".into(), None).unwrap();
-        (dir, router(Arc::new(app)))
+        let router = test_app_in(dir.path(), "");
+        (dir, router)
+    }
+
+    /// A server with its data in `dir`, and this config.
+    pub fn test_app_in(dir: &std::path::Path, config: &str) -> Router {
+        let mut config = Config::parse(config).unwrap();
+        config.solutions_dir = dir.join("aoc");
+        let app = App::new(config, Paths::under(dir), "secret".into(), None).unwrap();
+        router(Arc::new(app))
+    }
+
+    /// Config for a stand-in discussion model, a shell script in `dir` that replies with the
+    /// file named by the first pattern the prompt matches, of `replies`: (pattern, file name).
+    #[cfg(unix)]
+    pub fn fake_discussion_model(dir: &std::path::Path, replies: &[(&str, &str)]) -> String {
+        let mut script = String::from("prompt=$(cat)\ncase \"$prompt\" in\n");
+        for (pattern, file) in replies {
+            let file = dir.join(file);
+            script.push_str(&format!("  *'{pattern}'*) cat '{}' ;;\n", file.display()));
+        }
+        script.push_str(
+            "  *) echo 'The fake model has no reply for this prompt' >&2; exit 1 ;;\nesac\n",
+        );
+        let path = dir.join("fake-model.sh");
+        std::fs::write(&path, script).unwrap();
+        format!(
+            "[providers.fake]\ncommand = [\"sh\", {path:?}]\ninput = \"stdin\"\noutput = \"text\"\ndiscuss_models = [\"fake\"]\n\n[models.discuss]\nprovider = \"fake\"\nmodels = [\"fake\"]\n",
+            path = path.display().to_string()
+        )
     }
 
     pub async fn send(router: &Router, request: Request) -> Response {

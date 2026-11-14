@@ -306,8 +306,8 @@ impl Learning {
         })
     }
 
-    /// The tracks of short items, from a plan. The Coding track, whose problems are worked on
-    /// over several steps, is the coding module's.
+    /// The tracks of short items, from a plan, and of design prompts. The Coding track, whose
+    /// problems are worked on over several steps, is the coding module's.
     pub fn tracks(&self, planned: &Planned, clock: Clock) -> Tracks {
         let tracks = planned
             .names
@@ -315,6 +315,9 @@ impl Learning {
             .filter(|(id, _)| **id != TrackId::Coding)
             .map(|(id, name)| {
                 let plan = &planned.plans[id];
+                if *id == TrackId::SystemDesign {
+                    return design_track(plan, planned);
+                }
                 Track {
                     summary: summary(plan, clock),
                     destination: Destination::Practice { track: id.clone() },
@@ -354,10 +357,14 @@ fn shorts(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| item.kind.is_short())
 }
 
-/// The items there's practice of: the short ones, and coding problems.
+/// The items there's practice of: the short ones, coding problems and design prompts.
 fn practised(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| {
-        item.kind.is_short() || item.kind == workshop_pack::Kind::Coding
+        item.kind.is_short()
+            || matches!(
+                item.kind,
+                workshop_pack::Kind::Coding | workshop_pack::Kind::Design
+            )
     })
 }
 
@@ -482,6 +489,40 @@ fn seed_base(key: &str) -> u64 {
     key.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
     }) >> 16
+}
+
+/// The System design track. Its prompts take a while, so they're there to choose, and never
+/// what Continue suggests unless they're due.
+fn design_track(plan: &TrackPlan, planned: &Planned) -> Track<Destination> {
+    let destination = Destination::Design { item: None };
+    let next = plan
+        .due
+        .first()
+        .map(|key| (key, Priority::Due, "Due for review"))
+        .or_else(|| {
+            plan.new
+                .first()
+                .map(|key| (key, Priority::Browse, "Something new"))
+        })
+        .map(|(key, priority, why)| Step {
+            title: planned.item(key).map_or_else(|| key.clone(), Item::label),
+            reason: format!("{why} · {}", week_so_far(planned.week)),
+            priority,
+            destination: Destination::Design {
+                item: Some(key.clone()),
+            },
+        });
+    let mut parts = Vec::new();
+    if !plan.due.is_empty() {
+        parts.push(format!("{} due", plan.due.len()));
+    }
+    if !plan.new.is_empty() {
+        parts.push(format!("{} new", plan.new.len()));
+    }
+    if parts.is_empty() {
+        parts.push("Nothing due".to_owned());
+    }
+    Track::built_in(TrackId::SystemDesign, parts.join(" · "), destination, next)
 }
 
 /// What a track's items are called, one and many.
