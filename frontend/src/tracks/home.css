@@ -105,3 +105,53 @@
   align-items: flex-start;
   gap: 12px;
 }
+
+.week {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.week-label {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.meter {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 6px;
+  border: none;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.meter::-webkit-meter-bar {
+  background: var(--border);
+  border: none;
+  border-radius: 3px;
+}
+
+.meter::-webkit-meter-optimum-value,
+.meter::-webkit-meter-suboptimum-value,
+.meter::-webkit-meter-even-less-good-value {
+  background: var(--accent);
+}
+
+.meter::-moz-meter-bar {
+  background: var(--accent);
+}
+
+.home-pending {
+  margin: 0;
+  font-size: 14px;
+}
+
+.home-problems ul {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 14px;
+  color: var(--warn);
+}

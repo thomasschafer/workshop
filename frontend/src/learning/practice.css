@@ -1,0 +1,201 @@
+.learn {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+.learn > .top,
+.learn-content {
+  width: 100%;
+  max-width: 36rem;
+  margin: 0 auto;
+}
+
+.learn-content {
+  padding: 8px 16px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.learn-sync {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.learn-sync.offline {
+  color: var(--warn);
+}
+
+.learn-count {
+  margin: 0;
+  font-size: 13px;
+}
+
+.learn-item {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.learn-text {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.learn-prompt {
+  font-size: 17px;
+}
+
+.learn-sum {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.learn-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.learn-answer.right {
+  border-color: var(--ok);
+}
+
+.learn-answer.wrong {
+  border-color: var(--warn);
+}
+
+.learn-verdict {
+  margin: 0;
+  font-weight: 600;
+}
+
+.learn-answer.right .learn-verdict {
+  color: var(--ok);
+}
+
+.learn-answer.wrong .learn-verdict {
+  color: var(--warn);
+}
+
+.learn-question {
+  margin: 0;
+  font-size: 14px;
+}
+
+.learn-ratings {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.learn-ratings .pill {
+  min-height: 48px;
+  padding: 8px 4px;
+}
+
+.learn-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learn-form input,
+.learn-flag input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 10px 14px;
+  font-size: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.learn-flag {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learn-flag label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.learn-flag input {
+  font-size: 16px;
+}
+
+.learn-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.learn-actions .pill {
+  min-height: 44px;
+  min-width: 96px;
+}
+
+.learn-link {
+  align-self: flex-start;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  font-size: 14px;
+}
+
+.learn-source {
+  margin: 0;
+  font-size: 13px;
+}
+
+.learn-done {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.learn-done h2 {
+  margin: 8px 0 0;
+  font-size: 20px;
+}
+
+.learn-done p {
+  margin: 0;
+}
+
+.learn-done .learn-actions {
+  justify-content: flex-start;
+}
+
+.learn-skills {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.learn-skills li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

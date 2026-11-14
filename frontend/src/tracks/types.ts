@@ -1,4 +1,5 @@
-// Types mirror the track model in crates/tracks, and where steps lead in src/tracks.rs.
+// Types mirror the track model in crates/tracks, where steps lead in src/tracks.rs, and the home
+// screen in src/server/home.rs.
 
 import type { Puzzle } from "../api";
 
@@ -17,7 +18,10 @@ export type TrackId = BuiltInTrackId | `pack:${string}`;
 export type Priority = "due" | "unfinished" | "new" | "browse";
 
 /** Where a step or a track leads in the app. */
-export type Destination = { kind: "puzzle"; puzzle: Puzzle } | { kind: "puzzle_list" };
+export type Destination =
+  | { kind: "puzzle"; puzzle: Puzzle }
+  | { kind: "puzzle_list" }
+  | { kind: "practice"; track: TrackId };
 
 export interface Step {
   title: string;
@@ -42,4 +46,8 @@ export interface Home {
   continue: (Step & { track: TrackId }) | null;
   /** The tracks with something in them, in the order they're shown. */
   tracks: Track[];
+  /** Minutes of practice this week, towards the week's target, unless the packs can't be read. */
+  week: { minutes: number; target: number } | null;
+  /** What's wrong with the packs, such as items that couldn't be read. */
+  problems: string[];
 }

@@ -1,0 +1,459 @@
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useMarkdown } from "../hooks/useMarkdown";
+import type { TrackId } from "../tracks/types";
+import { displayNumber, grade } from "./grading";
+import { newId, nextInstance, progress, queue, step, utcOffset } from "./local";
+import "./practice.css";
+import { learning, type SyncStatus } from "./sync";
+import type { Deck, DeckItem, Instance, Rating } from "./types";
+
+/** Re-renders whenever the device's learning changes, such as after a sync. */
+function useLearning() {
+  const [, setVersion] = useState(0);
+  useEffect(() => learning().subscribe(() => setVersion((v) => v + 1)), []);
+  return learning();
+}
+
+/** Formatted Markdown from a pack, with raw HTML escaped and unsafe links dropped. */
+function Markdown({ text, class: className = "" }: { text: string; class?: string }) {
+  const render = useMarkdown();
+  if (render === null) return <div class={`learn-text ${className}`}>{text}</div>;
+  return (
+    <div
+      class={`learn-text markdown ${className}`}
+      dangerouslySetInnerHTML={{ __html: render(text) }}
+    />
+  );
+}
+
+/** One result in a step: whether it was right, or null for a card marked by the learner. */
+type Result = { key: string; right: boolean | null };
+
+/**
+ * Practising a track: a few minutes of its items at a time, due reviews first. Every answer is
+ * saved on the device as it's given and synced when the server can be reached, so it can be
+ * left at any moment, and works offline.
+ */
+export function Practice({ track, onHome }: { track: TrackId; onHome: () => void }) {
+  const state = useLearning();
+  const deck = state.deck;
+  const [chosen, setChosen] = useState<string[] | null>(null);
+  const [results, setResults] = useState<Result[]>([]);
+  // The deck's ready once it's been fetched, or right away if the device has one.
+  const [tried, setTried] = useState(false);
+
+  useEffect(() => {
+    void state.sync().finally(() => setTried(true));
+  }, []);
+
+  const startStep = () => {
+    if (!deck) return;
+    const next = queue(deck, track, state.attempts, state.flagChanges, Date.now(), utcOffset());
+    setChosen(step(next).map((item) => item.key));
+    setResults([]);
+  };
+  // The first step starts once there's a deck, from the device or the server.
+  useEffect(() => {
+    if (deck && chosen === null) startStep();
+  }, [deck !== null]);
+
+  const name = deck?.tracks.find((t) => t.id === track)?.name ?? "Practice";
+  const header = (
+    <header class="top">
+      <span class="header-start">
+        <button type="button" class="icon-button home-button" aria-label="Home" onClick={onHome}>
+          ⌂
+        </button>
+        <h1 class="app-title">{name}</h1>
+      </span>
+      <SyncChip status={state.syncStatus} />
+    </header>
+  );
+
+  if (!deck) {
+    return (
+      <div class="learn">
+        {header}
+        <main class="learn-content">
+          {tried ? (
+            <p class="error-text">
+              {state.syncStatus.error ??
+                "Practising offline needs this device to have been connected once, to fetch what to practise."}
+            </p>
+          ) : (
+            <p class="muted">Loading…</p>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  if (chosen === null) return <div class="learn">{header}</div>;
+
+  const items = chosen.flatMap((key) => deck.items.find((item) => item.key === key) ?? []);
+  const current = items[results.length];
+  return (
+    <div class="learn">
+      {header}
+      {state.syncStatus.error ? (
+        <div class="banner" role="alert">
+          Couldn't sync: {state.syncStatus.error}. Your answers are kept on this device.
+        </div>
+      ) : null}
+      <main class="learn-content">
+        {current ? (
+          <>
+            <p class="learn-count muted">
+              {results.length + 1} of {items.length}
+            </p>
+            <ItemView
+              key={`${current.key}-${results.length}`}
+              item={current}
+              onDone={(right) => setResults((done) => [...done, { key: current.key, right }])}
+            />
+          </>
+        ) : (
+          <Done deck={deck} track={track} results={results} onAgain={startStep} onHome={onHome} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function SyncChip({ status }: { status: SyncStatus }) {
+  if (status.offline) {
+    return (
+      <span class="learn-sync offline" role="status">
+        Offline{status.pending > 0 ? ` · ${status.pending} to sync` : ""}
+      </span>
+    );
+  }
+  if (status.pending > 0 || status.syncing) {
+    return (
+      <span class="learn-sync" role="status">
+        Syncing…
+      </span>
+    );
+  }
+  return (
+    <span class="learn-sync saved" role="status">
+      Saved
+    </span>
+  );
+}
+
+/** One item, until it's answered or marked, and what to do next. */
+function ItemView({ item, onDone }: { item: DeckItem; onDone: (right: boolean | null) => void }) {
+  const shown = useRef(Date.now());
+  const record = (rating: Rating, extra: { response?: string; seed?: number } = {}) => {
+    learning().record({
+      id: newId(),
+      item: item.key,
+      answered_at: Date.now(),
+      duration_ms: Date.now() - shown.current,
+      rating,
+      ...extra,
+    });
+  };
+  return (
+    <article class="learn-item">
+      {item.kind === "card" ? (
+        <CardView
+          item={item}
+          onRate={(rating) => {
+            record(rating);
+            onDone(null);
+          }}
+          onFlag={(note) => {
+            learning().flag({
+              id: newId(),
+              item: item.key,
+              at: Date.now(),
+              flagged: true,
+              ...(note ? { note } : {}),
+            });
+            onDone(null);
+          }}
+        />
+      ) : item.kind === "mental-maths" ? (
+        <TypedAnswer
+          prompt={nextInstance(item.instances, learning().attempts, item.key)}
+          tolerance={item.tolerance}
+          onAnswer={(instance, response, right) => {
+            record(right ? "good" : "again", {
+              ...(response === null ? {} : { response }),
+              seed: instance.seed,
+            });
+          }}
+          onNext={onDone}
+        />
+      ) : (
+        <TypedAnswer
+          prompt={{
+            seed: 0,
+            prompt: item.prompt,
+            answer: item.answer,
+            method: item.solution,
+          }}
+          tolerance={item.tolerance}
+          markdown
+          onAnswer={(_, response, right) => {
+            record(right ? "good" : "again", response === null ? {} : { response });
+          }}
+          onNext={onDone}
+        />
+      )}
+      {item.source ? <p class="learn-source muted">Source: {item.source}</p> : null}
+    </article>
+  );
+}
+
+function CardView({
+  item,
+  onRate,
+  onFlag,
+}: {
+  item: Extract<DeckItem, { kind: "card" }>;
+  onRate: (rating: Rating) => void;
+  onFlag: (note: string) => void;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const [flagging, setFlagging] = useState(false);
+  const [note, setNote] = useState("");
+  return (
+    <>
+      <Markdown text={item.prompt} class="learn-prompt" />
+      {revealed ? (
+        <>
+          <section class="learn-answer" aria-label="Answer">
+            <Markdown text={item.answer} />
+            {item.explanation ? <Markdown text={item.explanation} class="muted" /> : null}
+          </section>
+          {flagging ? (
+            <form
+              class="learn-flag"
+              onSubmit={(event) => {
+                event.preventDefault();
+                onFlag(note.trim());
+              }}
+            >
+              <label>
+                What's wrong? (optional)
+                <input
+                  type="text"
+                  value={note}
+                  onInput={(event) => setNote(event.currentTarget.value)}
+                />
+              </label>
+              <span class="learn-actions">
+                <button type="button" class="pill" onClick={() => setFlagging(false)}>
+                  Cancel
+                </button>
+                <button type="submit" class="pill primary">
+                  Flag it
+                </button>
+              </span>
+            </form>
+          ) : (
+            <>
+              <p class="learn-question muted">How well did you know it?</p>
+              <div class="learn-ratings">
+                {(
+                  [
+                    ["again", "Forgot"],
+                    ["hard", "Hard"],
+                    ["good", "Good"],
+                    ["easy", "Easy"],
+                  ] as const
+                ).map(([rating, label]) => (
+                  <button
+                    key={rating}
+                    type="button"
+                    class={`pill rating ${rating}`}
+                    onClick={() => onRate(rating)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button type="button" class="learn-link" onClick={() => setFlagging(true)}>
+                This is wrong
+              </button>
+            </>
+          )}
+        </>
+      ) : (
+        <button type="button" class="pill primary wide" onClick={() => setRevealed(true)}>
+          Show answer
+        </button>
+      )}
+    </>
+  );
+}
+
+/** A question answered by typing a number, checked straight away, on the device. */
+function TypedAnswer({
+  prompt,
+  tolerance,
+  markdown = false,
+  onAnswer,
+  onNext,
+}: {
+  prompt: Instance;
+  tolerance: Extract<DeckItem, { kind: "probability" }>["tolerance"];
+  markdown?: boolean;
+  onAnswer: (instance: Instance, response: string | null, right: boolean) => void;
+  onNext: (right: boolean) => void;
+}) {
+  // The question stays the one first shown, even once answering it moves the deck on.
+  const [instance] = useState(prompt);
+  const [response, setResponse] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [right, setRight] = useState<boolean | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const next = useRef<HTMLButtonElement>(null);
+  useEffect(() => input.current?.focus(), []);
+  useEffect(() => {
+    if (right !== null) next.current?.focus();
+  }, [right]);
+
+  const check = (event: Event) => {
+    event.preventDefault();
+    if (right !== null) return;
+    const graded = grade(instance.answer, tolerance, response);
+    if (graded === null) {
+      setProblem("Type a number, such as 42, 0.25, 1/4 or 25%.");
+      return;
+    }
+    setProblem(null);
+    setRight(graded);
+    onAnswer(instance, response, graded);
+  };
+  const giveUp = () => {
+    setRight(false);
+    onAnswer(instance, null, false);
+  };
+
+  return (
+    <>
+      {markdown ? (
+        <Markdown text={instance.prompt} class="learn-prompt" />
+      ) : (
+        <p class="learn-prompt learn-sum">{instance.prompt}</p>
+      )}
+      <form class="learn-form" onSubmit={check}>
+        <label class="visually-hidden" for="learn-response">
+          Your answer
+        </label>
+        <input
+          id="learn-response"
+          ref={input}
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          autoCorrect="off"
+          spellcheck={false}
+          value={response}
+          readOnly={right !== null}
+          onInput={(event) => setResponse(event.currentTarget.value)}
+        />
+        {right === null ? (
+          <span class="learn-actions">
+            <button type="button" class="pill" onClick={giveUp}>
+              I don't know
+            </button>
+            <button type="submit" class="pill primary">
+              Check
+            </button>
+          </span>
+        ) : null}
+      </form>
+      {problem ? <p class="error-text">{problem}</p> : null}
+      {right !== null ? (
+        <section class={`learn-answer ${right ? "right" : "wrong"}`} aria-label="Answer">
+          <p class="learn-verdict">
+            {right ? "Right" : `The answer is ${displayNumber(instance.answer)}`}
+          </p>
+          {instance.method ? <Markdown text={instance.method} class="muted" /> : null}
+          <button ref={next} type="button" class="pill primary wide" onClick={() => onNext(right)}>
+            Next
+          </button>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+function Done({
+  deck,
+  track,
+  results,
+  onAgain,
+  onHome,
+}: {
+  deck: Deck;
+  track: TrackId;
+  results: Result[];
+  onAgain: () => void;
+  onHome: () => void;
+}) {
+  const state = learning();
+  const now = Date.now();
+  const left = queue(deck, track, state.attempts, state.flagChanges, now, utcOffset());
+  const more = left.due.length + left.fresh.length;
+  const week = progress(deck, state.attempts, now, utcOffset());
+  const answered = results.filter((r) => r.right !== null);
+  const skills = useMemo(() => {
+    const ids = new Set(deck.items.filter((i) => i.track === track).flatMap((i) => i.skills));
+    return deck.skills.filter((skill) => ids.has(skill.id));
+  }, [deck, track]);
+  return (
+    <section class="learn-done" aria-label="Done">
+      {results.length === 0 ? (
+        <h2>Nothing to do here for now</h2>
+      ) : (
+        <h2>
+          That's a step done
+          {answered.length > 0
+            ? `: ${answered.filter((r) => r.right).length} of ${answered.length} right`
+            : ""}
+        </h2>
+      )}
+      <p class="muted">
+        {week.minutesThisWeek} of {deck.limits.weekly_minutes} minutes this week
+        {left.waiting > 0 ? ` · ${left.waiting} more due tomorrow` : ""}
+      </p>
+      <span class="learn-actions">
+        <button type="button" class="pill" onClick={onHome}>
+          Home
+        </button>
+        {more > 0 ? (
+          <button type="button" class="pill primary" onClick={onAgain}>
+            Another step
+          </button>
+        ) : null}
+      </span>
+      {skills.length > 0 ? (
+        <section aria-labelledby="skills-heading">
+          <h3 id="skills-heading" class="tracks-heading">
+            Skills
+          </h3>
+          <ul class="learn-skills">
+            {skills.map((skill) => (
+              <li key={skill.id}>
+                <span>{skill.name}</span>
+                <meter
+                  class="meter"
+                  aria-label={`${skill.name} mastered`}
+                  min={0}
+                  max={1}
+                  value={skill.mastery}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </section>
+  );
+}

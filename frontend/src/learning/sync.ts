@@ -1,0 +1,181 @@
+// The deck and everything done since it came, kept on the device so practice works offline, and
+// sent to the server whenever it can be reached. Each attempt has its own id, so sending one
+// again after a reply was lost changes nothing.
+
+import { ApiError, ConnectionError, connection, request } from "../api";
+import { errorMessage } from "../errors";
+import { utcOffset } from "./local";
+import type { Attempt, Deck, FlagChange } from "./types";
+
+const STORAGE_KEY = "workshop:learning";
+
+/** How long to wait before trying the server again, at first and at most. */
+const RETRY_MS = 5_000;
+const MAX_RETRY_MS = 60_000;
+
+interface Saved {
+  deck: Deck | null;
+  /** Done since the deck came, and not yet known to have reached the server. */
+  attempts: Attempt[];
+  flags: FlagChange[];
+}
+
+export interface SyncStatus {
+  /** How many attempts and flag changes are waiting to reach the server. */
+  pending: number;
+  syncing: boolean;
+  /** Whether the server couldn't be reached the last time it was tried. */
+  offline: boolean;
+  /** What the server said was wrong, the last time it refused what was sent. */
+  error: string | null;
+}
+
+export class Learning {
+  private saved: Saved;
+  private status: SyncStatus = { pending: 0, syncing: false, offline: false, error: null };
+  private readonly listeners = new Set<() => void>();
+  private running: Promise<void> | null = null;
+  /** Whether more was done while a sync was under way, so another is needed after it. */
+  private again = false;
+  private retry: ReturnType<typeof setTimeout> | null = null;
+  private retryMs = RETRY_MS;
+
+  constructor(private readonly storage: Storage = localStorage) {
+    this.saved = this.load();
+    this.status.pending = this.pending();
+  }
+
+  private load(): Saved {
+    const text = this.storage.getItem(STORAGE_KEY);
+    if (!text) return { deck: null, attempts: [], flags: [] };
+    // Anything else here was written by this code, so a failure to read it is a bug to hear about.
+    return JSON.parse(text) as Saved;
+  }
+
+  private save(): void {
+    this.storage.setItem(STORAGE_KEY, JSON.stringify(this.saved));
+    this.status = { ...this.status, pending: this.pending() };
+    for (const listener of this.listeners) listener();
+  }
+
+  /** Syncs now if anything is waiting, such as when the server can be reached again. */
+  syncIfPending(): void {
+    if (this.pending() > 0) void this.sync();
+  }
+
+  private pending(): number {
+    return this.saved.attempts.length + this.saved.flags.length;
+  }
+
+  get deck(): Deck | null {
+    return this.saved.deck;
+  }
+
+  get attempts(): Attempt[] {
+    return this.saved.attempts;
+  }
+
+  get flagChanges(): FlagChange[] {
+    return this.saved.flags;
+  }
+
+  get syncStatus(): SyncStatus {
+    return this.status;
+  }
+
+  /** Calls `listener` whenever anything here changes, returning how to stop. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private setStatus(change: Partial<SyncStatus>): void {
+    this.status = { ...this.status, ...change };
+    for (const listener of this.listeners) listener();
+  }
+
+  /** Saves an attempt on the device straight away, then sends it when it can. */
+  record(attempt: Attempt): void {
+    this.saved = { ...this.saved, attempts: [...this.saved.attempts, attempt] };
+    this.save();
+    void this.sync();
+  }
+
+  flag(change: FlagChange): void {
+    this.saved = { ...this.saved, flags: [...this.saved.flags, change] };
+    this.save();
+    void this.sync();
+  }
+
+  /**
+   * Sends what's waiting and takes the deck the server sends back. Resolves once that's done or
+   * has failed: failures are kept in the status, and tried again later.
+   */
+  sync(): Promise<void> {
+    if (this.running) {
+      this.again = true;
+      return this.running;
+    }
+    this.running = this.run().finally(() => {
+      this.running = null;
+      if (this.again && this.pending() > 0) {
+        this.again = false;
+        void this.sync();
+      }
+    });
+    return this.running;
+  }
+
+  private async run(): Promise<void> {
+    if (this.retry) {
+      clearTimeout(this.retry);
+      this.retry = null;
+    }
+    const attempts = this.saved.attempts;
+    const flags = this.saved.flags;
+    this.setStatus({ syncing: true });
+    try {
+      const deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
+        attempts,
+        flags,
+      });
+      // Anything done while this was on its way is still to send.
+      const sentAttempts = new Set(attempts.map((a) => a.id));
+      const sentFlags = new Set(flags.map((f) => f.id));
+      this.saved = {
+        deck,
+        attempts: this.saved.attempts.filter((a) => !sentAttempts.has(a.id)),
+        flags: this.saved.flags.filter((f) => !sentFlags.has(f.id)),
+      };
+      this.retryMs = RETRY_MS;
+      this.save();
+      this.setStatus({ syncing: false, offline: false, error: null });
+    } catch (e) {
+      const offline = e instanceof ConnectionError;
+      this.setStatus({
+        syncing: false,
+        offline,
+        // What was sent is kept, so nothing done is lost, and the problem is shown until fixed.
+        error: offline ? null : e instanceof ApiError ? e.message : errorMessage(e),
+      });
+      if (offline) {
+        this.retry = setTimeout(() => void this.sync(), this.retryMs);
+        this.retryMs = Math.min(MAX_RETRY_MS, this.retryMs * 2);
+      }
+    }
+  }
+}
+
+let shared: Learning | null = null;
+
+/** The device's learning, shared by every screen. */
+export function learning(): Learning {
+  if (!shared) {
+    const created = new Learning();
+    // Straight away when the server or the network is back, rather than at the next retry.
+    connection.subscribe((online) => online && created.syncIfPending());
+    window.addEventListener("online", () => created.syncIfPending());
+    shared = created;
+  }
+  return shared;
+}

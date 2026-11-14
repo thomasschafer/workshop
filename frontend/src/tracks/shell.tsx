@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, type Bootstrap } from "../api";
 import { App } from "../app";
 import { errorMessage } from "../errors";
+import { Practice } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
 import { Home } from "./home";
 import { pathOf, type Route, routeFor, routeOf } from "./routes";
@@ -32,7 +33,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
     // Dialogs close with the back button too, which leaves the screen as it is.
     const onPop = () => {
       const next = routeOf(location.pathname, location.search);
-      setRoute((shown) => (shown.screen === next.screen ? shown : next));
+      setRoute((shown) => (pathOf(shown) === pathOf(next) ? shown : next));
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -42,7 +43,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
     await rebooting.current;
     const next = routeFor(destination);
     history.pushState(null, "", pathOf(next));
-    setEntry(destination);
+    if (next.screen === "advent-of-code") setEntry(destination);
     setRoute(next);
   };
 
@@ -70,9 +71,16 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
     return onNotificationOpen((year, day) => void go({ kind: "puzzle", puzzle: { year, day } }));
   }, [route.screen]);
 
+  const goHome = () => {
+    history.pushState(null, "", pathOf({ screen: "home" }));
+    setRoute({ screen: "home" });
+  };
+
   switch (route.screen) {
     case "home":
       return <Home onGo={(destination) => void go(destination)} />;
+    case "practice":
+      return <Practice key={route.track} track={route.track} onHome={goHome} />;
     case "advent-of-code":
       return (
         <App

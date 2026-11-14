@@ -84,10 +84,11 @@ test.afterAll(async () => {
 
 test("starts at home, where Advent of Code is a track", async () => {
   await expect(page.getByRole("heading", { name: "Tracks" })).toBeVisible();
-  // The only track with anything in it yet.
+  // Advent of Code, then the sample pack's tracks, as no pack is configured.
   const tracks = page.locator(".track");
-  await expect(tracks).toHaveCount(1);
+  await expect(tracks).toHaveCount(5);
   await expect(tracks.first()).toContainText("Advent of Code");
+  await expect(tracks.nth(3)).toContainText("Review");
   await expect(page.locator(".continue")).toContainText("Continue");
   // On a phone, it all fits across the screen.
   const width = page.viewportSize()?.width ?? 0;

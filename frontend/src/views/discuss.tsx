@@ -1,30 +1,11 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import type { Turn } from "../api";
-
-type Renderer = typeof import("../markdown").renderMarkdown;
-
-// The renderer is loaded when first needed, so pages that never show a reply don't pay for it.
-let renderer: Renderer | null = null;
-
-function useRenderer(): Renderer | null {
-  const [loaded, setLoaded] = useState(() => renderer);
-  useEffect(() => {
-    if (loaded !== null) return;
-    import("../markdown")
-      .then((module) => {
-        renderer = module.renderMarkdown;
-        setLoaded(() => module.renderMarkdown);
-      })
-      // Replies still show, as plain text.
-      .catch((e: unknown) => console.error("Couldn't load the markdown renderer", e));
-  }, [loaded]);
-  return loaded;
-}
+import { useMarkdown } from "../hooks/useMarkdown";
 
 /** A coach's reply, formatted. Links open in a new tab, so following one keeps Workshop open. */
 function Reply({ text, writing = false }: { text: string; writing?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  const render = useRenderer();
+  const render = useMarkdown();
   const html = render === null ? null : render(text);
   useEffect(() => {
     for (const link of ref.current?.querySelectorAll("a[href]") ?? []) {
