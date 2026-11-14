@@ -243,6 +243,10 @@ test("has the grader check a flagged card, and unflags it", async () => {
   await card.getByRole("button", { name: "Unflag" }).tap();
   await expect(phone.getByText("No cards are flagged.")).toBeVisible();
   await expect.poll(async () => Object.keys((await serverDeck()).flags)).toEqual([]);
+  // Questions can only be added to a pack of one's own.
+  await expect(phone.getByRole("region", { name: "Add a question" })).toContainText(
+    "The sample pack is built in",
+  );
   const width = phone.viewportSize()?.width ?? 0;
   expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     width,

@@ -17,6 +17,8 @@ my-pack/
       reference.py
       ...
     reading/lifetimes.md
+  drafts/
+    three-dice.md        a question waiting to be made into an item
   prompts/
     examiner.md          a prompt add-on
 ```
@@ -272,6 +274,28 @@ Design a service that shortens links.
 ```
 
 `## Rubric` is a list, one point per line. `## Notes` is optional.
+
+## Drafts
+
+A draft is a question added to a pack as it was found, such as from elsewhere, waiting to be made into an item with a check. Drafts are never practised. Add one in the app, under Packs, or with:
+
+```sh
+workshop pack import question.md --skills probability.counting --source "Where it's from" --kind probability
+```
+
+which reads the question from the file, or from stdin without one, writes it to `drafts/`, and commits it if the pack is a git repo. `--source` is free-form, in your own words, and `--kind` is optional. With more than one pack, say which with `--pack` and its id.
+
+```markdown
++++
+source = "Where it's from"
+skills = ["probability.counting"]
+kind = "probability"
+added = "2026-11-14"
++++
+Three dice are rolled. What's the chance that they all differ?
+```
+
+The author can make an item from a draft, with its check, and removes the draft when it does.
 
 ## Scripts
 

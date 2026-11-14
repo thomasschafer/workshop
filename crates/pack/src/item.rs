@@ -388,7 +388,7 @@ pub fn replace_section(source: &str, heading: &str, text: Option<&str>) -> Strin
     format!("{}\n", out.trim_end())
 }
 
-fn split_front_matter(source: &str) -> Result<(&str, &str), String> {
+pub(crate) fn split_front_matter(source: &str) -> Result<(&str, &str), String> {
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let rest = source
         .strip_prefix("+++\n")

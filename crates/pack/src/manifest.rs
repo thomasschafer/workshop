@@ -24,7 +24,7 @@ pub struct Manifest {
     pub prompts: Prompts,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Skill {
     /// Words of lowercase letters and digits, joined by hyphens, in parts separated by dots,

@@ -113,6 +113,29 @@ enum PackCommand {
         /// The pack's directory. By default, the packs in your config, or the sample pack.
         dir: Option<std::path::PathBuf>,
     },
+    /// Add a question to a pack as a draft, such as one found elsewhere, for the author to make
+    /// into an item with a check. Commits it if the pack is a git repo.
+    Import {
+        /// A file holding the question, as text or Markdown. Without one, it's read from stdin.
+        file: Option<std::path::PathBuf>,
+        /// Where it came from, in your own words.
+        #[arg(long)]
+        source: Option<String>,
+        /// The skills it's for, from the pack's pack.toml, separated by commas.
+        #[arg(long, value_delimiter = ',', required = true)]
+        skills: Vec<String>,
+        /// The kind of item it should become, such as `card`, `probability` or `coding`.
+        #[arg(long, value_parser = parse_kind)]
+        kind: Option<workshop_pack::Kind>,
+        /// The pack to add it to, by its id, if you have more than one.
+        #[arg(long)]
+        pack: Option<String>,
+    },
+}
+
+fn parse_kind(text: &str) -> Result<workshop_pack::Kind, String> {
+    serde_json::from_value(serde_json::Value::String(text.to_owned()))
+        .map_err(|_| format!("{text:?} isn't a kind of item; see docs/packs.md"))
 }
 
 #[derive(clap::Args, Default)]
@@ -209,6 +232,43 @@ async fn main() -> Result<()> {
             if !packs::check(dir.as_deref(), &config.learning, runtime).await? {
                 std::process::exit(1);
             }
+            Ok(())
+        }
+        Command::Pack {
+            command:
+                PackCommand::Import {
+                    file,
+                    source,
+                    skills,
+                    kind,
+                    pack,
+                },
+        } => {
+            let text = match file {
+                Some(file) => std::fs::read_to_string(&file)
+                    .with_context(|| format!("reading {}", file.display()))?,
+                None => std::io::read_to_string(std::io::stdin()).context("reading stdin")?,
+            };
+            let dir = pack_files::chosen_pack_dir(&config.learning, pack.as_deref())?;
+            let today = pack_files::date(learning::now_ms().div_euclid(86_400_000));
+            let imported = pack_files::import(
+                &dir,
+                pack_files::Import {
+                    text,
+                    source,
+                    skills,
+                    kind,
+                },
+                &today,
+            )
+            .await?;
+            println!(
+                "Added {} as a draft{}.",
+                dir.join(&imported.draft.path).display(),
+                imported
+                    .commit
+                    .map_or_else(String::new, |c| format!(", in commit {c}"))
+            );
             Ok(())
         }
         Command::Token { tailscale } => {
@@ -397,6 +457,38 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn parses_importing_a_question() {
+        let parsed = Cli::try_parse_from([
+            "workshop",
+            "pack",
+            "import",
+            "q.md",
+            "--skills",
+            "a.b,c",
+            "--kind",
+            "probability",
+            "--source",
+            "A book",
+        ])
+        .unwrap();
+        let Some(Command::Pack {
+            command: PackCommand::Import { skills, kind, .. },
+        }) = parsed.command
+        else {
+            panic!("not an import");
+        };
+        assert_eq!(skills, ["a.b", "c"]);
+        assert_eq!(kind, Some(workshop_pack::Kind::Probability));
+        assert!(Cli::try_parse_from(["workshop", "pack", "import", "--kind", "card"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "workshop", "pack", "import", "--skills", "a", "--kind", "poem"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

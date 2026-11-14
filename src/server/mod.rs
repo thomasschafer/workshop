@@ -17,6 +17,7 @@ mod lsp;
 mod mistakes;
 mod notifications;
 mod packages;
+mod packs;
 mod puzzles;
 mod run;
 mod settings;
@@ -55,6 +56,8 @@ pub fn router(app: Shared) -> Router {
         .route("/design/{pack}/{item}", get(grading::design_open))
         .route("/items/{pack}/{item}/mark", post(grading::mark))
         .route("/cards/flagged", get(grading::flagged))
+        .route("/packs", get(packs::packs))
+        .route("/packs/import", post(packs::import))
         .route("/cards/{pack}/{item}/review", post(grading::review))
         .route("/cards/{pack}/{item}/fix", post(grading::fix))
         .route("/mistakes/tag", put(mistakes::tag))

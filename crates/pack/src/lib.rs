@@ -6,6 +6,7 @@
 //! with answers, for example.
 
 pub mod code;
+pub mod drafts;
 pub mod error_types;
 mod item;
 mod manifest;
@@ -21,6 +22,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 pub use code::{Case, Coding, Language, Question, Reading, ReadingCheck, Source};
+pub use drafts::Draft;
 pub use error_types::ErrorType;
 pub use item::{Content, Item, Kind, MentalMaths, Param, Probability, Simulation, replace_section};
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
@@ -38,6 +40,8 @@ pub struct Pack {
     pub manifest: Manifest,
     /// Every item that could be read, in the order of their paths.
     pub items: Vec<Item>,
+    /// Questions waiting to be made into items, under `drafts/`.
+    pub drafts: Vec<Draft>,
     /// What couldn't be read, which is left out.
     pub problems: Vec<Problem>,
     /// The text added to each coach role's instructions, by role, such as `tutor`.
@@ -157,9 +161,33 @@ impl Pack {
                 }),
             }
         }
+        let mut drafts = Vec::new();
+        for (path, bytes) in &files {
+            let Some(id) = path
+                .strip_prefix("drafts/")
+                .and_then(|name| name.strip_suffix(".md"))
+            else {
+                continue;
+            };
+            let parsed = if id.contains('/') || !manifest::is_slug(id) {
+                Err("a draft's file name should be lowercase letters and digits, in words joined by hyphens, directly in drafts/".to_owned())
+            } else {
+                std::str::from_utf8(bytes)
+                    .map_err(|_| "it isn't UTF-8".to_owned())
+                    .and_then(|source| Draft::parse(path, id, source, &manifest))
+            };
+            match parsed {
+                Ok(draft) => drafts.push(draft),
+                Err(message) => problems.push(Problem {
+                    path: path.clone(),
+                    message,
+                }),
+            }
+        }
         Ok(Self {
             manifest,
             items,
+            drafts,
             problems,
             prompt_add_ons,
         })
@@ -440,6 +468,7 @@ mod tests {
         assert_eq!(pack.problems, []);
         let ids: Vec<&str> = pack.items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, ["one", "roll"]);
+        assert!(pack.drafts.is_empty());
         let Content::Coding(coding) = &pack.item("roll").unwrap().content else {
             panic!("not a coding item");
         };
@@ -508,11 +537,25 @@ mod tests {
             ("items/a.md", card),
             ("items/b/a.md", card),
             ("items/broken.md", "no front matter"),
+            (
+                "drafts/good.md",
+                "+++\nskills = [\"dice\"]\n+++\nWhat's a die?\n",
+            ),
+            ("drafts/Bad Name.md", "+++\nskills = []\n+++\nQ\n"),
         ]))
         .unwrap();
         assert_eq!(pack.items.len(), 1);
+        assert_eq!(pack.drafts[0].id, "good");
         let problems: Vec<&str> = pack.problems.iter().map(|p| p.path.as_str()).collect();
-        assert_eq!(problems, ["pack.toml", "items/b/a.md", "items/broken.md"]);
+        assert_eq!(
+            problems,
+            [
+                "pack.toml",
+                "items/b/a.md",
+                "items/broken.md",
+                "drafts/Bad Name.md"
+            ]
+        );
         assert!(pack.problems[1].message.contains("already items/a.md's"));
         assert!(!pack.check(&NotRun).await.passed());
         assert!(Pack::from_files(files(&[("items/a.md", card)])).is_err());
