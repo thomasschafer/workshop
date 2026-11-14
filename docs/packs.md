@@ -238,7 +238,7 @@ A learner works through a problem in steps of a few minutes each: understanding 
 
 ### Reading
 
-Code to read, and a question about it, such as what it prints, what's wrong with it, or what it costs. In the Coding track by default, and short, so it works offline. The prompt shows the code in one code block, marked `cpp`, `python` or `rust`; C++ is only for reading.
+Code to read, and a question about it, such as what it prints, what's wrong with it, or what it costs. In the Coding track by default, and short, so it works offline. The prompt shows the code in one code block, whose mark says its language: `python` (or `py`), `rust` (or `rs`), or `cpp` (or `c++`). The code is highlighted for that language, and built and run with its toolchain. C++ is only for reading, not for coding problems.
 
 Either the question is what the code prints, which the learner types:
 
@@ -275,7 +275,46 @@ expect = "sanitizer-error"
 
 `## Explanation` (required) is shown after answering.
 
-The check builds and runs the code. For what it prints, the code must print exactly that. For a choice, `[check]` says what the code must do: `expect = "compiles"`, the default; `"compile-error"`, failing to build; `"sanitizer-error"`, for C++, stopped by the address and undefined behaviour sanitizers, such as for reading freed memory; or `"output"`, printing the `output` given, such as a count of the copies or moves the code makes, to show what it costs. Without a C++ compiler (`c++`, `clang++` or `g++`), C++ items are reported as skipped.
+The check builds and runs the code, as a program of its own. For what it prints, the code must print exactly that. For a choice, `[check]` says what the code must do, and what makes sense depends on its language:
+
+| `expect` | Python | Rust | C++ |
+| --- | --- | --- | --- |
+| `compiles` | | builds; the default | builds; the default |
+| `compile-error` | | fails to build, such as for a borrow the borrow checker refuses | fails to build |
+| `runs` | runs to the end without an exception; the default | runs to the end without panicking | runs to the end, exiting successfully |
+| `exception` | stops with an exception it doesn't catch | | |
+| `panic` | | panics, such as on an integer overflowing | |
+| `sanitizer-error` | | | stopped by the address and undefined behaviour sanitizers, such as for reading freed memory |
+| `output` | prints the `output` given | prints the `output` given | prints the `output` given |
+
+`output` is for code that shows its answer, such as a count of the copies or moves it makes, to show what it costs. A check that doesn't fit the code's language, such as `compile-error` for Python or `sanitizer-error` for Rust, is refused, with what to use instead. Python isn't built ahead of running it, so a syntax error isn't a compile error, nor an exception the code raises.
+
+Rust code is built as a debug build, as `cargo run` does, so integer overflow panics rather than wrapping around, and `debug_assert!` is checked. C++ is built with optimisations, and with the sanitizers only for `sanitizer-error`, as they change what the code does. Without a C++ compiler (`c++`, `clang++` or `g++`), C++ items are reported as skipped, as are Python and Rust ones without `python3` or `rustc`.
+
+````markdown
++++
+kind = "reading"
+skills = ["rust.semantics"]
+choices = ["It prints 300", "It prints 44", "It panics, as the sum overflows a u8"]
+answer = 3
+
+[check]
+expect = "panic"
++++
+What happens when this runs, in a debug build?
+
+```rust
+fn main() {
+    let sizes: Vec<u8> = vec![200, 100];
+    let total: u8 = sizes.iter().sum();
+    println!("{total}");
+}
+```
+
+## Explanation
+
+A u8 holds 0 to 255, and a debug build checks arithmetic for overflow.
+````
 
 ### Design
 
