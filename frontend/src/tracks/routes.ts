@@ -7,6 +7,7 @@ export type Route =
   | { screen: "practice"; track: TrackId }
   | { screen: "coding"; item: string | null }
   | { screen: "design"; item: string | null }
+  | { screen: "rounds"; item: string | null }
   | { screen: "mistakes" }
   /** Progress towards a goal of the packs', by its id, or the list of goals. */
   | { screen: "goals"; goal: string | null }
@@ -18,6 +19,7 @@ const ADVENT_OF_CODE_PATH = "/advent-of-code";
 const PRACTICE_PATH = "/practice/";
 const CODING_PATH = "/coding";
 const DESIGN_PATH = "/design";
+const ROUNDS_PATH = "/rounds";
 const MISTAKES_PATH = "/mistakes";
 const GOALS_PATH = "/goals";
 const PACK_PATH = "/pack";
@@ -41,6 +43,7 @@ export function routeOf(pathname: string, search: string): Route {
   for (const [base, screen] of [
     [CODING_PATH, "coding"],
     [DESIGN_PATH, "design"],
+    [ROUNDS_PATH, "rounds"],
   ] as const) {
     if (pathname === base) return { screen, item: null };
     if (pathname.startsWith(`${base}/`)) {
@@ -74,6 +77,8 @@ export function pathOf(route: Route): string {
       return route.item === null ? CODING_PATH : `${CODING_PATH}/${route.item}`;
     case "design":
       return route.item === null ? DESIGN_PATH : `${DESIGN_PATH}/${route.item}`;
+    case "rounds":
+      return route.item === null ? ROUNDS_PATH : `${ROUNDS_PATH}/${route.item}`;
     case "mistakes":
       return MISTAKES_PATH;
     case "goals":
@@ -95,5 +100,7 @@ export function routeFor(destination: Destination): Route {
       return { screen: "coding", item: destination.item };
     case "design":
       return { screen: "design", item: destination.item };
+    case "round":
+      return { screen: "rounds", item: destination.item };
   }
 }

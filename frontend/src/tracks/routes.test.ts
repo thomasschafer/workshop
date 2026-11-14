@@ -49,6 +49,8 @@ describe("pathOf", () => {
       { screen: "mistakes" },
       { screen: "design", item: null },
       { screen: "design", item: "sample/link-shortener" },
+      { screen: "rounds", item: null },
+      { screen: "rounds", item: "sample/two-dice-seven" },
       { screen: "goals", goal: null },
       { screen: "goals", goal: "quick-arithmetic" },
       { screen: "pack" },
@@ -77,6 +79,14 @@ describe("routeFor", () => {
     });
     // An address that isn't an item's shows the list.
     expect(routeOf("/coding/Sample/x/y", "")).toEqual({ screen: "coding", item: null });
+  });
+
+  it("opens timed rounds on their screen", () => {
+    expect(routeFor({ kind: "round", item: "sample/islands" })).toEqual({
+      screen: "rounds",
+      item: "sample/islands",
+    });
+    expect(routeFor({ kind: "round", item: null })).toEqual({ screen: "rounds", item: null });
   });
 
   it("practises a track on its own screen", () => {

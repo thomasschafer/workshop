@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BrowserContext, devices, expect, type Page, test } from "@playwright/test";
 import { LEARNING_HOME, LEARNING_PORT } from "./fixture";
@@ -60,6 +60,32 @@ async function scheduled(kind?: string): Promise<number> {
     (key) =>
       kind === undefined || deck.items.some((item) => item.key === key && item.kind === kind),
   ).length;
+}
+
+interface SavedRound {
+  minutes: number;
+  used_ms: number;
+  seen_at: number;
+  work: string;
+}
+
+/**
+ * Changes a timed round as the server keeps it, as if time had passed. The round mustn't be
+ * open in the app, which would save it again over this.
+ */
+function changeRound(item: string, change: (round: SavedRound) => void): SavedRound {
+  const path = join(LEARNING_HOME, "data", "rounds", "sample", `${item}.json`);
+  const round = JSON.parse(readFileSync(path, "utf8")) as SavedRound;
+  change(round);
+  writeFileSync(path, JSON.stringify(round));
+  return round;
+}
+
+/** The working of a round under way, as the server has it. */
+async function serverWork(item: string): Promise<string | null> {
+  const response = await phone.request.post(`/api/rounds/sample/${item}/open`, { data: {} });
+  const opened = (await response.json()) as { round: { work: string } | null };
+  return opened.round?.work ?? null;
 }
 
 async function goHome(): Promise<void> {
@@ -263,7 +289,11 @@ test("offers long items only with a while, which turns itself off once the sitti
   await expect(next).not.toContainText("long");
   await toggle.tap();
   await expect(next).toContainText("Continue · long");
-  await expect(next).toContainText("System design · Something new");
+  // A timed round in the skill recent mistakes point to comes before anything new.
+  await expect(next).toContainText("Fewest hops between towns");
+  await expect(next).toContainText(
+    "Timed rounds · Practise Graph algorithms, after recent mistakes",
+  );
   // Still on after a reload, in the same sitting.
   await phone.reload();
   await expect(toggle).toBeChecked();
@@ -285,8 +315,8 @@ test("works through a design session in stages, with the coach, stopping and car
   await phone.goto("/");
   await phone.getByRole("switch", { name: /I've got a while/ }).tap();
   const next = phone.locator(".continue");
-  await expect(next).toContainText("Design a key-value store spread across many machines");
-  await next.tap();
+  await phone.locator(".track", { hasText: "System design" }).tap();
+  await phone.getByRole("button", { name: /key-value store/ }).tap();
   await expect(phone).toHaveURL(/\/design\/sample\/key-value-store$/);
   await phone.getByRole("button", { name: "Start the session" }).tap();
 
@@ -528,4 +558,153 @@ test("explains a card aloud, marked for what's right and how clearly it's put", 
   expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     width,
   );
+});
+
+test("runs a timed round with the examiner, carrying on after a reload and a break, until time's up", async () => {
+  await phone.goto("/");
+  const toggle = phone.getByRole("switch", { name: /I've got a while/ });
+  await expect(toggle).not.toBeChecked();
+  // Rounds are long, so they're only offered with a while.
+  const rounds = phone.locator(".track", { hasText: "Timed rounds" });
+  await expect(phone.locator(".track")).toHaveCount(7);
+  await expect(rounds).toHaveCount(0);
+  await toggle.tap();
+  await expect(rounds).toContainText("Against the clock, with the examiner");
+  await rounds.tap();
+  await expect(phone).toHaveURL(/\/rounds$/);
+  await phone.getByRole("button", { name: /Two fair dice/ }).tap();
+  await expect(phone).toHaveURL(/\/rounds\/sample\/two-dice-seven$/);
+  // The problem isn't shown until the clock starts.
+  await expect(phone.getByText("add up to 7")).toHaveCount(0);
+  await phone.getByRole("radio", { name: /Probing/ }).check();
+  await phone.getByRole("button", { name: "Start the clock" }).tap();
+
+  const timer = phone.getByRole("timer", { name: "Time left" });
+  await expect(timer).toHaveText(/^(10:00|9:5\d)$/);
+  await expect(phone.getByText("Examiner: Probing")).toBeVisible();
+  await expect(phone.getByText("What's the probability that they add up to 7?")).toBeVisible();
+  await phone.getByLabel("Your working").fill("6 of the 36 pairs add up to 7");
+  const examiner = phone.getByRole("region", { name: "Examiner" });
+  await holdToTalk(
+    phone,
+    examiner.getByRole("button", { name: "Hold to dictate" }),
+    "it's one in six",
+    () => expect(examiner.locator(".dictate-hearing")).toContainText("six"),
+  );
+  await expect(examiner.getByLabel("Say to the examiner")).toHaveValue("it's one in six");
+  await examiner.getByRole("button", { name: "Say it" }).tap();
+  await expect(examiner.locator(".design-turn.coach")).toHaveText(
+    `Probing: you said "it's one in six". What if there were three dice instead?`,
+  );
+  // The clock keeps in sight below everything, and it all fits across a phone.
+  await examiner.getByRole("button", { name: "Say it" }).scrollIntoViewIfNeeded();
+  await expect(timer).toBeInViewport();
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+
+  // The working's saved as it goes, with the clock: a reload carries on where it was.
+  await expect.poll(() => serverWork("two-dice-seven")).toBe("6 of the 36 pairs add up to 7");
+  await phone.reload();
+  await expect(phone.getByLabel("Your working")).toHaveValue("6 of the 36 pairs add up to 7");
+  await expect(examiner.locator(".design-turn")).toHaveCount(2);
+  await expect(timer).toHaveText(/^9:\d\d$/);
+  await expect(phone.getByText(/Welcome back/)).toHaveCount(0);
+
+  // Paused, and back ten minutes later: the clock stopped while the app was closed.
+  await phone.getByRole("button", { name: "Pause" }).tap();
+  await expect(phone).toHaveURL(/\/rounds$/);
+  await expect(phone.getByRole("region", { name: "Under way" })).toContainText(/left of 10/);
+  const paused = changeRound("two-dice-seven", (round) => {
+    round.seen_at -= 10 * 60_000;
+  });
+  await phone
+    .getByRole("button", { name: /Two fair dice/ })
+    .first()
+    .tap();
+  await expect(phone.getByText(/Welcome back. The clock stopped/)).toBeVisible();
+  const left = 600 - Math.floor(paused.used_ms / 1000);
+  const [minutes, seconds] = ((await timer.innerText()).match(/^(\d+):(\d\d)$/) ?? [])
+    .slice(1)
+    .map(Number);
+  // No more than the short gap the server allows went by, not the ten minutes.
+  expect(left - ((minutes ?? 0) * 60 + (seconds ?? 0))).toBeLessThanOrEqual(25);
+  await examiner.getByLabel("Say to the examiner").fill("I'm back");
+  await examiner.getByRole("button", { name: "Say it" }).tap();
+  await expect(examiner.locator(".design-turn.coach").last()).toHaveText(
+    `Probing: welcome back. You said "I'm back"; carry on from there.`,
+  );
+  await expect(phone.getByText(/Welcome back. The clock stopped/)).toHaveCount(0);
+
+  // Nearly out of time: when it runs out, the round ends and goes to the grader.
+  await phone.getByLabel("Your working").fill("6 of 36 pairs, so 1/6. Three dice: 27/216.");
+  // Paused straight after typing, the working goes to the server as the round closes.
+  await phone.getByRole("button", { name: "Pause" }).tap();
+  await expect
+    .poll(() => serverWork("two-dice-seven"))
+    .toBe("6 of 36 pairs, so 1/6. Three dice: 27/216.");
+  changeRound("two-dice-seven", (round) => {
+    round.used_ms = round.minutes * 60_000 - 3_000;
+  });
+  await phone
+    .getByRole("button", { name: /Two fair dice/ })
+    .first()
+    .tap();
+  await expect(timer).toHaveText(/^0:0[0-3]$/);
+  await expect(phone.getByText("Time's up.")).toBeVisible();
+  const marked = phone.getByRole("region", { name: "Marked" });
+  await expect(marked).toContainText("50%");
+  await expect(marked).toContainText("Mistakes, kept in your log");
+  // The working typed before it paused went to the grader, with what was said.
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { item: string; detail: string }[];
+  };
+  const found = log.mistakes.find(
+    (m) => m.item === "sample/two-dice-seven" && m.detail.includes("Examiner:"),
+  );
+  expect(found?.detail).toContain("Three dice: 27/216.");
+  expect(found?.detail).toContain("Learner: it's one in six");
+  await phone.getByRole("button", { name: "Done" }).tap();
+  await expect(phone).toHaveURL(/\/rounds$/);
+  await expect(phone.getByRole("region", { name: "Under way" })).toHaveCount(0);
+});
+
+test("ends a round left for over half an hour, marked but not counted as an attempt", async () => {
+  await phone.goto("/rounds/sample/islands");
+  // The first style is chosen unless another is.
+  await expect(phone.getByRole("radio", { name: /Steady/ })).toBeChecked();
+  await phone.getByRole("button", { name: "Start the clock" }).tap();
+  await expect(phone.getByText("Examiner: Steady")).toBeVisible();
+  await expect(phone.locator(".round-example")).not.toHaveCount(0);
+  await phone.getByLabel("Your working").fill("Flood fill from each unvisited land square");
+  await phone.getByRole("button", { name: "Pause" }).tap();
+  await expect.poll(() => serverWork("islands")).toContain("Flood fill");
+  changeRound("islands", (round) => {
+    round.seen_at -= 31 * 60_000;
+  });
+  await goHome();
+  const next = phone.locator(".continue");
+  await expect(next).toContainText("Ended while you were away, to be marked");
+  await next.tap();
+  await expect(phone.getByText(/ended while you were away/)).toBeVisible();
+  await expect(phone.getByRole("region", { name: "Marked" })).toContainText("50%");
+  const deck = await serverDeck();
+  expect(deck.schedules["sample/islands"]).toBeUndefined();
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { item: string; detail: string }[];
+  };
+  expect(log.mistakes.find((m) => m.item === "sample/islands")?.detail).toContain("Flood fill");
+  await phone.getByRole("button", { name: "Done" }).tap();
+  await goHome();
+  await phone.getByRole("switch", { name: /I've got a while/ }).tap();
+  await expect(phone.locator(".track", { hasText: "Timed rounds" })).toHaveCount(0);
+  // What the grader found is in the log with everything else.
+  await phone.getByRole("button", { name: /^Mistakes/ }).tap();
+  await expect(
+    phone
+      .getByRole("list", { name: "Mistakes" })
+      .getByRole("listitem")
+      .filter({ hasText: "Flood fill" }),
+  ).toHaveCount(1);
 });

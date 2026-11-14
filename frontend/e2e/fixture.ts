@@ -107,7 +107,7 @@ export function writeHome(options: HomeOptions): void {
     model === "fake"
       ? `
 [providers.fake]
-command = ["node", ${JSON.stringify(fakeModel)}]
+command = ["node", ${JSON.stringify(fakeModel)}, "{system_prompt}"]
 input = "stdin"
 output = "claude-stream-json"
 edit_models = ["fake"]

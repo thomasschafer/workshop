@@ -9,6 +9,7 @@ import { onNotificationOpen } from "../notifications";
 import { PackScreen } from "../pack/screen";
 import { GoalsScreen } from "../progress/goals";
 import { MistakesScreen } from "../progress/mistakes";
+import { RoundsScreen } from "../rounds/screen";
 import { Home } from "./home";
 import { pathOf, type Route, routeFor, routeOf } from "./routes";
 import { watchActivity } from "./sitting";
@@ -100,6 +101,15 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
           serverDictation={boot.server_dictation}
           onHome={goHome}
           onOpen={(item) => open({ screen: "design", item })}
+        />
+      );
+    case "rounds":
+      return (
+        <RoundsScreen
+          item={route.item}
+          serverDictation={boot.server_dictation}
+          onHome={goHome}
+          onOpen={(item) => open({ screen: "rounds", item })}
         />
       );
     case "goals":

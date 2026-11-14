@@ -1,0 +1,71 @@
+/* The clock stays in sight while the learner scrolls through their working and the examiner. */
+.round-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.round-title {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.round-clock {
+  flex: none;
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.round-bar.low .round-clock {
+  color: var(--warn);
+}
+
+.round-with {
+  margin: 0;
+  font-size: 14px;
+}
+
+.round-styles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.round-style {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.round-style > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.round-style-name {
+  font-weight: 600;
+}
+
+.round-style-description {
+  font-size: 14px;
+}
+
+.round-example pre {
+  margin: 4px 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  background: var(--surface);
+  border-radius: 6px;
+}

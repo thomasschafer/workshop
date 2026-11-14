@@ -26,7 +26,9 @@ export type Destination =
   /** The Coding track: one of its items, as `pack/item`, or the list of them. */
   | { kind: "coding"; item: string | null }
   /** Design prompts: one of them, as `pack/item`, or the list of them. */
-  | { kind: "design"; item: string | null };
+  | { kind: "design"; item: string | null }
+  /** Timed rounds: one of an item, as `pack/item`, under way or to start, or the list of them. */
+  | { kind: "round"; item: string | null };
 
 export interface Step {
   title: string;

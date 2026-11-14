@@ -4,6 +4,8 @@
 import { readFileSync } from "node:fs";
 
 const prompt = readFileSync(0, "utf8");
+// The system prompt, which the tests' config passes as the only argument.
+const system = process.argv[2] ?? "";
 
 /** Replies as Claude Code's stream-json output does: the text in parts, then the message. */
 async function reply(parts, pauseMs = 0) {
@@ -33,6 +35,20 @@ if (prompt.includes("Ask one or two follow-up questions about this stage.")) {
     answered
       ? "And what happens to that when traffic grows tenfold?"
       : `At ${stage}: what have you assumed here that might not hold?`,
+  ]);
+  process.exit(0);
+}
+
+// The examiner of a timed round, in the style chosen for it, replying to the learner's last
+// message, or welcoming them back after a break.
+if (prompt.includes("Reply to their last message as the examiner.")) {
+  const style = system.match(/Your style for this round is "([^"]+)"/)?.[1] ?? "No style";
+  const said = prompt.match(/^Learner: .*$/gm) ?? [];
+  const last = (said[said.length - 1] ?? "").replace(/^Learner: /, "");
+  await reply([
+    prompt.includes("just come back to the round")
+      ? `${style}: welcome back. You said "${last}"; carry on from there.`
+      : `${style}: you said "${last}". What if there were three dice instead?`,
   ]);
   process.exit(0);
 }
