@@ -2,8 +2,8 @@
 
 use axum::Json;
 use axum::extract::{Query, State};
-use serde::Serialize;
-use workshop_tracks::Home;
+use serde::{Deserialize, Serialize};
+use workshop_tracks::{Home, Time};
 
 use super::error::ApiResult;
 use super::learning::Where;
@@ -21,11 +21,23 @@ pub(super) struct HomeScreen {
     problems: Vec<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HomeQuery {
+    utc_offset: Option<i32>,
+    /// How long the learner has, which decides whether Continue offers long items.
+    #[serde(default)]
+    time: Time,
+}
+
 pub(super) async fn home(
     State(app): State<Shared>,
-    Query(at): Query<Where>,
+    Query(query): Query<HomeQuery>,
 ) -> ApiResult<HomeScreen> {
-    let clock = at.clock()?;
+    let clock = Where {
+        utc_offset: query.utc_offset,
+    }
+    .clock()?;
     let advent_of_code = AdventOfCode {
         last: app.workspace.load_ui_state()?.puzzle,
         has_session: app.aoc.has_session(),
@@ -59,7 +71,7 @@ pub(super) async fn home(
     let tracks = std::iter::once(advent_of_code.track())
         .chain(learning)
         .map(Some);
-    let home = Home::new(tracks).map_err(anyhow::Error::from)?;
+    let home = Home::new(tracks, query.time).map_err(anyhow::Error::from)?;
     Ok(Json(HomeScreen {
         home,
         week,
@@ -119,5 +131,21 @@ mod tests {
             home["continue"]["destination"],
             serde_json::json!({ "kind": "puzzle", "puzzle": { "year": 0, "day": 1 } })
         );
+        assert_eq!(home["continue"]["long"], false);
+
+        // With a while, a long item instead: a design session.
+        let request = Request::get("/api/home?utc_offset=0&time=a_while")
+            .header(header::COOKIE, "workshop_token=secret")
+            .body(Body::empty())
+            .unwrap();
+        let response = send(&router, request).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let home: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(home["continue"]["long"], true);
+        assert_eq!(home["continue"]["track"], "system-design");
+        assert_eq!(home["continue"]["destination"]["kind"], "design");
     }
 }

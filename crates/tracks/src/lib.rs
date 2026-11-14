@@ -19,6 +19,8 @@ pub enum TrackId {
     Coding,
     Probability,
     SystemDesign,
+    /// Timed rounds with the examiner, on items from the other tracks.
+    Rounds,
     MentalMaths,
     Review,
     /// A track a pack defines.
@@ -33,11 +35,18 @@ const BUILT_IN: &[(TrackId, &str, &str)] = &[
     (TrackId::Coding, "coding", "Coding"),
     (TrackId::Probability, "probability", "Probability"),
     (TrackId::SystemDesign, "system-design", "System design"),
+    (TrackId::Rounds, "rounds", "Timed rounds"),
     (TrackId::MentalMaths, "mental-maths", "Mental maths"),
     (TrackId::Review, "review", "Review"),
 ];
 
 impl TrackId {
+    /// Whether a pack's items can be in it. Advent of Code's puzzles aren't a pack's, and timed
+    /// rounds are made from the other tracks' items.
+    pub fn holds_items(&self) -> bool {
+        !matches!(self, Self::AdventOfCode | Self::Rounds)
+    }
+
     /// A built-in track's name, as the app shows it. A pack names its own tracks.
     pub fn built_in_name(&self) -> Option<&'static str> {
         BUILT_IN
@@ -170,8 +179,11 @@ pub struct Track<D> {
     pub summary: String,
     /// Where opening the track leads.
     pub destination: D,
-    /// The step this track suggests, if it has one.
+    /// The step this track suggests, if it has one: a few minutes' worth.
     pub next: Option<Step<D>>,
+    /// The long item this track suggests for when the learner has a while, such as a design
+    /// session or a timed round, if it has one.
+    pub long: Option<Step<D>>,
 }
 
 impl<D> Track<D> {
@@ -187,8 +199,25 @@ impl<D> Track<D> {
             summary,
             destination,
             next,
+            long: None,
         }
     }
+
+    /// The track, suggesting this long item for when the learner has a while.
+    pub fn with_long(self, long: Option<Step<D>>) -> Self {
+        Self { long, ..self }
+    }
+}
+
+/// How long the learner has: what Continue may offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Time {
+    /// A few minutes, as usual: only steps of a few minutes each.
+    #[default]
+    Short,
+    /// "I've got a while": long items too, such as timed rounds and design sessions.
+    AWhile,
 }
 
 /// The step Continue takes, and the track it's in.
@@ -197,6 +226,8 @@ pub struct Next<D> {
     pub track: TrackId,
     #[serde(flatten)]
     pub step: Step<D>,
+    /// Whether it's a long item, only offered when the learner has a while.
+    pub long: bool,
 }
 
 /// The home screen: one step to continue with, and the tracks.
@@ -211,20 +242,40 @@ impl<D: Clone> Home<D> {
     /// The home screen for these tracks, where `None` is a track with nothing in it yet, which
     /// isn't shown. Continue takes the most pressing step any track suggests; between steps as
     /// pressing as each other, the track listed first.
-    pub fn new(tracks: impl IntoIterator<Item = Option<Track<D>>>) -> Result<Self, TrackError> {
+    ///
+    /// Long items are only offered when the learner has a while, and then they come first,
+    /// as that's what the learner asked for: the most pressing of them, unless none is more
+    /// than something to browse, when the usual step is better.
+    pub fn new(
+        tracks: impl IntoIterator<Item = Option<Track<D>>>,
+        time: Time,
+    ) -> Result<Self, TrackError> {
         let mut tracks: Vec<Track<D>> = tracks.into_iter().flatten().collect();
         tracks.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(pair) = tracks.windows(2).find(|pair| pair[0].id == pair[1].id) {
             return Err(TrackError::DuplicateTrack(pair[0].id.clone()));
         }
-        let next = tracks
-            .iter()
-            .filter_map(|track| track.next.as_ref().map(|step| (track, step)))
-            .min_by_key(|(_, step)| step.priority)
-            .map(|(track, step)| Next {
-                track: track.id.clone(),
-                step: step.clone(),
-            });
+        let most_pressing = |long: bool| {
+            tracks
+                .iter()
+                .filter_map(|track| {
+                    let step = if long { &track.long } else { &track.next };
+                    step.as_ref().map(|step| (track, step))
+                })
+                .min_by_key(|(_, step)| step.priority)
+                .map(|(track, step)| Next {
+                    track: track.id.clone(),
+                    step: step.clone(),
+                    long,
+                })
+        };
+        let next = match time {
+            Time::Short => most_pressing(false),
+            Time::AWhile => match most_pressing(true) {
+                Some(long) if long.step.priority < Priority::Browse => Some(long),
+                long => most_pressing(false).or(long),
+            },
+        };
         Ok(Self { next, tracks })
     }
 }
@@ -249,6 +300,7 @@ mod tests {
             summary: String::new(),
             destination: "the track",
             next,
+            long: None,
         })
     }
 
@@ -258,6 +310,7 @@ mod tests {
             (TrackId::AdventOfCode, "advent-of-code"),
             (TrackId::SystemDesign, "system-design"),
             (TrackId::MentalMaths, "mental-maths"),
+            (TrackId::Rounds, "rounds"),
             (
                 TrackId::Pack("graph-search".parse().unwrap()),
                 "pack:graph-search",
@@ -306,12 +359,15 @@ mod tests {
     #[test]
     fn lists_tracks_in_order_leaving_out_empty_ones() {
         let pack = TrackId::Pack("graphs".parse().unwrap());
-        let home = Home::new([
-            track(pack.clone(), None),
-            track(TrackId::Review, None),
-            None,
-            track(TrackId::AdventOfCode, None),
-        ])
+        let home = Home::new(
+            [
+                track(pack.clone(), None),
+                track(TrackId::Review, None),
+                None,
+                track(TrackId::AdventOfCode, None),
+            ],
+            Time::Short,
+        )
         .unwrap();
         let ids: Vec<TrackId> = home.tracks.iter().map(|t| t.id.clone()).collect();
         assert_eq!(ids, [TrackId::AdventOfCode, TrackId::Review, pack]);
@@ -320,14 +376,17 @@ mod tests {
 
     #[test]
     fn continues_with_the_most_pressing_step() {
-        let home = Home::new([
-            track(
-                TrackId::AdventOfCode,
-                Some(step("puzzle", Priority::Unfinished)),
-            ),
-            track(TrackId::Coding, Some(step("new problem", Priority::New))),
-            track(TrackId::Review, Some(step("cards", Priority::Due))),
-        ])
+        let home = Home::new(
+            [
+                track(
+                    TrackId::AdventOfCode,
+                    Some(step("puzzle", Priority::Unfinished)),
+                ),
+                track(TrackId::Coding, Some(step("new problem", Priority::New))),
+                track(TrackId::Review, Some(step("cards", Priority::Due))),
+            ],
+            Time::Short,
+        )
         .unwrap();
         let next = home.next.unwrap();
         assert_eq!(next.track, TrackId::Review);
@@ -336,33 +395,107 @@ mod tests {
 
     #[test]
     fn breaks_ties_by_the_order_tracks_are_listed() {
-        let home = Home::new([
-            track(TrackId::Probability, Some(step("later", Priority::New))),
-            track(TrackId::Coding, Some(step("first", Priority::New))),
-        ])
+        let home = Home::new(
+            [
+                track(TrackId::Probability, Some(step("later", Priority::New))),
+                track(TrackId::Coding, Some(step("first", Priority::New))),
+            ],
+            Time::Short,
+        )
         .unwrap();
         assert_eq!(home.next.unwrap().track, TrackId::Coding);
     }
 
     #[test]
     fn refuses_a_track_listed_twice() {
-        let err =
-            Home::new([track(TrackId::Coding, None), track(TrackId::Coding, None)]).unwrap_err();
+        let err = Home::new(
+            [track(TrackId::Coding, None), track(TrackId::Coding, None)],
+            Time::Short,
+        )
+        .unwrap_err();
         assert_eq!(err, TrackError::DuplicateTrack(TrackId::Coding));
+    }
+
+    fn with_long(
+        track: Option<Track<&'static str>>,
+        long: Step<&'static str>,
+    ) -> Option<Track<&'static str>> {
+        track.map(|track| track.with_long(Some(long)))
+    }
+
+    #[test]
+    fn offers_long_items_only_when_the_learner_has_a_while() {
+        let tracks = || {
+            [
+                track(TrackId::Review, Some(step("cards", Priority::Due))),
+                with_long(
+                    track(TrackId::SystemDesign, None),
+                    step("design session", Priority::New),
+                ),
+                with_long(
+                    track(TrackId::Rounds, None),
+                    step("timed round", Priority::Due),
+                ),
+            ]
+        };
+        let short = Home::new(tracks(), Time::Short).unwrap().next.unwrap();
+        assert_eq!((short.step.title.as_str(), short.long), ("cards", false));
+        // With a while, the most pressing long item comes first, even before due reviews.
+        let long = Home::new(tracks(), Time::AWhile).unwrap().next.unwrap();
+        assert_eq!((long.step.title.as_str(), long.long), ("timed round", true));
+        assert_eq!(long.track, TrackId::Rounds);
+    }
+
+    #[test]
+    fn with_a_while_still_prefers_a_real_step_to_a_long_item_only_to_browse() {
+        let tracks = || {
+            [
+                track(TrackId::Review, Some(step("cards", Priority::New))),
+                with_long(
+                    track(TrackId::Rounds, None),
+                    step("any round", Priority::Browse),
+                ),
+            ]
+        };
+        let next = Home::new(tracks(), Time::AWhile).unwrap().next.unwrap();
+        assert_eq!(next.step.title, "cards");
+        // With nothing else, the long item is still better than nothing.
+        let only = Home::new(
+            [with_long(
+                track(TrackId::Rounds, None),
+                step("any round", Priority::Browse),
+            )],
+            Time::AWhile,
+        )
+        .unwrap();
+        assert_eq!(only.next.unwrap().step.title, "any round");
+        let none = Home::new(
+            [with_long(
+                track(TrackId::Rounds, None),
+                step("any round", Priority::Browse),
+            )],
+            Time::Short,
+        )
+        .unwrap();
+        assert_eq!(none.next, None);
     }
 
     #[test]
     fn says_where_to_continue_alongside_the_step() {
-        let home = Home::new([track(
-            TrackId::AdventOfCode,
-            Some(step("2025 · day 3", Priority::Unfinished)),
-        )])
+        let home = Home::new(
+            [track(
+                TrackId::AdventOfCode,
+                Some(step("2025 · day 3", Priority::Unfinished)),
+            )],
+            Time::Short,
+        )
         .unwrap();
         let json = serde_json::to_value(&home).unwrap();
         assert_eq!(json["continue"]["track"], "advent-of-code");
         assert_eq!(json["continue"]["title"], "2025 · day 3");
         assert_eq!(json["continue"]["priority"], "unfinished");
         assert_eq!(json["continue"]["destination"], "somewhere");
+        assert_eq!(json["continue"]["long"], false);
         assert_eq!(json["tracks"][0]["id"], "advent-of-code");
     }
 }

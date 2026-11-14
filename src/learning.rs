@@ -334,6 +334,7 @@ impl Learning {
                     summary: summary(plan, clock),
                     destination: Destination::Practice { track: id.clone() },
                     next: next_step(id, plan, planned),
+                    long: None,
                     id: id.clone(),
                     name: name.clone(),
                 }
@@ -503,18 +504,18 @@ fn seed_base(key: &str) -> u64 {
     }) >> 16
 }
 
-/// The System design track. Its prompts take a while, so they're there to choose, and never
-/// what Continue suggests unless they're due.
+/// The System design track. Its prompts are worked through in design sessions, which take a
+/// while, so Continue only suggests one when the learner has a while.
 fn design_track(plan: &TrackPlan, planned: &Planned) -> Track<Destination> {
     let destination = Destination::Design { item: None };
-    let next = plan
+    let long = plan
         .due
         .first()
         .map(|key| (key, Priority::Due, "Due for review"))
         .or_else(|| {
             plan.new
                 .first()
-                .map(|key| (key, Priority::Browse, "Something new"))
+                .map(|key| (key, Priority::New, "Something new"))
         })
         .map(|(key, priority, why)| Step {
             title: planned.item(key).map_or_else(|| key.clone(), Item::label),
@@ -534,7 +535,7 @@ fn design_track(plan: &TrackPlan, planned: &Planned) -> Track<Destination> {
     if parts.is_empty() {
         parts.push("Nothing due".to_owned());
     }
-    Track::built_in(TrackId::SystemDesign, parts.join(" · "), destination, next)
+    Track::built_in(TrackId::SystemDesign, parts.join(" · "), destination, None).with_long(long)
 }
 
 /// What a track's items are called, one and many.

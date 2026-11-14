@@ -14,7 +14,7 @@ use crate::learning::{Deck, SyncRequest, now_ms};
 #[serde(deny_unknown_fields)]
 pub(super) struct Where {
     /// Minutes ahead of UTC, such as 60 in Paris in winter.
-    utc_offset: Option<i32>,
+    pub(super) utc_offset: Option<i32>,
 }
 
 impl Where {

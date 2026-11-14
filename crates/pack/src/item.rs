@@ -880,6 +880,10 @@ mod tests {
                 "no track",
             ),
             (
+                "+++\nkind = \"card\"\ntrack = \"rounds\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA",
+                "can't be in the rounds track",
+            ),
+            (
                 "+++\nkind = \"riddle\"\nskills = [\"dice\"]\n+++\nQ",
                 "riddle",
             ),

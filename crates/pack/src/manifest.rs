@@ -305,6 +305,9 @@ impl Manifest {
         if let Ok(built_in) = name.parse::<TrackId>()
             && !matches!(built_in, TrackId::Pack(_))
         {
+            if !built_in.holds_items() {
+                return Err(format!("items can't be in the {name} track"));
+            }
             return Ok(built_in);
         }
         self.tracks
