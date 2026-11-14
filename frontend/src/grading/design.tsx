@@ -1,27 +1,36 @@
 import { useEffect, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
-import { newId } from "../learning/local";
+import { useConnection } from "../hooks/useConnection";
 import { Markdown } from "../learning/practice";
 import { Loading, Page } from "../progress/page";
 import { gradingApi } from "./api";
-import { MarkedView } from "./marked";
-import type { DesignListed, DesignOpened, MarkedReply } from "./types";
+import { DesignSessionView } from "./session";
+import type { DesignListed, DesignOpened, Stage } from "./types";
 
-const STATUS = { due: "Due", new: "New", done: "Done" } as const;
+const STATUS = { in_progress: "In progress", due: "Due", new: "New", done: "Done" } as const;
 
-/** Design prompts: the list of them, or one, as `pack/item`, answered in writing and marked by
- * the grader. */
+/** Design prompts: the list of them, or one, as `pack/item`, worked through as a session. */
 export function DesignScreen({
   item,
+  serverDictation,
   onHome,
   onOpen,
 }: {
   item: string | null;
+  serverDictation: boolean;
   onHome: () => void;
   onOpen: (item: string | null) => void;
 }) {
   if (item === null) return <DesignList onHome={onHome} onOpen={onOpen} />;
-  return <DesignItem key={item} itemKey={item} onHome={onHome} onList={() => onOpen(null)} />;
+  return (
+    <DesignItem
+      key={item}
+      itemKey={item}
+      serverDictation={serverDictation}
+      onHome={onHome}
+      onList={() => onOpen(null)}
+    />
+  );
 }
 
 function DesignList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: string) => void }) {
@@ -45,7 +54,8 @@ function DesignList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
               <button type="button" class="home-link" onClick={() => onOpen(item.key)}>
                 <span class="home-link-name">{item.label}</span>
                 <span class="home-link-summary">
-                  {STATUS[item.status]} · about {item.minutes} minutes
+                  {STATUS[item.status]}
+                  {item.stage ? `, at ${stageName(item.stage)}` : ""} · about {item.minutes} minutes
                   {item.last_score === null
                     ? ""
                     : ` · last time ${Math.round(item.last_score * 100)}%`}
@@ -59,47 +69,38 @@ function DesignList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
   );
 }
 
-/** What's been written for a prompt, kept on the device until it's marked. */
-const draftKey = (key: string) => `workshop:design:${key}`;
+function stageName(stage: Stage): string {
+  return stage.replace("_", " ").replace("trade offs", "trade-offs");
+}
 
 function DesignItem({
   itemKey,
+  serverDictation,
   onHome,
   onList,
 }: {
   itemKey: string;
+  serverDictation: boolean;
   onHome: () => void;
   onList: () => void;
 }) {
+  const online = useConnection();
   const [opened, setOpened] = useState<DesignOpened | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [text, setText] = useState(() => localStorage.getItem(draftKey(itemKey)) ?? "");
-  const [marking, setMarking] = useState(false);
-  const [markError, setMarkError] = useState<string | null>(null);
-  const [result, setResult] = useState<MarkedReply | null>(null);
+  const [starting, setStarting] = useState(false);
   useEffect(() => {
     setError(null);
     gradingApi.design(itemKey).then(setOpened, (e: unknown) => setError(errorMessage(e)));
   }, [attempt]);
 
-  const write = (next: string) => {
-    setText(next);
-    localStorage.setItem(draftKey(itemKey), next);
-  };
-  const mark = () => {
-    setMarking(true);
-    setMarkError(null);
+  const start = () => {
+    setStarting(true);
+    setError(null);
     gradingApi
-      .mark(itemKey, newId(), "design", text)
-      .then(
-        (reply) => {
-          setResult(reply);
-          localStorage.removeItem(draftKey(itemKey));
-        },
-        (e: unknown) => setMarkError(errorMessage(e)),
-      )
-      .finally(() => setMarking(false));
+      .startDesign(itemKey)
+      .then(setOpened, (e: unknown) => setError(errorMessage(e)))
+      .finally(() => setStarting(false));
   };
 
   if (opened === null) {
@@ -111,53 +112,50 @@ function DesignItem({
   }
   return (
     <Page title="System design" onHome={onHome}>
-      <Markdown text={opened.prompt} class="learn-prompt" />
-      {opened.source ? <p class="learn-source muted">Source: {opened.source}</p> : null}
-      {result ? (
-        <>
-          <MarkedView marked={result.marked} />
-          <button type="button" class="pill primary wide" onClick={onList}>
-            Done
-          </button>
-        </>
+      {opened.session ? (
+        <DesignSessionView
+          opened={opened}
+          session={opened.session}
+          serverDictation={serverDictation}
+          onDone={onList}
+        />
       ) : (
-        <form
-          class="learn-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            mark();
-          }}
-        >
-          <label class="learn-question muted" for="design-answer">
-            Your design, about {opened.minutes} minutes' worth
-          </label>
-          <textarea
-            id="design-answer"
-            class="written"
-            value={text}
-            readOnly={marking}
-            onInput={(event) => write(event.currentTarget.value)}
-          />
-          {markError ? (
-            <p class="error-text" role="alert">
-              {markError}
+        <>
+          <Markdown text={opened.prompt} class="learn-prompt" />
+          {opened.source ? <p class="learn-source muted">Source: {opened.source}</p> : null}
+          <section class="design-intro" aria-label="Design session">
+            <p class="muted">
+              A design session of about {opened.minutes} minutes, in {opened.stages.length} stages:{" "}
+              {opened.stages.map((s) => s.name.toLowerCase()).join(", ")}. A coach asks follow-up
+              questions at each, and the whole session is marked at the end. Every stage is saved as
+              you go, so you can stop at any of them and carry on later.
             </p>
-          ) : null}
-          <span class="learn-actions">
-            <button type="button" class="pill" onClick={onList}>
-              Later
-            </button>
-            <button type="submit" class="pill primary" disabled={marking || !text.trim()}>
-              {marking ? "Marking…" : "Mark it"}
-            </button>
-          </span>
+            {error ? (
+              <p class="error-text" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <span class="learn-actions">
+              <button type="button" class="pill" onClick={onList}>
+                Later
+              </button>
+              <button
+                type="button"
+                class="pill primary"
+                disabled={starting || !online}
+                onClick={start}
+              >
+                Start the session
+              </button>
+            </span>
+          </section>
           {opened.previous ? (
             <details>
-              <summary class="muted">What you wrote last time</summary>
+              <summary class="muted">What you did last time</summary>
               <Markdown text={opened.previous} />
             </details>
           ) : null}
-        </form>
+        </>
       )}
     </Page>
   );

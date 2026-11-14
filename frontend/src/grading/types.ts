@@ -19,13 +19,52 @@ export interface MarkedReply {
   due: number | null;
 }
 
+// Design sessions mirror crates/sessions/src/design.rs, and their routes src/server/design.rs.
+
+export type Stage = "requirements" | "scale" | "outline" | "deep_dive" | "trade_offs";
+
 export interface DesignListed {
   key: string;
   label: string;
   skills: string[];
   minutes: number;
-  status: "due" | "new" | "done";
+  status: "in_progress" | "due" | "new" | "done";
+  /** The stage it's at, if it's in progress. */
+  stage: Stage | null;
   last_score: number | null;
+}
+
+export interface Component {
+  name: string;
+  /** What it does. */
+  role: string;
+  /** The components it talks to, by name. */
+  talks_to: string[];
+}
+
+export interface SessionTurn {
+  speaker: "learner" | "coach";
+  text: string;
+  at: number;
+}
+
+export interface DesignSession {
+  stage: Stage;
+  /** The furthest stage reached, which any stage up to can be gone back to. */
+  reached: Stage;
+  work: Partial<Record<Stage, { notes: string; turns: SessionTurn[] }>>;
+  components: Component[];
+  deep_dive: string | null;
+  started_at: number;
+  updated_at: number;
+}
+
+/** The learner's own changes to a session. */
+export interface DesignEdit {
+  stage: Stage;
+  notes: Partial<Record<Stage, string>>;
+  components: Component[];
+  deep_dive: string | null;
 }
 
 export interface DesignOpened {
@@ -35,6 +74,9 @@ export interface DesignOpened {
   skills: string[];
   minutes: number;
   source: string | null;
+  stages: { id: Stage; name: string; task: string }[];
+  session: DesignSession | null;
+  /** What was done last time, if it's been done before. */
   previous: string | null;
 }
 

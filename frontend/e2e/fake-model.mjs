@@ -25,6 +25,18 @@ if (prompt.includes("Find part 1's example.") && prompt.includes("+2, -5, +4")) 
   process.exit(0);
 }
 
+// The coach of a design session, asking follow-up questions about the stage the learner's at.
+if (prompt.includes("Ask one or two follow-up questions about this stage.")) {
+  const stage = prompt.match(/They're at the stage "([^"]+)"/)?.[1] ?? "?";
+  const answered = prompt.includes("\nLearner: ");
+  await reply([
+    answered
+      ? "And what happens to that when traffic grows tenfold?"
+      : `At ${stage}: what have you assumed here that might not hold?`,
+  ]);
+  process.exit(0);
+}
+
 // The grader, marking written work or checking a card.
 if (prompt.includes("<work>")) {
   const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";

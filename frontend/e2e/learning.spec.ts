@@ -255,23 +255,142 @@ test("has the grader check a flagged card, and unflags it", async () => {
   );
 });
 
-test("answers a design prompt in writing, marked by the grader", async () => {
+test("offers long items only with a while, which turns itself off once the sitting's over", async () => {
   await goHome();
-  await phone.locator(".track", { hasText: "System design" }).tap();
-  await expect(phone).toHaveURL(/\/design$/);
-  await phone.getByRole("button", { name: /^Design a service that turns long links/ }).tap();
+  const toggle = phone.getByRole("switch", { name: /I've got a while/ });
+  await expect(toggle).not.toBeChecked();
+  const next = phone.locator(".continue");
+  await expect(next).not.toContainText("long");
+  await toggle.tap();
+  await expect(next).toContainText("Continue · long");
+  await expect(next).toContainText("System design · Something new");
+  // Still on after a reload, in the same sitting.
+  await phone.reload();
+  await expect(toggle).toBeChecked();
+  await expect(next).toContainText("Continue · long");
+  // Away for over half an hour, and the sitting's over.
+  await phone.evaluate(() =>
+    localStorage.setItem(
+      "workshop:a-while",
+      JSON.stringify({ lastActive: Date.now() - 31 * 60_000 }),
+    ),
+  );
+  await phone.reload();
+  await expect(toggle).not.toBeChecked();
+  await expect(next).toBeVisible();
+  await expect(next).not.toContainText("long");
+});
+
+test("works through a design session in stages, with the coach, stopping and carrying on", async () => {
+  await phone.goto("/");
+  await phone.getByRole("switch", { name: /I've got a while/ }).tap();
+  const next = phone.locator(".continue");
+  await expect(next).toContainText("Design a service that turns long links");
+  await next.tap();
   await expect(phone).toHaveURL(/\/design\/sample\/link-shortener$/);
+  await phone.getByRole("button", { name: "Start the session" }).tap();
+
+  const stage = phone.getByRole("region", { name: "Clarify the requirements" });
+  await stage.getByLabel("Your notes").fill("Make short links, and send whoever opens one on.");
+  const coach = phone.getByRole("region", { name: "Coach" });
+  await coach.getByRole("button", { name: "Ask the coach" }).tap();
+  await expect(coach.locator(".design-turn.coach")).toHaveText(
+    "At Clarify the requirements: what have you assumed here that might not hold?",
+  );
+  // The coach is answered aloud, and follows up.
+  await holdToTalk(
+    phone,
+    coach.getByRole("button", { name: "Hold to dictate" }),
+    "links last a year",
+    () => expect(coach.locator(".dictate-hearing")).toContainText("year"),
+  );
+  await expect(coach.getByLabel("Your answer to the coach")).toHaveValue("links last a year");
+  await coach.getByRole("button", { name: "Answer the coach" }).tap();
+  await expect(coach.locator(".design-turn")).toHaveCount(3);
+  await expect(coach.locator(".design-turn.learner")).toHaveText("links last a year");
+
+  await phone.getByRole("button", { name: "Next: estimate the scale" }).tap();
   await phone
-    .getByLabel(/^Your design/)
-    .fill("Codes from a counter, and a cache in front of the store.");
-  await phone.getByRole("button", { name: "Mark it" }).tap();
+    .getByRole("region", { name: "Estimate the scale" })
+    .getByLabel("Your notes")
+    .fill("A hundred links made a second, and ten thousand opened.");
+  // Saved as it goes: a reload, or coming back later, carries on from here.
+  await expect
+    .poll(async () => {
+      const response = await phone.request.get("/api/design/sample/link-shortener");
+      const opened = (await response.json()) as {
+        session: { stage: string; work: { scale?: { notes: string } } } | null;
+      };
+      return opened.session?.work.scale?.notes ?? "";
+    })
+    .toContain("ten thousand");
+  await phone.reload();
+  await expect(
+    phone.getByRole("region", { name: "Estimate the scale" }).getByLabel("Your notes"),
+  ).toHaveValue(/ten thousand opened/);
+  await phone.getByRole("button", { name: "Stop here for now" }).tap();
+  await expect(phone).toHaveURL(/\/design$/);
+  await expect(phone.getByRole("button", { name: /links/ })).toContainText("In progress, at scale");
+  await goHome();
+  await expect(next).toContainText("Where you left off: estimate the scale");
+  // Without a while, it's not offered, but it's still in the track, where it was left.
+  await phone.getByRole("switch", { name: /I've got a while/ }).tap();
+  await expect(next).not.toContainText("Where you left off: estimate the scale");
+  const design = phone.locator(".track", { hasText: "System design" });
+  await expect(design).toContainText("1 in progress");
+  await design.tap();
+  await phone.getByRole("button", { name: /links/ }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Scale");
+  // The stages already reached can be gone back to.
+  await phone.locator(".step", { hasText: "Requirements" }).tap();
+  await expect(
+    phone.getByRole("region", { name: "Clarify the requirements" }).getByLabel("Your notes"),
+  ).toHaveValue(/short links/);
+  await phone.locator(".step", { hasText: "Scale" }).tap();
+
+  await phone.getByRole("button", { name: "Next: outline the design" }).tap();
+  const components = phone.getByRole("region", { name: "Components" });
+  await components.getByRole("button", { name: "Add a component" }).tap();
+  await components.getByLabel("Component 1", { exact: true }).fill("API");
+  await components.getByLabel("What component 1 does").fill("Makes and opens links");
+  await components.getByLabel("What component 1 talks to").fill("Cache, Store");
+  await components.getByRole("button", { name: "Add a component" }).tap();
+  await components.getByLabel("Component 2", { exact: true }).fill("Cache");
+  await components.getByRole("button", { name: "Add a component" }).tap();
+  await components.getByLabel("Component 3", { exact: true }).fill("cache");
+  await expect(phone.getByRole("alert")).toHaveText('Two components are called "cache".');
+  await components.getByLabel("Component 3", { exact: true }).fill("Store");
+  await expect(phone.getByRole("alert")).toHaveCount(0);
+  await phone.getByRole("button", { name: "Next: deep-dive one component" }).tap();
+  await phone.getByLabel("The component to go into").selectOption("Store");
+  await phone
+    .getByRole("region", { name: "Deep-dive one component" })
+    .getByLabel("Your notes")
+    .fill("Codes come from a counter, split into ranges per server.");
+  await phone.getByRole("button", { name: "Next: trade-offs and failure modes" }).tap();
+  await phone
+    .getByRole("region", { name: "Trade-offs and failure modes" })
+    .getByLabel("Your notes")
+    .fill("If the cache fails, opens go to the store, which must take the load.");
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+  await phone.getByRole("button", { name: "Finish and mark it" }).tap();
   const marked = phone.getByRole("region", { name: "Marked" });
   await expect(marked).toContainText("90%");
-  await expect(marked).toContainText("Partly");
   await expect(marked).toContainText("Mistakes, kept in your log");
   await phone.getByRole("button", { name: "Done" }).tap();
   await expect(phone).toHaveURL(/\/design$/);
   await expect(phone.getByRole("button", { name: /links/ })).toContainText("last time 90%");
+  // The whole session went to the grader, components and the coach's questions too.
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { item: string; detail: string }[];
+  };
+  const found = log.mistakes.find((m) => m.item === "sample/link-shortener");
+  expect(found?.detail).toContain("- API: Makes and opens links (talks to Cache, Store)");
+  expect(found?.detail).toContain("Learner: links last a year");
+  expect(found?.detail).toContain("## Deep-dive one component: Store");
 });
 
 test("practises offline on a phone, keeping answers across a reload, and syncs them later", async () => {

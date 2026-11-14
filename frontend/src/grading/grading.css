@@ -101,3 +101,96 @@ textarea.explain-heard {
 .marked-clarity > .tracks-heading {
   margin-bottom: 4px;
 }
+
+.design-intro,
+.design-stage,
+.design-coach,
+.design-components {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.design-stage-name {
+  margin: 0;
+  font-size: 18px;
+}
+
+.design-task {
+  margin: 0;
+  font-size: 14px;
+}
+
+.design-turns {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.design-turn {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.design-turn.coach {
+  background: var(--surface);
+  border-left: 3px solid var(--accent);
+}
+
+.design-turn.learner {
+  margin-left: 24px;
+  border: 1px solid var(--border);
+}
+
+.design-reply {
+  min-height: 5rem;
+}
+
+.design-component-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.design-component {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.design-component input {
+  grid-column: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.design-component .text-button {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.design-deep-dive {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.design-deep-dive select {
+  font: inherit;
+  padding: 6px 8px;
+}

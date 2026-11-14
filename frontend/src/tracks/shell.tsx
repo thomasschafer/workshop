@@ -97,6 +97,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
       return (
         <DesignScreen
           item={route.item}
+          serverDictation={boot.server_dictation}
           onHome={goHome}
           onOpen={(item) => open({ screen: "design", item })}
         />
