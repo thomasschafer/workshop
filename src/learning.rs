@@ -559,13 +559,13 @@ fn design_track(
     let long = unfinished
         .or_else(|| {
             plan.due.first().map(|key| {
-                let reason = format!("Due for review · {}", week_so_far(planned.week));
+                let reason = "Due for review".to_owned();
                 (key, Priority::Due, reason)
             })
         })
         .or_else(|| {
             plan.new.first().map(|key| {
-                let reason = format!("Something new · {}", week_so_far(planned.week));
+                let reason = "Something new".to_owned();
                 (key, Priority::New, reason)
             })
         })
@@ -613,19 +613,6 @@ fn count(n: usize, before: &str, track: &TrackId) -> String {
     format!("{n} {before}{}", if n == 1 { one } else { many })
 }
 
-pub fn week_so_far(week: Week) -> String {
-    let minutes = if week.target == 1 {
-        "minute"
-    } else {
-        "minutes"
-    };
-    if week.minutes >= week.target {
-        format!("This week's {} {minutes} done", week.target)
-    } else {
-        format!("{} of {} {minutes} this week", week.minutes, week.target)
-    }
-}
-
 impl Planned {
     /// The skill to focus on that an item has, if it has one, by name.
     pub fn focus_of(&self, item: &Item) -> Option<&str> {
@@ -656,7 +643,7 @@ fn next_step(id: &TrackId, plan: &TrackPlan, planned: &Planned) -> Option<Step<D
     if !plan.due.is_empty() {
         return Some(Step {
             title: format!("{} due", count(plan.due.len(), "", id)),
-            reason: format!("Due today · {}", week_so_far(week)),
+            reason: "Due today".to_owned(),
             priority: Priority::Due,
             destination,
         });
@@ -665,10 +652,7 @@ fn next_step(id: &TrackId, plan: &TrackPlan, planned: &Planned) -> Option<Step<D
         if let Some(skill) = planned.item(first).and_then(|item| planned.focus_of(item)) {
             return Some(Step {
                 title: count(plan.new.len(), "new ", id),
-                reason: format!(
-                    "Practise {skill}, after recent mistakes · {}",
-                    week_so_far(week)
-                ),
+                reason: format!("Practise {skill}, after recent mistakes"),
                 priority: Priority::Focus,
                 destination,
             });
@@ -681,7 +665,7 @@ fn next_step(id: &TrackId, plan: &TrackPlan, planned: &Planned) -> Option<Step<D
         };
         return Some(Step {
             title: count(plan.new.len(), "new ", id),
-            reason: format!("Something new · {}", week_so_far(week)),
+            reason: "Something new".to_owned(),
             priority,
             destination,
         });
@@ -1034,6 +1018,5 @@ mod tests {
         let next = tracks.tracks[0].next.as_ref().unwrap();
         // The week's target is met, so something new can wait.
         assert_eq!(next.priority, Priority::Browse);
-        assert!(next.reason.contains("This week's 1 minute done"));
     }
 }

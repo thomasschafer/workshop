@@ -22,7 +22,7 @@ use workshop_pack::{Case, Coding, Content, Item, Kind, Language, Pack};
 use workshop_tracks::{Priority, Step, Track, TrackId};
 
 use crate::config::Config;
-use crate::learning::{Planned, Week, week_so_far};
+use crate::learning::{Planned, Week};
 use crate::paths::Paths;
 use crate::tracks::Destination;
 use crate::workspace::{SaveError, VersionedFile, read_versioned, save_versioned};
@@ -615,7 +615,7 @@ pub fn track(
         };
         Some(Step {
             title: label(key),
-            reason: format!("{why} · {}", week_so_far(planned.week)),
+            reason: why.to_owned(),
             priority: Priority::Due,
             destination: open(key),
         })
@@ -634,16 +634,13 @@ pub fn track(
         quickest.map(|key| match focus(key) {
             Some(skill) => Step {
                 title: label(key),
-                reason: format!(
-                    "Practise {skill}, after recent mistakes · {}",
-                    week_so_far(planned.week)
-                ),
+                reason: format!("Practise {skill}, after recent mistakes"),
                 priority: Priority::Focus,
                 destination: open(key),
             },
             None => Step {
                 title: label(key),
-                reason: format!("Something new · {}", week_so_far(planned.week)),
+                reason: "Something new".to_owned(),
                 // Once the week's target is met, new items wait behind anything else to do.
                 priority: if planned.week.minutes >= planned.week.target {
                     Priority::Browse
@@ -859,7 +856,7 @@ mod tests {
                 item: Some("sample/copies-by-value".to_owned())
             }
         );
-        assert_eq!(next.reason, "Something new · 0 of 90 minutes this week");
+        assert_eq!(next.reason, "Something new");
 
         let packs = vec![Pack::sample()];
         let found = find(&packs, "sample", "islands").unwrap();

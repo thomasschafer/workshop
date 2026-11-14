@@ -11,7 +11,7 @@ use workshop_pack::Item;
 use workshop_sessions::round::{Ending, Round};
 use workshop_tracks::{Priority, Step, Time, Track, TrackId};
 
-use crate::learning::{Planned, week_so_far};
+use crate::learning::Planned;
 use crate::tracks::Destination;
 
 /// The tracks rounds are made from, in the order their items are suggested.
@@ -31,12 +31,11 @@ pub fn items(planned: &Planned) -> impl Iterator<Item = (String, &Item)> {
 pub fn suggest(planned: &Planned) -> Option<(String, Priority, String)> {
     let roundable = |key: &String| planned.item(key).is_some_and(crate::examiner::can_round);
     let plans: Vec<&TrackPlan> = FROM.iter().filter_map(|id| planned.plans.get(id)).collect();
-    let week = week_so_far(planned.week);
     if let Some(key) = plans.iter().flat_map(|p| &p.due).find(|k| roundable(k)) {
         return Some((
             key.clone(),
             Priority::Due,
-            format!("Due for review, against the clock · {week}"),
+            "Due for review, against the clock".to_owned(),
         ));
     }
     let new: Vec<&String> = plans
@@ -52,14 +51,14 @@ pub fn suggest(planned: &Planned) -> Option<(String, Priority, String)> {
         return Some((
             (*key).clone(),
             Priority::Focus,
-            format!("Practise {skill}, after recent mistakes · {week}"),
+            format!("Practise {skill}, after recent mistakes"),
         ));
     }
     if let Some(key) = new.first() {
         return Some((
             (*key).clone(),
             Priority::New,
-            format!("Something new, against the clock · {week}"),
+            "Something new, against the clock".to_owned(),
         ));
     }
     items(planned)

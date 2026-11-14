@@ -155,7 +155,8 @@ test("shows the pack's tracks at home, and continues with something new", async 
   // quickest of the Coding track's, some code to read.
   const next = phone.locator(".continue");
   await expect(next).toContainText("Counting copies");
-  await expect(next).toContainText("Coding · Something new · 0 of 90 minutes this week");
+  await expect(next).toContainText("Coding · Something new");
+  await expect(next).not.toContainText("this week");
   await expect(phone.getByLabel("This week's practice")).toBeVisible();
   // It all fits across a phone's screen.
   const width = phone.viewportSize()?.width ?? 0;
