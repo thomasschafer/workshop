@@ -1,0 +1,859 @@
+//! Items: Markdown files with TOML front matter between `+++` lines, whose body is the prompt,
+//! followed by sections under `## ` headings that depend on the item's kind.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use workshop_tracks::TrackId;
+
+use crate::manifest::{Manifest, is_slug};
+use crate::number::{self, Tolerance};
+
+/// The relative tolerance for a probability answer, unless the item gives its own.
+const DEFAULT_ANSWER_TOLERANCE: f64 = 0.005;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    /// A question and its answer, which the learner marks themselves.
+    Card,
+    /// A template of sums, with fresh numbers each time and a computed answer.
+    MentalMaths,
+    /// A question with an exact numeric answer, which a simulation must agree with.
+    Probability,
+    /// A problem to solve in code, with a reference solution, a brute-force one and tests.
+    Coding,
+    /// A design prompt, marked against a rubric.
+    Design,
+}
+
+impl Kind {
+    /// The track an item of this kind is in, unless it says otherwise.
+    pub fn default_track(self) -> TrackId {
+        match self {
+            Self::Card => TrackId::Review,
+            Self::MentalMaths => TrackId::MentalMaths,
+            Self::Probability => TrackId::Probability,
+            Self::Coding => TrackId::Coding,
+            Self::Design => TrackId::SystemDesign,
+        }
+    }
+
+    /// Roughly how many minutes an item of this kind takes, unless it says.
+    fn default_minutes(self) -> u32 {
+        match self {
+            Self::Card | Self::MentalMaths => 1,
+            Self::Probability => 3,
+            Self::Coding => 20,
+            Self::Design => 30,
+        }
+    }
+
+    /// Whether items of this kind are short enough to do offline in a spare minute.
+    pub fn is_short(self) -> bool {
+        matches!(self, Self::Card | Self::MentalMaths | Self::Probability)
+    }
+
+    fn sections(self) -> &'static [(&'static str, bool)] {
+        // (heading, required)
+        match self {
+            Self::Card => &[("Answer", true), ("Explanation", false)],
+            Self::MentalMaths => &[("Method", false)],
+            Self::Probability => &[("Solution", true), ("Simulation", true)],
+            Self::Coding => &[("Hints", false), ("Notes", false)],
+            Self::Design => &[("Rubric", true), ("Notes", false)],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub id: String,
+    /// Where it is in the pack, for messages.
+    pub path: String,
+    pub kind: Kind,
+    pub title: Option<String>,
+    pub skills: Vec<String>,
+    pub track: TrackId,
+    /// Where the item came from, in the pack author's words, such as for imported questions.
+    pub source: Option<String>,
+    /// Roughly how long it takes.
+    pub minutes: u32,
+    /// What the learner is asked, in Markdown.
+    pub prompt: String,
+    pub content: Content,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Content {
+    Card {
+        answer: String,
+        explanation: Option<String>,
+    },
+    MentalMaths(MentalMaths),
+    Probability(Probability),
+    Coding(Coding),
+    Design {
+        /// What a good answer covers, one point each.
+        rubric: Vec<String>,
+        notes: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MentalMaths {
+    /// The numbers drawn for each instance, by name.
+    pub params: BTreeMap<String, Param>,
+    /// Values worked out from the params, by name, for the prompt to show.
+    pub derived: BTreeMap<String, String>,
+    /// An expression of the params and derived values.
+    pub answer: String,
+    /// An expression the params must satisfy, such as `a != b`.
+    pub require: Option<String>,
+    pub tolerance: Tolerance,
+    /// How to work it out, shown after answering, with the instance's values filled in.
+    pub method: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Param {
+    /// Any integer from `min` to `max`, inclusive.
+    Range { min: i64, max: i64 },
+    /// One of these.
+    Choices { choices: Vec<i64> },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawParam {
+    min: Option<i64>,
+    max: Option<i64>,
+    choices: Option<Vec<i64>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Probability {
+    /// The exact answer, as the pack writes it, such as `5/36`.
+    pub answer_text: String,
+    pub answer: f64,
+    pub tolerance: Tolerance,
+    pub solution: String,
+    pub simulation: Simulation,
+}
+
+/// A Monte Carlo check of a probability item: the script is one trial, giving true or false
+/// for a probability, or a number for an expectation, and the mean over the trials must be
+/// within `tolerance` of the exact answer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Simulation {
+    pub script: String,
+    pub trials: u32,
+    pub tolerance: f64,
+}
+
+/// A coding problem's files, relative to the item's directory.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Coding {
+    /// The languages the learner may solve it in, such as `python` and `rust`.
+    pub languages: Vec<String>,
+    /// Languages whose reference solution can be read but not written in, such as `cpp`.
+    pub read_only: Vec<String>,
+    /// Solutions known to be right, one per language.
+    pub reference: Vec<String>,
+    /// A slow solution that's obviously right, compared with the reference on random inputs.
+    pub brute_force: String,
+    /// Hand-written cases, with inputs and expected outputs.
+    pub tests: String,
+    /// A program that prints a random input for a seed, for comparing solutions.
+    pub inputs: String,
+    pub hints: Option<String>,
+    pub notes: Option<String>,
+}
+
+const COMMON_KEYS: &[&str] = &[
+    "id", "kind", "title", "skills", "track", "source", "minutes",
+];
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Common {
+    id: Option<String>,
+    kind: Kind,
+    title: Option<String>,
+    skills: Vec<String>,
+    track: Option<String>,
+    source: Option<String>,
+    minutes: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NoFields {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MentalMathsFields {
+    params: BTreeMap<String, RawParam>,
+    #[serde(default)]
+    derived: BTreeMap<String, String>,
+    answer: String,
+    require: Option<String>,
+    #[serde(default)]
+    tolerance: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProbabilityFields {
+    answer: String,
+    answer_tolerance: Option<f64>,
+    simulation: SimulationFields,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SimulationFields {
+    trials: u32,
+    tolerance: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CodingFields {
+    languages: Vec<String>,
+    #[serde(default)]
+    read_only: Vec<String>,
+    reference: Vec<String>,
+    brute_force: String,
+    tests: String,
+    inputs: String,
+}
+
+/// The fewest and most trials a simulation may ask for.
+const TRIALS: std::ops::RangeInclusive<u32> = 1_000..=2_000_000;
+
+impl Item {
+    /// Reads an item from its file. `default_id` is what it's called if its front matter
+    /// doesn't say, from its file or directory name, and `exists` says whether a file the item
+    /// refers to, relative to the item's directory, is in the pack.
+    pub fn parse(
+        path: &str,
+        default_id: &str,
+        source: &str,
+        manifest: &Manifest,
+        exists: impl Fn(&str) -> bool,
+    ) -> Result<Self, String> {
+        let (front, body) = split_front_matter(source)?;
+        let mut table: toml::Table = toml::from_str(front).map_err(|err| err.to_string())?;
+        let mut common = toml::Table::new();
+        for key in COMMON_KEYS {
+            if let Some(value) = table.remove(*key) {
+                common.insert((*key).to_owned(), value);
+            }
+        }
+        let common: Common = common.try_into().map_err(|err| err.to_string())?;
+        let id = common.id.unwrap_or_else(|| default_id.to_owned());
+        if !is_slug(&id) {
+            return Err(format!(
+                "the id {id:?} should be lowercase letters and digits, in words joined by hyphens"
+            ));
+        }
+        if common.skills.is_empty() {
+            return Err("an item needs at least one skill".to_owned());
+        }
+        if let Some(unknown) = common.skills.iter().find(|s| !manifest.has_skill(s)) {
+            return Err(format!(
+                "the skill {unknown:?} isn't in the pack's skills, in pack.toml"
+            ));
+        }
+        let track = match &common.track {
+            Some(name) => manifest.track(name)?,
+            None => common.kind.default_track(),
+        };
+        if common.minutes == Some(0) {
+            return Err("minutes should be at least 1".to_owned());
+        }
+
+        let (prompt, mut sections) = split_sections(body, common.kind)?;
+        let mut section = |name: &str| sections.remove(name);
+        let kind_fields = toml::Value::Table(table);
+        let content = match common.kind {
+            Kind::Card => {
+                kind_fields
+                    .try_into::<NoFields>()
+                    .map_err(|err| err.to_string())?;
+                Content::Card {
+                    answer: section("Answer").expect("required"),
+                    explanation: section("Explanation"),
+                }
+            }
+            Kind::MentalMaths => {
+                let fields: MentalMathsFields =
+                    kind_fields.try_into().map_err(|err| err.to_string())?;
+                Content::MentalMaths(MentalMaths::new(fields, &prompt, section("Method"))?)
+            }
+            Kind::Probability => {
+                let fields: ProbabilityFields =
+                    kind_fields.try_into().map_err(|err| err.to_string())?;
+                let simulation = section("Simulation").expect("required");
+                Content::Probability(Probability::new(
+                    fields,
+                    section("Solution").expect("required"),
+                    &simulation,
+                )?)
+            }
+            Kind::Coding => {
+                let fields: CodingFields = kind_fields.try_into().map_err(|err| err.to_string())?;
+                if fields.languages.is_empty() {
+                    return Err("a coding item needs at least one language".to_owned());
+                }
+                let files = fields.reference.iter().chain([
+                    &fields.brute_force,
+                    &fields.tests,
+                    &fields.inputs,
+                ]);
+                for file in files {
+                    if !exists(file) {
+                        return Err(format!(
+                            "{file:?} isn't in the item's directory, where its front matter says it is"
+                        ));
+                    }
+                }
+                if fields.reference.is_empty() {
+                    return Err("a coding item needs a reference solution".to_owned());
+                }
+                Content::Coding(Coding {
+                    languages: fields.languages,
+                    read_only: fields.read_only,
+                    reference: fields.reference,
+                    brute_force: fields.brute_force,
+                    tests: fields.tests,
+                    inputs: fields.inputs,
+                    hints: section("Hints"),
+                    notes: section("Notes"),
+                })
+            }
+            Kind::Design => {
+                kind_fields
+                    .try_into::<NoFields>()
+                    .map_err(|err| err.to_string())?;
+                let rubric_text = section("Rubric").expect("required");
+                let rubric: Vec<String> = rubric_text
+                    .lines()
+                    .filter_map(|line| {
+                        line.trim_start()
+                            .strip_prefix("- ")
+                            .or_else(|| line.trim_start().strip_prefix("* "))
+                    })
+                    .map(|point| point.trim().to_owned())
+                    .collect();
+                if rubric.is_empty() {
+                    return Err(
+                        "the rubric should be a list, with a point on each line starting with `- `"
+                            .to_owned(),
+                    );
+                }
+                Content::Design {
+                    rubric,
+                    notes: section("Notes"),
+                }
+            }
+        };
+        Ok(Self {
+            id,
+            path: path.to_owned(),
+            kind: common.kind,
+            title: common.title,
+            skills: common.skills,
+            track,
+            source: common.source,
+            minutes: common.minutes.unwrap_or(common.kind.default_minutes()),
+            prompt,
+            content,
+        })
+    }
+
+    /// What the item is called in lists: its title, or the start of its prompt.
+    pub fn label(&self) -> String {
+        if let Some(title) = &self.title {
+            return title.clone();
+        }
+        let first = self.prompt.lines().next().unwrap_or_default();
+        let words: Vec<&str> = first.split_whitespace().collect();
+        if words.len() <= 8 {
+            words.join(" ")
+        } else {
+            format!("{}…", words[..8].join(" "))
+        }
+    }
+}
+
+fn split_front_matter(source: &str) -> Result<(&str, &str), String> {
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let rest = source
+        .strip_prefix("+++\n")
+        .or_else(|| source.strip_prefix("+++\r\n"))
+        .ok_or("an item should start with TOML front matter, between lines of `+++`")?;
+    let end = rest
+        .match_indices("+++")
+        .find(|(at, _)| {
+            (*at == 0 || rest[..*at].ends_with('\n'))
+                && rest[at + 3..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| c == '\n' || c == '\r')
+        })
+        .map(|(at, _)| at)
+        .ok_or("the front matter has no closing `+++` line")?;
+    let body = rest[end + 3..].trim_start_matches(['\r', '\n']);
+    Ok((&rest[..end], body))
+}
+
+/// The prompt, and each section by its heading, checking the kind's required sections are
+/// there and no others.
+fn split_sections(body: &str, kind: Kind) -> Result<(String, BTreeMap<String, String>), String> {
+    let mut prompt = String::new();
+    let mut sections: BTreeMap<String, String> = BTreeMap::new();
+    let mut current: Option<String> = None;
+    let mut in_code = false;
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+        }
+        if !in_code && let Some(heading) = line.strip_prefix("## ") {
+            let heading = heading.trim().to_owned();
+            if !kind.sections().iter().any(|(name, _)| *name == heading) {
+                let allowed: Vec<_> = kind.sections().iter().map(|(name, _)| *name).collect();
+                return Err(format!(
+                    "a {} item can't have a section called {heading:?}; it can have {}",
+                    kind_name(kind),
+                    allowed.join(", ")
+                ));
+            }
+            if sections.contains_key(&heading) {
+                return Err(format!("the {heading:?} section is there twice"));
+            }
+            sections.insert(heading.clone(), String::new());
+            current = Some(heading);
+            continue;
+        }
+        let text = match &current {
+            Some(heading) => sections.get_mut(heading).expect("inserted above"),
+            None => &mut prompt,
+        };
+        text.push_str(line);
+        text.push('\n');
+    }
+    let prompt = prompt.trim().to_owned();
+    if prompt.is_empty() {
+        return Err("the prompt, before the first `## ` heading, is empty".to_owned());
+    }
+    for text in sections.values_mut() {
+        *text = text.trim().to_owned();
+    }
+    sections.retain(|_, text| !text.is_empty());
+    for (name, required) in kind.sections() {
+        if *required && !sections.contains_key(*name) {
+            return Err(format!(
+                "a {} item needs a `## {name}` section",
+                kind_name(kind)
+            ));
+        }
+    }
+    Ok((prompt, sections))
+}
+
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Card => "card",
+        Kind::MentalMaths => "mental maths",
+        Kind::Probability => "probability",
+        Kind::Coding => "coding",
+        Kind::Design => "design",
+    }
+}
+
+impl MentalMaths {
+    fn new(
+        fields: MentalMathsFields,
+        prompt: &str,
+        method: Option<String>,
+    ) -> Result<Self, String> {
+        if fields.params.is_empty() {
+            return Err("a mental maths item needs at least one param".to_owned());
+        }
+        let mut params = BTreeMap::new();
+        for (name, raw) in fields.params {
+            if !is_identifier(&name) {
+                return Err(format!(
+                    "{name:?} can't be a param's name: use letters, digits and underscores, starting with a letter"
+                ));
+            }
+            let param = match raw {
+                RawParam {
+                    min: Some(min),
+                    max: Some(max),
+                    choices: None,
+                } => {
+                    if min > max {
+                        return Err(format!("the param {name} has min {min} above max {max}"));
+                    }
+                    Param::Range { min, max }
+                }
+                RawParam {
+                    min: None,
+                    max: None,
+                    choices: Some(choices),
+                } => {
+                    if choices.is_empty() {
+                        return Err(format!("the param {name} has no choices"));
+                    }
+                    Param::Choices { choices }
+                }
+                _ => {
+                    return Err(format!(
+                        "the param {name} should have either a min and a max, or choices"
+                    ));
+                }
+            };
+            params.insert(name, param);
+        }
+        for name in fields.derived.keys() {
+            if !is_identifier(name) || params.contains_key(name) || name == "answer" {
+                return Err(format!(
+                    "{name:?} can't be a derived value's name: use letters, digits and underscores, and not the name of a param or `answer`"
+                ));
+            }
+        }
+        if !(fields.tolerance >= 0.0 && fields.tolerance.is_finite()) {
+            return Err("tolerance should be 0 or more".to_owned());
+        }
+        let known = |name: &str| params.contains_key(name) || fields.derived.contains_key(name);
+        for name in placeholders(prompt) {
+            if !known(&name) {
+                return Err(format!(
+                    "the prompt shows {{{name}}}, which isn't a param or a derived value"
+                ));
+            }
+        }
+        if let Some(method) = &method {
+            for name in placeholders(method) {
+                if !known(&name) && name != "answer" {
+                    return Err(format!(
+                        "the method shows {{{name}}}, which isn't a param, a derived value or the answer"
+                    ));
+                }
+            }
+        }
+        Ok(Self {
+            params,
+            derived: fields.derived,
+            answer: fields.answer,
+            require: fields.require,
+            tolerance: Tolerance {
+                absolute: fields.tolerance.max(Tolerance::EXACT.absolute),
+                relative: 0.0,
+            },
+            method,
+        })
+    }
+}
+
+impl Probability {
+    fn new(fields: ProbabilityFields, solution: String, simulation: &str) -> Result<Self, String> {
+        let answer = number::parse(&fields.answer).ok_or_else(|| {
+            format!(
+                "the answer {:?} should be a number, such as 0.25, 1/4 or 25%",
+                fields.answer
+            )
+        })?;
+        let relative = fields.answer_tolerance.unwrap_or(DEFAULT_ANSWER_TOLERANCE);
+        if !(0.0..1.0).contains(&relative) {
+            return Err("answer_tolerance should be at least 0 and below 1".to_owned());
+        }
+        if !TRIALS.contains(&fields.simulation.trials) {
+            return Err(format!(
+                "the simulation should run between {} and {} trials",
+                TRIALS.start(),
+                TRIALS.end()
+            ));
+        }
+        if !(fields.simulation.tolerance > 0.0 && fields.simulation.tolerance.is_finite()) {
+            return Err("the simulation's tolerance should be above 0".to_owned());
+        }
+        let script = code_block(simulation, "rhai").ok_or(
+            "the Simulation section should hold the script for one trial, in a ```rhai code block",
+        )?;
+        Ok(Self {
+            answer_text: fields.answer,
+            answer,
+            tolerance: Tolerance {
+                absolute: Tolerance::EXACT.absolute,
+                relative,
+            },
+            solution,
+            simulation: Simulation {
+                script,
+                trials: fields.simulation.trials,
+                tolerance: fields.simulation.tolerance,
+            },
+        })
+    }
+}
+
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The names in `{name}` placeholders.
+pub(crate) fn placeholders(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('{') {
+        let after = &rest[start + 1..];
+        match after.find('}') {
+            Some(end) if is_identifier(&after[..end]) => {
+                names.push(after[..end].to_owned());
+                rest = &after[end + 1..];
+            }
+            _ => rest = after,
+        }
+    }
+    names
+}
+
+/// The only code block in `text` in this language.
+fn code_block(text: &str, language: &str) -> Option<String> {
+    let mut blocks = Vec::new();
+    let mut current: Option<String> = None;
+    for line in text.lines() {
+        let fence = line.trim_start().strip_prefix("```");
+        match (&mut current, fence) {
+            (None, Some(info)) => {
+                current = (info.trim() == language).then(String::new);
+                if current.is_none() {
+                    // Another language's block: skip to its end.
+                    current = Some(String::from("\0"));
+                }
+            }
+            (Some(code), Some(_)) => {
+                if !code.starts_with('\0') {
+                    blocks.push(std::mem::take(code));
+                }
+                current = None;
+            }
+            (Some(code), None) => {
+                code.push_str(line);
+                code.push('\n');
+            }
+            (None, None) => {}
+        }
+    }
+    if current.is_some() || blocks.len() != 1 {
+        return None;
+    }
+    blocks.pop()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest() -> Manifest {
+        Manifest::parse(
+            r#"
+            id = "example"
+            name = "Example"
+            [[skills]]
+            id = "arithmetic"
+            name = "Arithmetic"
+            [[skills]]
+            id = "dice"
+            name = "Dice"
+            [[tracks]]
+            id = "estimation"
+            name = "Estimation"
+            "#,
+        )
+        .unwrap()
+    }
+
+    fn parse(source: &str) -> Result<Item, String> {
+        Item::parse("items/x.md", "x", source, &manifest(), |file| {
+            file == "reference.py"
+                || file == "brute.py"
+                || file == "tests.toml"
+                || file == "inputs.py"
+        })
+    }
+
+    #[test]
+    fn reads_a_card() {
+        let item = parse(
+            "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\nsource = \"Written for the example\"\n+++\n\nWhat's 7 × 8?\n\n## Answer\n\n56\n\n## Explanation\n\n7 × 8 = 7 × 7 + 7.\n",
+        )
+        .unwrap();
+        assert_eq!(item.id, "x");
+        assert_eq!(item.track, TrackId::Review);
+        assert_eq!(item.prompt, "What's 7 × 8?");
+        assert_eq!(item.minutes, 1);
+        assert_eq!(item.source.as_deref(), Some("Written for the example"));
+        assert_eq!(
+            item.content,
+            Content::Card {
+                answer: "56".to_owned(),
+                explanation: Some("7 × 8 = 7 × 7 + 7.".to_owned())
+            }
+        );
+        assert_eq!(item.label(), "What's 7 × 8?");
+    }
+
+    #[test]
+    fn reads_a_mental_maths_template() {
+        let item = parse(
+            "+++\nkind = \"mental-maths\"\nid = \"times\"\nskills = [\"arithmetic\"]\ntrack = \"estimation\"\nanswer = \"a * b\"\nrequire = \"a != b\"\n[params]\na = { min = 2, max = 9 }\nb = { choices = [11, 12] }\n[derived]\nboth = \"a + b\"\n+++\nWhat's {a} × {b}?\n\n## Method\n\n{a} × {b} = {answer}\n",
+        )
+        .unwrap();
+        assert_eq!(item.id, "times");
+        assert_eq!(item.track, TrackId::Pack("estimation".parse().unwrap()));
+        let Content::MentalMaths(maths) = item.content else {
+            panic!("not mental maths");
+        };
+        assert_eq!(maths.params["a"], Param::Range { min: 2, max: 9 });
+        assert_eq!(
+            maths.params["b"],
+            Param::Choices {
+                choices: vec![11, 12]
+            }
+        );
+        assert_eq!(maths.method.as_deref(), Some("{a} × {b} = {answer}"));
+    }
+
+    #[test]
+    fn reads_a_probability_item() {
+        let item = parse(
+            "+++\nkind = \"probability\"\nskills = [\"dice\"]\nanswer = \"1/6\"\n[simulation]\ntrials = 50000\ntolerance = 0.01\n+++\nTwo dice: what's the chance they sum to 7?\n\n## Solution\n\n6 of the 36 outcomes.\n\n## Simulation\n\n```rhai\nrand_int(1, 6) + rand_int(1, 6) == 7\n```\n",
+        )
+        .unwrap();
+        let Content::Probability(probability) = item.content else {
+            panic!("not probability");
+        };
+        assert_eq!(probability.answer, 1.0 / 6.0);
+        assert_eq!(probability.tolerance.relative, DEFAULT_ANSWER_TOLERANCE);
+        assert_eq!(
+            probability.simulation.script,
+            "rand_int(1, 6) + rand_int(1, 6) == 7\n"
+        );
+        assert_eq!(item.minutes, 3);
+    }
+
+    #[test]
+    fn reads_coding_and_design_items() {
+        let coding = parse(
+            "+++\nkind = \"coding\"\nskills = [\"arithmetic\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nSum a list.\n",
+        )
+        .unwrap();
+        assert_eq!(coding.track, TrackId::Coding);
+        assert_eq!(coding.minutes, 20);
+        let design = parse(
+            "+++\nkind = \"design\"\nskills = [\"arithmetic\"]\nminutes = 25\n+++\nDesign a calculator service.\n\n## Rubric\n\n- Handles precision\n- Scales reads\n",
+        )
+        .unwrap();
+        assert_eq!(design.minutes, 25);
+        assert_eq!(
+            design.content,
+            Content::Design {
+                rubric: vec!["Handles precision".to_owned(), "Scales reads".to_owned()],
+                notes: None
+            }
+        );
+    }
+
+    #[test]
+    fn says_what_is_wrong_with_an_item() {
+        let card = "kind = \"card\"\nskills = [\"arithmetic\"]";
+        let broken = [
+            ("What?\n## Answer\nYes", "front matter"),
+            (
+                "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\nWhat?",
+                "closing",
+            ),
+            (&*format!("+++\n{card}\n+++\nWhat?\n"), "## Answer"),
+            (&*format!("+++\n{card}\n+++\n## Answer\nYes"), "prompt"),
+            (&*format!("+++\n{card}\n+++\nQ\n## Answr\nYes"), "Answr"),
+            (
+                &*format!("+++\n{card}\ncolour = 1\n+++\nQ\n## Answer\nA"),
+                "colour",
+            ),
+            (
+                "+++\nkind = \"card\"\nskills = []\n+++\nQ\n## Answer\nA",
+                "at least one skill",
+            ),
+            (
+                "+++\nkind = \"card\"\nskills = [\"chess\"]\n+++\nQ\n## Answer\nA",
+                "chess",
+            ),
+            (
+                "+++\nkind = \"card\"\nid = \"Big\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA",
+                "lowercase",
+            ),
+            (
+                "+++\nkind = \"card\"\ntrack = \"chess\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA",
+                "no track",
+            ),
+            (
+                "+++\nkind = \"riddle\"\nskills = [\"dice\"]\n+++\nQ",
+                "riddle",
+            ),
+            (
+                "+++\nkind = \"mental-maths\"\nskills = [\"dice\"]\nanswer = \"a\"\n[params]\na = { min = 1, max = 2 }\n+++\nWhat's {b}?",
+                "{b}",
+            ),
+            (
+                "+++\nkind = \"mental-maths\"\nskills = [\"dice\"]\nanswer = \"a\"\n[params]\na = { min = 3, max = 2 }\n+++\nQ",
+                "above max",
+            ),
+            (
+                "+++\nkind = \"probability\"\nskills = [\"dice\"]\nanswer = \"lots\"\n[simulation]\ntrials = 5000\ntolerance = 0.01\n+++\nQ\n## Solution\nS\n## Simulation\n```rhai\ntrue\n```",
+                "should be a number",
+            ),
+            (
+                "+++\nkind = \"probability\"\nskills = [\"dice\"]\nanswer = \"1/2\"\n[simulation]\ntrials = 5000\ntolerance = 0.01\n+++\nQ\n## Solution\nS\n## Simulation\nrand_bool(0.5)",
+                "```rhai",
+            ),
+            (
+                "+++\nkind = \"probability\"\nskills = [\"dice\"]\nanswer = \"1/2\"\n[simulation]\ntrials = 5\ntolerance = 0.01\n+++\nQ\n## Solution\nS\n## Simulation\n```rhai\ntrue\n```",
+                "trials",
+            ),
+            (
+                "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"missing.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nQ",
+                "missing.py",
+            ),
+            (
+                "+++\nkind = \"design\"\nskills = [\"dice\"]\n+++\nQ\n## Rubric\nBe good.",
+                "a list",
+            ),
+        ];
+        for (source, expected) in broken {
+            let err = parse(source).unwrap_err();
+            assert!(err.contains(expected), "{source:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn ignores_headings_inside_code() {
+        let item = parse(
+            "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\n+++\nWhat does this print?\n\n```python\n## not a heading\nprint(1)\n```\n\n## Answer\n\n1\n",
+        )
+        .unwrap();
+        assert!(item.prompt.contains("## not a heading"));
+    }
+
+    #[test]
+    fn finds_placeholders() {
+        assert_eq!(placeholders("{a} × {b_2} = {}"), ["a", "b_2"]);
+        assert_eq!(placeholders("a set {1, 2}"), Vec::<String>::new());
+    }
+}

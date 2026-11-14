@@ -1,0 +1,21 @@
+[
+  { "expected": 1938, "tolerance": { "absolute": 1e-9, "relative": 0 }, "response": "1938", "correct": true },
+  { "expected": 1938, "tolerance": { "absolute": 1e-9, "relative": 0 }, "response": "1,938", "correct": true },
+  { "expected": 1938, "tolerance": { "absolute": 1e-9, "relative": 0 }, "response": "1937", "correct": false },
+  { "expected": 1938, "tolerance": { "absolute": 1e-9, "relative": 0 }, "response": "about 1900", "correct": null },
+  { "expected": 0.75, "tolerance": { "absolute": 1e-9, "relative": 0 }, "response": "3/4", "correct": true },
+  { "expected": 0.75, "tolerance": { "absolute": 1e-9, "relative": 0 }, "response": "75%", "correct": true },
+  { "expected": -12, "tolerance": { "absolute": 1e-9, "relative": 0 }, "response": "−12", "correct": true },
+  { "expected": 0.1388888888888889, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "5/36", "correct": true },
+  { "expected": 0.1388888888888889, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "0.139", "correct": true },
+  { "expected": 0.1388888888888889, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "0.14", "correct": false },
+  { "expected": 0.1388888888888889, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "13.9%", "correct": true },
+  { "expected": 0.1388888888888889, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "1/7", "correct": false },
+  { "expected": 3.5, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "7/2", "correct": true },
+  { "expected": 3.5, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "", "correct": null },
+  { "expected": 3.5, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "7/0", "correct": null },
+  { "expected": 120, "tolerance": { "absolute": 5, "relative": 0 }, "response": "124", "correct": true },
+  { "expected": 120, "tolerance": { "absolute": 5, "relative": 0 }, "response": "126", "correct": false },
+  { "expected": 0.001, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "0.1%", "correct": true },
+  { "expected": 0.001, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "0.002", "correct": false }
+]

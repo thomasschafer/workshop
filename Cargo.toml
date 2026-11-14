@@ -24,6 +24,7 @@ repository = "https://github.com/thomasschafer/workshop"
 workshop-auth = { path = "crates/auth" }
 workshop-common = { path = "crates/common" }
 workshop-lsp = { path = "crates/lsp" }
+workshop-pack = { path = "crates/pack" }
 workshop-provider = { path = "crates/provider" }
 workshop-push = { path = "crates/push" }
 workshop-runner = { path = "crates/runner" }
@@ -42,6 +43,7 @@ mime_guess = "2.0.5"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 rand = "0.10.3"
 regex = "1.13.1"
+rhai = { version = "1.27.0", features = ["no_module", "only_i64"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "form", "gzip", "http2", "multipart"] }
 rust-embed = "8.13.0"
 scraper = "0.27.0"
@@ -64,6 +66,7 @@ web-push-native = "0.5"
 workshop-auth.workspace = true
 workshop-common.workspace = true
 workshop-lsp.workspace = true
+workshop-pack.workspace = true
 workshop-provider.workspace = true
 workshop-push.workspace = true
 workshop-runner.workspace = true
@@ -97,3 +100,8 @@ urlencoding.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 tower.workspace = true
+
+# Pack checks run thousands of simulated trials, which an unoptimised script engine makes slow in
+# tests and debug builds.
+[profile.dev.package.rhai]
+opt-level = 3

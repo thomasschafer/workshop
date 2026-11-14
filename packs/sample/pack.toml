@@ -1,0 +1,95 @@
+# The sample pack that comes with Workshop, used until you configure a pack of your own. See
+# docs/packs.md for the format.
+id = "sample"
+name = "Sample pack"
+description = "A few of each kind of short item: review cards, mental maths and probability."
+
+[[skills]]
+id = "algorithms.complexity"
+name = "Complexity"
+
+[[skills]]
+id = "algorithms.graphs"
+name = "Graph algorithms"
+
+[[skills]]
+id = "data-structures"
+name = "Data structures"
+
+[[skills]]
+id = "systems.reliability"
+name = "Reliability"
+
+[[skills]]
+id = "systems.networking"
+name = "Networking"
+
+[[skills]]
+id = "arithmetic.multiplication"
+name = "Multiplication"
+
+[[skills]]
+id = "arithmetic.addition"
+name = "Addition and subtraction"
+
+[[skills]]
+id = "arithmetic.division"
+name = "Division"
+
+[[skills]]
+id = "arithmetic.percentages"
+name = "Percentages"
+
+[[skills]]
+id = "estimation.magnitudes"
+name = "Orders of magnitude"
+
+[[skills]]
+id = "probability.counting"
+name = "Counting outcomes"
+
+[[skills]]
+id = "probability.complements"
+name = "Complements"
+
+[[skills]]
+id = "probability.conditional"
+name = "Conditional probability"
+
+[[skills]]
+id = "probability.expectation"
+name = "Expectation"
+
+[[skills]]
+id = "probability.geometric"
+name = "Geometric probability"
+
+# A track of the pack's own, beside the built-in ones.
+[[tracks]]
+id = "estimation"
+name = "Estimation"
+summary = "Quick numbers for back-of-the-envelope sums"
+
+[[goals]]
+id = "quick-arithmetic"
+name = "Quick arithmetic"
+skills = [
+  "arithmetic.multiplication",
+  "arithmetic.addition",
+  "arithmetic.division",
+  "arithmetic.percentages",
+]
+
+[[goals]]
+id = "probability-foundations"
+name = "Probability foundations"
+skills = [
+  "probability.counting",
+  "probability.complements",
+  "probability.conditional",
+  "probability.expectation",
+]
+mastery = 0.7
+
+[prompts]
+tutor = "prompts/tutor.md"
