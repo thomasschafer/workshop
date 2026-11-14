@@ -59,7 +59,9 @@ async function closeSettings(): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage({ baseURL: `http://127.0.0.1:${PORT}` });
+  // Without the service worker, as WebKit keeps a page's requests that it handles from the
+  // routes tests set up to stand in for the server. learning.spec.ts tests what it does.
+  page = await browser.newPage({ baseURL: `http://127.0.0.1:${PORT}`, serviceWorkers: "block" });
   await page.addInitScript(installSimulatedSpeech, 20);
   // Counts cards animating in, to check one isn't replayed as words arrive.
   await page.addInitScript(() => {

@@ -1,5 +1,6 @@
 import { render } from "preact";
 import { api } from "./api";
+import { errorMessage } from "./errors";
 import "./styles.css";
 import { applyThemeCss } from "./theme";
 import { Shell } from "./tracks/shell";
@@ -19,6 +20,13 @@ window.addEventListener("unhandledrejection", (event) => {
       : String(event.reason);
   api.log("error", `unhandled rejection: ${reason}`);
 });
+
+// Keeps the app on the device, so short items can be practised offline.
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch((e: unknown) => {
+    api.log("error", `couldn't keep the app for offline use: ${errorMessage(e)}`);
+  });
+}
 
 api
   .bootstrap()

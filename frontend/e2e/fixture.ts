@@ -5,12 +5,29 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-// Each checkout has its own port and home, so the tests can run in several worktrees at once.
+// Each checkout has its own block of ports, one for each server, and its own homes, so the tests
+// can run in several worktrees at once.
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-export const PORT = 20_000 + (checkout.readUInt16BE(0) % 10_000);
-export const HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
+const SERVERS = 2;
+const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
+const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
+
+/** The port of this checkout's `index`th server, in a block no other checkout's overlaps. */
+function port(index: number): number {
+  if (!Number.isInteger(index) || index < 0 || index >= SERVERS) {
+    throw new Error(`Each checkout has ports for ${SERVERS} servers, not server ${index}.`);
+  }
+  return FIRST_PORT + index;
+}
+
+export const PORT = port(0);
+export const HOME = CHECKOUT_HOME;
+
+/** A second server, for learning from the sample pack, so its tests start with nothing done. */
+export const LEARNING_PORT = port(1);
+export const LEARNING_HOME = `${CHECKOUT_HOME}-learning`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -179,6 +196,20 @@ export function createHome(): void {
     puzzle: PUZZLE,
     input: "a\nb\nc\nd\ne\n",
     stars: { 1: 2, 2: 2, 3: 1, 4: 0 },
+    model: "fake",
+  });
+}
+
+/** A home for learning from the sample pack, as when no pack is configured. */
+export function createLearningHome(): void {
+  writeHome({
+    home: LEARNING_HOME,
+    port: LEARNING_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
     model: "fake",
   });
 }

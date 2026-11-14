@@ -1,11 +1,19 @@
 import { delimiter, resolve } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
-import { createHome, HOME, PORT } from "./e2e/fixture";
+import {
+  createHome,
+  createLearningHome,
+  HOME,
+  LEARNING_HOME,
+  LEARNING_PORT,
+  PORT,
+} from "./e2e/fixture";
 
 // Playwright loads this file in each of its processes; the home must only be built once, before
 // the server starts.
 if (process.env.WORKSHOP_E2E_HOME_READY === undefined) {
   createHome();
+  createLearningHome();
   process.env.WORKSHOP_E2E_HOME_READY = "1";
 }
 
@@ -36,10 +44,10 @@ export default defineConfig({
     },
     { name: "webkit", use: { browserName: "webkit" } },
   ],
-  webServer: {
+  webServer: [HOME, LEARNING_HOME].map((home) => ({
     command: `${binary} serve`,
     env: {
-      WORKSHOP_HOME: HOME,
+      WORKSHOP_HOME: home,
       // A stand-in for Whisper, used once a test puts its model in place.
       PATH: `${resolve(import.meta.dirname, "e2e", "bin")}${delimiter}${process.env.PATH ?? ""}`,
       RUST_LOG: "workshop=warn",
@@ -49,10 +57,10 @@ export default defineConfig({
       GIT_COMMITTER_NAME: "Workshop tests",
       GIT_COMMITTER_EMAIL: "tests@example.com",
     },
-    url: `http://127.0.0.1:${PORT}/api/bootstrap`,
+    url: `http://127.0.0.1:${home === HOME ? PORT : LEARNING_PORT}/api/bootstrap`,
     reuseExistingServer: false,
     // So the server stops what it started, such as whisper-server, as it would when stopped by hand.
-    gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
+    gracefulShutdown: { signal: "SIGTERM" as const, timeout: 5000 },
     timeout: 30_000,
-  },
+  })),
 });
