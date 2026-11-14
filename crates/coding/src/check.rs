@@ -12,6 +12,16 @@ use crate::programs::{Built, Flavour, Runtime};
 /// Checks items' programs by building and running them, for `Pack::check`.
 pub struct Checker {
     pub runtime: Runtime,
+    pub unconfined: Unconfined,
+}
+
+/// What to do with items' programs when the runtime has no sandbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unconfined {
+    /// Run them anyway, for programs the user has chosen to trust.
+    Run,
+    /// Skip the item, as it can't be shown to be right here.
+    Skip,
 }
 
 impl workshop_pack::Programs for Checker {
@@ -20,6 +30,16 @@ impl workshop_pack::Programs for Checker {
         item: &'a Item,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Verdict> + Send + 'a>> {
         Box::pin(async move {
+            let has_programs = matches!(item.content, Content::Coding(_) | Content::Reading(_));
+            if has_programs
+                && !self.runtime.sandbox.confines()
+                && self.unconfined == Unconfined::Skip
+            {
+                return Verdict::Skipped(
+                    "there's no sandbox here to run its programs in (sandbox-exec on macOS, or bubblewrap on Linux)"
+                        .to_owned(),
+                );
+            }
             let cancel = CancellationToken::new();
             let checked = match &item.content {
                 Content::Coding(coding) => check_coding(&self.runtime, coding, &cancel).await,
@@ -247,17 +267,26 @@ mod tests {
     use workshop_pack::{Pack, Verdict};
 
     use super::*;
+    use crate::Sandbox;
 
     #[tokio::test]
     async fn the_sample_packs_programs_pass_their_checks() {
         let dir = tempfile::tempdir().unwrap();
+        let sandbox = Sandbox::detect(&[]).await;
+        // Where there's a sandbox, the real toolchains must work inside it.
+        assert!(
+            sandbox.is_some() || !cfg!(target_os = "macos"),
+            "macOS always has a sandbox"
+        );
         let checker = Checker {
             runtime: Runtime {
                 scratch: dir.path().to_owned(),
                 environment: Vec::new(),
                 build_timeout: Duration::from_secs(60),
                 run_timeout: Duration::from_secs(60),
+                sandbox: sandbox.unwrap_or(Sandbox::Unconfined),
             },
+            unconfined: Unconfined::Run,
         };
         let pack = Pack::sample();
         let report = pack.check(&checker).await;
@@ -282,5 +311,38 @@ mod tests {
                 Verdict::Failed(_) => unreachable!("listed above"),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn skips_programs_without_a_sandbox_when_told_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let checker = Checker {
+            runtime: Runtime {
+                scratch: dir.path().to_owned(),
+                environment: Vec::new(),
+                build_timeout: Duration::from_secs(60),
+                run_timeout: Duration::from_secs(60),
+                sandbox: Sandbox::Unconfined,
+            },
+            unconfined: Unconfined::Skip,
+        };
+        let pack = Pack::sample();
+        let report = pack.check(&checker).await;
+        let mut with_programs = 0;
+        for checked in &report.items {
+            let item = pack.items.iter().find(|i| i.path == checked.path).unwrap();
+            if matches!(item.content, Content::Coding(_) | Content::Reading(_)) {
+                with_programs += 1;
+                assert!(
+                    matches!(&checked.verdict, Verdict::Skipped(why) if why.contains("no sandbox")),
+                    "{}: {:?}",
+                    checked.path,
+                    checked.verdict
+                );
+            }
+        }
+        assert!(with_programs > 0);
+        // Nothing was built.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 }

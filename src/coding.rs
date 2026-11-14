@@ -35,15 +35,22 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(10);
 pub const SUBMIT_RANDOM_INPUTS: u32 = 30;
 
 /// Where and how coding items' programs are built and run: in Workshop's build directory, with
-/// the solutions' toolchain, if mise provides one.
+/// the solutions' toolchain, if mise provides one, and inside this machine's sandbox, if it has
+/// one. Without one, they run with all the user's access, as Advent of Code solutions do; it's
+/// up to the caller whether to run model-written programs then.
 pub async fn runtime(config: &Config, paths: &Paths) -> Result<workshop_coding::Runtime> {
     let toolchain = workshop_toolchain::toolchain::Toolchain::load(&config.solutions_dir).await?;
     let build_timeout = Duration::from_secs(config.run.timeout_secs);
+    let environment = toolchain.overlay(Vec::new());
+    let sandbox = workshop_coding::Sandbox::detect(&environment)
+        .await
+        .unwrap_or(workshop_coding::Sandbox::Unconfined);
     Ok(workshop_coding::Runtime {
         scratch: paths.build_dir().join("coding"),
-        environment: toolchain.overlay(Vec::new()),
+        environment,
         build_timeout,
         run_timeout: RUN_TIMEOUT.min(build_timeout),
+        sandbox,
     })
 }
 

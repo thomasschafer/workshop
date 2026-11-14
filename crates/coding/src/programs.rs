@@ -14,6 +14,8 @@ use workshop_common::programs::{find_program, find_program_in};
 use workshop_pack::Language;
 use workshop_runner::Ending;
 
+use crate::sandbox::Sandbox;
+
 /// Where and how programs are built and run.
 #[derive(Debug, Clone)]
 pub struct Runtime {
@@ -25,6 +27,8 @@ pub struct Runtime {
     pub build_timeout: Duration,
     /// How long each run may take.
     pub run_timeout: Duration,
+    /// What programs are built and run inside.
+    pub sandbox: Sandbox,
 }
 
 /// The C++ compilers to look for, in order.
@@ -102,7 +106,7 @@ impl Runtime {
                         "Rust isn't installed: install it from https://rustup.rs".to_owned()
                     );
                 }
-                Ok(Some(owned(&[
+                let mut args = owned(&[
                     "rustc",
                     "--edition",
                     "2024",
@@ -111,16 +115,26 @@ impl Runtime {
                     "main",
                     "-o",
                     &binary(),
-                ])))
+                ]);
+                // rustc links with `cc`, which may need to be the compiler behind a shim.
+                if let Some(cc) = self.find("cc") {
+                    let linker = self.sandbox.program(&cc);
+                    if linker != cc {
+                        args.extend(["-C".to_owned(), format!("linker={}", linker.display())]);
+                    }
+                }
+                Ok(Some(args))
             }
             Language::Cpp => {
-                let Some(compiler) = CPP_COMPILERS.iter().find(|c| self.find(c).is_some()) else {
+                let Some(compiler) = CPP_COMPILERS.iter().find_map(|c| self.find(c)) else {
                     return Err(format!(
                         "no C++ compiler was found (looked for {}); install one, such as clang or GCC",
                         CPP_COMPILERS.join(", ")
                     ));
                 };
-                let mut args = owned(&[compiler, "-std=c++17", "-o", &binary()]);
+                let compiler = self.sandbox.program(&compiler);
+                let compiler = compiler.to_string_lossy();
+                let mut args = owned(&[&compiler, "-std=c++17", "-o", &binary()]);
                 match flavour {
                     Flavour::Plain => args.push("-O1".to_owned()),
                     Flavour::Sanitized => args.extend(owned(&[
@@ -177,10 +191,14 @@ impl Runtime {
         std::fs::write(staging.join(&file), source)?;
         if let Some(mut args) = compiler {
             args.push(file.clone());
+            let confined = self
+                .sandbox
+                .confine(&args, &[], &staging, &self.environment)
+                .with_context(|| format!("sandboxing the build in {}", staging.display()))?;
             let output = workshop_runner::execute(
-                &args,
+                &confined.command,
                 &staging,
-                &self.environment,
+                &confined.environment,
                 None,
                 self.build_timeout,
                 cancel,
@@ -219,15 +237,31 @@ impl Runtime {
     ) -> Result<Run> {
         let started = Instant::now();
         let command: Vec<String> = program.command.iter().chain(args).cloned().collect();
-        let output = workshop_runner::execute(
-            &command,
-            &program.dir,
-            &self.environment,
-            Some(input),
-            self.run_timeout,
-            cancel,
-        )
-        .await?;
+        // Somewhere of its own to write, as the program's directory is shared by every run.
+        let scratch =
+            self.scratch
+                .join("running")
+                .join(format!("{}-{}", std::process::id(), unique()));
+        std::fs::create_dir_all(&scratch)
+            .with_context(|| format!("creating {}", scratch.display()))?;
+        let output = async {
+            let confined = self
+                .sandbox
+                .confine(&command, &[&program.dir], &scratch, &self.environment)
+                .with_context(|| format!("sandboxing a run of {}", program.dir.display()))?;
+            workshop_runner::execute(
+                &confined.command,
+                &program.dir,
+                &confined.environment,
+                Some(input),
+                self.run_timeout,
+                cancel,
+            )
+            .await
+        }
+        .await;
+        let _ = std::fs::remove_dir_all(&scratch);
+        let output = output?;
         Ok(Run {
             ending: output.ending,
             stdout: output.stdout,
@@ -287,6 +321,7 @@ mod tests {
             environment: Vec::new(),
             build_timeout: Duration::from_secs(60),
             run_timeout: Duration::from_secs(60),
+            sandbox: Sandbox::Unconfined,
         }
     }
 

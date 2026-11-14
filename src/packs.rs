@@ -46,7 +46,15 @@ pub async fn check(
             .map(|dir: &PathBuf| Ok((dir.display().to_string(), Pack::load(dir)?)))
             .collect::<Result<_>>()?,
     };
-    let checker = workshop_coding::Checker { runtime };
+    if !runtime.sandbox.confines() {
+        eprintln!(
+            "Warning: there's no sandbox on this machine (sandbox-exec on macOS, or bubblewrap on Linux), so the packs' programs run with all your access, including to the network and your files. Only check packs whose programs you trust.\n"
+        );
+    }
+    let checker = workshop_coding::Checker {
+        runtime,
+        unconfined: workshop_coding::Unconfined::Run,
+    };
     let mut passed = true;
     for (place, pack) in packs {
         let report = pack.check(&checker).await;
@@ -136,6 +144,7 @@ mod tests {
             environment: Vec::new(),
             build_timeout: std::time::Duration::from_secs(60),
             run_timeout: std::time::Duration::from_secs(60),
+            sandbox: workshop_coding::Sandbox::Unconfined,
         }
     }
 

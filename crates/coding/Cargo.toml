@@ -12,11 +12,12 @@ workshop-common.workspace = true
 workshop-pack.workspace = true
 workshop-runner.workspace = true
 anyhow.workspace = true
+dirs.workspace = true
 futures-util.workspace = true
 serde.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-tempfile.workspace = true
