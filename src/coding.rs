@@ -235,6 +235,7 @@ pub struct Reference {
 /// The problems' sessions and code drafts, kept in Workshop's data directory.
 pub struct Problems {
     dir: PathBuf,
+    saved: workshop_sessions::Saved<Session>,
     /// Held while saving a draft, so two saves from the same version can't both succeed.
     save_lock: std::sync::Mutex<()>,
 }
@@ -269,14 +270,12 @@ pub fn find<'a>(packs: &'a [Pack], pack: &str, item: &str) -> Result<Found<'a>> 
 
 impl Problems {
     pub fn new(data_dir: &Path) -> Self {
+        let dir = data_dir.join("coding");
         Self {
-            dir: data_dir.join("coding"),
+            saved: workshop_sessions::Saved::new(dir.join("sessions")),
+            dir,
             save_lock: std::sync::Mutex::new(()),
         }
-    }
-
-    fn session_path(&self, key: &str) -> PathBuf {
-        self.dir.join("sessions").join(format!("{key}.json"))
     }
 
     /// Where a language's drafts are, which its language server is started in.
@@ -316,46 +315,16 @@ impl Problems {
     }
 
     pub fn session(&self, key: &str) -> Result<Option<Session>> {
-        let path = self.session_path(key);
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(Some(
-                serde_json::from_str(&text)
-                    .with_context(|| format!("reading {}", path.display()))?,
-            )),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
-        }
+        self.saved.get(key)
     }
 
     /// Every session in progress, by item.
     pub fn sessions(&self) -> Result<BTreeMap<String, Session>> {
-        let mut sessions = BTreeMap::new();
-        let root = self.dir.join("sessions");
-        let Ok(packs) = std::fs::read_dir(&root) else {
-            return Ok(sessions);
-        };
-        for pack in packs {
-            let pack = pack?;
-            for file in std::fs::read_dir(pack.path())? {
-                let name = file?.file_name().to_string_lossy().into_owned();
-                if let Some(item) = name.strip_suffix(".json") {
-                    let key = format!("{}/{item}", pack.file_name().to_string_lossy());
-                    if let Some(session) = self.session(&key)? {
-                        sessions.insert(key, session);
-                    }
-                }
-            }
-        }
-        Ok(sessions)
+        self.saved.all()
     }
 
     fn write_session(&self, key: &str, session: &Session) -> Result<()> {
-        let path = self.session_path(key);
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let json = serde_json::to_string_pretty(session)?;
-        workshop_common::files::write_atomic(&path, json.as_bytes())
+        self.saved.put(key, session)
     }
 
     /// Saves where the learner is with a problem, as long as it's somewhere the problem has.
@@ -428,11 +397,7 @@ impl Problems {
 
     /// Ends a problem's session, once its attempt is recorded.
     pub fn finish(&self, key: &str) -> Result<()> {
-        match std::fs::remove_file(self.session_path(key)) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(err.into()),
-        }
+        self.saved.remove(key)
     }
 
     /// A problem's draft in a language, starting from the item's starter the first time.

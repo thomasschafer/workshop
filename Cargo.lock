@@ -4071,6 +4071,7 @@ dependencies = [
  "workshop-provider",
  "workshop-push",
  "workshop-runner",
+ "workshop-sessions",
  "workshop-tailscale",
  "workshop-toolchain",
  "workshop-tracks",
@@ -4213,6 +4214,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "workshop-common",
+]
+
+[[package]]
+name = "workshop-sessions"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
  "workshop-common",
 ]
 

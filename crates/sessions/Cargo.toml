@@ -1,0 +1,18 @@
+[package]
+name = "workshop-sessions"
+version = "0.0.0"
+edition.workspace = true
+description = "Long items done in a sitting, saved as they go: guided design sessions and timed rounds"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+workshop-common.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

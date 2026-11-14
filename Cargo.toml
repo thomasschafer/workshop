@@ -31,6 +31,7 @@ workshop-pack = { path = "crates/pack" }
 workshop-provider = { path = "crates/provider" }
 workshop-push = { path = "crates/push" }
 workshop-runner = { path = "crates/runner" }
+workshop-sessions = { path = "crates/sessions" }
 workshop-tailscale = { path = "crates/tailscale" }
 workshop-toolchain = { path = "crates/toolchain" }
 workshop-tracks = { path = "crates/tracks" }
@@ -78,6 +79,7 @@ workshop-pack.workspace = true
 workshop-provider.workspace = true
 workshop-push.workspace = true
 workshop-runner.workspace = true
+workshop-sessions.workspace = true
 workshop-tailscale.workspace = true
 workshop-toolchain.workspace = true
 workshop-tracks.workspace = true
