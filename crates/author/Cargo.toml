@@ -1,0 +1,18 @@
+[package]
+name = "workshop-author"
+version = "0.0.0"
+edition.workspace = true
+description = "The author: writing new items for a pack with one model, reviewed blind by another"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+workshop-pack.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true

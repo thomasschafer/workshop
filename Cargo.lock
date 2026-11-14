@@ -4062,6 +4062,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "workshop-auth",
+ "workshop-author",
  "workshop-coding",
  "workshop-common",
  "workshop-learning",
@@ -4087,6 +4088,18 @@ dependencies = [
  "tower",
  "urlencoding",
  "workshop-common",
+]
+
+[[package]]
+name = "workshop-author"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "workshop-pack",
 ]
 
 [[package]]
