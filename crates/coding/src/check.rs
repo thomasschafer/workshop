@@ -68,9 +68,16 @@ pub async fn check_coding(
                 skipped.push(format!("{}: {reason}", reference.file));
             }
             Ok(graded) => {
+                // A build that fails says why itself, which may be the toolchain rather than
+                // the solution, such as a missing linker.
                 if let Some(problem) = graded.problem() {
+                    let what = if matches!(graded, Graded::BuildFailed { .. }) {
+                        ":"
+                    } else {
+                        " is wrong:"
+                    };
                     return Ok(Verdict::Failed(format!(
-                        "{} is wrong: {problem}",
+                        "{}{what} {problem}",
                         reference.file
                     )));
                 }
