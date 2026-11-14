@@ -41,6 +41,12 @@ provider = "claude"
 # ["sol", "astra"].
 models = ["sonnet", "opus", "fable"]
 
+# The grader, which marks work in your own words, design sessions and timed rounds, uses the
+# discussion provider's first model unless it has one of its own, here or in the app, such as:
+# [models.grader]
+# provider = "codex"
+# model = "sol"        # the provider's first discussion model if not given
+
 [editor]
 # The code editor's keybindings with a keyboard: "default", or "helix" for Helix's modal ones.
 # Each device can choose for itself in the app, under Settings, Display.

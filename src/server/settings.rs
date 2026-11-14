@@ -16,6 +16,8 @@ pub(super) struct ModelsState {
     settings: ModelSettings,
     /// The models to choose between in the Discuss tab.
     discuss_models: Vec<String>,
+    /// The grader's model, or `None` for the discussion provider's first.
+    grader: Option<models::ModelChoice>,
 }
 
 pub(super) fn models_state(app: &App) -> ModelsState {
@@ -23,6 +25,7 @@ pub(super) fn models_state(app: &App) -> ModelsState {
     ModelsState {
         providers: models::options(&app.config),
         discuss_models: models::discuss_models(&app.config, &settings.discuss_provider),
+        grader: settings.grader(&app.config),
         settings,
     }
 }
@@ -39,10 +42,10 @@ pub(super) async fn set_models(
         .validate(&app.config)
         .map_err(|e| bad_request(format!("{e:#}")))?;
     let options = models::options(&app.config);
-    for provider in [&settings.edit.provider, &settings.discuss_provider] {
+    for provider in settings.providers(&app.config) {
         if let Some(reason) = options
             .iter()
-            .find(|o| &o.id == provider)
+            .find(|o| o.id == provider)
             .and_then(|o| o.unavailable.clone())
         {
             return Err(bad_request(reason));

@@ -189,13 +189,25 @@ impl App {
         (&self.runners[&choice.provider], spec)
     }
 
-    /// The runner and call for the grader: the discussion provider's first model, with the
-    /// pack's add-on to the grader's instructions.
+    /// The runner and call for the grader: its own model if one's chosen, in the app or the
+    /// config, or else the discussion provider's first, with the pack's add-on to the grader's
+    /// instructions.
     pub(super) fn grader_target(
         &self,
         add_on: Option<&str>,
     ) -> Result<(&ProviderRunner, CallSpec)> {
-        self.coach_target(crate::grader::system_prompt(add_on))
+        let system = crate::grader::system_prompt(add_on);
+        match self.model_settings().grader(&self.config) {
+            Some(grader) => {
+                let spec = self.config.providers[&grader.provider].spec(
+                    Role::Discuss,
+                    &grader.model,
+                    system,
+                );
+                Ok((&self.runners[&grader.provider], spec))
+            }
+            None => self.coach_target(system),
+        }
     }
 
     /// The runner and call for a coach that isn't talked to through the discussion screen, such

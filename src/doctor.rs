@@ -81,12 +81,7 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
 
     // The providers chosen in the app, which may differ from the config's defaults.
     let settings = crate::settings::AppSettings::load(config, paths);
-    let mut provider_ids = vec![
-        settings.models.edit.provider.clone(),
-        settings.models.discuss_provider.clone(),
-    ];
-    provider_ids.dedup();
-    for id in &provider_ids {
+    for id in &settings.models.providers(config) {
         checks.extend(check_provider(config, id).await);
     }
 

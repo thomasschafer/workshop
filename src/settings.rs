@@ -96,6 +96,10 @@ mod tests {
                     model: "luna".into(),
                 },
                 discuss_provider: "codex".into(),
+                grader: Some(crate::models::GraderChoice::Model {
+                    provider: "claude".into(),
+                    model: "opus".into(),
+                }),
             },
             language: "python".into(),
             theme: ThemeSettings::default(),

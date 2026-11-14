@@ -492,6 +492,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn marks_with_the_graders_own_model_if_one_is_chosen() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("pack");
+        crate::pack_files::testing::sample_pack_repo(&pack);
+        std::fs::write(dir.path().join("mark.json"), MARKED).unwrap();
+        let model = fake_discussion_model(dir.path(), &[("<work>", "mark.json")]);
+        let graded = r#"{"score": 0.4, "points": [], "findings": [], "feedback": "From the grader's own model."}"#;
+        std::fs::write(dir.path().join("graded.json"), graded).unwrap();
+        let grader = dir.path().join("grader.sh");
+        std::fs::write(
+            &grader,
+            format!(
+                "cat > /dev/null\ncat {:?}\n",
+                dir.path().join("graded.json").display().to_string()
+            ),
+        )
+        .unwrap();
+        let router = test_app_in(
+            dir.path(),
+            &format!(
+                "{model}\n[providers.grader]\ncommand = [\"sh\", {:?}]\ninput = \"stdin\"\noutput = \"text\"\ndiscuss_models = [\"careful\"]\n\n[models.grader]\nprovider = \"grader\"\n\n[learning]\npacks = [{:?}]\n",
+                grader.display().to_string(),
+                pack.display().to_string()
+            ),
+        );
+        let mark = |id: &str| {
+            request(
+                "POST",
+                "/api/items/sample/link-shortener/mark",
+                Some(
+                    serde_json::json!({ "id": id, "work": "design", "text": "A table of codes." }),
+                ),
+            )
+        };
+        let models = json(send(&router, request("GET", "/api/models", None)).await).await;
+        assert_eq!(
+            models["grader"],
+            serde_json::json!({ "provider": "grader", "model": "careful" })
+        );
+        let marked = json(send(&router, mark("5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a41")).await).await;
+        assert_eq!(marked["marked"]["score"], 0.4);
+
+        // Chosen in the app to mark as the discussion does.
+        let mut settings = models["settings"].clone();
+        settings["grader"] = serde_json::json!({ "kind": "discussion" });
+        let models = json(send(&router, request("PUT", "/api/models", Some(settings))).await).await;
+        assert_eq!(models["grader"], serde_json::Value::Null);
+        let marked = json(send(&router, mark("5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a42")).await).await;
+        assert_eq!(marked["marked"]["score"], 0.65);
+    }
+
+    #[tokio::test]
     async fn marks_what_was_explained_aloud_for_clarity_too() {
         let dir = tempfile::tempdir().unwrap();
         let router = app(dir.path());

@@ -17,6 +17,22 @@ pub struct ModelChoice {
 pub struct ModelSettings {
     pub edit: ModelChoice,
     pub discuss_provider: String,
+    /// The model that marks work, if chosen in the app; otherwise the config decides. See
+    /// [`ModelSettings::grader`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grader: Option<GraderChoice>,
+}
+
+/// The grader's model, as chosen in the app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GraderChoice {
+    /// The discussion provider's first model.
+    Discussion,
+    Model {
+        provider: String,
+        model: String,
+    },
 }
 
 /// A provider as offered in the app.
@@ -38,17 +54,58 @@ impl ModelSettings {
                 model: config.models.edit.model.clone(),
             },
             discuss_provider: config.models.discuss.provider.clone(),
+            grader: None,
         }
     }
 
+    /// The grader's model: the one chosen in the app, or else the config's, or `None` for the
+    /// discussion provider's first model.
+    pub fn grader(&self, config: &Config) -> Option<ModelChoice> {
+        match &self.grader {
+            Some(GraderChoice::Discussion) => None,
+            Some(GraderChoice::Model { provider, model }) => Some(ModelChoice {
+                provider: provider.clone(),
+                model: model.clone(),
+            }),
+            None => config.models.grader.provider.as_ref().map(|provider| {
+                let model = config
+                    .models
+                    .grader
+                    .model
+                    .clone()
+                    .or_else(|| discuss_models(config, provider).into_iter().next());
+                ModelChoice {
+                    provider: provider.clone(),
+                    // Parsing the config checks it has one, given or suggested.
+                    model: model.expect("[models.grader] has a model"),
+                }
+            }),
+        }
+    }
+
+    /// The providers chosen, for anything, each once.
+    pub fn providers(&self, config: &Config) -> Vec<String> {
+        let mut providers = vec![self.edit.provider.clone(), self.discuss_provider.clone()];
+        providers.extend(self.grader(config).map(|grader| grader.provider));
+        providers.sort();
+        providers.dedup();
+        providers
+    }
+
     pub fn validate(&self, config: &Config) -> Result<()> {
-        for provider in [&self.edit.provider, &self.discuss_provider] {
-            if !config.providers.contains_key(provider) {
+        for provider in self.providers(config) {
+            if !config.providers.contains_key(&provider) {
                 bail!("there's no provider called {provider:?}");
             }
         }
         if self.edit.model.trim().is_empty() {
             bail!("choose an edit model");
+        }
+        if self
+            .grader(config)
+            .is_some_and(|grader| grader.model.trim().is_empty())
+        {
+            bail!("choose a model for the grader");
         }
         Ok(())
     }
@@ -120,6 +177,39 @@ mod tests {
         assert_eq!(settings.edit.provider, "claude");
         assert_eq!(settings.edit.model, "haiku");
         assert_eq!(settings.discuss_provider, "claude");
+        // The grader follows the discussion unless the config or the app says otherwise.
+        assert_eq!(settings.grader(&config()), None);
+        let given = Config::parse("[models.grader]\nprovider = \"codex\"").unwrap();
+        let codex = ModelChoice {
+            provider: "codex".into(),
+            model: "sol".into(),
+        };
+        assert_eq!(
+            ModelSettings::defaults(&given).grader(&given),
+            Some(codex.clone())
+        );
+        let following = ModelSettings {
+            grader: Some(GraderChoice::Discussion),
+            ..ModelSettings::defaults(&given)
+        };
+        assert_eq!(following.grader(&given), None);
+        let chosen = ModelSettings {
+            grader: Some(GraderChoice::Model {
+                provider: "codex".into(),
+                model: "sol".into(),
+            }),
+            ..settings.clone()
+        };
+        assert_eq!(chosen.grader(&config()), Some(codex));
+        assert_eq!(chosen.providers(&config()), ["claude", "codex"]);
+        let empty = ModelSettings {
+            grader: Some(GraderChoice::Model {
+                provider: "codex".into(),
+                model: String::new(),
+            }),
+            ..settings
+        };
+        assert!(empty.validate(&config()).is_err());
     }
 
     #[test]

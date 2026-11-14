@@ -93,7 +93,7 @@ Cards, coding plans and solutions, design notes and what you say to the coaches 
 
 Wrong answers, failed submissions and what the grader finds go into a mistake log, each tagged with a kind of mistake, such as an off-by-one or a misreading, which you can confirm or change; a pack can add kinds of its own. Practice, and Continue, lean towards the skills your recent mistakes are in. Each goal a pack defines has a page showing its skills against the goal's target, how it's changed over the last few weeks, how long is left, and what's weakest.
 
-The grader, through your discussion model, marks written and spoken work against a rubric: design sessions, timed rounds, a coding problem's plan and how its solution works, and a card answered in your own words. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
+The grader, through your discussion provider's first model unless you give it one of its own under Settings, Models, or `[models.grader]` in your config, marks written and spoken work against a rubric: design sessions, timed rounds, a coding problem's plan and how its solution works, and a card answered in your own words. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
 
 The author writes new items for a pack of your own, for what you're weakest in and the mistakes you make most: one model writes them, a model from another provider solves each blind and reviews it, and each must pass its check. Run it with `workshop author`, or Top up under Packs in the app; [docs/author.md](docs/author.md) describes it. Questions you've found elsewhere can be added to a pack as drafts, under Packs or with `workshop pack import`, for the author to make into items.
 
@@ -117,6 +117,10 @@ model = "haiku"        # always the latest; for Codex, a family such as "luna"
 [models.discuss]
 provider = "claude"
 models = ["sonnet", "opus", "fable"]    # for Codex, ["sol", "astra"]
+
+# [models.grader]      # the discussion provider's first model unless set
+# provider = "codex"
+# model = "sol"        # the provider's first discussion model if not given
 
 [learning]
 packs = []              # pack directories; the sample pack until you list one

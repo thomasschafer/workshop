@@ -222,9 +222,14 @@ export interface ModelChoice {
   model: string;
 }
 
+/** The grader's model, as chosen in the app: the discussion provider's first, or its own. */
+export type GraderChoice = { kind: "discussion" } | ({ kind: "model" } & ModelChoice);
+
 export interface ModelSettings {
   edit: ModelChoice;
   discuss_provider: string;
+  /** Missing until chosen in the app, when the config decides. */
+  grader?: GraderChoice;
 }
 
 /** A model CLI as offered in the app. */
@@ -241,6 +246,8 @@ export interface ModelsState {
   providers: ProviderOption[];
   settings: ModelSettings;
   discuss_models: string[];
+  /** The grader's model, or null for the discussion provider's first. */
+  grader: ModelChoice | null;
 }
 
 /** A file the user edits, here or elsewhere. */

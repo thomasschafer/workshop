@@ -141,6 +141,7 @@ pub struct RunConfig {
 pub struct ModelsConfig {
     pub edit: EditModelConfig,
     pub discuss: DiscussModelConfig,
+    pub grader: GraderModelConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -155,6 +156,15 @@ pub struct EditModelConfig {
 pub struct DiscussModelConfig {
     pub provider: String,
     pub models: Vec<String>,
+}
+
+/// The model that marks work, if not the discussion provider's first model.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GraderModelConfig {
+    pub provider: Option<String>,
+    /// The provider's first discussion model if not given.
+    pub model: Option<String>,
 }
 
 /// How the code editor behaves with a keyboard.
@@ -407,6 +417,32 @@ impl Config {
         if raw.models.discuss.models.is_empty() {
             bail!("[models.discuss] needs at least one model");
         }
+        match &raw.models.grader {
+            GraderModelConfig {
+                provider: None,
+                model: Some(_),
+            } => bail!("[models.grader] needs a provider for its model"),
+            GraderModelConfig {
+                provider: Some(provider),
+                ..
+            } if !providers.contains_key(provider) => {
+                bail!("[models.grader] uses unknown provider {provider:?}");
+            }
+            GraderModelConfig {
+                model: Some(model), ..
+            } if model.trim().is_empty() => bail!("[models.grader] has an empty model"),
+            GraderModelConfig {
+                provider: Some(provider),
+                model: None,
+            } if *provider != raw.models.discuss.provider
+                && providers[provider].discuss_models.is_empty() =>
+            {
+                bail!(
+                    "[models.grader] needs a model, as {provider:?} doesn't suggest any for discussion"
+                );
+            }
+            _ => {}
+        }
         let mut seen = std::collections::HashSet::new();
         for snippet in &raw.snippets {
             if !seen.insert(snippet.name.to_lowercase()) {
@@ -522,6 +558,20 @@ mod tests {
         assert_eq!(codex.models.edit.model, "luna");
         assert_eq!(codex.models.discuss.provider, "codex");
         assert_eq!(codex.models.discuss.models, vec!["sol", "astra"]);
+    }
+
+    #[test]
+    fn reads_the_graders_model_if_its_not_the_discussions() {
+        let config = Config::parse("").unwrap();
+        assert!(config.models.grader.provider.is_none());
+        let codex =
+            Config::parse("[models.grader]\nprovider = \"codex\"\nmodel = \"astra\"").unwrap();
+        assert_eq!(codex.models.grader.provider.as_deref(), Some("codex"));
+        assert_eq!(codex.models.grader.model.as_deref(), Some("astra"));
+        assert!(Config::parse("[models.grader]\nprovider = \"codex\"").is_ok());
+        assert!(Config::parse("[models.grader]\nmodel = \"astra\"").is_err());
+        assert!(Config::parse("[models.grader]\nprovider = \"nope\"").is_err());
+        assert!(Config::parse("[models.grader]\nprovider = \"codex\"\nmodel = \" \"").is_err());
     }
 
     #[test]
