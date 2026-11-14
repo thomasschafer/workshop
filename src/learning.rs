@@ -752,7 +752,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let deck = learning(dir.path()).deck(clock(NOW)).unwrap();
         // Coding problems aren't short, so aren't in it; code to read is.
-        assert_eq!(deck.items.len(), 42);
+        assert_eq!(deck.items.len(), 48);
         assert!(deck.problems.is_empty());
         let names: Vec<&str> = deck.tracks.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
@@ -795,6 +795,14 @@ mod tests {
         assert_eq!(reading["ask"], "prints");
         assert_eq!(reading["output"], "-3 -1");
         assert_eq!(reading["language"], "cpp");
+        let languages: std::collections::BTreeSet<&str> = json["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["kind"] == "reading")
+            .map(|item| item["language"].as_str().unwrap())
+            .collect();
+        assert_eq!(languages, ["cpp", "python", "rust"].into());
     }
 
     #[test]

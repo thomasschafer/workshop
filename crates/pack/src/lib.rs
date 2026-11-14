@@ -496,7 +496,19 @@ mod tests {
             .filter(|i| i.kind == Kind::Reading)
             .count();
         assert!((6..=8).contains(&coding), "{coding} coding items");
-        assert!((3..=4).contains(&reading), "{reading} reading items");
+        assert!((9..=12).contains(&reading), "{reading} reading items");
+        // Code to read in each language.
+        for language in Language::ALL {
+            let count = pack
+                .items
+                .iter()
+                .filter(|i| matches!(&i.content, Content::Reading(r) if r.language == language))
+                .count();
+            assert!(
+                (3..=4).contains(&count),
+                "{count} reading items in {language:?}"
+            );
+        }
         assert_eq!(report.skipped().len(), coding + reading);
     }
 

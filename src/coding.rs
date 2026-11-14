@@ -846,14 +846,14 @@ mod tests {
         let none = BTreeMap::new();
         let track = track(&planned, &none).unwrap();
         assert_eq!(track.name, "Coding");
-        assert_eq!(track.summary, "11 new");
+        assert_eq!(track.summary, "17 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::New);
         // The quickest first: code to read, rather than a problem.
         assert_eq!(
             next.destination,
             Destination::Coding {
-                item: Some("sample/copies-by-value".to_owned())
+                item: Some("sample/assigning-a-global".to_owned())
             }
         );
         assert_eq!(next.reason, "Something new");
@@ -866,7 +866,7 @@ mod tests {
         problems.save_session(&found, session, NOW).unwrap();
         let sessions = problems.sessions().unwrap();
         let track = super::track(&planned, &sessions).unwrap();
-        assert_eq!(track.summary, "1 in progress · 11 new");
+        assert_eq!(track.summary, "1 in progress · 17 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::Unfinished);
         assert_eq!(next.title, "Count the islands");
@@ -880,7 +880,7 @@ mod tests {
             .unwrap();
         assert_eq!(islands.status, Status::InProgress);
         assert_eq!(islands.step, Some(StepName::Code));
-        assert_eq!(overview.items.len(), 11);
+        assert_eq!(overview.items.len(), 17);
         assert!(
             overview
                 .items

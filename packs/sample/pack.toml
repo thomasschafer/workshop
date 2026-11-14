@@ -100,6 +100,18 @@ name = "Memory and lifetimes in C++"
 id = "cpp.costs"
 name = "What C++ code costs"
 
+[[skills]]
+id = "python.semantics"
+name = "How Python behaves"
+
+[[skills]]
+id = "rust.ownership"
+name = "Ownership and borrowing in Rust"
+
+[[skills]]
+id = "rust.semantics"
+name = "How Rust behaves"
+
 # A track of the pack's own, beside the built-in ones.
 [[tracks]]
 id = "estimation"
