@@ -11,6 +11,7 @@ import { GoalsScreen } from "../progress/goals";
 import { MistakesScreen } from "../progress/mistakes";
 import { Home } from "./home";
 import { pathOf, type Route, routeFor, routeOf } from "./routes";
+import { watchActivity } from "./sitting";
 import type { Destination } from "./types";
 
 /**
@@ -27,6 +28,9 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
   // Where Advent of Code opens: at a step or track chosen at home, or where it was left when
   // going back to it; null until either, when it opens as the server saved it.
   const [entry, setEntry] = useState<Destination | null>(null);
+
+  // Doing anything in the app keeps "I've got a while" on for the sitting.
+  useEffect(() => watchActivity(), []);
 
   useEffect(() => {
     // An old address for a screen, such as a notification's, becomes the screen's own, keeping

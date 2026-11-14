@@ -5,6 +5,7 @@ import { learning } from "../learning/sync";
 import { tracksApi } from "./api";
 import "./home.css";
 import type { Route } from "./routes";
+import { aWhile as hasAWhile, setAWhile } from "./sitting";
 import type { Destination, Home as HomeState, Track } from "./types";
 
 /**
@@ -23,6 +24,7 @@ export function Home({
   const [attempt, setAttempt] = useState(0);
 
   const [pending, setPending] = useState(() => learning().syncStatus.pending);
+  const [aWhile, setAWhileShown] = useState(() => hasAWhile());
 
   useEffect(() => {
     let cancelled = false;
@@ -30,13 +32,27 @@ export function Home({
     // What was done offline is sent first, so what's suggested takes it into account.
     learning()
       .sync()
-      .then(() => tracksApi.home())
+      .then(() => tracksApi.home(aWhile))
       .then((loaded) => !cancelled && setHome(loaded))
       .catch((e: unknown) => !cancelled && setError(errorMessage(e)));
     return () => {
       cancelled = true;
     };
-  }, [attempt]);
+  }, [attempt, aWhile]);
+
+  // It can turn itself off while the home screen's open, if the learner leaves it there.
+  useEffect(() => {
+    if (!aWhile) return;
+    const check = () => {
+      if (!hasAWhile()) setAWhileShown(false);
+    };
+    const timer = setInterval(check, 60_000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [aWhile]);
 
   useEffect(() => learning().subscribe(() => setPending(learning().syncStatus.pending)), []);
 
@@ -71,13 +87,34 @@ export function Home({
           <>
             {next ? (
               <button type="button" class="continue" onClick={() => onGo(next.destination)}>
-                <span class="continue-label">Continue</span>
+                <span class="continue-label">{next.long ? "Continue · long" : "Continue"}</span>
                 <span class="continue-title">{next.title}</span>
                 <span class="continue-reason">
                   {trackName(home.tracks, next.track)} · {next.reason}
                 </span>
               </button>
             ) : null}
+            <label class="a-while">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-checked={aWhile}
+                checked={aWhile}
+                onChange={(event) => {
+                  const on = event.currentTarget.checked;
+                  setAWhile(on);
+                  setAWhileShown(on);
+                }}
+              />
+              <span class="a-while-text">
+                <span class="a-while-name">I've got a while</span>
+                <span class="a-while-summary">
+                  {aWhile
+                    ? "Continue can offer timed rounds and design sessions. Turns off once you've been away for half an hour."
+                    : "For timed rounds and design sessions. Otherwise, everything takes a few minutes."}
+                </span>
+              </span>
+            </label>
             {home.week ? <WeekProgress {...home.week} /> : null}
             <section aria-labelledby="tracks-heading">
               <h2 id="tracks-heading" class="tracks-heading">

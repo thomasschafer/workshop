@@ -8,6 +8,7 @@ export type BuiltInTrackId =
   | "coding"
   | "probability"
   | "system-design"
+  | "rounds"
   | "mental-maths"
   | "review";
 
@@ -42,12 +43,15 @@ export interface Track {
   summary: string;
   /** Where opening the track leads. */
   destination: Destination;
+  /** A few minutes' worth. */
   next: Step | null;
+  /** A long item, for when the learner has a while. */
+  long: Step | null;
 }
 
 export interface Home {
   /** The step Continue takes, if any track suggests one. */
-  continue: (Step & { track: TrackId }) | null;
+  continue: (Step & { track: TrackId; long: boolean }) | null;
   /** The tracks with something in them, in the order they're shown. */
   tracks: Track[];
   /** Minutes of practice this week, towards the week's target, unless the packs can't be read. */
