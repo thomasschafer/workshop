@@ -5,8 +5,8 @@ answer = "p * n * 20 / 100"
 require = "p * n * 20 % 100 == 0"
 
 [params]
-p = { choices = [5, 10, 15, 20, 25, 30, 40, 60, 75] }
-n = { min = 4, max = 60 }
+p = { choices = [12, 15, 18, 24, 35, 45, 65, 72, 85] }
+n = { min = 11, max = 99 }
 
 [derived]
 whole = "n * 20"
@@ -15,4 +15,4 @@ What's {p}% of {whole}?
 
 ## Method
 
-Find 10% or 5% of {whole} first, and build {p}% from those: {answer}.
+Find 10%, 5% and 1% of {whole} first, and build {p}% from those, adding or taking away: {answer}.

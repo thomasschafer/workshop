@@ -2,9 +2,10 @@
 kind = "mental-maths"
 skills = ["arithmetic.multiplication"]
 answer = "a * a"
+require = "a % 10 != 0"
 
 [params]
-a = { min = 11, max = 59 }
+a = { min = 21, max = 99 }
 
 [derived]
 gap = "abs((a + 5) / 10 * 10 - a)"
