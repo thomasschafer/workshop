@@ -41,3 +41,49 @@
   align-items: center;
   gap: 6px;
 }
+
+.pack-answer {
+  display: flex;
+  gap: 8px;
+}
+
+.pack-answer input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+}
+
+.pack-file {
+  margin: 8px 0;
+  padding: 8px 10px;
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.pack-transcript {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.pack-last p {
+  margin: 0;
+}
+
+.pack-import .pack-skill input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+}

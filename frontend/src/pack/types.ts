@@ -18,3 +18,46 @@ export interface PackShown {
   skills: { id: string; name: string }[];
   drafts: Draft[];
 }
+
+export interface Turn {
+  who: "writer" | "reviewer";
+  text: string;
+}
+
+export interface Written {
+  path: string;
+  id: string;
+  label: string;
+  skills: string[];
+  /** Its files, by path in the pack. */
+  files: Record<string, string>;
+  from_draft: string | null;
+  transcript: Turn[];
+  reason: string | null;
+}
+
+export interface Report {
+  accepted: Written[];
+  queued: Written[];
+  dropped: Written[];
+  questions: string[];
+  put_back: string[];
+}
+
+export interface AuthorStatus {
+  running: boolean;
+  /** Why the author can't run, if it can't. */
+  unavailable: string | null;
+  writer: string;
+  reviewer: string;
+  max_items: number;
+  last: {
+    started_at: number;
+    finished_at: number;
+    report: Report | null;
+    commit: string | null;
+    error: string | null;
+  } | null;
+  queue: { id: string; pack: string; at: number; item: Written }[];
+  questions: { id: string; text: string; asked_at: number; answer: string | null }[];
+}

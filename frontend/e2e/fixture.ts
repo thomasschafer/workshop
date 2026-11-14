@@ -1,7 +1,8 @@
 // Builds a self-contained Workshop home for end-to-end tests: Python, a stand-in model, and an
 // invented puzzle already in the cache, so tests need no network, toolchain or model access.
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -10,7 +11,7 @@ import { join, resolve } from "node:path";
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-const SERVERS = 3;
+const SERVERS = 4;
 const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
 const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
@@ -32,6 +33,10 @@ export const LEARNING_HOME = `${CHECKOUT_HOME}-learning`;
 /** A third, for the Coding track, whose problems' steps and attempts are its own. */
 export const CODING_PORT = port(2);
 export const CODING_HOME = `${CHECKOUT_HOME}-coding`;
+
+/** A fourth, with a pack of its own in a git repo, for the author, importing and fixing cards. */
+export const AUTHOR_PORT = port(3);
+export const AUTHOR_HOME = `${CHECKOUT_HOME}-author`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -88,11 +93,13 @@ export interface HomeOptions {
   stars: Record<number, 0 | 1 | 2>;
   /** The stand-in model, or the default model provider for real model calls. */
   model: "fake" | "default";
+  /** More config, appended. */
+  extra?: string;
 }
 
 /** Writes a Workshop home for Python, with the puzzle and input already in the cache. */
 export function writeHome(options: HomeOptions): void {
-  const { home, port, year, day, puzzle, input, stars, model } = options;
+  const { home, port, year, day, puzzle, input, stars, model, extra = "" } = options;
   rmSync(home, { recursive: true, force: true });
   mkdirSync(join(home, "config"), { recursive: true });
   const fakeModel = resolve(import.meta.dirname, "fake-model.mjs");
@@ -151,6 +158,7 @@ A-up = [
 [editor.helix.keys.normal.space]
 x = ["yank_to_clipboard", "delete_selection"]
 ${models}
+${extra}
 ${pythonProfile()}`,
   );
   writeFileSync(join(home, "config", "aoc-session"), "not-a-real-session");
@@ -251,4 +259,63 @@ export async function serverToken(home: string, port: number, timeoutMs = 60_000
       await new Promise((r) => setTimeout(r, 250));
     }
   }
+}
+
+/**
+ * A home whose pack is a copy of the sample pack in a git repo of its own, with stand-ins for
+ * the author's writer and reviewer, so the author runs without calling any model.
+ */
+export function createAuthorHome(): void {
+  const pack = join(AUTHOR_HOME, "pack");
+  const writer = resolve(import.meta.dirname, "fake-author.mjs");
+  const reviewer = resolve(import.meta.dirname, "fake-reviewer.mjs");
+  const fakeModel = resolve(import.meta.dirname, "fake-model.mjs");
+  writeHome({
+    home: AUTHOR_HOME,
+    port: AUTHOR_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
+    model: "fake",
+    extra: `
+[providers.fakewriter]
+command = ["node", ${JSON.stringify(fakeModel)}]
+input = "stdin"
+output = "claude-stream-json"
+
+[providers.fakewriter.agent]
+command = ["node", ${JSON.stringify(writer)}, "{dir}"]
+output = "text"
+
+[providers.fakereviewer]
+command = ["node", ${JSON.stringify(reviewer)}]
+input = "stdin"
+output = "text"
+
+[author]
+writer = { provider = "fakewriter", model = "writer" }
+reviewer = { provider = "fakereviewer", model = "reviewer" }
+max_items = 3
+
+[learning]
+packs = [${JSON.stringify(pack)}]
+`,
+  });
+  cpSync(resolve(import.meta.dirname, "../../packs/sample"), pack, { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", args, {
+      cwd: pack,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Workshop tests",
+        GIT_AUTHOR_EMAIL: "tests@example.com",
+        GIT_COMMITTER_NAME: "Workshop tests",
+        GIT_COMMITTER_EMAIL: "tests@example.com",
+      },
+    });
+  git("init", "--quiet", "--initial-branch", "main");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "Start");
 }

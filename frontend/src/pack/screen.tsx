@@ -2,12 +2,16 @@ import { useEffect, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
 import { Loading, Page } from "../progress/page";
 import { packApi } from "./api";
+import { Author } from "./author";
 import { FlaggedCards } from "./flagged";
 import { ImportForm } from "./import";
 import "./pack.css";
 import type { PackShown } from "./types";
 
-/** The packs: items flagged as wrong, questions waiting as drafts, and adding more. */
+/**
+ * The packs: the author, which tops them up, items flagged as wrong, questions waiting as drafts,
+ * and adding more.
+ */
 export function PackScreen({ onHome }: { onHome: () => void }) {
   const [packs, setPacks] = useState<PackShown[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +23,12 @@ export function PackScreen({ onHome }: { onHome: () => void }) {
   const drafts = packs?.flatMap((pack) => pack.drafts) ?? [];
   return (
     <Page title="Packs" onHome={onHome}>
+      <section aria-labelledby="author-heading" class="pack-section">
+        <h2 id="author-heading" class="tracks-heading">
+          Author
+        </h2>
+        <Author onChanged={() => setAttempt((n) => n + 1)} />
+      </section>
       <FlaggedCards />
       {packs === null ? (
         <Loading error={error} onRetry={() => setAttempt((n) => n + 1)} />
