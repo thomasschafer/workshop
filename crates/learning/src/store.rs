@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+use crate::mistakes::{Mistake, MistakeSource, NewMistake};
 use crate::schedule::{ItemSchedule, Rating, Scheduler};
 
 /// The longest an attempt counts for towards time spent, so one left open while the learner
@@ -76,7 +77,7 @@ pub struct Store {
 }
 
 /// The schema's version, in SQLite's `user_version`.
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE attempts (
@@ -111,7 +112,8 @@ CREATE TABLE schedules (
 ";
 
 /// What each version adds to the one before, from version 1.
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
 -- Time spent on the steps of items done over several, such as coding problems, which counts
 -- towards the week's minutes alongside the attempts'.
 CREATE TABLE time_spent (
@@ -121,7 +123,22 @@ CREATE TABLE time_spent (
     ms INTEGER NOT NULL
 );
 CREATE INDEX time_spent_by_time ON time_spent (at);
-"];
+",
+    "
+-- The mistake log, with each mistake's suggested kind and the one the learner confirmed.
+CREATE TABLE mistakes (
+    id TEXT PRIMARY KEY,
+    item TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    attempt TEXT,
+    detail TEXT NOT NULL,
+    suggested TEXT,
+    confirmed TEXT
+);
+CREATE INDEX mistakes_by_time ON mistakes (at);
+",
+];
 
 /// The earliest an attempt can be from: anything before is a broken clock.
 const EARLIEST: i64 = 1_577_836_800_000; // 2020-01-01
@@ -382,6 +399,90 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Adds mistakes to the log, ignoring any already there, so a mistake found again, such as
+    /// from an attempt synced twice, is only logged once.
+    pub fn record_mistakes(&self, mistakes: &[NewMistake]) -> Result<()> {
+        for mistake in mistakes {
+            if mistake.id.is_empty() || mistake.item.is_empty() {
+                bail!("a mistake needs an id and an item");
+            }
+        }
+        let mut connection = self.connection();
+        let transaction = connection.transaction()?;
+        for mistake in mistakes {
+            transaction.execute(
+                "INSERT OR IGNORE INTO mistakes (id, item, at, source, attempt, detail, suggested)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    mistake.id,
+                    mistake.item,
+                    mistake.at,
+                    mistake.source.as_str(),
+                    mistake.attempt,
+                    mistake.detail,
+                    mistake.suggested,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Sets the kind of mistake the learner says a mistake was, or with `None` goes back to the
+    /// suggestion. Fails if there's no such mistake.
+    pub fn tag_mistake(&self, id: &str, error_type: Option<&str>) -> Result<()> {
+        let changed = self.connection().execute(
+            "UPDATE mistakes SET confirmed = ? WHERE id = ?",
+            params![error_type, id],
+        )?;
+        if changed == 0 {
+            bail!("there's no mistake {id:?}");
+        }
+        Ok(())
+    }
+
+    /// The mistakes made from `since`, the most recent first.
+    pub fn mistakes(&self, since: i64) -> Result<Vec<Mistake>> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT id, item, at, source, attempt, detail, suggested, confirmed
+             FROM mistakes WHERE at >= ? ORDER BY at DESC, id",
+        )?;
+        let rows = statement.query_map([since], |row| {
+            let source: String = row.get(3)?;
+            Ok(Mistake {
+                mistake: NewMistake {
+                    id: row.get(0)?,
+                    item: row.get(1)?,
+                    at: row.get(2)?,
+                    source: MistakeSource::parse(&source).ok_or_else(|| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            3,
+                            rusqlite::types::Type::Text,
+                            format!("{source:?} isn't where a mistake can come from").into(),
+                        )
+                    })?,
+                    attempt: row.get(4)?,
+                    detail: row.get(5)?,
+                    suggested: row.get(6)?,
+                },
+                confirmed: row.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Every attempt, at any item, in the order they were made.
+    pub fn all_attempts(&self) -> Result<Vec<Attempt>> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT id, item, answered_at, duration_ms, rating, response, seed
+             FROM attempts ORDER BY answered_at, id",
+        )?;
+        let rows = statement.query_map([], row_to_attempt)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Every attempt at an item, in the order they were made.
     pub fn attempts(&self, item: &str) -> Result<Vec<Attempt>> {
         let connection = self.connection();
@@ -617,12 +718,48 @@ mod tests {
         let store = Store::open(&path).unwrap();
         store.record_time("sample/islands", NOW, 1000).unwrap();
         assert_eq!(store.activity(NOW - 1).unwrap().ms, 1000);
+        assert!(store.mistakes(0).unwrap().is_empty());
         drop(store);
         let version: i64 = Connection::open(&path)
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, VERSION);
+    }
+
+    #[test]
+    fn logs_mistakes_once_and_keeps_the_learners_tag() {
+        let store = Store::in_memory().unwrap();
+        let mistake = |id: &str, at: i64| NewMistake {
+            id: format!("attempt-{id}"),
+            item: "sample/times-eleven".to_owned(),
+            at,
+            source: MistakeSource::Answer,
+            attempt: Some(id.to_owned()),
+            detail: "Answered 132; it's 121".to_owned(),
+            suggested: Some("arithmetic-slip".to_owned()),
+        };
+        store
+            .record_mistakes(&[mistake("1", NOW), mistake("2", NOW + 5)])
+            .unwrap();
+        store.record_mistakes(&[mistake("1", NOW)]).unwrap();
+        let logged = store.mistakes(0).unwrap();
+        assert_eq!(logged.len(), 2);
+        // The most recent first.
+        assert_eq!(logged[0].mistake.id, "attempt-2");
+        assert_eq!(logged[1].error_type(), Some("arithmetic-slip"));
+
+        store.tag_mistake("attempt-1", Some("misread")).unwrap();
+        let logged = store.mistakes(NOW).unwrap();
+        assert_eq!(logged[1].error_type(), Some("misread"));
+        assert_eq!(logged[1].confirmed.as_deref(), Some("misread"));
+        store.tag_mistake("attempt-1", None).unwrap();
+        assert_eq!(
+            store.mistakes(NOW).unwrap()[1].error_type(),
+            Some("arithmetic-slip")
+        );
+        assert!(store.tag_mistake("attempt-9", Some("misread")).is_err());
+        assert_eq!(store.mistakes(NOW + 1).unwrap().len(), 1);
     }
 
     #[test]

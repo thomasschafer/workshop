@@ -5,11 +5,13 @@
 //! attempts made offline on another device fit in wherever they belong once they arrive.
 
 pub mod mastery;
+pub mod mistakes;
 pub mod plan;
 pub mod schedule;
 pub mod store;
 
 pub use mastery::{SkillMastery, mastery};
+pub use mistakes::{Mistake, MistakeSource, NewMistake};
 pub use plan::{Clock, ItemRef, Limits, Progress, TrackPlan, plan};
 pub use schedule::{ItemSchedule, Rating, Scheduler};
 pub use store::{Activity, Attempt, Flag, FlagChange, Store};

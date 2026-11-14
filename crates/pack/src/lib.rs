@@ -6,6 +6,7 @@
 //! with answers, for example.
 
 pub mod code;
+pub mod error_types;
 mod item;
 mod manifest;
 pub mod mental;
@@ -20,6 +21,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 pub use code::{Case, Coding, Language, Question, Reading, ReadingCheck, Source};
+pub use error_types::ErrorType;
 pub use item::{Content, Item, Kind, MentalMaths, Param, Probability, Simulation};
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
 

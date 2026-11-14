@@ -48,6 +48,12 @@ skills = ["probability.conditional"]
 mastery = 0.8                    # the default
 by = "2027-06-30"                # optional
 
+# Kinds of mistake for the mistake log, besides the built-in ones.
+[[error_types]]
+id = "unit-slip"
+name = "Unit slip"
+description = "Mixed up units, such as seconds and milliseconds"
+
 # Text added to a coach role's instructions, to shape its style for this pack. The tutor gives
 # hints on coding problems.
 [prompts]
@@ -58,6 +64,8 @@ author = "prompts/author.md"
 ```
 
 Every item names at least one skill, and every skill it names must be listed here. Mastery of a skill comes from how well you've recalled its items lately, so goals can show progress as you go.
+
+Mistakes are tagged with a kind of mistake. The built-in kinds are `misread`, `arithmetic-slip`, `off-by-one`, `missed-edge-case`, `wrong-approach`, `concept-gap` and `too-slow`; a pack's `[[error_types]]` add to them, each with an id of its own.
 
 ## Items
 

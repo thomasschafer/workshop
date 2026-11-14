@@ -6,6 +6,8 @@ use std::collections::BTreeSet;
 use serde::Deserialize;
 use workshop_tracks::{PackTrackId, TrackId};
 
+use crate::error_types::{self, ErrorType};
+
 /// The default mastery a goal asks of each of its skills.
 const DEFAULT_GOAL_MASTERY: f64 = 0.8;
 
@@ -17,6 +19,8 @@ pub struct Manifest {
     pub skills: Vec<Skill>,
     pub tracks: Vec<PackTrack>,
     pub goals: Vec<Goal>,
+    /// Kinds of mistake the pack adds to the built-in ones, for its mistake log.
+    pub error_types: Vec<ErrorType>,
     pub prompts: Prompts,
 }
 
@@ -86,6 +90,8 @@ struct RawManifest {
     tracks: Vec<RawTrack>,
     #[serde(default)]
     goals: Vec<RawGoal>,
+    #[serde(default)]
+    error_types: Vec<ErrorType>,
     #[serde(default)]
     prompts: Prompts,
 }
@@ -197,6 +203,28 @@ impl Manifest {
                 by: goal.by,
             });
         }
+        let mut error_types: Vec<ErrorType> = Vec::new();
+        for error_type in raw.error_types {
+            if !is_slug(&error_type.id) {
+                return Err(format!(
+                    "the error type id {:?} should be lowercase letters and digits, in words joined by hyphens",
+                    error_type.id
+                ));
+            }
+            if error_types::is_built_in(&error_type.id) {
+                return Err(format!(
+                    "the error type {:?} is built in already",
+                    error_type.id
+                ));
+            }
+            if error_types.iter().any(|t| t.id == error_type.id) {
+                return Err(format!(
+                    "the error type {:?} is listed twice",
+                    error_type.id
+                ));
+            }
+            error_types.push(error_type);
+        }
         Ok(Self {
             id: raw.id,
             name: raw.name,
@@ -204,8 +232,17 @@ impl Manifest {
             skills: raw.skills,
             tracks,
             goals,
+            error_types,
             prompts: raw.prompts,
         })
+    }
+
+    /// Every kind of mistake the pack's mistakes can be tagged with: the built-in ones, then
+    /// the pack's own.
+    pub fn all_error_types(&self) -> Vec<ErrorType> {
+        let mut all = error_types::built_in();
+        all.extend(self.error_types.iter().cloned());
+        all
     }
 
     pub fn has_skill(&self, id: &str) -> bool {
@@ -252,6 +289,11 @@ mod tests {
         name = "Quick sums"
         skills = ["arithmetic.multiplication"]
 
+        [[error_types]]
+        id = "sign-error"
+        name = "Sign error"
+        description = "Lost a minus sign"
+
         [prompts]
         examiner = "prompts/examiner.md"
     "#;
@@ -273,6 +315,9 @@ mod tests {
             TrackId::Pack("estimation".parse().unwrap())
         );
         assert!(manifest.track("chess").is_err());
+        let types = manifest.all_error_types();
+        assert_eq!(types[0].id, "misread");
+        assert_eq!(types.last().unwrap().id, "sign-error");
     }
 
     #[test]
@@ -302,6 +347,14 @@ mod tests {
             (
                 "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"a\"]\nmastery = 1.5",
                 "at most 1",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[error_types]]\nid = \"off-by-one\"\nname = \"O\"\ndescription = \"d\"",
+                "built in already",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[error_types]]\nid = \"Bad\"\nname = \"O\"\ndescription = \"d\"",
+                "error type id",
             ),
         ];
         for (source, expected) in broken {
