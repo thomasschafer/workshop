@@ -110,7 +110,7 @@ impl Runtime {
                     "--crate-name",
                     "main",
                     "-o",
-                    "main",
+                    &binary(),
                 ])))
             }
             Language::Cpp => {
@@ -120,7 +120,7 @@ impl Runtime {
                         CPP_COMPILERS.join(", ")
                     ));
                 };
-                let mut args = owned(&[compiler, "-std=c++17", "-o", "main"]);
+                let mut args = owned(&[compiler, "-std=c++17", "-o", &binary()]);
                 match flavour {
                     Flavour::Plain => args.push("-O1".to_owned()),
                     Flavour::Sanitized => args.extend(owned(&[
@@ -153,7 +153,9 @@ impl Runtime {
         let dir = self.scratch.join(&key);
         let command = match language {
             Language::Python => vec!["python3".to_owned(), file.clone()],
-            Language::Rust | Language::Cpp => vec![dir.join("main").to_string_lossy().into_owned()],
+            Language::Rust | Language::Cpp => {
+                vec![dir.join(binary()).to_string_lossy().into_owned()]
+            }
         };
         let built = Program {
             dir: dir.clone(),
@@ -233,6 +235,11 @@ impl Runtime {
             duration_ms: started.elapsed().as_millis() as u64,
         })
     }
+}
+
+/// The file a compiled program is built to: `main`, or `main.exe` on Windows.
+fn binary() -> String {
+    format!("main{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// Paths in the build directory, as compilers and tracebacks give them, without the directory,
