@@ -76,7 +76,7 @@ pub struct Store {
 }
 
 /// The schema's version, in SQLite's `user_version`.
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE attempts (
@@ -110,6 +110,19 @@ CREATE TABLE schedules (
 );
 ";
 
+/// What each version adds to the one before, from version 1.
+const MIGRATIONS: &[&str] = &["
+-- Time spent on the steps of items done over several, such as coding problems, which counts
+-- towards the week's minutes alongside the attempts'.
+CREATE TABLE time_spent (
+    id INTEGER PRIMARY KEY,
+    item TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    ms INTEGER NOT NULL
+);
+CREATE INDEX time_spent_by_time ON time_spent (at);
+"];
+
 /// The earliest an attempt can be from: anything before is a broken clock.
 const EARLIEST: i64 = 1_577_836_800_000; // 2020-01-01
 
@@ -134,15 +147,21 @@ impl Store {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "busy_timeout", 5000)?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        match version {
-            0 => {
-                connection.execute_batch(SCHEMA)?;
-                connection.pragma_update(None, "user_version", VERSION)?;
+        if version > VERSION {
+            bail!(
+                "it was written by a newer Workshop (schema {version}, where this one knows {VERSION}); update Workshop to use it"
+            );
+        }
+        if version < VERSION {
+            let transaction = connection.unchecked_transaction()?;
+            if version == 0 {
+                transaction.execute_batch(SCHEMA)?;
             }
-            VERSION => {}
-            newer => bail!(
-                "it was written by a newer Workshop (schema {newer}, where this one knows {VERSION}); update Workshop to use it"
-            ),
+            for migration in &MIGRATIONS[(version.max(1) - 1) as usize..] {
+                transaction.execute_batch(migration)?;
+            }
+            transaction.pragma_update(None, "user_version", VERSION)?;
+            transaction.commit()?;
         }
         Ok(Self {
             connection: Mutex::new(connection),
@@ -317,6 +336,19 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Counts time spent on a step of an item done over several, such as a coding problem,
+    /// towards the week's minutes. At most `MAX_ATTEMPT_MS` counts at a time.
+    pub fn record_time(&self, item: &str, at: i64, ms: i64) -> Result<()> {
+        if ms < 0 {
+            bail!("less than no time was spent on {item}");
+        }
+        self.connection().execute(
+            "INSERT INTO time_spent (item, at, ms) VALUES (?, ?, ?)",
+            params![item, at, ms.min(MAX_ATTEMPT_MS)],
+        )?;
+        Ok(())
+    }
+
     /// What was done from `since`, in milliseconds since 1970.
     pub fn activity(&self, since: i64) -> Result<Activity> {
         let connection = self.connection();
@@ -327,6 +359,7 @@ impl Store {
                         WHERE b.item = a.item AND b.answered_at < ?1
                     )), 0),
                     COALESCE(SUM(MIN(a.duration_ms, ?2)), 0)
+                        + (SELECT COALESCE(SUM(ms), 0) FROM time_spent WHERE at >= ?1)
              FROM attempts a WHERE a.answered_at >= ?1",
             params![since, MAX_ATTEMPT_MS],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -560,6 +593,36 @@ mod tests {
         assert_eq!(today.reviews, 1);
         assert_eq!(today.ms, 20_000 + MAX_ATTEMPT_MS);
         assert_eq!(store.activity(NOW + 1).unwrap(), Activity::default());
+
+        // Time on the steps of a coding problem counts too, a little at a time.
+        store.record_time("sample/islands", NOW, 90_000).unwrap();
+        store
+            .record_time("sample/islands", NOW + 10, 60 * 60 * 1000)
+            .unwrap();
+        assert!(store.record_time("sample/islands", NOW, -1).is_err());
+        let later = store.activity(NOW - 1000).unwrap();
+        assert_eq!(later.attempts, 2);
+        assert_eq!(later.ms, 20_000 + 2 * MAX_ATTEMPT_MS + 90_000);
+    }
+
+    #[test]
+    fn brings_an_older_log_up_to_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("learning.sqlite");
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection.execute_batch(SCHEMA).unwrap();
+            connection.pragma_update(None, "user_version", 1).unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        store.record_time("sample/islands", NOW, 1000).unwrap();
+        assert_eq!(store.activity(NOW - 1).unwrap().ms, 1000);
+        drop(store);
+        let version: i64 = Connection::open(&path)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, VERSION);
     }
 
     #[test]
