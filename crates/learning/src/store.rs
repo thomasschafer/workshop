@@ -67,6 +67,8 @@ pub struct Activity {
     pub attempts: u32,
     /// Attempts at items that had been attempted before then, rather than new ones.
     pub reviews: u32,
+    /// Items first attempted since then.
+    pub new: u32,
     /// Time spent, counting each attempt for at most `MAX_ATTEMPT_MS`.
     pub ms: i64,
 }
@@ -369,21 +371,26 @@ impl Store {
     /// What was done from `since`, in milliseconds since 1970.
     pub fn activity(&self, since: i64) -> Result<Activity> {
         let connection = self.connection();
-        let (attempts, reviews, ms) = connection.query_row(
+        let (attempts, reviews, new, ms) = connection.query_row(
             "SELECT COUNT(*),
                     COALESCE(SUM(EXISTS (
                         SELECT 1 FROM attempts b
                         WHERE b.item = a.item AND b.answered_at < ?1
                     )), 0),
+                    COUNT(DISTINCT CASE WHEN NOT EXISTS (
+                        SELECT 1 FROM attempts b
+                        WHERE b.item = a.item AND b.answered_at < ?1
+                    ) THEN a.item END),
                     COALESCE(SUM(MIN(a.duration_ms, ?2)), 0)
                         + (SELECT COALESCE(SUM(ms), 0) FROM time_spent WHERE at >= ?1)
              FROM attempts a WHERE a.answered_at >= ?1",
             params![since, MAX_ATTEMPT_MS],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
         Ok(Activity {
             attempts,
             reviews,
+            new,
             ms,
         })
     }
@@ -684,16 +691,19 @@ mod tests {
                     attempt("1", "sample/a", NOW - 2 * DAY_MS, Rating::Good),
                     attempt("2", "sample/a", NOW, Rating::Good),
                     long,
+                    attempt("4", "sample/b", NOW + 1, Rating::Good),
                 ],
                 NOW,
             )
             .unwrap();
         let today = store.activity(NOW - 1000).unwrap();
-        assert_eq!(today.attempts, 2);
-        // Only sample/a had been seen before today.
+        assert_eq!(today.attempts, 3);
+        // Only sample/a had been seen before today, and sample/b is new however many times
+        // it's been attempted.
         assert_eq!(today.reviews, 1);
-        assert_eq!(today.ms, 20_000 + MAX_ATTEMPT_MS);
-        assert_eq!(store.activity(NOW + 1).unwrap(), Activity::default());
+        assert_eq!(today.new, 1);
+        assert_eq!(today.ms, 2 * 20_000 + MAX_ATTEMPT_MS);
+        assert_eq!(store.activity(NOW + 2).unwrap(), Activity::default());
 
         // Time on the steps of a coding problem counts too, a little at a time.
         store.record_time("sample/islands", NOW, 90_000).unwrap();
@@ -702,8 +712,8 @@ mod tests {
             .unwrap();
         assert!(store.record_time("sample/islands", NOW, -1).is_err());
         let later = store.activity(NOW - 1000).unwrap();
-        assert_eq!(later.attempts, 2);
-        assert_eq!(later.ms, 20_000 + 2 * MAX_ATTEMPT_MS + 90_000);
+        assert_eq!(later.attempts, 3);
+        assert_eq!(later.ms, 2 * 20_000 + 2 * MAX_ATTEMPT_MS + 90_000);
     }
 
     #[test]

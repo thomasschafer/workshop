@@ -14,6 +14,8 @@ use crate::store::Flag;
 pub struct Limits {
     /// The most reviews of items seen before today to offer in a day.
     pub daily_reviews: u32,
+    /// The most items never seen before to start in a day.
+    pub daily_new: u32,
     pub weekly_minutes: u32,
     pub retention: f64,
 }
@@ -58,6 +60,8 @@ pub struct ItemRef<'a> {
 pub struct Progress {
     /// Reviews today of items seen before today, which count towards the daily limit.
     pub reviews_today: u32,
+    /// Items first attempted today, which count towards the daily limit of new ones.
+    pub new_today: u32,
     pub minutes_this_week: u32,
 }
 
@@ -68,12 +72,27 @@ pub struct TrackPlan {
     pub due: Vec<String>,
     /// Due, but over today's limit, so waiting for tomorrow.
     pub waiting: usize,
-    /// Never attempted, those in the skills to focus on first.
+    /// Never attempted and within today's limit of new items, those in the skills to focus on
+    /// first. The limit is shared by every track, so each offers up to what's left of it.
     pub new: Vec<String>,
+    /// Never attempted, but over today's limit of new items, so waiting for tomorrow.
+    pub new_waiting: Vec<String>,
     /// Flagged as wrong, so left out.
     pub flagged: usize,
     /// When the soonest item that isn't due yet will be, if there is one.
     pub next_due: Option<i64>,
+}
+
+impl TrackPlan {
+    /// Whether an item has never been attempted, whether or not it's within today's limit.
+    pub fn is_new(&self, key: &str) -> bool {
+        self.new.iter().chain(&self.new_waiting).any(|k| k == key)
+    }
+
+    /// How many items have never been attempted, whether or not within today's limit.
+    pub fn new_count(&self) -> usize {
+        self.new.len() + self.new_waiting.len()
+    }
 }
 
 /// Each track's plan, for the items given. Tracks with none of them aren't included. New items
@@ -118,6 +137,10 @@ pub fn plan(
         };
         // Stable, so otherwise they stay in the packs' order.
         plan.new.sort_by_key(|key| !in_focus(key));
+        let allowed_new = limits.daily_new.saturating_sub(progress.new_today) as usize;
+        if plan.new.len() > allowed_new {
+            plan.new_waiting = plan.new.split_off(allowed_new);
+        }
     }
     due.sort();
     let allowed = limits.daily_reviews.saturating_sub(progress.reviews_today) as usize;
@@ -203,11 +226,13 @@ mod tests {
         )]);
         let limits = Limits {
             daily_reviews: 5,
+            daily_new: 10,
             weekly_minutes: 60,
             retention: 0.9,
         };
         let progress = Progress {
             reviews_today: 3,
+            new_today: 0,
             minutes_this_week: 0,
         };
         let plans = plan(
@@ -230,6 +255,7 @@ mod tests {
 
         let done = Progress {
             reviews_today: 10,
+            new_today: 0,
             minutes_this_week: 0,
         };
         let plans = plan(
@@ -271,6 +297,7 @@ mod tests {
         ];
         let limits = Limits {
             daily_reviews: 5,
+            daily_new: 10,
             weekly_minutes: 60,
             retention: 0.9,
         };
@@ -285,5 +312,45 @@ mod tests {
             NOW,
         );
         assert_eq!(plans[review].new, ["p/b", "p/a", "p/c"]);
+
+        // Within today's limit of new items, the first of them; the rest wait for tomorrow.
+        let limited = Limits {
+            daily_new: 3,
+            ..limits
+        };
+        let started = Progress {
+            new_today: 1,
+            ..Progress::default()
+        };
+        let plans = plan(
+            &items,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            started,
+            limited,
+            &["graphs".to_owned()],
+            &scheduler,
+            NOW,
+        );
+        assert_eq!(plans[review].new, ["p/b", "p/a"]);
+        assert_eq!(plans[review].new_waiting, ["p/c"]);
+        assert!(plans[review].is_new("p/c"));
+        assert_eq!(plans[review].new_count(), 3);
+        let all_started = Progress {
+            new_today: 5,
+            ..Progress::default()
+        };
+        let plans = plan(
+            &items,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            all_started,
+            limited,
+            &[],
+            &scheduler,
+            NOW,
+        );
+        assert!(plans[review].new.is_empty());
+        assert_eq!(plans[review].new_waiting.len(), 3);
     }
 }

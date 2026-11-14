@@ -656,6 +656,7 @@ function Done({
       <p class="muted">
         {week.minutesThisWeek} of {deck.limits.weekly_minutes} minutes this week
         {left.waiting > 0 ? ` · ${left.waiting} more due tomorrow` : ""}
+        {left.freshWaiting > 0 ? ` · ${left.freshWaiting} more new tomorrow` : ""}
       </p>
       <span class="learn-actions">
         <button type="button" class="pill" onClick={onHome}>

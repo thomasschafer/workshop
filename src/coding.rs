@@ -543,7 +543,7 @@ pub fn overview(
                 Status::InProgress
             } else if plan.is_some_and(|plan| plan.due.contains(&key)) {
                 Status::Due
-            } else if plan.is_some_and(|plan| plan.new.contains(&key)) {
+            } else if plan.is_some_and(|plan| plan.is_new(&key)) {
                 Status::New
             } else {
                 Status::Done
@@ -673,8 +673,8 @@ fn summary(plan: &TrackPlan, in_progress: usize) -> String {
     if !plan.due.is_empty() {
         parts.push(format!("{} due", plan.due.len()));
     }
-    if !plan.new.is_empty() {
-        parts.push(format!("{} new", plan.new.len()));
+    if plan.new_count() > 0 {
+        parts.push(format!("{} new", plan.new_count()));
     }
     if parts.is_empty() {
         parts.push("Nothing due".to_owned());
@@ -703,6 +703,7 @@ mod tests {
         let config = LearningConfig {
             packs: Vec::new(),
             daily_reviews: 40,
+            daily_new: 10,
             weekly_minutes: 90,
             desired_retention: 0.9,
         };

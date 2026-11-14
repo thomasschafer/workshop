@@ -58,13 +58,17 @@ export type DeckItem = ItemBase &
 
 export interface Limits {
   daily_reviews: number;
+  /** The most new items to start in a day. Decks saved on a device by an older Workshop don't
+   * have it, and aren't limited until the next deck comes. */
+  daily_new?: number;
   weekly_minutes: number;
   retention: number;
 }
 
 export interface Deck {
   limits: Limits;
-  progress: { reviews_today: number; minutes_this_week: number };
+  /** `new_today` is missing from decks saved on a device by an older Workshop. */
+  progress: { reviews_today: number; new_today?: number; minutes_this_week: number };
   /** When the learner's day and week began, as the deck was made. */
   day_start: number;
   week_start: number;

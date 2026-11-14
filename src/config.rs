@@ -33,6 +33,7 @@ struct RawConfig {
 struct RawLearningConfig {
     packs: Vec<String>,
     daily_reviews: u32,
+    daily_new: u32,
     weekly_minutes: u32,
     desired_retention: f64,
 }
@@ -44,6 +45,8 @@ pub struct LearningConfig {
     pub packs: Vec<PathBuf>,
     /// The most reviews Continue offers in a day; the rest wait for the next.
     pub daily_reviews: u32,
+    /// The most new items Continue offers in a day; the rest wait for the next.
+    pub daily_new: u32,
     /// The minutes of practice to aim for each week.
     pub weekly_minutes: u32,
     /// How likely the learner should be to recall an item when it next comes up.
@@ -294,6 +297,7 @@ impl Default for RawLearningConfig {
         Self {
             packs: Vec::new(),
             daily_reviews: 40,
+            daily_new: 10,
             weekly_minutes: 90,
             desired_retention: 0.9,
         }
@@ -437,6 +441,9 @@ impl Config {
         if learning.daily_reviews == 0 {
             bail!("[learning] daily_reviews should be at least 1");
         }
+        if learning.daily_new == 0 {
+            bail!("[learning] daily_new should be at least 1");
+        }
         let packs = learning
             .packs
             .iter()
@@ -458,6 +465,7 @@ impl Config {
             learning: LearningConfig {
                 packs,
                 daily_reviews: learning.daily_reviews,
+                daily_new: learning.daily_new,
                 weekly_minutes: learning.weekly_minutes,
                 desired_retention: learning.desired_retention,
             },
@@ -574,7 +582,7 @@ mod tests {
     #[test]
     fn reads_what_to_learn_and_how_much() {
         let config = Config::parse(
-            "[learning]\npacks = [\"~/learning\"]\ndaily_reviews = 10\nweekly_minutes = 30",
+            "[learning]\npacks = [\"~/learning\"]\ndaily_reviews = 10\ndaily_new = 3\nweekly_minutes = 30",
         )
         .unwrap();
         assert_eq!(
@@ -582,11 +590,14 @@ mod tests {
             [files::expand_home("~/learning").unwrap()]
         );
         assert_eq!(config.learning.daily_reviews, 10);
+        assert_eq!(config.learning.daily_new, 3);
+        assert_eq!(Config::parse("").unwrap().learning.daily_new, 10);
         assert_eq!(config.learning.weekly_minutes, 30);
         assert_eq!(config.learning.desired_retention, 0.9);
         assert!(Config::parse("").unwrap().learning.packs.is_empty());
         assert!(Config::parse("[learning]\ndesired_retention = 0.99").is_err());
         assert!(Config::parse("[learning]\ndaily_reviews = 0").is_err());
+        assert!(Config::parse("[learning]\ndaily_new = 0").is_err());
     }
 
     #[test]

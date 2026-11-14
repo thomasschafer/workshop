@@ -98,6 +98,7 @@ mod tests {
         LearningConfig {
             packs,
             daily_reviews: 40,
+            daily_new: 10,
             weekly_minutes: 90,
             desired_retention: 0.9,
         }

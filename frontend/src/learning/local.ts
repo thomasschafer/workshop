@@ -63,6 +63,8 @@ export function flagged(deck: Deck, changes: FlagChange[]): Set<string> {
 export interface Progress {
   /** Reviews today of items seen before today, which count towards the daily limit. */
   reviewsToday: number;
+  /** Items first attempted today, which count towards the daily limit of new ones. */
+  newToday: number;
   minutesThisWeek: number;
 }
 
@@ -73,17 +75,24 @@ export interface Progress {
 export function progress(deck: Deck, attempts: Attempt[], now: number, offset: number): Progress {
   const today = dayStart(now, offset);
   const week = weekStart(now, offset);
-  let reviewsToday = deck.day_start === today ? deck.progress.reviews_today : 0;
+  const sameDay = deck.day_start === today;
+  let reviewsToday = sameDay ? deck.progress.reviews_today : 0;
   let msThisWeek = deck.week_start === week ? deck.progress.minutes_this_week * 60_000 : 0;
+  // Items first attempted today since the deck came; those first attempted before it came are
+  // in the deck's count, as they have a schedule in it.
+  const started = new Set<string>();
   for (const attempt of attempts) {
     if (attempt.answered_at >= week) msThisWeek += Math.min(attempt.duration_ms, MAX_ATTEMPT_MS);
     if (attempt.answered_at < today) continue;
+    const scheduled = deck.schedules[attempt.item];
     const seenBefore =
-      (deck.schedules[attempt.item]?.last_review ?? Number.POSITIVE_INFINITY) < today ||
+      (scheduled?.last_review ?? Number.POSITIVE_INFINITY) < today ||
       attempts.some((other) => other.item === attempt.item && other.answered_at < today);
     if (seenBefore) reviewsToday++;
+    else if (!scheduled) started.add(attempt.item);
   }
-  return { reviewsToday, minutesThisWeek: Math.floor(msThisWeek / 60_000) };
+  const newToday = (sameDay ? (deck.progress.new_today ?? 0) : 0) + started.size;
+  return { reviewsToday, newToday, minutesThisWeek: Math.floor(msThisWeek / 60_000) };
 }
 
 export interface Queue {
@@ -91,8 +100,13 @@ export interface Queue {
   due: DeckItem[];
   /** Due, but waiting for tomorrow as today's limit is reached. */
   waiting: number;
-  /** Never attempted: those in the skills recent mistakes point to first, then in the deck's order. */
+  /**
+   * Never attempted, within today's limit of new items: those in the skills recent mistakes
+   * point to first, then in the deck's order.
+   */
   fresh: DeckItem[];
+  /** Never attempted, but waiting for tomorrow as today's limit of new items is reached. */
+  freshWaiting: number;
 }
 
 /** What there is to do in a track now: due reviews first, then new items. */
@@ -106,7 +120,7 @@ export function queue(
 ): Queue {
   const scheduled = schedules(deck, attempts);
   const wrong = flagged(deck, changes);
-  const { reviewsToday } = progress(deck, attempts, now, offset);
+  const { reviewsToday, newToday } = progress(deck, attempts, now, offset);
   const allowed = Math.max(0, deck.limits.daily_reviews - reviewsToday);
   // The daily limit is shared across tracks, as on the server, so it's spent on the most overdue
   // items anywhere.
@@ -120,13 +134,17 @@ export function queue(
     })
     .sort((a, b) => a.when - b.when || a.item.key.localeCompare(b.item.key));
   const within = dueEverywhere.slice(0, allowed);
+  // Also shared across tracks, so each offers up to what's left of it, as on the server.
+  const allowedNew = Math.max(0, (deck.limits.daily_new ?? Number.POSITIVE_INFINITY) - newToday);
+  const fresh = deck.items
+    .filter((item) => item.track === track && !wrong.has(item.key) && !scheduled[item.key])
+    // Sorting is stable, so otherwise they keep the deck's order.
+    .sort((a, b) => Number(inFocus(deck, b)) - Number(inFocus(deck, a)));
   return {
     due: within.filter(({ item }) => item.track === track).map(({ item }) => item),
     waiting: dueEverywhere.slice(allowed).filter(({ item }) => item.track === track).length,
-    fresh: deck.items
-      .filter((item) => item.track === track && !wrong.has(item.key) && !scheduled[item.key])
-      // Sorting is stable, so otherwise they keep the deck's order.
-      .sort((a, b) => Number(inFocus(deck, b)) - Number(inFocus(deck, a))),
+    fresh: fresh.slice(0, allowedNew),
+    freshWaiting: Math.max(0, fresh.length - allowedNew),
   };
 }
 

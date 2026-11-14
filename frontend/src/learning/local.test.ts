@@ -24,8 +24,8 @@ function card(key: string, track: DeckItem["track"] = "review"): DeckItem {
 
 function deck(items: DeckItem[], changes: Partial<Deck> = {}): Deck {
   return {
-    limits: { daily_reviews: 40, weekly_minutes: 60, retention: 0.9 },
-    progress: { reviews_today: 0, minutes_this_week: 0 },
+    limits: { daily_reviews: 40, daily_new: 10, weekly_minutes: 60, retention: 0.9 },
+    progress: { reviews_today: 0, new_today: 0, minutes_this_week: 0 },
     day_start: dayStart(LATE_MONDAY, 0),
     week_start: weekStart(LATE_MONDAY, 0),
     tracks: [],
@@ -89,6 +89,34 @@ describe("queue", () => {
     ]);
   });
 
+  it("offers new items within the daily limit, counting those started since the deck came", () => {
+    const items = [card("p/a"), card("p/b"), card("p/c"), card("p/d", "mental-maths")];
+    const d = deck(items, {
+      limits: { daily_reviews: 40, daily_new: 3, weekly_minutes: 60, retention: 0.9 },
+      progress: { reviews_today: 0, new_today: 1, minutes_this_week: 0 },
+    });
+    const fresh = (attempts: Attempt[], track: DeckItem["track"] = "review") =>
+      queue(d, track, attempts, [], LATE_MONDAY, 0);
+    expect(fresh([]).fresh.map((i) => i.key)).toEqual(["p/a", "p/b"]);
+    expect(fresh([]).freshWaiting).toBe(1);
+    // The limit is shared with other tracks, and an item started twice counts once.
+    const started = [attempt("p/d", LATE_MONDAY - 60_000), attempt("p/d", LATE_MONDAY - 30_000)];
+    expect(fresh(started).fresh.map((i) => i.key)).toEqual(["p/a"]);
+    expect(fresh(started).freshWaiting).toBe(2);
+    // The deck's count is only today's.
+    const yesterday = deck(items, {
+      ...d,
+      day_start: dayStart(LATE_MONDAY, 0) - DAY_MS,
+    });
+    expect(queue(yesterday, "review", [], [], LATE_MONDAY, 0).fresh).toHaveLength(3);
+    // A deck from an older Workshop, with no limit in it, isn't limited.
+    const older = deck(items, {
+      limits: { daily_reviews: 40, weekly_minutes: 60, retention: 0.9 },
+      progress: { reviews_today: 0, minutes_this_week: 0 },
+    });
+    expect(queue(older, "review", [], [], LATE_MONDAY, 0).fresh).toHaveLength(3);
+  });
+
   it("puts new items in the skills recent mistakes point to first", () => {
     const items = [
       { ...card("p/a"), skills: ["heaps"] },
@@ -116,14 +144,22 @@ describe("queue", () => {
 describe("progress", () => {
   it("adds what's been done to the deck's, unless the deck is from another day", () => {
     const d = deck([card("p/a"), card("p/b")], {
-      progress: { reviews_today: 2, minutes_this_week: 10 },
+      progress: { reviews_today: 2, new_today: 4, minutes_this_week: 10 },
       schedules: { "p/a": review(null, LATE_MONDAY - 3 * DAY_MS, "good") },
     });
     const done = [attempt("p/a", LATE_MONDAY - 1000), attempt("p/b", LATE_MONDAY - 500)];
-    // p/b is new, so only p/a's counts as a review.
-    expect(progress(d, done, LATE_MONDAY, 0)).toEqual({ reviewsToday: 3, minutesThisWeek: 11 });
+    // p/b is new, so only p/a's counts as a review, and p/b as a new item.
+    expect(progress(d, done, LATE_MONDAY, 0)).toEqual({
+      reviewsToday: 3,
+      newToday: 5,
+      minutesThisWeek: 11,
+    });
     const tomorrow = LATE_MONDAY + DAY_MS;
-    expect(progress(d, [], tomorrow, 0)).toEqual({ reviewsToday: 0, minutesThisWeek: 10 });
+    expect(progress(d, [], tomorrow, 0)).toEqual({
+      reviewsToday: 0,
+      newToday: 0,
+      minutesThisWeek: 10,
+    });
     expect(progress(d, [], LATE_MONDAY + 7 * DAY_MS, 0).minutesThisWeek).toBe(0);
   });
 });
@@ -135,11 +171,12 @@ describe("step", () => {
       due: [card("p/due")],
       waiting: 0,
       fresh: [card("p/x"), card("p/y"), long],
+      freshWaiting: 0,
     });
     expect(chosen.map((item) => item.key)).toEqual(["p/due", "p/x", "p/y"]);
-    expect(step({ due: [], waiting: 0, fresh: [long, card("p/x")] }).map((i) => i.key)).toEqual([
-      "p/long",
-    ]);
+    expect(
+      step({ due: [], waiting: 0, fresh: [long, card("p/x")], freshWaiting: 0 }).map((i) => i.key),
+    ).toEqual(["p/long"]);
   });
 });
 

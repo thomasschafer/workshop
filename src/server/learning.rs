@@ -82,6 +82,8 @@ mod tests {
         let deck = json(response).await;
         assert_eq!(deck["items"].as_array().unwrap().len(), 34);
         assert_eq!(deck["limits"]["daily_reviews"], 40);
+        assert_eq!(deck["limits"]["daily_new"], 10);
+        assert_eq!(deck["progress"]["new_today"], 0);
 
         let now = crate::learning::now_ms();
         let body = serde_json::json!({

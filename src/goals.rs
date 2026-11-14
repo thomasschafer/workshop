@@ -173,6 +173,7 @@ mod tests {
         let config = LearningConfig {
             packs: Vec::new(),
             daily_reviews: 40,
+            daily_new: 10,
             weekly_minutes: 90,
             desired_retention: 0.9,
         };

@@ -60,7 +60,7 @@ pub(super) async fn list(
                 "in_progress"
             } else if plan.is_some_and(|p| p.due.contains(&key)) {
                 "due"
-            } else if plan.is_some_and(|p| p.new.contains(&key)) {
+            } else if plan.is_some_and(|p| p.is_new(&key)) {
                 "new"
             } else {
                 "done"

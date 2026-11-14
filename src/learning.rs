@@ -153,6 +153,7 @@ impl Learning {
     fn limits(&self) -> Limits {
         Limits {
             daily_reviews: self.config.daily_reviews,
+            daily_new: self.config.daily_new,
             weekly_minutes: self.config.weekly_minutes,
             retention: self.config.desired_retention,
         }
@@ -163,6 +164,7 @@ impl Learning {
         let week = self.store.activity(clock.week_start())?;
         Ok(Progress {
             reviews_today: today.reviews,
+            new_today: today.new,
             minutes_this_week: (week.ms / 60_000) as u32,
         })
     }
@@ -579,8 +581,8 @@ fn design_track(
     if !plan.due.is_empty() {
         parts.push(format!("{} due", plan.due.len()));
     }
-    if !plan.new.is_empty() {
-        parts.push(format!("{} new", plan.new.len()));
+    if plan.new_count() > 0 {
+        parts.push(format!("{} new", plan.new_count()));
     }
     if parts.is_empty() {
         parts.push("Nothing due".to_owned());
@@ -685,8 +687,8 @@ fn summary(plan: &TrackPlan, clock: Clock) -> String {
     if !plan.due.is_empty() {
         parts.push(format!("{} due", plan.due.len()));
     }
-    if !plan.new.is_empty() {
-        parts.push(format!("{} new", plan.new.len()));
+    if plan.new_count() > 0 {
+        parts.push(format!("{} new", plan.new_count()));
     }
     if parts.is_empty() {
         if plan.waiting > 0 {
@@ -723,6 +725,7 @@ mod tests {
         let config = LearningConfig {
             packs: Vec::new(),
             daily_reviews: 3,
+            daily_new: 10,
             weekly_minutes: 1,
             desired_retention: 0.9,
         };
