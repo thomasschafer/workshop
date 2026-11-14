@@ -28,6 +28,8 @@ The Workshop server runs arbitrary code on your machine and spends your model su
 
 The author's writer is the one model with tools, confined to a copy of your pack: [docs/author.md](docs/author.md) describes how, and the limits of each model CLI's confinement, such as Codex being able to read files outside the copy. A way for the writer to change anything outside its copy, or for anything it writes besides new items under `items/` to reach your pack, is in scope.
 
+The programs in coding and reading items, some of which a model may have written, are built and run in a sandbox where the operating system offers one, by `workshop pack check`, the author and the Coding track: [docs/author.md](docs/author.md#running-what-the-writer-wrote) says what it allows. A way for one of them to write outside its own directory, read your home directory beyond the toolchains it's allowed, or reach the network, is in scope. Where there's no sandbox, `workshop pack check` warns that it's running them with all your access, and the author refuses to run them. Your own Advent of Code solutions aren't sandboxed, as they're your own code, run with the packages and toolchain you set up for them.
+
 Out of scope:
 
 - anything that requires an attacker to already have a valid token, or to control your shell or user account

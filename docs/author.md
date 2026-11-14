@@ -51,7 +51,17 @@ How tightly the writer is kept to the copy depends on its CLI:
 
 Either way, the model is told what to write about, which includes your mistakes and answers, and sends that to its provider, as every role does.
 
-Checking an item runs its programs. For a coding problem, that's the reference solutions, brute force and inputs program the writer wrote, which are built and run on your machine as `workshop pack check` runs any pack's, without a sandbox. Only use the author with a coding toolchain on a machine where you're content for model-written programs to run, as the app already runs your own and the pack's.
+## Running what the writer wrote
+
+Checking an item runs its programs: for a coding problem, the reference solutions, brute force and inputs program the writer wrote, and for a reading item, its code. Workshop builds and runs each of them in the operating system's sandbox, as `workshop pack check` and the Coding track do: Seatbelt, through `sandbox-exec`, on macOS, and [bubblewrap](https://github.com/containers/bubblewrap) on Linux, if it's installed and works. Inside it, a build or run:
+
+- can't reach the network, including other machines, this one's own ports and local sockets, or talk to other programs and services, such as by sending Apple events;
+- can only write to a directory of its own, which Workshop makes for that build or run and is also its temporary directory, and to `/dev/null`;
+- can read the system's own files, its own directory and the toolchains it needs, such as rustup's, mise's and Xcode's, but not the rest of your home directory, shared temporary directories or other volumes.
+
+What it can't stop: a program can still see which files exist, and how big they are, anywhere, as compilers need to look at the directories above theirs; it can read anything outside home and temporary directories that your user can, such as `/etc`; and it can use as much CPU and memory as it likes until its time is up. On Linux, the system's files are mounted read-only rather than limited rule by rule, and home, temporary and runtime directories, such as `/run`, where local services keep their sockets, are replaced with empty ones.
+
+Where there's no sandbox, such as on Windows or on Linux without bubblewrap, the author doesn't run the writer's programs at all: its coding and reading items are left out, as they can't be checked, and approving one waiting under Packs says why it can't be added.
 
 ## Running it safely the first time
 
