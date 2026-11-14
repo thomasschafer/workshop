@@ -62,6 +62,10 @@ pub struct LastRun {
     pub error: Option<String>,
 }
 
+/// How many times taking the author's lock is tried, and how long to wait between tries.
+const LOCK_ATTEMPTS: u32 = 10;
+const LOCK_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
+
 impl Desk {
     pub fn new(data_dir: &Path) -> Self {
         Self {
@@ -169,6 +173,16 @@ impl Desk {
             .truncate(false)
             .write(true)
             .open(self.dir.join("lock"))?;
+        // A process another thread is starting holds a copy of every open file between its fork
+        // and its exec, this lock included, so a lock just let go of can look held for a moment.
+        // Trying again briefly tells that apart from a run that's really going.
+        for _ in 0..LOCK_ATTEMPTS - 1 {
+            match file.try_lock() {
+                Ok(()) => return Ok(Some(file)),
+                Err(std::fs::TryLockError::WouldBlock) => std::thread::sleep(LOCK_RETRY),
+                Err(std::fs::TryLockError::Error(err)) => return Err(err.into()),
+            }
+        }
         match file.try_lock() {
             Ok(()) => Ok(Some(file)),
             Err(std::fs::TryLockError::WouldBlock) => Ok(None),
