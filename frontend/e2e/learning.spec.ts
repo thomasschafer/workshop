@@ -497,7 +497,11 @@ test("sends an answer again when the reply was lost, without counting it twice",
     serviceWorkers: "block",
   });
   const page = await other.newPage();
+  // The page syncs as it opens; that sync must be done before the next one's reply is lost, or
+  // it would be the one lost.
+  const opened = page.waitForResponse((response) => response.url().includes("/api/learning/sync"));
   await page.goto(`/practice/probability?token=${token()}`);
+  await opened;
   await expect(page.locator(".learn-sync")).toHaveText("Saved");
   // The server gets the first sync, but its reply never arrives, as on a dropping connection.
   const syncs: string[] = [];
