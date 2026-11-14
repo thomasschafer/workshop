@@ -47,7 +47,7 @@ export function GoalsScreen({
     <Page title="Goals" onHome={onHome}>
       {goal !== null ? <p class="muted">There's no goal called {goal} in your packs.</p> : null}
       {goals.length === 0 ? (
-        <p class="muted">
+        <p class="empty">
           Your packs have no goals yet. A goal is a set of skills to master, in a pack's pack.toml.
         </p>
       ) : (
@@ -135,7 +135,7 @@ function GoalView({ goal }: { goal: GoalProgress }) {
           <h2 id="weakest-heading" class="tracks-heading">
             Weakest
           </h2>
-          <p>{goal.weakest.map(name).join(", ")}</p>
+          <p class="goal-weakest">{goal.weakest.map(name).join(", ")}</p>
         </section>
       ) : null}
       {goal.mistakes.length > 0 ? (

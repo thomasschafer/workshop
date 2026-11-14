@@ -74,7 +74,7 @@ export function FlaggedCards() {
         </p>
       ) : null}
       {cards === null ? null : cards.length === 0 ? (
-        <p class="muted">No cards are flagged.</p>
+        <p class="empty">No cards are flagged.</p>
       ) : (
         <ul class="progress-list" aria-label="Flagged cards">
           {cards.map((card) => (

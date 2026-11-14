@@ -39,7 +39,7 @@ export function PackScreen({ onHome }: { onHome: () => void }) {
               Drafts
             </h2>
             {drafts.length === 0 ? (
-              <p class="muted">No drafts. Questions you add wait here for the author.</p>
+              <p class="empty">No drafts. Questions you add wait here for the author.</p>
             ) : (
               <ul class="progress-list" aria-label="Drafts">
                 {drafts.map((draft) => (

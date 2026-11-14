@@ -133,7 +133,7 @@ export function Author({ onChanged }: { onChanged: () => void }) {
           Waiting for approval
         </h3>
         {status.queue.length === 0 ? (
-          <p class="muted">Nothing is waiting.</p>
+          <p class="empty">Nothing is waiting.</p>
         ) : (
           <ul class="progress-list" aria-label="Waiting for approval">
             {status.queue.map(({ id, item }) => (

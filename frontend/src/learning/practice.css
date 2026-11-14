@@ -20,6 +20,21 @@
   gap: 16px;
 }
 
+/* The content's gap spaces its paragraphs, so their own margins would only double it. */
+.learn-content > p {
+  margin: 0;
+}
+
+/* Nothing to show yet, and what would be here. */
+.empty {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .learn-sync {
   font-size: 13px;
   color: var(--muted);
@@ -47,6 +62,15 @@
 
 .learn-prompt {
   font-size: 17px;
+}
+
+/* Spaced by what's around it, rather than by its first and last paragraphs' margins. */
+.learn-prompt > :first-child {
+  margin-top: 0;
+}
+
+.learn-prompt > :last-child {
+  margin-bottom: 0;
 }
 
 .learn-sum {
@@ -110,6 +134,7 @@
 }
 
 .learn-form input,
+.learn-form textarea,
 .learn-flag input {
   width: 100%;
   box-sizing: border-box;
@@ -206,7 +231,7 @@
   gap: 4px;
 }
 
-.learn-output {
+.learn-form textarea.learn-output {
   font-family: var(--mono);
   font-size: var(--code-size);
 }

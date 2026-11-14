@@ -4,6 +4,16 @@
   gap: 10px;
 }
 
+.pack-section > p,
+.pack-section > .tracks-heading {
+  margin: 0;
+}
+
+/* A section within another, such as the author's queue, set apart from what's above it. */
+.pack-section .pack-section {
+  margin-top: 8px;
+}
+
 .pack-fix {
   display: flex;
   flex-direction: column;

@@ -102,6 +102,10 @@ textarea.explain-heard {
   margin-bottom: 4px;
 }
 
+.design-intro p {
+  margin: 0;
+}
+
 .design-intro,
 .design-stage,
 .design-coach,

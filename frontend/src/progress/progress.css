@@ -64,6 +64,14 @@
   font-weight: 650;
 }
 
+.progress-list.goal-skills {
+  gap: 16px;
+}
+
+.goal-weakest {
+  margin: 0;
+}
+
 .goal-skill {
   display: flex;
   flex-direction: column;

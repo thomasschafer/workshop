@@ -46,7 +46,7 @@ export function MistakesScreen({ onHome }: { onHome: () => void }) {
   return (
     <Page title="Mistakes" onHome={onHome}>
       {log.mistakes.length === 0 ? (
-        <p class="muted">
+        <p class="empty">
           No mistakes yet. Wrong answers, failed submissions and what the grader finds are kept
           here.
         </p>
