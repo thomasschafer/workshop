@@ -57,7 +57,7 @@ pub(super) async fn home(
             .learning
             .tracks(&planned, clock, &app.design_sessions.all()?);
         let coding = crate::coding::track(&planned, &app.problems.sessions()?);
-        let rounds = crate::rounds::track(&planned, &app.rounds.all()?, clock.now);
+        let rounds = crate::rounds::track(&planned, &app.rounds.all()?, clock.now, query.time);
         Ok((tracks, coding.into_iter().chain(rounds)))
     });
     let (learning, week, problems) = match learning {
@@ -117,7 +117,6 @@ mod tests {
                 "coding",
                 "probability",
                 "system-design",
-                "rounds",
                 "mental-maths",
                 "review",
                 "pack:estimation"
@@ -150,6 +149,8 @@ mod tests {
         let home: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(home["continue"]["long"], true);
         assert_eq!(home["continue"]["track"], "system-design");
+        // Timed rounds are only on the home screen then.
+        assert_eq!(home["tracks"][4]["id"], "rounds");
         assert_eq!(home["continue"]["destination"]["kind"], "design");
     }
 }

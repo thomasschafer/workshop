@@ -1,14 +1,15 @@
 //! The Timed rounds track: rounds with the examiner, on items from the Coding, Probability and
-//! System design tracks. Rounds take a while, so Continue only offers one when the learner has
-//! a while: the round under way, then an item due for review, then something new, sooner if
-//! it's in a skill recent mistakes point to, and otherwise any item, against the clock again.
+//! System design tracks. Rounds take a while, so the track is only on the home screen when the
+//! learner has a while, or has a round under way, and only then does Continue offer one: the
+//! round under way, then an item due for review, then something new, sooner if it's in a skill
+//! recent mistakes point to, and otherwise any item, against the clock again.
 
 use std::collections::BTreeMap;
 
 use workshop_learning::TrackPlan;
 use workshop_pack::Item;
 use workshop_sessions::round::{Ending, Round};
-use workshop_tracks::{Priority, Step, Track, TrackId};
+use workshop_tracks::{Priority, Step, Time, Track, TrackId};
 
 use crate::learning::{Planned, week_so_far};
 use crate::tracks::Destination;
@@ -81,11 +82,13 @@ pub fn where_it_is(round: &Round, now: i64) -> String {
     }
 }
 
-/// The Timed rounds track on the home screen at `now`, if there's anything to make a round of.
+/// The Timed rounds track on the home screen at `now`, if there's anything to make a round of
+/// and the learner has `time` for one, or a round under way.
 pub fn track(
     planned: &Planned,
     rounds: &BTreeMap<String, Round>,
     now: i64,
+    time: Time,
 ) -> Option<Track<Destination>> {
     let open = |key: &str| Destination::Round {
         item: Some(key.to_owned()),
@@ -99,6 +102,9 @@ pub fn track(
         .iter()
         .filter(|(key, _)| planned.item(key).is_some())
         .collect();
+    if time == Time::Short && under_way.is_empty() {
+        return None;
+    }
     let long = match under_way.iter().max_by_key(|(_, round)| round.seen_at) {
         Some((key, round)) => Some(Step {
             title: label(key),
@@ -163,7 +169,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let learning = learning(dir.path());
         let planned = learning.planned(clock(NOW)).unwrap();
-        let track = track(&planned, &BTreeMap::new(), NOW).unwrap();
+        let none = BTreeMap::new();
+        // Without a while, there's no track, as there's nothing under way.
+        assert!(track(&planned, &none, NOW, Time::Short).is_none());
+        let track = track(&planned, &none, NOW, Time::AWhile).unwrap();
         assert_eq!(track.name, "Timed rounds");
         assert_eq!(track.next, None);
         let long = track.long.unwrap();
@@ -201,7 +210,9 @@ mod tests {
         let mut round = Round::new(10, None, later);
         round.seen(later + 10_000);
         let rounds = BTreeMap::from([("sample/islands".to_owned(), round.clone())]);
-        let track = super::track(&planned, &rounds, later + 10_000).unwrap();
+        // One under way stays on the home screen without a while, to be carried on with.
+        assert!(super::track(&planned, &rounds, later + 10_000, Time::Short).is_some());
+        let track = super::track(&planned, &rounds, later + 10_000, Time::AWhile).unwrap();
         let long = track.long.unwrap();
         assert_eq!(long.priority, Priority::Unfinished);
         assert_eq!(long.title, "Count the islands");
