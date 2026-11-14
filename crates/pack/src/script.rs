@@ -107,6 +107,8 @@ impl Scripts {
             }
             items
         });
+        engine.register_fn("sig", significant);
+        engine.register_fn("sig", |n: i64, figures: i64| significant(n as f64, figures));
         Self { engine, rng }
     }
 
@@ -147,6 +149,19 @@ impl Scripts {
             .map_err(|err| format!("the script failed: {err}"))?;
         Value::from_dynamic(&result)
     }
+}
+
+/// `sig(x, n)`: `x` rounded to `n` significant figures, such as for the rounded numbers an
+/// estimate works with.
+fn significant(x: f64, figures: i64) -> Result<f64, Box<rhai::EvalAltResult>> {
+    if !(1..=15).contains(&figures) {
+        return Err(format!("sig(_, {figures}) should keep 1 to 15 figures").into());
+    }
+    if x == 0.0 {
+        return Ok(0.0);
+    }
+    let scale = 10f64.powi(figures as i32 - 1 - x.abs().log10().floor() as i32);
+    Ok((x * scale).round() / scale)
 }
 
 /// What a script gives back: a number, or whether something happened.
@@ -236,6 +251,21 @@ mod tests {
         assert_eq!(scripts.run(&roll, &[]), Ok(Value::Bool(true)));
         let float = scripts.compile_expression("a / 2.0").unwrap();
         assert_eq!(scripts.run(&float, &vars), Ok(Value::Float(3.0)));
+    }
+
+    #[test]
+    fn rounds_to_significant_figures() {
+        let scripts = Scripts::new(1);
+        let run = |source: &str| {
+            let ast = scripts.compile_expression(source).unwrap();
+            scripts.run(&ast, &[]).unwrap()
+        };
+        assert_eq!(run("sig(31536000, 2)"), Value::Float(32_000_000.0));
+        assert_eq!(run("sig(0.0012345, 3)"), Value::Float(0.00123));
+        assert_eq!(run("sig(-47.6, 1)"), Value::Float(-50.0));
+        assert_eq!(run("sig(0, 2)"), Value::Float(0.0));
+        let ast = scripts.compile_expression("sig(12.0, 0)").unwrap();
+        assert!(scripts.run(&ast, &[]).unwrap_err().contains("1 to 15"));
     }
 
     #[test]

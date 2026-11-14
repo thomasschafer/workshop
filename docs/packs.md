@@ -135,7 +135,6 @@ kind = "mental-maths"
 skills = ["arithmetic.division"]
 answer = "b"
 require = "b % 10 != 0"    # optional: draw again until this is true
-tolerance = 0              # optional: how far off an answer may be, such as for estimates
 
 [params]
 a = { min = 3, max = 12 }
@@ -152,7 +151,17 @@ What's {product} ÷ {a}?
 {a} × {answer} = {product}.
 ```
 
-Params are integers, drawn from `min` to `max` inclusive, or from `choices`. `answer`, `require` and derived values are expressions of the params, and derived values can be used in the answer too. Arithmetic on integers stays in integers, so `7 / 2` is 3; write `7.0 / 2` for 3.5. `{name}` in the prompt or the method shows a param's or a derived value's value, and the method can also show `{answer}`. The optional `## Method` section is shown after answering.
+Answers must be exact unless the template says how close is close enough, which makes it an estimate:
+
+```toml
+tolerance = 5               # within 5 either way
+relative_tolerance = 0.05   # within 5% of the answer
+factor = 2                  # from half to twice the answer, for when only its magnitude matters
+```
+
+An answer within any of the bounds given is right. The app shows the bounds with the question, such as "within 5%", and after answering shows the answer to four significant figures, so an estimate's method should teach a quick way to get close, rather than how to get the answer exactly. For a big answer, ask for it in a unit that keeps it short, such as millions or terabytes, as phones offer a keypad of digits for answers.
+
+Params are integers, drawn from `min` to `max` inclusive, or from `choices`. `answer`, `require` and derived values are expressions of the params, and derived values can be used in the answer too. Arithmetic on integers stays in integers, so `7 / 2` is 3; write `7.0 / 2` for 3.5. Scripts can round with `sig(x, n)`, to `n` significant figures, such as for the rounded numbers an estimate works with. `{name}` in the prompt or the method shows a param's or a derived value's value, and the method can also show `{answer}`. The optional `## Method` section is shown after answering.
 
 ### Probability
 
@@ -332,6 +341,7 @@ Mental maths expressions and probability simulations are in [Rhai](https://rhai.
 | `rand_bool(p)` | `true` with probability `p`. |
 | `rand_choice(array)` | One of the array's items. |
 | `shuffle(array)` | The array in a random order. |
+| `sig(x, n)` | `x` rounded to `n` significant figures. |
 
 A trial can end early with `return`, such as when drawing again until a condition holds:
 

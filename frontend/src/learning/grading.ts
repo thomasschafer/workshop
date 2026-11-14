@@ -38,10 +38,37 @@ export function parseNumber(text: string): number | null {
 export function grade(expected: number, tolerance: Tolerance, response: string): boolean | null {
   const given = parseNumber(response);
   if (given === null) return null;
-  return (
+  const close =
     Math.abs(given - expected) <=
-    Math.max(tolerance.absolute, tolerance.relative * Math.abs(expected))
-  );
+    Math.max(tolerance.absolute, tolerance.relative * Math.abs(expected));
+  const ratio = given / expected;
+  const sameMagnitude =
+    tolerance.factor !== undefined &&
+    ratio > 0 &&
+    ratio <= tolerance.factor &&
+    ratio >= 1 / tolerance.factor;
+  return close || sameMagnitude;
+}
+
+/** The tolerance every answer gets, which is too small to mention. */
+const HAIRS_BREADTH = 1e-9;
+
+/**
+ * How close an answer must be, to show with a question that's an estimate, such as "within 5%",
+ * or null when it must be exact.
+ */
+export function describeTolerance(tolerance: Tolerance): string | null {
+  const bounds = [
+    tolerance.absolute > HAIRS_BREADTH ? `${displayNumber(tolerance.absolute)} either way` : null,
+    tolerance.relative > 0 ? `${displayNumber(tolerance.relative * 100)}%` : null,
+    tolerance.factor !== undefined ? `a factor of ${displayNumber(tolerance.factor)}` : null,
+  ].filter((bound) => bound !== null);
+  return bounds.length === 0 ? null : `within ${bounds.join(" or ")}`;
+}
+
+/** An estimate's exact answer, to four significant figures, grouped in thousands. */
+export function displayApproximate(value: number): string {
+  return new Intl.NumberFormat("en-GB", { maximumSignificantDigits: 4 }).format(value);
 }
 
 /** A number as the app shows it: integers as they are, others to at most six decimal places. */

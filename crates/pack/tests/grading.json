@@ -17,5 +17,14 @@
   { "expected": 120, "tolerance": { "absolute": 5, "relative": 0 }, "response": "124", "correct": true },
   { "expected": 120, "tolerance": { "absolute": 5, "relative": 0 }, "response": "126", "correct": false },
   { "expected": 0.001, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "0.1%", "correct": true },
-  { "expected": 0.001, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "0.002", "correct": false }
+  { "expected": 0.001, "tolerance": { "absolute": 1e-9, "relative": 0.005 }, "response": "0.002", "correct": false },
+  { "expected": 31536000, "tolerance": { "absolute": 1e-9, "relative": 0.05 }, "response": "30,000,000", "correct": true },
+  { "expected": 31536000, "tolerance": { "absolute": 1e-9, "relative": 0.05 }, "response": "29,900,000", "correct": false },
+  { "expected": 250, "tolerance": { "absolute": 1e-9, "relative": 0, "factor": 2 }, "response": "125", "correct": true },
+  { "expected": 250, "tolerance": { "absolute": 1e-9, "relative": 0, "factor": 2 }, "response": "500", "correct": true },
+  { "expected": 250, "tolerance": { "absolute": 1e-9, "relative": 0, "factor": 2 }, "response": "124", "correct": false },
+  { "expected": 250, "tolerance": { "absolute": 1e-9, "relative": 0, "factor": 2 }, "response": "501", "correct": false },
+  { "expected": 250, "tolerance": { "absolute": 1e-9, "relative": 0, "factor": 2 }, "response": "-250", "correct": false },
+  { "expected": 250, "tolerance": { "absolute": 1e-9, "relative": 0, "factor": 2 }, "response": "0", "correct": false },
+  { "expected": 0.004, "tolerance": { "absolute": 1e-9, "relative": 0, "factor": 3 }, "response": "1/100", "correct": true }
 ]

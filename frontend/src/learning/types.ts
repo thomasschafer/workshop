@@ -18,6 +18,8 @@ export interface Tolerance {
   absolute: number;
   /** As a fraction of the exact answer. */
   relative: number;
+  /** For answers only the magnitude of matters: how many times off an answer may be. */
+  factor?: number;
 }
 
 export interface Instance {

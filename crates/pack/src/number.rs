@@ -6,23 +6,34 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How far a learner's answer may be from the exact one and still be right: within either
-/// bound is enough.
+/// How far a learner's answer may be from the exact one and still be right: within any of the
+/// bounds is enough.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Tolerance {
     pub absolute: f64,
     /// As a fraction of the exact answer, such as 0.005 for half a percent.
     pub relative: f64,
+    /// For an answer only the magnitude of matters: how many times bigger or smaller than the
+    /// exact answer it may be, such as 2 for anything from half to twice it. Always above 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub factor: Option<f64>,
 }
 
 impl Tolerance {
     pub const EXACT: Self = Self {
         absolute: 1e-9,
         relative: 0.0,
+        factor: None,
     };
 
     pub fn allows(&self, expected: f64, given: f64) -> bool {
-        (given - expected).abs() <= self.absolute.max(self.relative * expected.abs())
+        let close = (given - expected).abs() <= self.absolute.max(self.relative * expected.abs());
+        let same_magnitude = self.factor.is_some_and(|factor| {
+            // Of the same sign, and neither zero, so the ratio says how far apart they are.
+            let ratio = given / expected;
+            ratio > 0.0 && ratio <= factor && ratio >= 1.0 / factor
+        });
+        close || same_magnitude
     }
 }
 

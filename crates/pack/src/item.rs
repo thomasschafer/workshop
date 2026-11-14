@@ -190,6 +190,8 @@ struct MentalMathsFields {
     require: Option<String>,
     #[serde(default)]
     tolerance: f64,
+    relative_tolerance: Option<f64>,
+    factor: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -529,6 +531,21 @@ impl MentalMaths {
         if !(fields.tolerance >= 0.0 && fields.tolerance.is_finite()) {
             return Err("tolerance should be 0 or more".to_owned());
         }
+        if let Some(relative) = fields.relative_tolerance
+            && !(0.0..1.0).contains(&relative)
+        {
+            return Err(
+                "relative_tolerance should be at least 0 and below 1, such as 0.05 for 5%"
+                    .to_owned(),
+            );
+        }
+        if let Some(factor) = fields.factor
+            && !(factor > 1.0 && factor.is_finite())
+        {
+            return Err(
+                "factor should be above 1, such as 2 for half to twice the answer".to_owned(),
+            );
+        }
         let known = |name: &str| params.contains_key(name) || fields.derived.contains_key(name);
         for name in placeholders(prompt) {
             if !known(&name) {
@@ -553,7 +570,8 @@ impl MentalMaths {
             require: fields.require,
             tolerance: Tolerance {
                 absolute: fields.tolerance.max(Tolerance::EXACT.absolute),
-                relative: 0.0,
+                relative: fields.relative_tolerance.unwrap_or(0.0),
+                factor: fields.factor,
             },
             method,
         })
@@ -589,8 +607,8 @@ impl Probability {
             answer_text: fields.answer,
             answer,
             tolerance: Tolerance {
-                absolute: Tolerance::EXACT.absolute,
                 relative,
+                ..Tolerance::EXACT
             },
             solution,
             simulation: Simulation {
@@ -754,6 +772,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_how_close_an_estimate_must_be() {
+        let template = |bounds: &str| {
+            let item = parse(&format!(
+                "+++\nkind = \"mental-maths\"\nskills = [\"arithmetic\"]\nanswer = \"a * 3.7\"\n{bounds}\n[params]\na = {{ min = 2, max = 9 }}\n+++\nRoughly what's {{a}} × 3.7?\n"
+            ))
+            .unwrap();
+            let Content::MentalMaths(maths) = item.content else {
+                panic!("not mental maths");
+            };
+            maths.tolerance
+        };
+        assert_eq!(template(""), Tolerance::EXACT);
+        let relative = template("relative_tolerance = 0.05");
+        assert_eq!((relative.relative, relative.factor), (0.05, None));
+        assert!(relative.allows(100.0, 104.0) && !relative.allows(100.0, 106.0));
+        let factor = template("factor = 2");
+        assert_eq!((factor.relative, factor.factor), (0.0, Some(2.0)));
+        assert!(factor.allows(100.0, 51.0) && factor.allows(100.0, 199.0));
+        assert!(!factor.allows(100.0, 201.0) && !factor.allows(100.0, -100.0));
+    }
+
+    #[test]
     fn reads_a_probability_item() {
         let item = parse(
             "+++\nkind = \"probability\"\nskills = [\"dice\"]\nanswer = \"1/6\"\n[simulation]\ntrials = 50000\ntolerance = 0.01\n+++\nTwo dice: what's the chance they sum to 7?\n\n## Solution\n\n6 of the 36 outcomes.\n\n## Simulation\n\n```rhai\nrand_int(1, 6) + rand_int(1, 6) == 7\n```\n",
@@ -878,6 +918,14 @@ mod tests {
             (
                 "+++\nkind = \"card\"\ntrack = \"chess\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA",
                 "no track",
+            ),
+            (
+                "+++\nkind = \"mental-maths\"\nskills = [\"dice\"]\nanswer = \"a\"\nrelative_tolerance = 5\n[params]\na = { min = 1, max = 2 }\n+++\n{a}",
+                "relative_tolerance should be at least 0 and below 1",
+            ),
+            (
+                "+++\nkind = \"mental-maths\"\nskills = [\"dice\"]\nanswer = \"a\"\nfactor = 0.5\n[params]\na = { min = 1, max = 2 }\n+++\n{a}",
+                "factor should be above 1",
             ),
             (
                 "+++\nkind = \"card\"\ntrack = \"rounds\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA",

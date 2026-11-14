@@ -7,7 +7,7 @@ import type { Marked } from "../grading/types";
 import { useMarkdown } from "../hooks/useMarkdown";
 import { HomeButton, TrackTitle } from "../progress/page";
 import type { TrackId } from "../tracks/types";
-import { displayNumber, grade } from "./grading";
+import { describeTolerance, displayApproximate, displayNumber, grade } from "./grading";
 import { newId, nextInstance, progress, queue, step, utcOffset } from "./local";
 import { sameOutput } from "./output";
 import "./practice.css";
@@ -216,6 +216,7 @@ export function ItemView({
         <TypedAnswer
           prompt={nextInstance(item.instances, learning().attempts, item.key)}
           tolerance={item.tolerance}
+          estimate={describeTolerance(item.tolerance)}
           onAnswer={(instance, response, right) => {
             record(right ? "good" : "again", {
               ...(response === null ? {} : { response }),
@@ -528,12 +529,15 @@ function ReadingView({
 function TypedAnswer({
   prompt,
   tolerance,
+  estimate = null,
   markdown = false,
   onAnswer,
   onNext,
 }: {
   prompt: Instance;
   tolerance: Extract<DeckItem, { kind: "probability" }>["tolerance"];
+  /** How close an estimate must be, such as "within 5%", shown with the question; null if exact. */
+  estimate?: string | null;
   markdown?: boolean;
   onAnswer: (instance: Instance, response: string | null, right: boolean) => void;
   onNext: (right: boolean) => void;
@@ -574,6 +578,7 @@ function TypedAnswer({
       ) : (
         <p class="learn-prompt learn-sum">{instance.prompt}</p>
       )}
+      {estimate ? <p class="learn-estimate muted">An estimate: {estimate} counts.</p> : null}
       <form class="learn-form" onSubmit={check}>
         <label class="visually-hidden" for="learn-response">
           Your answer
@@ -605,7 +610,11 @@ function TypedAnswer({
       {right !== null ? (
         <section class={`learn-answer ${right ? "right" : "wrong"}`} aria-label="Answer">
           <p class="learn-verdict">
-            {right ? "Right" : `The answer is ${displayNumber(instance.answer)}`}
+            {estimate
+              ? `${right ? "Close enough" : "Not close enough"}: it's ${displayApproximate(instance.answer)}`
+              : right
+                ? "Right"
+                : `The answer is ${displayNumber(instance.answer)}`}
           </p>
           {instance.method ? <Markdown text={instance.method} class="muted" /> : null}
           <button ref={next} type="button" class="pill primary wide" onClick={() => onNext(right)}>

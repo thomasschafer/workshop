@@ -73,6 +73,11 @@
   margin-bottom: 0;
 }
 
+.learn-estimate {
+  margin: -6px 0 0;
+  font-size: 14px;
+}
+
 .learn-sum {
   margin: 0;
   font-size: 26px;
