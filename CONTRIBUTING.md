@@ -12,7 +12,11 @@ mise run check-fast  # formatting, lints, types and unit tests, in seconds
 mise run check       # all of that and the browser tests, as CI does
 ```
 
-The Rust server is in `src/`, and what it shares between tracks is in crates of its own under `crates/`: the model providers, building and running code, toolchains and packages, the language server relay, Tailscale serving, the token that guards the server, Web Push notifications, and the tracks themselves. They're parts of the one binary, never published on their own. The TypeScript frontend, built with Vite and CodeMirror 6, is in `frontend/`, with the home screen and its tracks in `frontend/src/tracks/`. The built frontend is embedded in the binary, so users only ever need the one file.
+The Rust server is in `src/`, and what it shares between tracks is in crates of its own under `crates/`: the model providers, building and running code, toolchains and packages, the language server relay, Tailscale serving, the token that guards the server, Web Push notifications, and the tracks themselves. Packs and their checks are in `crates/pack`, and the log of attempts, scheduling and mastery in `crates/learning`. They're parts of the one binary, never published on their own. The TypeScript frontend, built with Vite and CodeMirror 6, is in `frontend/`, with the home screen and its tracks in `frontend/src/tracks/`, and practising short items in `frontend/src/learning/`.
+
+The app schedules and grades answers given offline itself, until they reach the server, so its scheduling and grading must agree with the server's. Both are tested against the same cases, in `crates/learning/tests/fsrs.json` and `crates/pack/tests/grading.json`; after a deliberate change to scheduling, run `UPDATE_FIXTURES=1 cargo test -p workshop-learning` and check what changed.
+
+The sample pack in `packs/sample` must pass `workshop pack check`, which a test and CI both run. Its items are original; never add copyrighted problems. The built frontend is embedded in the binary, so users only ever need the one file.
 
 Tests must never use real Advent of Code puzzle text or inputs; invent your own.
 

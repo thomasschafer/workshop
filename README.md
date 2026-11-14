@@ -61,7 +61,17 @@ This gives Workshop an HTTPS address on your tailnet, and prints a link and QR c
 
 The first time you open Workshop, a short setup walks you through choosing your language and model and logging in to Advent of Code. If you'd rather not paste your session cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
-Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on. Below it are the tracks, of which Advent of Code is the first.
+Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on or the cards due for review. Below it are the tracks: Advent of Code, and tracks of short items from a pack.
+
+## Packs and practice
+
+Besides Advent of Code, Workshop practises short items from a pack: review cards you mark yourself, mental maths with fresh numbers each time, and probability questions with exact answers. A pack is a directory of Markdown files, usually a git repo of your own; [docs/packs.md](docs/packs.md) describes the format. Until you configure one, Workshop uses its small sample pack.
+
+Practice comes in steps of a few minutes, and each answer is saved as you give it, so you can stop at any moment. Items come back when you're due to forget them, scheduled with [FSRS](https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm). Continue puts due reviews first, up to a daily limit, and the home screen counts your practice towards a weekly target rather than a streak.
+
+Short items work offline: once a phone has opened Workshop, it keeps what it needs to practise, and syncs your answers when it can reach the server again.
+
+`workshop pack check` checks every item in a pack: that it can be read, that a probability question's simulation agrees with its answer, and that a mental maths template makes sensible questions.
 
 To try Workshop before logging in, or outside December, open the practice puzzle from the bottom of the puzzle list.
 
@@ -85,6 +95,12 @@ model = "haiku"        # always the latest; for Codex, a family such as "luna"
 [models.discuss]
 provider = "claude"
 models = ["sonnet", "opus", "fable"]    # for Codex, ["sol", "astra"]
+
+[learning]
+packs = []              # pack directories; the sample pack until you list one
+daily_reviews = 40      # the most reviews Continue offers in a day
+weekly_minutes = 90     # the week's target
+desired_retention = 0.9 # how likely you should be to remember an item when it comes back
 
 [[snippets]]
 name = "parse ints"
