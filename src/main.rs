@@ -7,6 +7,7 @@ mod doctor;
 mod edit;
 mod eval;
 mod language;
+mod learning;
 mod models;
 mod notify;
 mod packs;

@@ -10,6 +10,7 @@ mod error;
 mod git;
 mod home;
 mod install;
+mod learning;
 mod lsp;
 mod notifications;
 mod packages;
@@ -42,6 +43,8 @@ pub fn router(app: Shared) -> Router {
         .route("/bootstrap", get(client::bootstrap))
         .route("/ping", get(client::ping))
         .route("/home", get(home::home))
+        .route("/learning/deck", get(learning::deck))
+        .route("/learning/sync", post(learning::sync))
         .route("/state", put(client::save_state))
         .route("/doctor", get(setup::run_doctor))
         .route(

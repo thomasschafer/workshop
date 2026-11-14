@@ -2,10 +2,31 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use workshop_pack::Pack;
 
 use crate::config::LearningConfig;
+
+/// The packs to learn from: those in the config, or the sample pack if there are none. A pack
+/// whose items have problems still loads, without them; one whose `pack.toml` can't be read,
+/// or that has the same id as another, is an error.
+pub fn load(config: &LearningConfig) -> Result<Vec<Pack>> {
+    if config.packs.is_empty() {
+        return Ok(vec![Pack::sample()]);
+    }
+    let mut packs: Vec<Pack> = Vec::new();
+    for dir in &config.packs {
+        let pack = Pack::load(dir)?;
+        if packs.iter().any(|p| p.manifest.id == pack.manifest.id) {
+            bail!(
+                "two packs have the id {:?}; each needs its own, in its pack.toml",
+                pack.manifest.id
+            );
+        }
+        packs.push(pack);
+    }
+    Ok(packs)
+}
 
 /// Checks the pack in `dir`, or else the packs in the config, printing what's wrong. Returns
 /// whether everything passed.
@@ -72,6 +93,27 @@ mod tests {
             "+++\nkind = \"card\"\nskills = [\"a\"]\n+++\nQ\n## Answer\nA\n",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn uses_the_sample_pack_until_one_is_configured() {
+        let packs = load(&config(Vec::new())).unwrap();
+        assert_eq!(packs[0].manifest.id, "sample");
+
+        let dir = tempfile::tempdir().unwrap();
+        write_pack(&dir.path().join("mine"), "mine");
+        let packs = load(&config(vec![dir.path().join("mine")])).unwrap();
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].manifest.id, "mine");
+    }
+
+    #[test]
+    fn refuses_two_packs_with_one_id() {
+        let dir = tempfile::tempdir().unwrap();
+        write_pack(&dir.path().join("a"), "same");
+        write_pack(&dir.path().join("b"), "same");
+        let err = load(&config(vec![dir.path().join("a"), dir.path().join("b")])).unwrap_err();
+        assert!(err.to_string().contains("two packs"));
     }
 
     #[test]

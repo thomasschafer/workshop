@@ -8,13 +8,15 @@ use crate::calendar::{days_in, is_unlocked, todays_puzzle};
 use crate::language::Puzzle;
 
 /// Where a step or a track leads in the app.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Destination {
     /// Advent of Code, with this puzzle open.
     Puzzle { puzzle: Puzzle },
     /// Advent of Code's list of puzzles, to choose one.
     PuzzleList,
+    /// Practising a track's short items, such as review cards.
+    Practice { track: TrackId },
 }
 
 /// What the Advent of Code track is worked out from.
@@ -134,7 +136,7 @@ mod tests {
 
     fn next(track: &Track<Destination>) -> (Destination, Priority) {
         let step = track.next.as_ref().unwrap();
-        (step.destination, step.priority)
+        (step.destination.clone(), step.priority)
     }
 
     #[test]
@@ -255,6 +257,13 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Destination::PuzzleList).unwrap(),
             serde_json::json!({ "kind": "puzzle_list" })
+        );
+        assert_eq!(
+            serde_json::to_value(Destination::Practice {
+                track: TrackId::MentalMaths
+            })
+            .unwrap(),
+            serde_json::json!({ "kind": "practice", "track": "mental-maths" })
         );
     }
 }

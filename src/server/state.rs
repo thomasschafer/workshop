@@ -53,6 +53,8 @@ pub struct App {
     pub(super) lsp_restarts: tokio::sync::watch::Sender<u64>,
     /// Language servers whose editors have gone, kept for the next to take over.
     pub(super) lsp_servers: workshop_lsp::Servers,
+    /// The short items from packs, and what's been done with them.
+    pub(super) learning: crate::learning::Learning,
 }
 
 pub(super) type Shared = Arc<App>;
@@ -110,6 +112,7 @@ impl App {
                 .build()?,
             lsp_restarts: tokio::sync::watch::Sender::new(0),
             lsp_servers: workshop_lsp::Servers::default(),
+            learning: crate::learning::Learning::open(&config.learning, &paths.data_dir)?,
             config,
             paths,
             gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),

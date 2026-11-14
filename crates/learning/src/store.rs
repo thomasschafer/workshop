@@ -338,6 +338,17 @@ impl Store {
         })
     }
 
+    /// How many attempts there have been at each item.
+    pub fn attempt_counts(&self) -> Result<BTreeMap<String, u64>> {
+        let connection = self.connection();
+        let mut statement =
+            connection.prepare("SELECT item, COUNT(*) FROM attempts GROUP BY item")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Every attempt at an item, in the order they were made.
     pub fn attempts(&self, item: &str) -> Result<Vec<Attempt>> {
         let connection = self.connection();
@@ -590,6 +601,7 @@ mod tests {
             .unwrap();
         let store = Store::open(&path).unwrap();
         assert_eq!(store.attempts("sample/a").unwrap().len(), 1);
+        assert_eq!(store.attempt_counts().unwrap()["sample/a"], 1);
 
         let connection = Connection::open(&path).unwrap();
         connection.pragma_update(None, "user_version", 99).unwrap();
