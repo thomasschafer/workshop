@@ -21,6 +21,7 @@ mod notifications;
 mod packages;
 mod packs;
 mod puzzles;
+mod rounds;
 mod run;
 mod settings;
 mod setup;
@@ -60,6 +61,12 @@ pub fn router(app: Shared) -> Router {
         .route("/design/{pack}/{item}/session", put(design::save))
         .route("/design/{pack}/{item}/coach", post(design::coach))
         .route("/design/{pack}/{item}/finish", post(design::finish))
+        .route("/rounds", get(rounds::overview))
+        .route("/rounds/{pack}/{item}/open", post(rounds::open))
+        .route("/rounds/{pack}/{item}/start", post(rounds::start))
+        .route("/rounds/{pack}/{item}/beat", post(rounds::beat))
+        .route("/rounds/{pack}/{item}/say", post(rounds::say))
+        .route("/rounds/{pack}/{item}/end", post(rounds::end))
         .route("/items/{pack}/{item}/mark", post(grading::mark))
         .route("/cards/flagged", get(grading::flagged))
         .route("/packs", get(packs::packs))

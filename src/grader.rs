@@ -40,13 +40,16 @@ pub enum Work {
     /// How a coding problem's solution works, explained once it's been solved or given up
     /// on, against its approach.
     Explanation,
+    /// A timed round with the examiner, on a coding problem, a probability question or a
+    /// design prompt: the learner's working and what was said.
+    Round,
 }
 
 impl Work {
     /// Whether marking it counts as an attempt at the item. A coding problem's attempt is its
     /// own, when it's finished, so its plan and explanation only add to the mistake log.
     pub fn is_attempt(self) -> bool {
-        matches!(self, Self::Design | Self::Card)
+        matches!(self, Self::Design | Self::Card | Self::Round)
     }
 }
 
@@ -59,6 +62,9 @@ pub struct Answer<'a> {
     pub spoken: bool,
     /// For an explanation of a solution, the learner's code, and its language's name.
     pub code: Option<(&'a str, &'a str)>,
+    /// What the grader should know about how the work was done, such as how a timed round
+    /// ended.
+    pub note: Option<&'a str>,
 }
 
 impl<'a> Answer<'a> {
@@ -67,6 +73,7 @@ impl<'a> Answer<'a> {
             text,
             spoken: false,
             code: None,
+            note: None,
         }
     }
 }
@@ -92,6 +99,32 @@ fn rubric(item: &Item, work: Work) -> Result<(Vec<String>, Option<String>)> {
             ],
             Some(coding.approach.clone()),
         )),
+        (Work::Round, Content::Coding(coding)) => Ok((
+            vec![
+                "Chooses a method that solves the problem correctly, and is efficient enough"
+                    .to_owned(),
+                "Writes code, or steps close enough to code, that would work".to_owned(),
+                "Handles the unusual inputs".to_owned(),
+                "Answers the examiner's follow-up questions well".to_owned(),
+            ],
+            Some(coding.approach.clone()),
+        )),
+        (Work::Round, Content::Probability(probability)) => Ok((
+            vec![
+                "Gets the right answer".to_owned(),
+                "Shows how it was worked out, soundly".to_owned(),
+                "Answers the examiner's follow-up questions well".to_owned(),
+            ],
+            Some(format!(
+                "The answer is {}.\n\n{}",
+                probability.answer_text, probability.solution
+            )),
+        )),
+        (Work::Round, Content::Design { rubric, notes }) => {
+            let mut points = rubric.clone();
+            points.push("Answers the examiner's follow-up questions well".to_owned());
+            Ok((points, notes.clone()))
+        }
         (
             Work::Card,
             Content::Card {
@@ -146,6 +179,9 @@ pub fn mark_prompt(
         ));
     }
     out.push_str(&format!("<work>\n{}\n</work>\n\n", answer.text.trim()));
+    if let Some(note) = answer.note {
+        out.push_str(&format!("{}\n\n", note.trim()));
+    }
     if answer.spoken {
         out.push_str(SPOKEN);
     }
@@ -536,6 +572,34 @@ mod tests {
     }
 
     #[test]
+    fn marks_a_timed_round_with_how_it_ended() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let answer = Answer {
+            note: Some("The round ended when its 10 minutes ran out."),
+            ..Answer::written("Working:\n1/6")
+        };
+        for (id, point) in [
+            ("two-dice-seven", "- Gets the right answer\n"),
+            (
+                "islands",
+                "- Writes code, or steps close enough to code, that would work\n",
+            ),
+            (
+                "link-shortener",
+                "- Says what happens when the store is unavailable\n",
+            ),
+        ] {
+            let prompt = mark_prompt(pack.item(id).unwrap(), Work::Round, answer, &types).unwrap();
+            assert!(prompt.contains(point), "{id}");
+            assert!(prompt.contains("- Answers the examiner's follow-up questions well\n"));
+            assert!(prompt.contains("</work>\n\nThe round ended when its 10 minutes ran out.\n\n"));
+        }
+        let card = pack.item("binary-heap-costs").unwrap();
+        assert!(mark_prompt(card, Work::Round, answer, &types).is_err());
+    }
+
+    #[test]
     fn marks_an_explanation_aloud_for_clarity_too() {
         let pack = Pack::sample();
         let types = workshop_pack::error_types::built_in();
@@ -544,6 +608,7 @@ mod tests {
             text: "I go through every square and flood each new island",
             spoken: true,
             code: Some(("Python", "print(count(grid))\n")),
+            note: None,
         };
         let prompt = mark_prompt(problem, Work::Explanation, answer, &types).unwrap();
         assert!(prompt.contains("explained this aloud"));

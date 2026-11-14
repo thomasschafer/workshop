@@ -57,11 +57,12 @@ pub(super) async fn home(
             .learning
             .tracks(&planned, clock, &app.design_sessions.all()?);
         let coding = crate::coding::track(&planned, &app.problems.sessions()?);
-        Ok((tracks, coding))
+        let rounds = crate::rounds::track(&planned, &app.rounds.all()?, clock.now);
+        Ok((tracks, coding.into_iter().chain(rounds)))
     });
     let (learning, week, problems) = match learning {
-        Ok((learning, coding)) => (
-            coding.into_iter().chain(learning.tracks).collect(),
+        Ok((learning, coding_and_rounds)) => (
+            coding_and_rounds.chain(learning.tracks).collect(),
             Some(learning.week),
             learning.problems,
         ),
@@ -116,6 +117,7 @@ mod tests {
                 "coding",
                 "probability",
                 "system-design",
+                "rounds",
                 "mental-maths",
                 "review",
                 "pack:estimation"

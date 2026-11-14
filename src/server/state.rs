@@ -59,6 +59,8 @@ pub struct App {
     pub(super) problems: crate::coding::Problems,
     /// Design prompts' sessions, worked through in stages.
     pub(super) design_sessions: workshop_sessions::Saved<workshop_sessions::design::Session>,
+    /// Timed rounds under way, by item.
+    pub(super) rounds: workshop_sessions::Saved<workshop_sessions::round::Round>,
     /// Fixes to cards the grader has proposed, waiting for approval.
     pub(super) card_fixes: crate::grader::Fixes,
     /// The author's queue, questions and last run.
@@ -130,6 +132,7 @@ impl App {
             design_sessions: workshop_sessions::Saved::new(
                 paths.data_dir.join("design").join("sessions"),
             ),
+            rounds: workshop_sessions::Saved::new(paths.data_dir.join("rounds")),
             card_fixes: crate::grader::Fixes::new(&paths.data_dir),
             author: crate::author::Desk::new(&paths.data_dir),
             author_running: std::sync::atomic::AtomicBool::new(false),

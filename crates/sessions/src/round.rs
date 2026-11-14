@@ -59,6 +59,9 @@ pub struct Round {
     /// How many times the learner has come back to it after a gap.
     #[serde(default)]
     pub interruptions: u32,
+    /// Whether they've come back after a gap since the examiner last spoke, for it to know.
+    #[serde(default)]
+    pub returned: bool,
     /// The learner's working: their answer, code or notes, typed or dictated.
     #[serde(default)]
     pub work: String,
@@ -82,16 +85,22 @@ pub enum RoundError {
     Ended,
 }
 
+/// How long a round lasts of an item that takes `item_minutes` on its own.
+pub fn minutes_for(item_minutes: u32) -> u32 {
+    item_minutes.max(MIN_MINUTES)
+}
+
 impl Round {
     /// A round of an item that takes `item_minutes` on its own.
     pub fn new(item_minutes: u32, style: Option<String>, now: i64) -> Self {
         Self {
             style,
-            minutes: item_minutes.max(MIN_MINUTES),
+            minutes: minutes_for(item_minutes),
             started_at: now,
             used_ms: 0,
             seen_at: now,
             interruptions: 0,
+            returned: false,
             work: String::new(),
             turns: Vec::new(),
             ended: None,
@@ -126,12 +135,20 @@ impl Round {
         let back = gap > MAX_GAP_MS;
         if back {
             self.interruptions += 1;
+            self.returned = true;
         }
         if self.used_ms >= self.limit_ms() {
             self.used_ms = self.limit_ms();
             self.ended = Some(Ending::TimeUp);
         }
         back
+    }
+
+    /// How the round has ended as of `now`, if it has: as [`Round::seen`] would find it, without
+    /// running the clock, for showing a round that isn't open.
+    pub fn ending_at(&self, now: i64) -> Option<Ending> {
+        self.ended
+            .or_else(|| (now - self.seen_at > AWAY_MS).then_some(Ending::Interrupted))
     }
 
     /// Saves the learner's working, while the round is on.
@@ -161,6 +178,7 @@ impl Round {
     /// Adds the examiner's reply, which is kept even if the clock ran out while it was being
     /// written, as the learner asked for it in time.
     pub fn examiner_said(&mut self, text: &str, now: i64) {
+        self.returned = false;
         self.turns.push(Turn {
             speaker: Speaker::Coach,
             text: text.trim().to_owned(),
@@ -236,7 +254,10 @@ mod tests {
         assert!(round.seen(START + 11 * MINUTE));
         assert_eq!(round.used_ms, MINUTE + MAX_GAP_MS);
         assert_eq!(round.interruptions, 1);
+        assert!(round.returned);
         assert_eq!(round.ended, None);
+        round.examiner_said("Welcome back.", START + 11 * MINUTE + 1000);
+        assert!(!round.returned);
         round
             .save_work("p = 1/6", START + 11 * MINUTE + 5000)
             .unwrap();
@@ -265,6 +286,12 @@ mod tests {
         let mut round = Round::new(20, None, START);
         round.say("Is the input sorted?", START + 5000).unwrap();
         round.examiner_said("No.", START + 8000);
+        // Away from when it was last open, the learner's question.
+        assert_eq!(round.ending_at(START + 5000 + AWAY_MS), None);
+        assert_eq!(
+            round.ending_at(START + 5000 + AWAY_MS + 1),
+            Some(Ending::Interrupted)
+        );
         round.seen(START + 8000 + AWAY_MS + 1);
         assert_eq!(round.ended, Some(Ending::Interrupted));
         // The time away isn't counted.
