@@ -80,7 +80,7 @@ mod tests {
         let response = send(&router, request).await;
         assert_eq!(response.status(), StatusCode::OK);
         let deck = json(response).await;
-        assert_eq!(deck["items"].as_array().unwrap().len(), 30);
+        assert_eq!(deck["items"].as_array().unwrap().len(), 34);
         assert_eq!(deck["limits"]["daily_reviews"], 40);
 
         let now = crate::learning::now_ms();

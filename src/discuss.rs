@@ -4,6 +4,20 @@ use serde::{Deserialize, Serialize};
 
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/discuss.md");
 
+/// The tutor's instructions, for coding problems, with a pack's add-on if it has one.
+pub fn tutor_system_prompt(add_on: Option<&str>) -> String {
+    let base = include_str!("../prompts/tutor.md").trim_end();
+    match add_on {
+        Some(add_on) if !add_on.trim().is_empty() => {
+            format!(
+                "{base}\n\nThe pack this problem is from adds:\n\n{}",
+                add_on.trim()
+            )
+        }
+        _ => base.to_owned(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Speaker {
@@ -16,6 +30,57 @@ pub enum Speaker {
 pub struct Turn {
     pub speaker: Speaker,
     pub text: String,
+}
+
+/// A coding problem's tutor's view of where the learner is.
+pub struct TutorContext<'a> {
+    pub problem: &'a str,
+    pub step: &'a str,
+    pub language: &'a str,
+    pub plan: &'a str,
+    pub code: &'a str,
+    pub errors: &'a str,
+    pub last_run: &'a str,
+}
+
+/// The tutor's prompt: the problem, where the learner is with it, and the conversation.
+pub fn tutor_prompt(context: &TutorContext, turns: &[Turn]) -> String {
+    let mut out = format!(
+        "<problem>\n{}\n</problem>\n\nThey are at the {} step.\n\n",
+        context.problem.trim(),
+        context.step
+    );
+    let sections = [
+        ("plan", context.plan),
+        ("errors", context.errors),
+        ("last_run", context.last_run),
+    ];
+    if !context.code.trim().is_empty() {
+        out.push_str(&format!(
+            "<code language=\"{}\">\n{}\n</code>\n\n",
+            context.language, context.code
+        ));
+    }
+    for (tag, text) in sections {
+        if !text.trim().is_empty() {
+            out.push_str(&format!("<{tag}>\n{}\n</{tag}>\n\n", text.trim()));
+        }
+    }
+    out.push_str(&conversation(turns));
+    out
+}
+
+fn conversation(turns: &[Turn]) -> String {
+    let mut out = String::from("<conversation>\n");
+    for turn in turns {
+        let who = match turn.speaker {
+            Speaker::User => "Them",
+            Speaker::Coach => "You",
+        };
+        out.push_str(&format!("{who}: {}\n", turn.text.trim()));
+    }
+    out.push_str("</conversation>\n\nReply to their last message.");
+    out
 }
 
 pub struct Context<'a> {
@@ -66,15 +131,7 @@ pub fn prompt(context: &Context, turns: &[Turn]) -> String {
             context.last_run.trim()
         ));
     }
-    out.push_str("<conversation>\n");
-    for turn in turns {
-        let who = match turn.speaker {
-            Speaker::User => "Them",
-            Speaker::Coach => "You",
-        };
-        out.push_str(&format!("{who}: {}\n", turn.text.trim()));
-    }
-    out.push_str("</conversation>\n\nReply to their last message.");
+    out.push_str(&conversation(turns));
     out
 }
 
@@ -111,5 +168,33 @@ mod tests {
         assert!(prompt.contains("Them: why?\nYou: look at main\n"));
         assert!(prompt.contains("<helpers path=\"lib/Aoc.hs\">\nmodule Aoc where\n</helpers>"));
         assert!(prompt.contains("Installed packages: split\n"));
+    }
+
+    #[test]
+    fn tells_the_tutor_where_the_learner_is() {
+        let prompt = tutor_prompt(
+            &TutorContext {
+                problem: "Count the islands.",
+                step: "plan",
+                language: "Python",
+                plan: "Look at every square",
+                code: "",
+                errors: "",
+                last_run: "",
+            },
+            &[Turn {
+                speaker: Speaker::User,
+                text: "Is that enough?".into(),
+            }],
+        );
+        assert!(prompt.starts_with("<problem>\nCount the islands.\n</problem>"));
+        assert!(prompt.contains("at the plan step"));
+        assert!(prompt.contains("<plan>\nLook at every square\n</plan>"));
+        assert!(!prompt.contains("<code"));
+        assert!(prompt.contains("Them: Is that enough?\n"));
+        let system = tutor_system_prompt(Some("Ask about edge cases."));
+        assert!(system.starts_with("You are a patient tutor"));
+        assert!(system.ends_with("adds:\n\nAsk about edge cases."));
+        assert!(!tutor_system_prompt(None).contains("adds:"));
     }
 }

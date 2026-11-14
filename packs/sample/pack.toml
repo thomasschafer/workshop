@@ -2,15 +2,27 @@
 # docs/packs.md for the format.
 id = "sample"
 name = "Sample pack"
-description = "A few of each kind of short item: review cards, mental maths and probability."
+description = "A few of each kind of item: review cards, mental maths, probability, coding problems and code to read."
 
 [[skills]]
 id = "algorithms.complexity"
 name = "Complexity"
 
 [[skills]]
+id = "algorithms.arrays"
+name = "Arrays"
+
+[[skills]]
+id = "algorithms.hashing"
+name = "Hashing"
+
+[[skills]]
 id = "algorithms.graphs"
 name = "Graph algorithms"
+
+[[skills]]
+id = "algorithms.dynamic-programming"
+name = "Dynamic programming"
 
 [[skills]]
 id = "data-structures"
@@ -64,6 +76,18 @@ name = "Expectation"
 id = "probability.geometric"
 name = "Geometric probability"
 
+[[skills]]
+id = "cpp.semantics"
+name = "How C++ behaves"
+
+[[skills]]
+id = "cpp.memory"
+name = "Memory and lifetimes in C++"
+
+[[skills]]
+id = "cpp.costs"
+name = "What C++ code costs"
+
 # A track of the pack's own, beside the built-in ones.
 [[tracks]]
 id = "estimation"
@@ -90,6 +114,16 @@ skills = [
   "probability.expectation",
 ]
 mastery = 0.7
+
+[[goals]]
+id = "problem-solving"
+name = "Problem solving"
+skills = [
+  "algorithms.arrays",
+  "algorithms.hashing",
+  "algorithms.graphs",
+  "algorithms.dynamic-programming",
+]
 
 [prompts]
 tutor = "prompts/tutor.md"

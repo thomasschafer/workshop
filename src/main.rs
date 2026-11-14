@@ -1,5 +1,6 @@
 mod aoc;
 mod calendar;
+mod coding;
 mod commands;
 mod config;
 mod discuss;
@@ -200,7 +201,8 @@ async fn main() -> Result<()> {
         Command::Pack {
             command: PackCommand::Check { dir },
         } => {
-            if !packs::check(dir.as_deref(), &config.learning)? {
+            let runtime = coding::runtime(&config, &paths).await?;
+            if !packs::check(dir.as_deref(), &config.learning, runtime).await? {
                 std::process::exit(1);
             }
             Ok(())

@@ -22,6 +22,7 @@ repository = "https://github.com/thomasschafer/workshop"
 
 [workspace.dependencies]
 workshop-auth = { path = "crates/auth" }
+workshop-coding = { path = "crates/coding" }
 workshop-common = { path = "crates/common" }
 workshop-learning = { path = "crates/learning" }
 workshop-lsp = { path = "crates/lsp" }
@@ -67,6 +68,7 @@ web-push-native = "0.5"
 
 [dependencies]
 workshop-auth.workspace = true
+workshop-coding.workspace = true
 workshop-common.workspace = true
 workshop-learning.workspace = true
 workshop-lsp.workspace = true

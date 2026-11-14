@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 workshop-tracks.workspace = true
 anyhow.workspace = true
+futures-util.workspace = true
 rhai.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
@@ -19,3 +20,4 @@ toml.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
+tokio.workspace = true

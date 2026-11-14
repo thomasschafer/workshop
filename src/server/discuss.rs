@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use workshop_provider::Role;
+use workshop_provider::{CallSpec, Role};
 
 use super::error::{ApiError, bad_request};
 use super::puzzles::puzzle;
@@ -84,6 +84,18 @@ pub(super) async fn discuss(
         discuss::SYSTEM_PROMPT.to_owned(),
     );
 
+    Ok(stream_reply(app, provider, spec, prompt))
+}
+
+/// The model's reply, as newline-delimited JSON: `{"delta": text}` as it's written, if the
+/// model's CLI reports it, then `{"done": {text, model}}` or `{"error": message}`. Shared by
+/// every coach the app talks to.
+pub(super) fn stream_reply(
+    app: Shared,
+    provider: String,
+    spec: CallSpec,
+    prompt: String,
+) -> Response {
     let (lines, receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
     tokio::spawn(async move {
         let (partial, mut parts) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -119,12 +131,12 @@ pub(super) async fn discuss(
             receiver,
         ))
     });
-    Ok((
+    (
         [
             (header::CONTENT_TYPE, "application/x-ndjson"),
             (header::CACHE_CONTROL, "no-store"),
         ],
         Body::from_stream(stream),
     )
-        .into_response())
+        .into_response()
 }

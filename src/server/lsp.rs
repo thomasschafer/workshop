@@ -40,7 +40,7 @@ pub(super) async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) ->
     })
 }
 
-pub(super) fn file_uri(path: &std::path::Path) -> String {
+pub(crate) fn file_uri(path: &std::path::Path) -> String {
     let path = path.to_string_lossy().replace('\\', "/");
     let encoded: Vec<String> = path
         .split('/')

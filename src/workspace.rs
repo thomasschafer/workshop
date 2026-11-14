@@ -256,31 +256,13 @@ impl Workspace {
         self.save_versioned(&path, text, expected_version)
     }
 
-    /// Writes `text` only if the file is still at `expected_version`. A missing file counts as
-    /// empty.
     fn save_versioned(
         &self,
         path: &Path,
         text: &str,
         expected_version: &str,
     ) -> Result<VersionedFile, SaveError> {
-        let _guard = self
-            .save_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let current = read_versioned(path)?;
-        if current.version != expected_version {
-            return Err(SaveError::Conflict { current });
-        }
-        let text = with_final_newline(text);
-        if text != current.text {
-            files::write_atomic(path, text.as_bytes())?;
-        }
-        Ok(VersionedFile {
-            version: version_of(&text),
-            text,
-            path: path.to_owned(),
-        })
+        save_versioned(&self.save_lock, path, text, expected_version)
     }
 
     fn notes_path(&self, puzzle: Puzzle) -> PathBuf {
@@ -424,8 +406,37 @@ impl Workspace {
     }
 }
 
+/// Writes `text` only if the file is still at `expected_version`, holding `lock` meanwhile. A
+/// missing file counts as empty.
+pub fn save_versioned(
+    lock: &std::sync::Mutex<()>,
+    path: &Path,
+    text: &str,
+    expected_version: &str,
+) -> Result<VersionedFile, SaveError> {
+    let _guard = lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let current = read_versioned(path)?;
+    if current.version != expected_version {
+        return Err(SaveError::Conflict { current });
+    }
+    let text = with_final_newline(text);
+    if text != current.text {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+        files::write_atomic(path, text.as_bytes())?;
+    }
+    Ok(VersionedFile {
+        version: version_of(&text),
+        text,
+        path: path.to_owned(),
+    })
+}
+
 /// Reads a file the user edits; a missing file counts as empty.
-fn read_versioned(path: &Path) -> Result<VersionedFile> {
+pub fn read_versioned(path: &Path) -> Result<VersionedFile> {
     let text = read_optional(path)?.unwrap_or_default();
     Ok(VersionedFile {
         version: version_of(&text),

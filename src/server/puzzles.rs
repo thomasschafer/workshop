@@ -101,8 +101,8 @@ pub(super) async fn open_puzzle(
 
 #[derive(Deserialize)]
 pub(super) struct SaveText {
-    text: String,
-    version: String,
+    pub(super) text: String,
+    pub(super) version: String,
 }
 
 pub(super) async fn save_code(
@@ -129,7 +129,7 @@ pub(super) async fn save_notes(
 }
 
 /// A conflict is reported with the current file, so the editor can offer to load it.
-fn saved(result: Result<VersionedFile, SaveError>) -> ApiResult<VersionedFile> {
+pub(super) fn saved(result: Result<VersionedFile, SaveError>) -> ApiResult<VersionedFile> {
     match result {
         Ok(file) => Ok(Json(file)),
         Err(SaveError::Conflict { current }) => Err(ApiError(

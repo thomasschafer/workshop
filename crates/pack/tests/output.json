@@ -1,0 +1,12 @@
+[
+  { "expected": "3\n", "actual": "3", "same": true },
+  { "expected": "1 2\n3\n", "actual": "1 2  \r\n3\n\n\n", "same": true },
+  { "expected": "1 2\n3", "actual": "\n1 2\n3", "same": true },
+  { "expected": "1 2\n3", "actual": "1 2 3", "same": false },
+  { "expected": "1 2", "actual": "1  2", "same": false },
+  { "expected": "a\n\nb", "actual": "a\nb", "same": false },
+  { "expected": "a\n\nb", "actual": "a\n \nb", "same": true },
+  { "expected": "Yes", "actual": "yes", "same": false },
+  { "expected": "", "actual": "\n  \n", "same": true },
+  { "expected": "  indented", "actual": "indented", "same": false }
+]

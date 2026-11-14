@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use workshop_pack::Pack;
+use workshop_pack::{Pack, Verdict};
 
 use crate::config::LearningConfig;
 
@@ -28,9 +28,15 @@ pub fn load(config: &LearningConfig) -> Result<Vec<Pack>> {
     Ok(packs)
 }
 
-/// Checks the pack in `dir`, or else the packs in the config, printing what's wrong. Returns
-/// whether everything passed.
-pub fn check(dir: Option<&Path>, config: &LearningConfig) -> Result<bool> {
+/// Checks the pack in `dir`, or else the packs in the config, printing what's wrong, with its
+/// programs built and run with `runtime`. Returns whether everything passed; an item that
+/// couldn't be checked here, such as for want of a compiler, is said to be skipped, and
+/// doesn't count against it.
+pub async fn check(
+    dir: Option<&Path>,
+    config: &LearningConfig,
+    runtime: workshop_coding::Runtime,
+) -> Result<bool> {
     let packs: Vec<(String, Pack)> = match dir {
         Some(dir) => vec![(dir.display().to_string(), Pack::load(dir)?)],
         None if config.packs.is_empty() => vec![("the sample pack".to_owned(), Pack::sample())],
@@ -40,21 +46,29 @@ pub fn check(dir: Option<&Path>, config: &LearningConfig) -> Result<bool> {
             .map(|dir: &PathBuf| Ok((dir.display().to_string(), Pack::load(dir)?)))
             .collect::<Result<_>>()?,
     };
+    let checker = workshop_coding::Checker { runtime };
     let mut passed = true;
     for (place, pack) in packs {
-        let report = pack.check();
+        let report = pack.check(&checker).await;
         println!("{} ({place})", pack.manifest.name);
         for item in &report.items {
-            match &item.result {
-                Ok(detail) => println!("✓ {}: {detail}", item.path),
-                Err(message) => println!("✗ {}: {message}", item.path),
+            match &item.verdict {
+                Verdict::Passed(detail) => println!("✓ {}: {detail}", item.path),
+                Verdict::Skipped(reason) => println!("- {}: skipped, as {reason}", item.path),
+                Verdict::Failed(message) => println!("✗ {}: {message}", item.path),
             }
         }
         for problem in &report.problems {
             println!("✗ {problem}");
         }
         let failures = report.failures().len();
-        if failures == 0 {
+        let skipped = report.skipped().len();
+        if failures == 0 && skipped > 0 {
+            println!(
+                "{} items passed, and {skipped} couldn't be checked here.\n",
+                report.items.len() - skipped
+            );
+        } else if failures == 0 {
             println!("All {} items passed.\n", report.items.len());
         } else {
             passed = false;
@@ -116,19 +130,31 @@ mod tests {
         assert!(err.to_string().contains("two packs"));
     }
 
-    #[test]
-    fn checks_the_configured_packs() {
-        let dir = tempfile::tempdir().unwrap();
-        write_pack(&dir.path().join("mine"), "mine");
-        assert!(check(None, &config(vec![dir.path().join("mine")])).unwrap());
-        assert!(check(None, &config(Vec::new())).unwrap());
+    fn runtime(dir: &Path) -> workshop_coding::Runtime {
+        workshop_coding::Runtime {
+            scratch: dir.join("build"),
+            environment: Vec::new(),
+            build_timeout: std::time::Duration::from_secs(60),
+            run_timeout: std::time::Duration::from_secs(60),
+        }
     }
 
-    #[test]
-    fn fails_the_check_for_a_broken_item() {
+    // The sample pack's own check, which runs every program in it, is in workshop-coding.
+    #[tokio::test]
+    async fn checks_the_configured_packs() {
+        let dir = tempfile::tempdir().unwrap();
+        write_pack(&dir.path().join("mine"), "mine");
+        let configured = config(vec![dir.path().join("mine")]);
+        assert!(check(None, &configured, runtime(dir.path())).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn fails_the_check_for_a_broken_item() {
         let dir = tempfile::tempdir().unwrap();
         write_pack(dir.path(), "mine");
         std::fs::write(dir.path().join("items/two.md"), "no front matter").unwrap();
-        assert!(!check(Some(dir.path()), &config(Vec::new())).unwrap());
+        let none = config(Vec::new());
+        let checked = check(Some(dir.path()), &none, runtime(dir.path()));
+        assert!(!checked.await.unwrap());
     }
 }

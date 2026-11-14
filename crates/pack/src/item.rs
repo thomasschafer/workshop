@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use workshop_tracks::TrackId;
 
+use crate::code::{Coding, CodingFields, Reading, ReadingFields};
 use crate::manifest::{Manifest, is_slug};
 use crate::number::{self, Tolerance};
 
@@ -23,6 +24,8 @@ pub enum Kind {
     Probability,
     /// A problem to solve in code, with a reference solution, a brute-force one and tests.
     Coding,
+    /// Code to read, with a question about it, checked by building and running the code.
+    Reading,
     /// A design prompt, marked against a rubric.
     Design,
 }
@@ -34,7 +37,7 @@ impl Kind {
             Self::Card => TrackId::Review,
             Self::MentalMaths => TrackId::MentalMaths,
             Self::Probability => TrackId::Probability,
-            Self::Coding => TrackId::Coding,
+            Self::Coding | Self::Reading => TrackId::Coding,
             Self::Design => TrackId::SystemDesign,
         }
     }
@@ -43,6 +46,7 @@ impl Kind {
     fn default_minutes(self) -> u32 {
         match self {
             Self::Card | Self::MentalMaths => 1,
+            Self::Reading => 2,
             Self::Probability => 3,
             Self::Coding => 20,
             Self::Design => 30,
@@ -51,7 +55,10 @@ impl Kind {
 
     /// Whether items of this kind are short enough to do offline in a spare minute.
     pub fn is_short(self) -> bool {
-        matches!(self, Self::Card | Self::MentalMaths | Self::Probability)
+        matches!(
+            self,
+            Self::Card | Self::MentalMaths | Self::Probability | Self::Reading
+        )
     }
 
     fn sections(self) -> &'static [(&'static str, bool)] {
@@ -60,7 +67,8 @@ impl Kind {
             Self::Card => &[("Answer", true), ("Explanation", false)],
             Self::MentalMaths => &[("Method", false)],
             Self::Probability => &[("Solution", true), ("Simulation", true)],
-            Self::Coding => &[("Hints", false), ("Notes", false)],
+            Self::Coding => &[("Approach", true), ("Hints", false), ("Notes", false)],
+            Self::Reading => &[("Explanation", true)],
             Self::Design => &[("Rubric", true), ("Notes", false)],
         }
     }
@@ -93,6 +101,7 @@ pub enum Content {
     MentalMaths(MentalMaths),
     Probability(Probability),
     Coding(Coding),
+    Reading(Reading),
     Design {
         /// What a good answer covers, one point each.
         rubric: Vec<String>,
@@ -151,25 +160,6 @@ pub struct Simulation {
     pub tolerance: f64,
 }
 
-/// A coding problem's files, relative to the item's directory.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Coding {
-    /// The languages the learner may solve it in, such as `python` and `rust`.
-    pub languages: Vec<String>,
-    /// Languages whose reference solution can be read but not written in, such as `cpp`.
-    pub read_only: Vec<String>,
-    /// Solutions known to be right, one per language.
-    pub reference: Vec<String>,
-    /// A slow solution that's obviously right, compared with the reference on random inputs.
-    pub brute_force: String,
-    /// Hand-written cases, with inputs and expected outputs.
-    pub tests: String,
-    /// A program that prints a random input for a seed, for comparing solutions.
-    pub inputs: String,
-    pub hints: Option<String>,
-    pub notes: Option<String>,
-}
-
 const COMMON_KEYS: &[&str] = &[
     "id", "kind", "title", "skills", "track", "source", "minutes",
 ];
@@ -217,31 +207,19 @@ struct SimulationFields {
     tolerance: f64,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CodingFields {
-    languages: Vec<String>,
-    #[serde(default)]
-    read_only: Vec<String>,
-    reference: Vec<String>,
-    brute_force: String,
-    tests: String,
-    inputs: String,
-}
-
 /// The fewest and most trials a simulation may ask for.
 const TRIALS: std::ops::RangeInclusive<u32> = 1_000..=2_000_000;
 
 impl Item {
     /// Reads an item from its file. `default_id` is what it's called if its front matter
-    /// doesn't say, from its file or directory name, and `exists` says whether a file the item
-    /// refers to, relative to the item's directory, is in the pack.
+    /// doesn't say, from its file or directory name, and `read` gives the text of a file the
+    /// item refers to, relative to the item's directory, or says why it can't.
     pub fn parse(
         path: &str,
         default_id: &str,
         source: &str,
         manifest: &Manifest,
-        exists: impl Fn(&str) -> bool,
+        read: impl Fn(&str) -> Result<String, String>,
     ) -> Result<Self, String> {
         let (front, body) = split_front_matter(source)?;
         let mut table: toml::Table = toml::from_str(front).map_err(|err| err.to_string())?;
@@ -304,49 +282,28 @@ impl Item {
             }
             Kind::Coding => {
                 let fields: CodingFields = kind_fields.try_into().map_err(|err| err.to_string())?;
-                if fields.languages.is_empty() {
-                    return Err("a coding item needs at least one language".to_owned());
-                }
-                let files = fields.reference.iter().chain([
-                    &fields.brute_force,
-                    &fields.tests,
-                    &fields.inputs,
-                ]);
-                for file in files {
-                    if !exists(file) {
-                        return Err(format!(
-                            "{file:?} isn't in the item's directory, where its front matter says it is"
-                        ));
-                    }
-                }
-                if fields.reference.is_empty() {
-                    return Err("a coding item needs a reference solution".to_owned());
-                }
-                Content::Coding(Coding {
-                    languages: fields.languages,
-                    read_only: fields.read_only,
-                    reference: fields.reference,
-                    brute_force: fields.brute_force,
-                    tests: fields.tests,
-                    inputs: fields.inputs,
-                    hints: section("Hints"),
-                    notes: section("Notes"),
-                })
+                Content::Coding(Coding::new(
+                    fields,
+                    section("Approach").expect("required"),
+                    section("Hints"),
+                    section("Notes"),
+                    &read,
+                )?)
+            }
+            Kind::Reading => {
+                let fields: ReadingFields =
+                    kind_fields.try_into().map_err(|err| err.to_string())?;
+                Content::Reading(Reading::new(
+                    fields,
+                    &prompt,
+                    section("Explanation").expect("required"),
+                )?)
             }
             Kind::Design => {
                 kind_fields
                     .try_into::<NoFields>()
                     .map_err(|err| err.to_string())?;
-                let rubric_text = section("Rubric").expect("required");
-                let rubric: Vec<String> = rubric_text
-                    .lines()
-                    .filter_map(|line| {
-                        line.trim_start()
-                            .strip_prefix("- ")
-                            .or_else(|| line.trim_start().strip_prefix("* "))
-                    })
-                    .map(|point| point.trim().to_owned())
-                    .collect();
+                let rubric = crate::code::list(&section("Rubric").expect("required"));
                 if rubric.is_empty() {
                     return Err(
                         "the rubric should be a list, with a point on each line starting with `- `"
@@ -469,6 +426,7 @@ fn kind_name(kind: Kind) -> &'static str {
         Kind::MentalMaths => "mental maths",
         Kind::Probability => "probability",
         Kind::Coding => "coding",
+        Kind::Reading => "reading",
         Kind::Design => "design",
     }
 }
@@ -682,10 +640,14 @@ mod tests {
 
     fn parse(source: &str) -> Result<Item, String> {
         Item::parse("items/x.md", "x", source, &manifest(), |file| {
-            file == "reference.py"
-                || file == "brute.py"
-                || file == "tests.toml"
-                || file == "inputs.py"
+            match file {
+            "reference.py" | "starter.py" | "brute.py" | "inputs.py" => Ok(String::new()),
+            "tests.toml" => Ok(
+                "[[example]]\ninput = \"1\"\noutput = \"1\"\n[[test]]\ninput = \"2\"\noutput = \"2\"\n"
+                    .to_owned(),
+            ),
+            _ => Err(format!("{file:?} isn't in the item's directory")),
+        }
         })
     }
 
@@ -752,11 +714,16 @@ mod tests {
     #[test]
     fn reads_coding_and_design_items() {
         let coding = parse(
-            "+++\nkind = \"coding\"\nskills = [\"arithmetic\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nSum a list.\n",
+            "+++\nkind = \"coding\"\nskills = [\"arithmetic\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nSum a list.\n\n## Approach\n\nAdd as you go.\n\n## Hints\n\n- Start at zero.\n- Add each number.\n",
         )
         .unwrap();
         assert_eq!(coding.track, TrackId::Coding);
         assert_eq!(coding.minutes, 20);
+        let Content::Coding(problem) = &coding.content else {
+            panic!("not coding");
+        };
+        assert_eq!(problem.hints, ["Start at zero.", "Add each number."]);
+        assert_eq!(problem.random_inputs, 100);
         let design = parse(
             "+++\nkind = \"design\"\nskills = [\"arithmetic\"]\nminutes = 25\n+++\nDesign a calculator service.\n\n## Rubric\n\n- Handles precision\n- Scales reads\n",
         )
@@ -769,6 +736,55 @@ mod tests {
                 notes: None
             }
         );
+    }
+
+    fn coding(languages: &str, reference: &str, starter: &str) -> String {
+        format!(
+            "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"{languages}\"]\nreference = [{reference}]\nstarter = [{starter}]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nQ\n## Approach\nA\n"
+        )
+    }
+
+    fn reading(fields: &str) -> String {
+        format!(
+            "+++\nkind = \"reading\"\nskills = [\"dice\"]\n{fields}+++\nWhat does it print?\n\n```cpp\nint main() {{}}\n```\n\n## Explanation\n\nNothing.\n"
+        )
+    }
+
+    #[test]
+    fn reads_reading_items() {
+        let prints = parse(&reading("prints = \"6\\n\"\n")).unwrap();
+        assert_eq!(prints.track, TrackId::Coding);
+        assert_eq!(prints.minutes, 2);
+        assert!(prints.kind.is_short());
+        let Content::Reading(reading_item) = prints.content else {
+            panic!("not reading");
+        };
+        assert_eq!(reading_item.language, crate::Language::Cpp);
+        assert_eq!(reading_item.code, "int main() {}\n");
+        assert_eq!(
+            reading_item.check,
+            crate::ReadingCheck::Prints("6\n".to_owned())
+        );
+        let choice = parse(&reading(
+            "choices = [\"It leaks\", \"It reads freed memory\"]\nanswer = 2\n[check]\nexpect = \"sanitizer-error\"\n",
+        ))
+        .unwrap();
+        let Content::Reading(choice) = choice.content else {
+            panic!("not reading");
+        };
+        assert_eq!(
+            choice.question,
+            crate::Question::Choice {
+                choices: vec!["It leaks".to_owned(), "It reads freed memory".to_owned()],
+                answer: 1
+            }
+        );
+        assert_eq!(choice.check, crate::ReadingCheck::SanitizerError);
+        let unchecked = parse(&reading("choices = [\"a\", \"b\"]\nanswer = 1\n")).unwrap();
+        let Content::Reading(unchecked) = unchecked.content else {
+            panic!("not reading");
+        };
+        assert_eq!(unchecked.check, crate::ReadingCheck::Compiles);
     }
 
     #[test]
@@ -828,8 +844,54 @@ mod tests {
                 "trials",
             ),
             (
-                "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"missing.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nQ",
+                &*coding("python", "\"missing.py\"", "\"starter.py\""),
                 "missing.py",
+            ),
+            (
+                &*coding("python", "", "\"starter.py\""),
+                "reference solution",
+            ),
+            (
+                &*coding("python", "\"reference.py\"", ""),
+                "starter in Python",
+            ),
+            (
+                &*coding("cpp", "\"reference.py\"", "\"starter.py\""),
+                "reading item",
+            ),
+            (
+                &*coding("go", "\"reference.py\"", "\"starter.py\""),
+                "\"go\"",
+            ),
+            (
+                &*coding(
+                    "python",
+                    "\"reference.py\", \"reference.py\"",
+                    "\"starter.py\"",
+                ),
+                "two reference solutions",
+            ),
+            (
+                "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nQ",
+                "## Approach",
+            ),
+            (
+                &*reading("prints = \"1\"\n[check]\nexpect = \"compiles\"\n"),
+                "no [check]",
+            ),
+            (
+                &*reading("choices = [\"a\", \"b\"]\nanswer = 3\n"),
+                "from 1 to 2",
+            ),
+            (&*reading("choices = [\"a\"]\nanswer = 1\n"), "two choices"),
+            (&*reading(""), "either prints"),
+            (
+                &*reading("choices = [\"a\", \"b\"]\nanswer = 1\n[check]\nexpect = \"magic\"\n"),
+                "\"magic\"",
+            ),
+            (
+                &*reading("choices = [\"a\", \"b\"]\nanswer = 1\n[check]\nexpect = \"output\"\n"),
+                "give the output",
             ),
             (
                 "+++\nkind = \"design\"\nskills = [\"dice\"]\n+++\nQ\n## Rubric\nBe good.",

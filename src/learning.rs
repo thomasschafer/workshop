@@ -1,5 +1,6 @@
-//! The tracks of short items from packs: review cards, mental maths and probability, and any
-//! tracks a pack adds for them.
+//! The tracks of short items from packs: review cards, mental maths, probability and code to
+//! read, and any tracks a pack adds for them. What's due across every track, the Coding track's
+//! problems included, is planned here together, so they share one day's limit of reviews.
 //!
 //! The app works on a deck: every short item, with its schedule, and questions already made
 //! from each mental maths template. With that it can practise offline, scheduling what's
@@ -95,6 +96,12 @@ pub enum DeckContent {
         tolerance: Tolerance,
         solution: String,
     },
+    Reading {
+        language: workshop_pack::Language,
+        #[serde(flatten)]
+        question: workshop_pack::Question,
+        explanation: String,
+    },
 }
 
 /// What a device sends when it syncs: what was done since it last did.
@@ -120,7 +127,7 @@ pub struct Week {
     pub target: u32,
 }
 
-/// A short item from a pack, with the key it's known by across packs.
+/// An item from a pack, with the key it's known by across packs.
 struct Short<'a> {
     key: String,
     item: &'a Item,
@@ -216,10 +223,11 @@ impl Learning {
         self.deck(clock)
     }
 
-    pub fn tracks(&self, clock: Clock) -> Result<Tracks> {
+    /// What's due and new in every track, as one plan, with the packs it was made from.
+    pub fn planned(&self, clock: Clock) -> Result<Planned> {
         let packs = crate::packs::load(&self.config)?;
-        let shorts = shorts(&packs);
-        let refs = item_refs(&shorts);
+        let items = practised(&packs);
+        let refs = item_refs(&items);
         let progress = self.progress(clock)?;
         let limits = self.limits();
         let plans = workshop_learning::plan(
@@ -231,39 +239,77 @@ impl Learning {
             self.store.scheduler(),
             clock.now,
         );
-        let week = Week {
-            minutes: progress.minutes_this_week,
-            target: limits.weekly_minutes,
-        };
-        let tracks = track_names(&packs, &shorts)
-            .into_iter()
+        let names = track_names(&packs, &items);
+        Ok(Planned {
+            week: Week {
+                minutes: progress.minutes_this_week,
+                target: limits.weekly_minutes,
+            },
+            problems: problems(&packs),
+            plans,
+            names,
+            packs,
+        })
+    }
+
+    /// The tracks of short items, from a plan. The Coding track, whose problems are worked on
+    /// over several steps, is the coding module's.
+    pub fn tracks(&self, planned: &Planned, clock: Clock) -> Tracks {
+        let tracks = planned
+            .names
+            .iter()
+            .filter(|(id, _)| **id != TrackId::Coding)
             .map(|(id, name)| {
-                let plan = &plans[&id];
-                let next = next_step(&id, plan, week);
+                let plan = &planned.plans[id];
                 Track {
                     summary: summary(plan, clock),
                     destination: Destination::Practice { track: id.clone() },
-                    id,
-                    name,
-                    next,
+                    next: next_step(id, plan, planned.week),
+                    id: id.clone(),
+                    name: name.clone(),
                 }
             })
             .collect();
-        Ok(Tracks {
+        Tracks {
             tracks,
-            week,
-            problems: problems(&packs),
-        })
+            week: planned.week,
+            problems: planned.problems.clone(),
+        }
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
     }
 }
 
+/// Every track's items, by what's to be done with them, and the packs they're from.
+pub struct Planned {
+    pub packs: Vec<Pack>,
+    pub plans: BTreeMap<TrackId, TrackPlan>,
+    /// Each track with items in it, and its name.
+    pub names: BTreeMap<TrackId, String>,
+    pub week: Week,
+    pub problems: Vec<String>,
+}
+
 fn shorts(packs: &[Pack]) -> Vec<Short<'_>> {
+    items_where(packs, |item| item.kind.is_short())
+}
+
+/// The items there's practice of: the short ones, and coding problems.
+fn practised(packs: &[Pack]) -> Vec<Short<'_>> {
+    items_where(packs, |item| {
+        item.kind.is_short() || item.kind == workshop_pack::Kind::Coding
+    })
+}
+
+fn items_where(packs: &[Pack], keep: impl Fn(&Item) -> bool) -> Vec<Short<'_>> {
     packs
         .iter()
         .flat_map(|pack| {
             pack.items
                 .iter()
-                .filter(|item| item.kind.is_short())
+                .filter(|item| keep(item))
                 .map(|item| Short {
                     key: format!("{}/{}", pack.manifest.id, item.id),
                     item,
@@ -283,7 +329,7 @@ fn item_refs<'a>(shorts: &'a [Short<'a>]) -> Vec<ItemRef<'a>> {
         .collect()
 }
 
-/// The tracks with short items in them, in the order the home screen shows them, and their
+/// The tracks with these items in them, in the order the home screen shows them, and their
 /// names. Two packs' tracks with the same id are one track.
 fn track_names(packs: &[Pack], shorts: &[Short<'_>]) -> BTreeMap<TrackId, String> {
     shorts
@@ -349,6 +395,11 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
             answer_text: probability.answer_text.clone(),
             tolerance: probability.tolerance,
             solution: probability.solution.clone(),
+        },
+        Content::Reading(reading) => DeckContent::Reading {
+            language: reading.language,
+            question: reading.question.clone(),
+            explanation: reading.explanation.clone(),
         },
         Content::Coding(_) | Content::Design { .. } => {
             unreachable!("only short items are in the deck")
@@ -487,6 +538,11 @@ mod tests {
         }
     }
 
+    fn tracks_at(learning: &Learning, clock: Clock) -> Tracks {
+        let planned = learning.planned(clock).unwrap();
+        learning.tracks(&planned, clock)
+    }
+
     fn attempt(id: &str, item: &str, at: i64, rating: Rating) -> Attempt {
         Attempt {
             id: format!("attempt-{id}"),
@@ -503,12 +559,19 @@ mod tests {
     fn deals_every_short_item_of_the_sample_pack() {
         let dir = tempfile::tempdir().unwrap();
         let deck = learning(dir.path()).deck(clock(NOW)).unwrap();
-        assert_eq!(deck.items.len(), 30);
+        // Coding problems aren't short, so aren't in it; code to read is.
+        assert_eq!(deck.items.len(), 34);
         assert!(deck.problems.is_empty());
         let names: Vec<&str> = deck.tracks.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
             names,
-            ["Probability", "Mental maths", "Review", "Estimation"]
+            [
+                "Coding",
+                "Probability",
+                "Mental maths",
+                "Review",
+                "Estimation"
+            ]
         );
         let sums = deck
             .items
@@ -529,6 +592,17 @@ mod tests {
             .unwrap();
         assert!(card["key"].as_str().unwrap().starts_with("sample/"));
         assert!(card["answer"].is_string());
+        let reading = json["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["key"] == "sample/negative-division")
+            .unwrap();
+        assert_eq!(reading["kind"], "reading");
+        assert_eq!(reading["track"], "coding");
+        assert_eq!(reading["ask"], "prints");
+        assert_eq!(reading["output"], "-3 -1");
+        assert_eq!(reading["language"], "cpp");
     }
 
     #[test]
@@ -558,7 +632,7 @@ mod tests {
     fn offers_new_items_then_due_reviews_first() {
         let dir = tempfile::tempdir().unwrap();
         let learning = learning(dir.path());
-        let tracks = learning.tracks(clock(NOW)).unwrap();
+        let tracks = tracks_at(&learning, clock(NOW));
         let review = tracks
             .tracks
             .iter()
@@ -582,7 +656,7 @@ mod tests {
             flags: Vec::new(),
         };
         learning.sync(&request, clock(NOW)).unwrap();
-        let later = learning.tracks(clock(NOW + 2 * 86_400_000)).unwrap();
+        let later = tracks_at(&learning, clock(NOW + 2 * 86_400_000));
         let review = later
             .tracks
             .iter()
@@ -623,7 +697,7 @@ mod tests {
             )
             .unwrap();
         assert!(deck.flags.contains_key("sample/stable-sorting"));
-        let tracks = learning.tracks(clock(NOW)).unwrap();
+        let tracks = tracks_at(&learning, clock(NOW));
         let review = tracks
             .tracks
             .iter()
@@ -660,7 +734,7 @@ mod tests {
             flags: Vec::new(),
         };
         learning.sync(&request, clock(NOW)).unwrap();
-        let tracks = learning.tracks(clock(NOW + 10)).unwrap();
+        let tracks = tracks_at(&learning, clock(NOW + 10));
         assert_eq!(
             tracks.week,
             Week {

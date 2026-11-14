@@ -17,6 +17,8 @@ pub enum Destination {
     PuzzleList,
     /// Practising a track's short items, such as review cards.
     Practice { track: TrackId },
+    /// The Coding track: one of its items, as `pack/item`, or the list of them.
+    Coding { item: Option<String> },
 }
 
 /// What the Advent of Code track is worked out from.
@@ -264,6 +266,13 @@ mod tests {
             })
             .unwrap(),
             serde_json::json!({ "kind": "practice", "track": "mental-maths" })
+        );
+        assert_eq!(
+            serde_json::to_value(Destination::Coding {
+                item: Some("sample/islands".to_owned())
+            })
+            .unwrap(),
+            serde_json::json!({ "kind": "coding", "item": "sample/islands" })
         );
     }
 }

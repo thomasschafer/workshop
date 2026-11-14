@@ -1,0 +1,22 @@
+[package]
+name = "workshop-coding"
+version = "0.0.0"
+edition.workspace = true
+description = "Building and running the programs in coding and reading items, and checking them"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+workshop-common.workspace = true
+workshop-pack.workspace = true
+workshop-runner.workspace = true
+anyhow.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

@@ -1,0 +1,50 @@
+# Examples are shown to the learner, and tests kept from them until they submit.
+
+[[example]]
+input = """
+abcde
+ace
+"""
+output = "3"
+
+[[example]]
+input = """
+spring
+autumn
+"""
+output = "1"
+
+[[test]]
+input = """
+a
+a
+"""
+output = "1"
+
+[[test]]
+input = """
+a
+b
+"""
+output = "0"
+
+[[test]]
+input = """
+banana
+anana
+"""
+output = "5"
+
+[[test]]
+input = """
+abcabc
+cbacba
+"""
+output = "3"
+
+[[test]]
+input = """
+tggccagtagatcttcccaacatagcctagctggacatattcactaaaccgaacaatctatcaccaagcgaatccagagagtctcatgatacctggaggaaatttgcatcatggcgcgaacgcacaaatctgaggctgcagaattctcgtgaagccaccacctttactgaatgagaccaattataagctcgtcaaattaacacaaagttaagagattcttcagctcccaaaaaagaatcgacagcatgaatagtgcagcgacgtagaagtctgtgttcaggtttttcgtagacgaccgcagttcgaattcgatagcacagaacgcatttcgggcgtcccagagttaggcttccgcgaggacatcgcctcctaagtgagtttcacaggctcagccaacggcggtaatcttagccctctatcgttcatggggacatgacactagggcactggggcaccaacagtggaattcacctgcgtacggtggttaagctggtgatcaagttagtatgctcacgaaactatgcagctccgtgtgtataatgatcctttaagtagcgagtggccgggtaggaggattagtctgttaccaaaagatgatccagaacgggccctctgtctaggccatcttaattgccgcgaaaagtgctatggcgagcgctaaccacatctgtatcgacctgagagaactcggccgacacatataacggatccaaacgatcggaggcaagacgagccaatagacccttgttcctgtatcctctatgcgtaacagaggagttctcgtggccaaagattgagctgaagtcagtactagatataggcatctcagttggatgtagccatgtagttcgtcgagatggtctcgtggcaaatgcaccgcgacgacaacctcagatagct
+ccgggaaggaaaacgcatgtatccgaaaaaagagaaacatcgacaccctaactgtaagaaaaggtctaaatcaacaccagactacgggttgagaggcgctcttgccagtacatataccaacttaaggcaaatttgtggcttcctaaccatcccgatcctctcaaacgtaaccagatgaagatcctcgattgtggtcggctctgaatcggagactatcatcttccctgtcacgtttttttagtcaatcctgagcatcgagacattttcggataagtcggcctacgtagatggaatcatgagtaccttattgactcggtaacgtttaccagttttaatccgaatattcaaggcacagattcctgagaacgcatgccagtttaactggcagttacaattgctacctaagtgttctcgcctgacagcgtacctgtctggatttttgcattgtaatgccgaaatacccggcacatagctcaccgggagtgcgtactgcccgagcccagaaaccaagctgaagagtgaagggtcatagagttacggtcctgagatgcgggatgataaccacgacggtcctgcttcccacctttggccgaaatgcaaagtgccttgggctattgggcgtgcgactccttagtaaccgagggtatattttctttggagctttaaccgcgctttgcccgcctaagcttctctatcgtcgttaggagccgatcccagggaattttgtcagcccgtcctgttgcggggacttattgaacagactatgattaccgatgtttacactgccgcaaggtctccgg
+"""
+output = "550"

@@ -55,6 +55,11 @@ pub struct App {
     pub(super) lsp_servers: workshop_lsp::Servers,
     /// The short items from packs, and what's been done with them.
     pub(super) learning: crate::learning::Learning,
+    /// Coding problems' sessions and drafts.
+    pub(super) problems: crate::coding::Problems,
+    /// Each coding problem's brute force and inputs program, built, with the random cases made
+    /// with them so far, by item and what's in them.
+    pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
 }
 
 pub(super) type Shared = Arc<App>;
@@ -113,6 +118,8 @@ impl App {
             lsp_restarts: tokio::sync::watch::Sender::new(0),
             lsp_servers: workshop_lsp::Servers::default(),
             learning: crate::learning::Learning::open(&config.learning, &paths.data_dir)?,
+            problems: crate::coding::Problems::new(&paths.data_dir),
+            oracles: tokio::sync::Mutex::default(),
             config,
             paths,
             gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),

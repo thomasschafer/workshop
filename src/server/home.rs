@@ -40,8 +40,17 @@ pub(super) async fn home(
         },
     };
     // Advent of Code stays usable whatever is wrong with the packs.
-    let (learning, week, problems) = match app.learning.tracks(clock) {
-        Ok(learning) => (learning.tracks, Some(learning.week), learning.problems),
+    let learning = app.learning.planned(clock).and_then(|planned| {
+        let tracks = app.learning.tracks(&planned, clock);
+        let coding = crate::coding::track(&planned, &app.problems.sessions()?);
+        Ok((tracks, coding))
+    });
+    let (learning, week, problems) = match learning {
+        Ok((learning, coding)) => (
+            coding.into_iter().chain(learning.tracks).collect(),
+            Some(learning.week),
+            learning.problems,
+        ),
         Err(err) => {
             tracing::warn!("reading the packs: {err:#}");
             (Vec::new(), None, vec![format!("{err:#}")])
@@ -90,6 +99,7 @@ mod tests {
             ids,
             [
                 "advent-of-code",
+                "coding",
                 "probability",
                 "mental-maths",
                 "review",

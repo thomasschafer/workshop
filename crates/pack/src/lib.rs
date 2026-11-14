@@ -5,10 +5,12 @@
 //! simulation must agree with its exact answer, and a mental maths template must make questions
 //! with answers, for example.
 
+pub mod code;
 mod item;
 mod manifest;
 pub mod mental;
 pub mod number;
+pub mod output;
 pub mod script;
 pub mod simulate;
 
@@ -17,7 +19,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-pub use item::{Coding, Content, Item, Kind, MentalMaths, Param, Probability, Simulation};
+pub use code::{Case, Coding, Language, Question, Reading, ReadingCheck, Source};
+pub use item::{Content, Item, Kind, MentalMaths, Param, Probability, Simulation};
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
 
 /// How many questions a mental maths template must make without fault to pass its check.
@@ -35,6 +38,8 @@ pub struct Pack {
     pub items: Vec<Item>,
     /// What couldn't be read, which is left out.
     pub problems: Vec<Problem>,
+    /// The text added to each coach role's instructions, by role, such as `tutor`.
+    pub prompt_add_ons: BTreeMap<String, String>,
 }
 
 /// Something in a pack that's wrong, and where.
@@ -82,12 +87,20 @@ impl Pack {
         let manifest =
             Manifest::parse(manifest).map_err(|err| anyhow::anyhow!("in pack.toml: {err}"))?;
         let mut problems = Vec::new();
+        let mut prompt_add_ons = BTreeMap::new();
         for (role, file) in manifest.prompts.files() {
-            if !files.contains_key(file) {
-                problems.push(Problem {
+            match files.get(file).map(|bytes| std::str::from_utf8(bytes)) {
+                Some(Ok(text)) => {
+                    prompt_add_ons.insert(role.to_owned(), text.trim().to_owned());
+                }
+                Some(Err(_)) => problems.push(Problem {
+                    path: file.to_owned(),
+                    message: format!("the {role}'s prompt add-on isn't UTF-8"),
+                }),
+                None => problems.push(Problem {
                     path: "pack.toml".to_owned(),
                     message: format!("the {role}'s prompt add-on {file:?} isn't in the pack"),
-                });
+                }),
             }
         }
 
@@ -120,11 +133,10 @@ impl Pack {
                     None,
                 ),
             };
-            let exists =
-                |file: &str| dir.is_some_and(|dir| files.contains_key(&format!("{dir}/{file}")));
+            let read = |file: &str| read_item_file(&files, dir, file);
             let parsed = std::str::from_utf8(bytes)
                 .map_err(|_| "it isn't UTF-8".to_owned())
-                .and_then(|source| Item::parse(path, default_id, source, &manifest, exists));
+                .and_then(|source| Item::parse(path, default_id, source, &manifest, read));
             match parsed {
                 Ok(item) if items.iter().any(|other| other.id == item.id) => {
                     let other = items
@@ -147,6 +159,7 @@ impl Pack {
             manifest,
             items,
             problems,
+            prompt_add_ons,
         })
     }
 
@@ -154,21 +167,60 @@ impl Pack {
         self.items.iter().find(|item| item.id == id)
     }
 
-    /// Runs every item's mechanical check, along with what was found reading the pack.
-    pub fn check(&self) -> Report {
-        let items = self
-            .items
-            .iter()
-            .map(|item| Checked {
+    /// Runs every item's mechanical check, along with what was found reading the pack. Items
+    /// with programs to build and run are checked by `programs`.
+    pub async fn check(&self, programs: &dyn Programs) -> Report {
+        // At once, as building programs takes a while and each build is one process.
+        let checks = self.items.iter().map(|item| async move {
+            let verdict = match check_item(item) {
+                Some(verdict) => verdict,
+                None => programs.check(item).await,
+            };
+            Checked {
                 path: item.path.clone(),
-                result: check_item(item),
-            })
-            .collect();
+                verdict,
+            }
+        });
+        let items = futures_util::future::join_all(checks).await;
         Report {
             problems: self.problems.clone(),
             items,
         }
     }
+}
+
+/// Checks items by building and running their programs, such as a coding item's reference
+/// solution against its tests.
+pub trait Programs: Sync {
+    fn check<'a>(
+        &'a self,
+        item: &'a Item,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Verdict> + Send + 'a>>;
+}
+
+/// The text of a file an item refers to, relative to the item's own directory.
+fn read_item_file(
+    files: &BTreeMap<String, Vec<u8>>,
+    dir: Option<&str>,
+    file: &str,
+) -> Result<String, String> {
+    let Some(dir) = dir else {
+        return Err(format!(
+            "it refers to {file:?}, so it needs a directory of its own, with an item.md"
+        ));
+    };
+    if file
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(format!(
+            "{file:?} should be a path inside the item's directory"
+        ));
+    }
+    let bytes = files.get(&format!("{dir}/{file}")).ok_or_else(|| {
+        format!("{file:?} isn't in the item's directory, where its front matter says it is")
+    })?;
+    String::from_utf8(bytes.clone()).map_err(|_| format!("{file:?} isn't UTF-8"))
 }
 
 fn read_dir(root: &Path, dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
@@ -210,28 +262,72 @@ pub struct Report {
 #[derive(Debug, Clone)]
 pub struct Checked {
     pub path: String,
-    /// What was checked, or what's wrong.
-    pub result: Result<String, String>,
+    pub verdict: Verdict,
+}
+
+/// How an item's check went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    /// What was checked.
+    Passed(String),
+    /// Why it couldn't be checked here, such as a compiler that isn't installed. It isn't a
+    /// failure, as the item may well be right, but it hasn't been shown to be.
+    Skipped(String),
+    /// What's wrong.
+    Failed(String),
+}
+
+impl From<Result<String, String>> for Verdict {
+    fn from(result: Result<String, String>) -> Self {
+        match result {
+            Ok(detail) => Self::Passed(detail),
+            Err(problem) => Self::Failed(problem),
+        }
+    }
 }
 
 impl Report {
+    /// Whether nothing failed. Items that were skipped don't count against it.
     pub fn passed(&self) -> bool {
-        self.problems.is_empty() && self.items.iter().all(|item| item.result.is_ok())
+        self.failures().is_empty()
     }
 
     /// Every problem, read or checked.
     pub fn failures(&self) -> Vec<Problem> {
-        let checked = self.items.iter().filter_map(|item| {
-            item.result.as_ref().err().map(|message| Problem {
+        let checked = self.items.iter().filter_map(|item| match &item.verdict {
+            Verdict::Failed(message) => Some(Problem {
                 path: item.path.clone(),
                 message: message.clone(),
-            })
+            }),
+            _ => None,
         });
         self.problems.iter().cloned().chain(checked).collect()
     }
+
+    /// Items that couldn't be checked here, and why.
+    pub fn skipped(&self) -> Vec<Problem> {
+        self.items
+            .iter()
+            .filter_map(|item| match &item.verdict {
+                Verdict::Skipped(reason) => Some(Problem {
+                    path: item.path.clone(),
+                    message: reason.clone(),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
-fn check_item(item: &Item) -> Result<String, String> {
+/// An item's check, unless it's one of programs to build and run.
+fn check_item(item: &Item) -> Option<Verdict> {
+    match &item.content {
+        Content::Coding(_) | Content::Reading(_) => None,
+        _ => Some(check_without_programs(item).into()),
+    }
+}
+
+fn check_without_programs(item: &Item) -> Result<String, String> {
     match &item.content {
         Content::Card { .. } => Ok("a card, marked by the learner".to_owned()),
         Content::MentalMaths(template) => {
@@ -261,11 +357,9 @@ fn check_item(item: &Item) -> Result<String, String> {
                 estimate.trials, estimate.mean, estimate.standard_error, probability.answer_text
             ))
         }
-        // Running the solutions needs a toolchain, which the coding track's runner provides.
-        Content::Coding(coding) => Ok(format!(
-            "its reference in {}, brute force, tests and inputs are in place",
-            coding.reference.join(", ")
-        )),
+        Content::Coding(_) | Content::Reading(_) => {
+            unreachable!("checked by running their programs")
+        }
         Content::Design { rubric, .. } => Ok(format!("a rubric of {} points", rubric.len())),
     }
 }
@@ -284,30 +378,59 @@ mod tests {
     const MANIFEST: &str =
         "id = \"example\"\nname = \"Example\"\n[[skills]]\nid = \"dice\"\nname = \"Dice\"\n";
 
-    #[test]
-    fn the_sample_pack_passes_its_checks() {
+    /// Stands in for building and running programs, which `workshop-coding` does.
+    struct NotRun;
+
+    impl Programs for NotRun {
+        fn check<'a>(
+            &'a self,
+            item: &'a Item,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Verdict> + Send + 'a>> {
+            Box::pin(async move { Verdict::Skipped(format!("{} isn't run here", item.id)) })
+        }
+    }
+
+    #[tokio::test]
+    async fn the_sample_pack_passes_its_checks() {
         let pack = Pack::sample();
-        let report = pack.check();
+        let report = pack.check(&NotRun).await;
         let failures: Vec<String> = report.failures().iter().map(ToString::to_string).collect();
         assert!(failures.is_empty(), "{failures:#?}");
         for kind in [Kind::Card, Kind::MentalMaths, Kind::Probability] {
             let count = pack.items.iter().filter(|item| item.kind == kind).count();
             assert!((8..=12).contains(&count), "{count} of {kind:?}");
         }
+        // Coding items' programs are checked by workshop-coding, which runs them.
+        let coding = pack.items.iter().filter(|i| i.kind == Kind::Coding).count();
+        let reading = pack
+            .items
+            .iter()
+            .filter(|i| i.kind == Kind::Reading)
+            .count();
+        assert!((6..=8).contains(&coding), "{coding} coding items");
+        assert!((3..=4).contains(&reading), "{reading} reading items");
+        assert_eq!(report.skipped().len(), coding + reading);
     }
 
-    #[test]
-    fn reads_items_in_files_and_directories() {
+    const CODING: &str = "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nRoll some dice.\n## Approach\nAdd them up.\n";
+    const TESTS: &str =
+        "[[example]]\ninput = \"1 2\"\noutput = \"3\"\n[[test]]\ninput = \"2 2\"\noutput = \"4\"\n";
+
+    #[tokio::test]
+    async fn reads_items_in_files_and_directories() {
         let card = "+++\nkind = \"card\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA\n";
-        let coding = "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nRoll some dice.\n";
         let pack = Pack::from_files(files(&[
             ("pack.toml", MANIFEST),
             ("items/cards/one.md", card),
-            ("items/roll/item.md", coding),
+            ("items/roll/item.md", CODING),
             ("items/roll/notes.md", "Not an item."),
-            ("items/roll/reference.py", ""),
+            (
+                "items/roll/reference.py",
+                "print(sum(map(int, input().split())))\n",
+            ),
+            ("items/roll/starter.py", "print(0)\n"),
             ("items/roll/brute.py", ""),
-            ("items/roll/tests.toml", ""),
+            ("items/roll/tests.toml", TESTS),
             ("items/roll/inputs.py", ""),
             ("README.md", "Not an item either."),
         ]))
@@ -315,11 +438,65 @@ mod tests {
         assert_eq!(pack.problems, []);
         let ids: Vec<&str> = pack.items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, ["one", "roll"]);
-        assert!(pack.check().passed());
+        let Content::Coding(coding) = &pack.item("roll").unwrap().content else {
+            panic!("not a coding item");
+        };
+        assert_eq!(coding.reference[0].language, Language::Python);
+        assert!(coding.reference[0].text.starts_with("print(sum"));
+        assert_eq!(coding.examples[0].output, "3");
+        assert_eq!(coding.tests.len(), 1);
+        assert_eq!(coding.approach, "Add them up.");
+        let report = pack.check(&NotRun).await;
+        assert!(report.passed());
+        assert_eq!(report.skipped()[0].path, "items/roll/item.md");
     }
 
     #[test]
-    fn leaves_out_items_that_cannot_be_read() {
+    fn says_what_is_wrong_with_a_coding_items_files() {
+        let pack = |extra: &[(&str, &str)], front: &str| {
+            let item = CODING.replace("+++\nRoll", &format!("{front}+++\nRoll"));
+            let mut entries = vec![
+                ("pack.toml", MANIFEST),
+                ("items/roll/reference.py", ""),
+                ("items/roll/starter.py", ""),
+                ("items/roll/brute.py", ""),
+                ("items/roll/tests.toml", TESTS),
+                ("items/roll/inputs.py", ""),
+            ];
+            entries.extend_from_slice(extra);
+            let item = item.clone();
+            let mut all = files(&entries);
+            all.insert("items/roll/item.md".to_owned(), item.into_bytes());
+            let pack = Pack::from_files(all).unwrap();
+            pack.problems
+                .first()
+                .map(|p| p.message.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(pack(&[], ""), "");
+        assert!(pack(&[], "random_inputs = 0\n").contains("random_inputs"));
+        assert!(
+            pack(
+                &[(
+                    "items/roll/tests.toml",
+                    "[[test]]\ninput = \"\"\noutput = \"\"\n"
+                )],
+                ""
+            )
+            .contains("[[example]]")
+        );
+        assert!(pack(&[("items/roll/tests.toml", "nonsense")], "").contains("tests.toml"));
+        let flat =
+            Pack::from_files(files(&[("pack.toml", MANIFEST), ("items/roll.md", CODING)])).unwrap();
+        assert!(
+            flat.problems[0].message.contains("directory of its own"),
+            "{}",
+            flat.problems[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn leaves_out_items_that_cannot_be_read() {
         let card = "+++\nkind = \"card\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA\n";
         let pack = Pack::from_files(files(&[
             (
@@ -335,12 +512,12 @@ mod tests {
         let problems: Vec<&str> = pack.problems.iter().map(|p| p.path.as_str()).collect();
         assert_eq!(problems, ["pack.toml", "items/b/a.md", "items/broken.md"]);
         assert!(pack.problems[1].message.contains("already items/a.md's"));
-        assert!(!pack.check().passed());
+        assert!(!pack.check(&NotRun).await.passed());
         assert!(Pack::from_files(files(&[("items/a.md", card)])).is_err());
     }
 
-    #[test]
-    fn checks_fail_for_wrong_answers() {
+    #[tokio::test]
+    async fn checks_fail_for_wrong_answers() {
         let wrong = "+++\nkind = \"probability\"\nskills = [\"dice\"]\nanswer = \"1/2\"\n[simulation]\ntrials = 20000\ntolerance = 0.02\n+++\nWhat's the chance of a six?\n## Solution\nOne side in six.\n## Simulation\n```rhai\nrand_int(1, 6) == 6\n```\n";
         let same = "+++\nkind = \"mental-maths\"\nskills = [\"dice\"]\nanswer = \"a\"\n[params]\na = { choices = [1, 2] }\n+++\nWhat's {a}?\n";
         let pack = Pack::from_files(files(&[
@@ -349,7 +526,7 @@ mod tests {
             ("items/same.md", same),
         ]))
         .unwrap();
-        let report = pack.check();
+        let report = pack.check(&NotRun).await;
         let failures = report.failures();
         assert_eq!(failures.len(), 2);
         assert!(

@@ -1,0 +1,48 @@
+# Examples are shown to the learner, and tests kept from them until they submit.
+
+[[example]]
+input = "4 0"
+output = "7"
+
+[[example]]
+input = """
+5 1
+2
+"""
+output = "5"
+
+[[test]]
+input = "1 0"
+output = "1"
+
+[[test]]
+input = """
+3 2
+1 2
+"""
+output = "1"
+
+[[test]]
+input = """
+6 2
+3 4
+"""
+output = "2"
+
+[[test]]
+input = """
+10 3
+2 5 7
+"""
+output = "15"
+
+[[test]]
+input = """
+100000 2
+50000 50001
+"""
+output = "515333372"
+
+[[test]]
+input = "100000 0"
+output = "111787461"

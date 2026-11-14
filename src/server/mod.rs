@@ -4,6 +4,7 @@
 
 mod bench;
 mod client;
+mod coding;
 mod discuss;
 mod edit;
 mod error;
@@ -31,6 +32,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use rust_embed::RustEmbed;
 
+pub(crate) use lsp::file_uri;
 pub use state::App;
 use state::Shared;
 
@@ -45,6 +47,21 @@ pub fn router(app: Shared) -> Router {
         .route("/home", get(home::home))
         .route("/learning/deck", get(learning::deck))
         .route("/learning/sync", post(learning::sync))
+        .route("/coding", get(coding::overview))
+        .route("/coding/items/{pack}/{item}/open", post(coding::open))
+        .route(
+            "/coding/items/{pack}/{item}/session",
+            put(coding::save_session),
+        )
+        .route(
+            "/coding/items/{pack}/{item}/code/{language}",
+            put(coding::save_code),
+        )
+        .route("/coding/items/{pack}/{item}/run", post(coding::run))
+        .route("/coding/items/{pack}/{item}/submit", post(coding::submit))
+        .route("/coding/items/{pack}/{item}/finish", post(coding::finish))
+        .route("/coding/items/{pack}/{item}/tutor", post(coding::tutor))
+        .route("/coding/lsp/{language}", get(coding::lsp))
         .route("/state", put(client::save_state))
         .route("/doctor", get(setup::run_doctor))
         .route(
