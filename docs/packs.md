@@ -21,6 +21,7 @@ my-pack/
     three-dice.md        a question waiting to be made into an item
   prompts/
     examiner.md          a prompt add-on
+    examiner-steady.md   an examiner style's add-on
 ```
 
 Every Markdown file under `items/` is an item, except that a directory holding an `item.md` is one item, and its other files belong to it. Directories under `items/` are only for keeping things tidy; what an item is about comes from its skills. Files and directories starting with `.` are ignored.
@@ -57,13 +58,22 @@ name = "Unit slip"
 description = "Mixed up units, such as seconds and milliseconds"
 
 # Text added to a coach role's instructions, to shape its style for this pack. The tutor gives
-# hints on coding problems; the grader marks written work and checks cards; the author writes
-# new items (see docs/author.md).
+# hints on coding problems and asks the follow-up questions in design sessions; the examiner
+# runs timed rounds; the grader marks written and spoken work and checks cards; the author
+# writes new items (see docs/author.md).
 [prompts]
 tutor = "prompts/tutor.md"
 examiner = "prompts/examiner.md"
 grader = "prompts/grader.md"
 author = "prompts/author.md"
+
+# Styles the examiner can take in timed rounds, chosen as a round starts. Each style's add-on
+# goes after the pack's examiner add-on.
+[[examiner_styles]]
+id = "steady"
+name = "Steady"
+description = "Gives a hint when you ask, and asks a follow-up or two"
+prompt = "prompts/examiner-steady.md"
 ```
 
 Every item names at least one skill, and every skill it names must be listed here. Mastery of a skill comes from how well you've recalled its items lately, so goals can show progress as you go.
@@ -100,7 +110,7 @@ Every item can have:
 | `title` | What it's called in lists, if not the start of its prompt. |
 | `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults by kind. |
 | `source` | Where it came from, in your own words, such as for questions imported from elsewhere. Workshop shows it but doesn't interpret it. |
-| `minutes` | Roughly how long it takes. Defaults by kind. |
+| `minutes` | Roughly how long it takes. Defaults by kind. A timed round of it lasts this long, and at least 10 minutes. |
 
 Items that can't be read are left out, and Workshop says which and why. `workshop pack check` finds them too.
 
@@ -110,7 +120,7 @@ A question and its answer, which you mark yourself after seeing the answer: Agai
 
 Sections: `## Answer` (required) and `## Explanation`.
 
-If a card is wrong, flag it in the app with "This is wrong". It's left out of practice until you fix it and clear the flag, under Packs in the app, where the grader can also check it: it unflags a card it finds right, and proposes a fix for one it doesn't, which is written to the card's file, and committed if the pack is a git repo, once you approve it. You can also answer a card in your own words, for the grader to mark.
+If a card is wrong, flag it in the app with "This is wrong". It's left out of practice until you fix it and clear the flag, under Packs in the app, where the grader can also check it: it unflags a card it finds right, and proposes a fix for one it doesn't, which is written to the card's file, and committed if the pack is a git repo, once you approve it. You can also answer a card in your own words, typed or explained aloud, for the grader to mark; explained aloud, it's marked for how clearly you put it as well as whether it's right.
 
 ### Mental maths
 
@@ -212,7 +222,7 @@ Sections: `## Approach` (required), how it's meant to be solved, shown once it's
 
 `workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. It needs Python and Rust installed; an item that can't be run for want of one is reported as skipped rather than failed.
 
-A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed or dictated; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution. When it comes back for review, it's usually to recall the approach: writing down how to solve it, then comparing that with the item's approach, which takes a few minutes rather than solving it again. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
+A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed, dictated or explained aloud; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution, where they can explain their solution aloud for the grader to mark against the approach. When it comes back for review, it's usually to recall the approach: writing down how to solve it, then comparing that with the item's approach, which takes a few minutes rather than solving it again. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
 
 ### Reading
 
@@ -274,7 +284,17 @@ Design a service that shortens links.
 - Says what happens when a store is unavailable
 ```
 
-`## Rubric` is a list, one point per line. `## Notes` is optional. You answer in writing, and the grader marks it against the rubric, which counts as an attempt rated from its score.
+`## Rubric` is a list, one point per line. `## Notes` is optional: what a good answer looks like, for the examiner and the grader to judge by. The learner sees the rubric once their work is marked, and never the notes.
+
+A design prompt is worked through as a design session of five stages: clarifying the requirements, estimating the scale, outlining the design as a list of components and what each talks to, going into one of them, and its trade-offs and failure modes. Notes are typed or dictated at each, and the tutor asks follow-up questions about what's been written, which can be answered aloud too. Everything's saved as it's written, so a session can be stopped at any stage and carried on later, and earlier stages gone back to. At the end, the grader marks the whole session against the rubric, which counts as an attempt rated from its score. A session takes a while, so Continue only offers one when the learner has said they've got a while.
+
+## Timed rounds
+
+Coding problems, probability questions and design prompts can also be done as timed rounds, in the Timed rounds track: the problem against a visible clock, as in a live session, with the examiner. The learner keeps their working in one place, typed or dictated, and talks with the examiner as they go; it answers questions without giving the method away and, once they have an answer, asks follow-ups that extend or change the problem. A round lasts the item's `minutes`, and at least 10. When time runs out, or the learner ends it, the grader marks the working and what was said against a rubric: a design prompt's own, and for a coding problem or a probability question, one Workshop has for rounds of each, judged against the item's approach or solution. Answering the examiner's follow-ups well is a point in each. That counts as an attempt, and what the grader finds goes in the mistake log.
+
+Rounds are long, so the track is only on the home screen, and Continue only offers one, when the learner has said they've got a while, or has a round under way. The clock only runs while the round is open in the app. If the app closes or the phone sleeps, the clock stops, and coming back within half an hour carries on where it was, with the examiner told of the break. After longer than that, the sitting is over, so the round ends as it was left: it's marked, and what the grader finds is kept, but it doesn't count as an attempt, as a round cut short says too little about what the learner knows.
+
+The pack's `examiner` add-on applies to every round, and its `[[examiner_styles]]` let the learner choose how the examiner behaves for each: how many hints it gives, how strict it is with time, how hard it probes. The sample pack's two styles show the idea.
 
 ## Drafts
 

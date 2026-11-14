@@ -61,7 +61,7 @@ This gives Workshop an HTTPS address on your tailnet, and prints a link and QR c
 
 The first time you open Workshop, a short setup walks you through choosing your language and model and logging in to Advent of Code. If you'd rather not paste your session cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
-Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on or the cards due for review. Below it are the tracks: Advent of Code, Coding, and tracks of short items from a pack.
+Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on or the cards due for review. Below it are the tracks: Advent of Code, Coding, and tracks of short items from a pack. Everything takes a few minutes at a time unless you turn on "I've got a while", which lets Continue offer long items too: design sessions and timed rounds. It stays on while you're using the app, and turns itself off once you've been away for half an hour.
 
 ## Packs and practice
 
@@ -81,11 +81,19 @@ A tutor gives hints that don't give the problem away, through your discussion mo
 
 To try Workshop before logging in, or outside December, open the practice puzzle from the bottom of the puzzle list.
 
+## Design sessions and timed rounds
+
+A design prompt is worked through as a session in stages, from the requirements to the trade-offs, with a coach asking follow-up questions at each, and the grader marking the whole session at the end. Each stage is saved as you write, so you can stop at any of them.
+
+A timed round puts a coding problem, a probability question or a design prompt against a visible clock, with an examiner who answers your questions and asks follow-ups that extend or change the problem, as a live session would. When time's up, the grader marks your working and what was said. The clock only runs while the round is open: close the app and come back within half an hour, and it carries on where it was; leave it longer, and the round ends there and is marked on what you did, without counting as an attempt. A pack can offer styles for the examiner, such as how many hints it gives and how hard it probes, to choose from as a round starts.
+
+Cards, coding plans and solutions, design notes and what you say to the coaches can all be dictated, and some can be explained aloud: the grader then marks how clearly you put it, as well as whether it's right.
+
 ## Mistakes, goals and the grader
 
 Wrong answers, failed submissions and what the grader finds go into a mistake log, each tagged with a kind of mistake, such as an off-by-one or a misreading, which you can confirm or change; a pack can add kinds of its own. Practice, and Continue, lean towards the skills your recent mistakes are in. Each goal a pack defines has a page showing its skills against the goal's target, how it's changed over the last few weeks, how long is left, and what's weakest.
 
-The grader, through your discussion model, marks written work against a rubric: answers to design prompts, a coding problem's plan, and a card answered in your own words. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
+The grader, through your discussion model, marks written and spoken work against a rubric: design sessions, timed rounds, a coding problem's plan and how its solution works, and a card answered in your own words. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
 
 The author writes new items for a pack of your own, for what you're weakest in and the mistakes you make most: one model writes them, a model from another provider solves each blind and reviews it, and each must pass its check. Run it with `workshop author`, or Top up under Packs in the app; [docs/author.md](docs/author.md) describes it. Questions you've found elsewhere can be added to a pack as drafts, under Packs or with `workshop pack import`, for the author to make into items.
 
