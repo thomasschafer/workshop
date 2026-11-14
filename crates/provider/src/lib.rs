@@ -1,6 +1,8 @@
 //! Model CLIs, such as Claude Code and Codex: how to start each, give it a prompt and read its
 //! reply, with every tool turned off.
 
+mod agent;
+
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -11,6 +13,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, mpsc};
 use workshop_common::process::{self, GroupedChild};
 use workshop_common::template::{self, Vars};
+
+pub use agent::{AgentConfig, AgentOutput};
 
 /// A model CLI: how to start it, how to give it a prompt and how to read its reply.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -46,6 +50,10 @@ pub struct ProviderConfig {
     /// Fills an `{effort}` placeholder: how hard the model thinks for each kind of request.
     #[serde(default)]
     pub effort: Option<Effort>,
+    /// How to run it as an agent with tools confined to one directory, for the author, the only
+    /// role that has tools.
+    #[serde(default)]
+    pub agent: Option<AgentConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -125,6 +133,7 @@ impl ProviderConfig {
             edit_models: Vec::new(),
             discuss_models: Vec::new(),
             effort: None,
+            agent: None,
         }
     }
 
@@ -146,6 +155,12 @@ impl ProviderConfig {
     pub fn validate(&self) -> Result<()> {
         if self.command.is_empty() {
             bail!("`command` must not be empty");
+        }
+        if let Some(agent) = &self.agent {
+            agent.validate()?;
+            if agent.command.iter().any(|arg| arg.contains("{effort")) && self.effort.is_none() {
+                bail!("the agent's `command` uses {{effort}}, so `effort` needs setting");
+            }
         }
         if self.command.iter().any(|arg| arg.contains("{effort")) && self.effort.is_none() {
             bail!("`command` uses {{effort}}, so `effort` needs setting for edit and discuss");

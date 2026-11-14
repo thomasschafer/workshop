@@ -27,3 +27,24 @@ discuss_models = ["sonnet", "opus", "fable"]
 version_command = ["claude", "--version"]
 auth_check_command = ["claude", "auth", "status", "--text"]
 install_hint = "Install Claude Code (https://claude.com/claude-code), then run `claude` once to log in."
+
+# The author, the only role with tools, writes a pack's items as an agent in a copy of the pack.
+# Restricted mode keeps the file tools to the working directory, the pack's copy, and takes away
+# every tool that runs commands or code; only the file tools are offered; edits there are
+# accepted, and anything that would ask permission is refused, as nobody is there to answer.
+[agent]
+command = [
+  "claude", "-p",
+  "--model", "{model}",
+  "--system-prompt", "{system_prompt}",
+  "--restricted",
+  "--tools", "Read,Edit,Write,Glob,Grep",
+  "--permission-mode", "acceptEdits",
+  "--permission-prompts", "none",
+  "--setting-sources", "",
+  "--strict-mcp-config",
+  "--disable-slash-commands",
+  "--no-session-persistence",
+  "--output-format", "json",
+]
+output = "claude-json"

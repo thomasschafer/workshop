@@ -49,3 +49,44 @@ auth_check_command = ["codex", "login", "status"]
 install_hint = "Install Codex (https://developers.openai.com/codex), then run `codex login`."
 # Lets a family name such as "luna" always mean the newest model in that family.
 model_catalog = ["codex", "debug", "models"]
+
+# The author, the only role with tools, writes a pack's items as an agent in a copy of the pack.
+# Codex's workspace-write sandbox lets its commands write only in the workspace, the pack's copy
+# given with -C, and not in temporary directories, with no network; it can still read files
+# elsewhere. Approvals are off, so it can't ask to go further, and the tools besides its shell and
+# file edits are switched off.
+[agent]
+command = [
+  "codex", "exec",
+  "--json",
+  "--ephemeral",
+  "--skip-git-repo-check",
+  "--ignore-user-config",
+  "--ignore-rules",
+  "--sandbox", "workspace-write",
+  "-C", "{dir}",
+  "--model", "{model}",
+  "-c", "approval_policy=\"never\"",
+  "-c", "sandbox_workspace_write.network_access=false",
+  "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+  "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+  "-c", "model_instructions_file={system_prompt_file:toml}",
+  "-c", "model_reasoning_effort={effort:toml}",
+  "-c", "project_doc_max_bytes=0",
+  "-c", "web_search=\"disabled\"",
+  "-c", "features.multi_agent=false",
+  "-c", "features.plugins=false",
+  "-c", "features.apps=false",
+  "-c", "features.hooks=false",
+  "-c", "features.browser_use=false",
+  "-c", "features.browser_use_external=false",
+  "-c", "features.in_app_browser=false",
+  "-c", "features.computer_use=false",
+  "-c", "features.image_generation=false",
+  "-c", "features.code_mode_host=false",
+  "-c", "features.goals=false",
+  "-c", "features.tool_suggest=false",
+  "-c", "features.personality=false",
+  "-",
+]
+output = "codex-json"
