@@ -854,6 +854,8 @@ export class LanguageServerConnection {
     rootUri: string,
     initializationOptions: unknown,
     private readonly onStatus: (status: LanguageServerStatus) => void,
+    /** The relay's address on the server, for the language and the files it serves. */
+    private readonly path = "/api/lsp",
   ) {
     this.client = new LSPClient({
       rootUri,
@@ -875,7 +877,7 @@ export class LanguageServerConnection {
 
   private open(): void {
     const scheme = location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${scheme}://${location.host}/api/lsp`);
+    const socket = new WebSocket(`${scheme}://${location.host}${this.path}`);
     this.socket = socket;
     this.onStatus(this.retryDelay === MIN_RECONNECT_MS ? "connecting" : "reconnecting");
     socket.addEventListener("open", () => {

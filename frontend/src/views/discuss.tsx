@@ -32,6 +32,8 @@ interface Props {
   onModel: (model: string) => void;
   onSend: (text: string) => void;
   onClear: () => void;
+  /** What's said before the conversation starts, about what the coach can help with. */
+  intro?: string;
 }
 
 export function DiscussView({
@@ -46,6 +48,7 @@ export function DiscussView({
   onModel,
   onSend,
   onClear,
+  intro = "Stuck? Ask about the puzzle or your code. The coach can see both, won't edit anything, and won't give the answer away unless you ask.",
 }: Props) {
   const end = useRef<HTMLDivElement>(null);
 
@@ -82,12 +85,7 @@ export function DiscussView({
           </button>
         ) : null}
       </div>
-      {turns.length === 0 ? (
-        <p class="muted">
-          Stuck? Ask about the puzzle or your code. The coach can see both, won't edit anything, and
-          won't give the answer away unless you ask.
-        </p>
-      ) : null}
+      {turns.length === 0 ? <p class="muted">{intro}</p> : null}
       <div class="turns">
         {turns.map((t, i) =>
           t.speaker === "coach" ? (

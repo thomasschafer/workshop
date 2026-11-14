@@ -3,14 +3,14 @@ import { api, type Bootstrap, loginNeeded, type Problem, type Puzzle, type Tab }
 import { type LocalCommand, matchCommand } from "./commands";
 import { CodeEditor, type Diagnostics, type HelixSetup, hoverText, NO_DIAGNOSTICS } from "./editor";
 import { errorMessage } from "./errors";
-import { describeProblems, helixSettings } from "./helix/config";
+import { describeProblems } from "./helix/config";
 import { useConnection } from "./hooks/useConnection";
 import { useDayMeta } from "./hooks/useDayMeta";
 import { useDictation } from "./hooks/useDictation";
 import { useDiscussion } from "./hooks/useDiscussion";
 import { type UtteranceDetail, useEditing } from "./hooks/useEditing";
+import { useEditorSettings } from "./hooks/useEditorSettings";
 import { useFileSync } from "./hooks/useFileSync";
-import { useKeyOffsets } from "./hooks/useKeyOffsets";
 import { useLanguageServer } from "./hooks/useLanguageServer";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePackages } from "./hooks/usePackages";
@@ -68,7 +68,6 @@ import {
 } from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
-import { roundCodeScale } from "./zoom";
 
 type Sheet =
   | "run"
@@ -158,7 +157,13 @@ export function App({
   }, []);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
-  const { lsp, lspStatus } = useLanguageServer(boot, editor);
+  const { lsp, lspStatus } = useLanguageServer(
+    boot.language.has_lsp
+      ? { rootUri: boot.language.root_uri, options: boot.language.lsp_options, path: "/api/lsp" }
+      : null,
+    boot,
+    editor,
+  );
   const fileUri = useRef<string | null>(null);
   const puzzleRef = useRef(puzzle);
   // Utterances are handled one at a time, in the order they were spoken. The handler is set
@@ -224,66 +229,37 @@ export function App({
     [],
   );
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
-  const [lineWrapping, setLineWrapping] = useState(() => preferences.lineWrapping.get());
-  const lineWrappingRef = useRef(lineWrapping);
-  lineWrappingRef.current = lineWrapping;
-  const changeLineWrapping = (enabled: boolean) => {
-    preferences.lineWrapping.set(enabled);
-    setLineWrapping(enabled);
-    lineWrappingRef.current = enabled;
-    editor.current?.setLineWrapping(enabled);
-  };
-  const [codeScale, setCodeScale] = useState(() => preferences.codeScale.get());
-  const changeCodeScale = (scale: number) => {
-    const kept = roundCodeScale(scale);
-    preferences.codeScale.set(kept);
-    setCodeScale(kept);
-    editor.current?.setCodeScale(kept);
-  };
-  const changeCodeScaleRef = useRef(changeCodeScale);
-  changeCodeScaleRef.current = changeCodeScale;
-  const [keybindings, setKeybindings] = useState(() => preferences.keybindings.get());
-  const helixOn =
-    keybindings === "helix" || (keybindings === "config" && boot.editor.keybindings === "helix");
-  const helixOnRef = useRef(helixOn);
-  helixOnRef.current = helixOn;
-  // With Helix's keybindings on a touch screen, typing is on Workshop's own keyboard: a laptop's
-  // keys, rather than the phone's.
-  const touchScreen = useMediaQuery("(pointer: coarse)");
-  const ownKeyboard = helixOn && touchScreen;
-  const keyOffsets = useKeyOffsets();
-  const helix = useMemo(() => helixSettings(boot.editor.helix), [boot]);
-  // Read through refs, as the editor keeps these for as long as it's open.
-  const changeLineWrappingRef = useRef(changeLineWrapping);
-  changeLineWrappingRef.current = changeLineWrapping;
+  const settings = useEditorSettings(boot.editor, editor);
+  const {
+    lineWrapping,
+    changeLineWrapping,
+    codeScale,
+    changeCodeScale,
+    helixOn,
+    helix,
+    touchScreen,
+    ownKeyboard,
+    keyOffsets,
+  } = settings;
   /** Helix's keybindings for the open file, or null if they're off. */
   const helixSetup = (documentName: string): HelixSetup | null =>
-    helixOnRef.current
-      ? {
-          keymaps: helix.keymaps,
-          options: helix.options,
-          documentName,
-          actions: {
-            write: async () => {
-              await saver.current?.flush();
-            },
-            reload: async () => {
-              const p = puzzleRef.current;
-              const s = saver.current;
-              const current = editor.current;
-              if (!p || !s || !current) return;
-              // Changes here are saved first, so reloading only ever picks up changes made
-              // elsewhere.
-              await s.flush();
-              const opened = await api.open(p);
-              if (s.adopt(opened.code)) current.replaceAll(opened.code.text);
-            },
-            showProblems: () => setSheet("problems"),
-            lineWrapping: () => lineWrappingRef.current,
-            setLineWrapping: (enabled) => changeLineWrappingRef.current(enabled),
-          },
-        }
-      : null;
+    settings.helixSetup(documentName, {
+      write: async () => {
+        await saver.current?.flush();
+      },
+      reload: async () => {
+        const p = puzzleRef.current;
+        const s = saver.current;
+        const current = editor.current;
+        if (!p || !s || !current) return;
+        // Changes here are saved first, so reloading only ever picks up changes made
+        // elsewhere.
+        await s.flush();
+        const opened = await api.open(p);
+        if (s.adopt(opened.code)) current.replaceAll(opened.code.text);
+      },
+      showProblems: () => setSheet("problems"),
+    });
   const helixSetupRef = useRef(helixSetup);
   helixSetupRef.current = helixSetup;
   useEffect(() => {
@@ -409,9 +385,7 @@ export function App({
           doc,
           cursor: opened.meta.cursor,
           mode: boot.language.editor_mode,
-          lineWrapping: preferences.lineWrapping.get(),
-          codeScale: preferences.codeScale.get(),
-          onCodeScale: (scale) => changeCodeScaleRef.current(scale),
+          ...settings.editorOptions(),
           helix: helixSetupRef.current(fileName(opened.file_uri)),
           formatter: boot.language.has_formatter ? (code) => api.format(puzzle, code) : null,
           formatAutomatically: boot.editor.format_automatically,
@@ -1057,10 +1031,7 @@ export function App({
             helixOn={helixOn}
             helixProblems={describeProblems(helix.problems)}
             onHelix={(enabled) => {
-              const choice = enabled ? "helix" : "default";
-              preferences.keybindings.set(choice);
-              setKeybindings(choice);
-              helixOnRef.current = enabled;
+              settings.setHelixOn(enabled);
               const uri = fileUri.current;
               editor.current?.setHelix(uri ? helixSetupRef.current(fileName(uri)) : null);
             }}
