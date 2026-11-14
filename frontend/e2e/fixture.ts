@@ -223,6 +223,8 @@ export function createLearningHome(): void {
     input: "a\n",
     stars: {},
     model: "fake",
+    // The tests start more new items than a day's default allows.
+    extra: "[learning]\ndaily_new = 100\n",
   });
 }
 
