@@ -55,6 +55,7 @@ export function Author({ onChanged }: { onChanged: () => void }) {
         {status.writer} writes up to {status.max_items} items for what you're weakest in, and{" "}
         {status.reviewer} solves each blind and reviews it. Each must pass its check.
       </p>
+      {status.schedule ? <ScheduleLine schedule={status.schedule} /> : null}
       {status.unavailable ? (
         <p class="muted">{status.unavailable}</p>
       ) : (
@@ -247,5 +248,25 @@ function QueuedRow({
         </button>
       </span>
     </li>
+  );
+}
+
+/** When the server next runs the author by itself. */
+function ScheduleLine({ schedule }: { schedule: NonNullable<AuthorStatus["schedule"]> }) {
+  const next =
+    schedule.next_at <= Date.now()
+      ? "due now"
+      : new Date(schedule.next_at).toLocaleString(undefined, {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+  return (
+    <p class="muted">
+      Runs by itself {schedule.every}
+      {schedule.after ? `, after ${schedule.after}` : ""}. Next run: {next}.
+    </p>
   );
 }

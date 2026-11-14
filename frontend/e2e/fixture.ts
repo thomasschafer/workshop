@@ -300,11 +300,19 @@ output = "text"
 writer = { provider = "fakewriter", model = "writer" }
 reviewer = { provider = "fakereviewer", model = "reviewer" }
 max_items = 3
+every = "7d"
 
 [learning]
 packs = [${JSON.stringify(pack)}]
 `,
   });
+  // Scheduled weekly, and run just now, so the server shows when it's next due without running
+  // it during the tests.
+  mkdirSync(join(AUTHOR_HOME, "data", "author"), { recursive: true });
+  writeFileSync(
+    join(AUTHOR_HOME, "data", "author", "schedule.json"),
+    JSON.stringify({ last_started_at: Date.now() }),
+  );
   cpSync(resolve(import.meta.dirname, "../../packs/sample"), pack, { recursive: true });
   const git = (...args: string[]) =>
     execFileSync("git", args, {

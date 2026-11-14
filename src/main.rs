@@ -403,6 +403,8 @@ async fn serve(
     tokio::spawn(async move { crate::notify::notify_unlocks(&notifier).await });
     let updates = app.updates.clone();
     tokio::spawn(async move { updates.run().await });
+    let author = app.clone();
+    tokio::spawn(async move { server::run_author_on_schedule(author).await });
     // Stop straight away rather than waiting for connections to close: the editor's language
     // server websocket stays open indefinitely. Returning drops every task, which stops the
     // language servers and model CLIs they started.

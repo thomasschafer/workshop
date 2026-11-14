@@ -37,6 +37,16 @@ test.afterAll(async () => {
 test("tops up the pack, adding what both models agree on and queueing the rest", async () => {
   const author = phone.getByRole("region", { name: "Author" });
   await expect(author).toContainText("writer with fakewriter writes up to 3 items");
+  // It's scheduled to run by itself weekly, and has just run, so it's next due in a week.
+  const due = await phone.evaluate(() =>
+    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }),
+  );
+  await expect(author).toContainText("Runs by itself every 7 days. Next run: ");
+  await expect(author).toContainText(due);
   await author.getByRole("button", { name: "Top up" }).tap();
   const last = phone.getByRole("region", { name: "Last run" });
   await expect(last).toContainText("Last run: 1 item added in commit", { timeout: 30_000 });

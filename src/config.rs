@@ -70,6 +70,13 @@ pub struct AuthorConfig {
     pub fix_rounds: usize,
     /// The longest a model may take over one turn.
     pub timeout_minutes: u64,
+    /// How often the server runs the author by itself, for each pack of the learner's own, if
+    /// at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub every: Option<crate::author::schedule::Every>,
+    /// The time of day, on this computer's clock, a scheduled run waits for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<crate::author::schedule::TimeOfDay>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -94,6 +101,8 @@ impl Default for AuthorConfig {
             discussion_rounds: 2,
             fix_rounds: 2,
             timeout_minutes: 20,
+            every: None,
+            after: None,
         }
     }
 }
@@ -465,6 +474,7 @@ impl Config {
         if author.timeout_minutes == 0 {
             bail!("[author] timeout_minutes should be at least 1");
         }
+        crate::author::schedule::check(author.every, author.after)?;
 
         let learning = raw.learning;
         if !RETENTION.contains(&learning.desired_retention) {
@@ -572,6 +582,23 @@ mod tests {
         assert!(Config::parse("[models.grader]\nmodel = \"astra\"").is_err());
         assert!(Config::parse("[models.grader]\nprovider = \"nope\"").is_err());
         assert!(Config::parse("[models.grader]\nprovider = \"codex\"\nmodel = \" \"").is_err());
+    }
+
+    #[test]
+    fn schedules_the_author_only_when_asked() {
+        let config = Config::parse("").unwrap();
+        assert_eq!((config.author.every, config.author.after), (None, None));
+        let weekly = Config::parse("[author]\nevery = \"7d\"\nafter = \"02:00\"").unwrap();
+        assert_eq!(weekly.author.every.unwrap().to_string(), "7d");
+        assert_eq!(weekly.author.after.unwrap().to_string(), "02:00");
+        for (source, expected) in [
+            ("[author]\nafter = \"02:00\"", "after needs every"),
+            ("[author]\nevery = \"7x\"", "hours, days or weeks"),
+            ("[author]\nevery = \"7d\"\nafter = \"2am\"", "HH:MM"),
+        ] {
+            let err = format!("{:#}", Config::parse(source).unwrap_err());
+            assert!(err.contains(expected), "{source}: {err}");
+        }
     }
 
     #[test]

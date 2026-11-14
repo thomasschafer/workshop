@@ -38,6 +38,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use rust_embed::RustEmbed;
 
+pub use author::run_on_schedule as run_author_on_schedule;
 pub(crate) use lsp::file_uri;
 pub use state::App;
 use state::Shared;

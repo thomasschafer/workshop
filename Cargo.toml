@@ -43,6 +43,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"
 fsrs = { version = "7.0.0", default-features = false }
 futures-util = "0.3.34"
+jiff = "0.2.38"
 libc = "0.2.190"
 mime_guess = "2.0.5"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
@@ -89,6 +90,7 @@ axum.workspace = true
 clap.workspace = true
 dirs.workspace = true
 futures-util.workspace = true
+jiff.workspace = true
 mime_guess.workspace = true
 qrcode.workspace = true
 regex.workspace = true

@@ -46,6 +46,15 @@ export interface Report {
 
 export interface AuthorStatus {
   running: boolean;
+  /** When the server runs the author by itself, if it's scheduled to. */
+  schedule: {
+    /** Such as "every 7 days". */
+    every: string;
+    /** The time of day it waits for, such as "02:00", on the server's clock. */
+    after: string | null;
+    /** When the next run is due, in milliseconds since 1970. */
+    next_at: number;
+  } | null;
   /** Why the author can't run, if it can't. */
   unavailable: string | null;
   writer: string;

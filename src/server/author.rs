@@ -12,9 +12,22 @@ use super::error::{ApiError, ApiResult, bad_request};
 use super::state::Shared;
 use crate::author::{LastRun, Question, Queued};
 
+/// When the server runs the author by itself.
+#[derive(Serialize)]
+struct Schedule {
+    /// How often, such as "every 7 days".
+    every: String,
+    /// The time of day it waits for, such as "02:00", if it waits for one.
+    after: Option<String>,
+    /// When the next run is due, in milliseconds since 1970.
+    next_at: i64,
+}
+
 #[derive(Serialize)]
 pub(super) struct AuthorStatus {
     running: bool,
+    /// When it runs by itself, if it's scheduled to.
+    schedule: Option<Schedule>,
     /// Why the author can't run, if it can't, such as with only the sample pack.
     unavailable: Option<String>,
     writer: String,
@@ -39,8 +52,19 @@ fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
             });
         format!("{} with {provider}", choice.model)
     };
+    let next = crate::author::schedule::next_scheduled(
+        &app.config,
+        &app.author,
+        crate::learning::now_ms(),
+    )?;
+    let schedule = next.zip(author.every).map(|(next_at, every)| Schedule {
+        every: every.describe(),
+        after: author.after.map(|after| after.to_string()),
+        next_at,
+    });
     Ok(AuthorStatus {
         running,
+        schedule,
         unavailable: app.config.learning.packs.is_empty().then(|| {
             "The author writes for a pack of your own, and the sample pack is built in: list your pack under [learning] in your config.".to_owned()
         }),
@@ -90,6 +114,20 @@ pub(super) async fn top_up(State(app): State<Shared>) -> ApiResult<AuthorStatus>
     let mut shown = status(&app)?;
     shown.running = true;
     Ok(Json(shown))
+}
+
+/// Runs the author by itself when the config schedules it, for as long as the server runs.
+pub async fn run_on_schedule(app: Shared) {
+    crate::author::schedule::Scheduler {
+        config: &app.config,
+        paths: &app.paths,
+        learning: &app.learning,
+        desk: &app.author,
+        notifier: app.notifier.clone(),
+        running: &app.author_running,
+    }
+    .run_forever()
+    .await;
 }
 
 #[derive(Deserialize)]

@@ -95,7 +95,7 @@ Wrong answers, failed submissions and what the grader finds go into a mistake lo
 
 The grader, through your discussion provider's first model unless you give it one of its own under Settings, Models, or `[models.grader]` in your config, marks written and spoken work against a rubric: design sessions, timed rounds, a coding problem's plan and how its solution works, and a card answered in your own words. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
 
-The author writes new items for a pack of your own, for what you're weakest in and the mistakes you make most: one model writes them, a model from another provider solves each blind and reviews it, and each must pass its check. Run it with `workshop author`, or Top up under Packs in the app; [docs/author.md](docs/author.md) describes it. Questions you've found elsewhere can be added to a pack as drafts, under Packs or with `workshop pack import`, for the author to make into items.
+The author writes new items for a pack of your own, for what you're weakest in and the mistakes you make most: one model writes them, a model from another provider solves each blind and reviews it, and each must pass its check. Run it with `workshop author`, or Top up under Packs in the app, or have the server run it every so often, with `every` under `[author]`; [docs/author.md](docs/author.md) describes it. Questions you've found elsewhere can be added to a pack as drafts, under Packs or with `workshop pack import`, for the author to make into items.
 
 ## Configuration
 

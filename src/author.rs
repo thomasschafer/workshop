@@ -18,6 +18,8 @@ use crate::config::Config;
 use crate::learning::{Learning, now_ms};
 use crate::paths::Paths;
 
+pub mod schedule;
+
 /// How far back mistakes count towards what the author writes about.
 const MISTAKES_MS: i64 = 30 * workshop_learning::schedule::DAY_MS;
 

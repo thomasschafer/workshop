@@ -2,12 +2,7 @@
 
 The author writes new items for a pack of your own: for the skills you're weakest in, those in your goals first, and the kinds of mistake you make most. One model writes them, a model from another provider checks each one, and every item must pass its mechanical check, as `workshop pack check` runs it, before it's accepted.
 
-Run it with `workshop author`, or with the Top up button under Packs in the app. It doesn't run on a schedule of its own; to run it regularly, schedule `workshop author` yourself, such as with cron:
-
-```sh
-# Each night at 2am. Use the full path to workshop, as cron's PATH is short.
-0 2 * * * /usr/local/bin/workshop author >> ~/workshop-author.log 2>&1
-```
+Run it with `workshop author`, or with the Top up button under Packs in the app, or have the server run it by itself on a schedule (see below).
 
 ## How a run goes
 
@@ -35,6 +30,20 @@ discussion_rounds = 2
 fix_rounds = 2
 timeout_minutes = 20
 ```
+
+## Running on a schedule
+
+While `workshop serve` is running, it can run the author by itself, for each pack of your own in turn. It's off unless you set how often, under `[author]`:
+
+```toml
+[author]
+every = "7d"      # a number of hours, days or weeks, such as "12h", "1d" or "2w"
+after = "02:00"   # optional: the time of day to wait for, on this computer's clock
+```
+
+A run is due `every` after the last one started, whether that was scheduled, from Top up, or from `workshop author`. With `after`, it waits for that time of day once `every` has nearly passed, so a run that starts late, such as after the computer wakes, doesn't push later runs back; `every` must be at least a day then. With no run yet, the first is due straight away, or at the next `after`. The server keeps when it last started a run in its data directory, so restarting it neither runs the author again nor skips a run, and a run that's due while the computer is asleep happens once it wakes. Packs, under Packs, shows when the next run is due.
+
+Scheduled runs are like any other: one at a time, waiting while one from the app or the command is going, with the same `max_items` and checks, and the writer's programs run only in the sandbox. Devices that turned on notifications are told how each run went, or why it failed. The sample pack is built in, so it's never run on.
 
 The writer's provider needs an `[agent]` command, which the built-in Claude Code and Codex providers have. The reviewer must use a different provider from the writer, so an item is never checked by the model that wrote it. A pack's `prompts.author` add-on is added to both models' instructions.
 

@@ -286,3 +286,91 @@ fn tells_devices_about_a_question() {
     assert_eq!(message.title, "A question from the author");
     assert_eq!(message.url, "/pack");
 }
+
+#[tokio::test]
+async fn runs_on_its_schedule_for_each_pack_keeping_when_it_last_ran() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use schedule::{Looked, Scheduler};
+
+    let s = setup();
+    let claude = s.root.join("claude");
+    write(
+        &claude.join("reply"),
+        &claude_result("Nothing to add.\n{\"items\": [], \"questions\": []}"),
+    );
+    let calls = || {
+        std::fs::read_to_string(claude.join("count"))
+            .map_or(0, |count| count.trim().parse::<u32>().unwrap())
+    };
+    let notifier = Arc::new(workshop_push::Notifier::load(&s.paths.data_dir).unwrap());
+    let running = AtomicBool::new(false);
+    let now = 1_800_000_000_000;
+    let week = 7 * 24 * 60 * 60 * 1000;
+
+    let scheduler = |config, desk| Scheduler {
+        config,
+        paths: &s.paths,
+        learning: &s.learning,
+        desk,
+        notifier: notifier.clone(),
+        running: &running,
+    };
+    // Off unless it's set.
+    assert_eq!(
+        scheduler(&s.config, &s.desk).look(now).await.unwrap(),
+        Looked::Off
+    );
+
+    let mut config = s.config.clone();
+    config.author.every = Some("7d".parse().unwrap());
+    let scheduled = scheduler(&config, &s.desk);
+    // Nothing has run, so it's due now.
+    assert_eq!(
+        scheduled.look(now).await.unwrap(),
+        Looked::Ran(vec!["sample".to_owned()])
+    );
+    assert_eq!(calls(), 1);
+    assert!(!running.load(Ordering::SeqCst));
+    assert!(s.desk.last_run().unwrap().unwrap().error.is_none());
+
+    // Not again until a week later, even from a scheduler started afresh, as after a restart.
+    let desk = Desk::new(&s.paths.data_dir);
+    assert!(matches!(
+        scheduler(&config, &desk).look(now + 60_000).await.unwrap(),
+        Looked::Wait(_)
+    ));
+    assert_eq!(
+        schedule::next_scheduled(&config, &s.desk, now + 60_000).unwrap(),
+        Some(now + week)
+    );
+    assert_eq!(calls(), 1);
+
+    // While a run from the app is going, it waits.
+    running.store(true, Ordering::SeqCst);
+    assert_eq!(scheduled.look(now + week).await.unwrap(), Looked::Busy);
+    running.store(false, Ordering::SeqCst);
+    // And while the command holds the author's lock.
+    let held = s.desk.try_lock().unwrap().unwrap();
+    assert_eq!(scheduled.look(now + week).await.unwrap(), Looked::Busy);
+    drop(held);
+    assert_eq!(calls(), 1);
+
+    assert_eq!(
+        scheduled.look(now + week).await.unwrap(),
+        Looked::Ran(vec!["sample".to_owned()])
+    );
+    assert_eq!(calls(), 2);
+
+    // Never for the built-in sample pack.
+    let mut sample_only = config.clone();
+    sample_only.learning.packs.clear();
+    assert_eq!(
+        scheduler(&sample_only, &s.desk)
+            .look(now + 10 * week)
+            .await
+            .unwrap(),
+        Looked::Off
+    );
+    assert_eq!(calls(), 2);
+}
