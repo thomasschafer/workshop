@@ -3,19 +3,20 @@ import { useMarkdown } from "../hooks/useMarkdown";
 import type { TrackId } from "../tracks/types";
 import { displayNumber, grade } from "./grading";
 import { newId, nextInstance, progress, queue, step, utcOffset } from "./local";
+import { sameOutput } from "./output";
 import "./practice.css";
 import { learning, type SyncStatus } from "./sync";
 import type { Deck, DeckItem, Instance, Rating } from "./types";
 
 /** Re-renders whenever the device's learning changes, such as after a sync. */
-function useLearning() {
+export function useLearning() {
   const [, setVersion] = useState(0);
   useEffect(() => learning().subscribe(() => setVersion((v) => v + 1)), []);
   return learning();
 }
 
 /** Formatted Markdown from a pack, with raw HTML escaped and unsafe links dropped. */
-function Markdown({ text, class: className = "" }: { text: string; class?: string }) {
+export function Markdown({ text, class: className = "" }: { text: string; class?: string }) {
   const render = useMarkdown();
   if (render === null) return <div class={`learn-text ${className}`}>{text}</div>;
   return (
@@ -120,7 +121,7 @@ export function Practice({ track, onHome }: { track: TrackId; onHome: () => void
   );
 }
 
-function SyncChip({ status }: { status: SyncStatus }) {
+export function SyncChip({ status }: { status: SyncStatus }) {
   if (status.offline) {
     return (
       <span class="learn-sync offline" role="status">
@@ -143,7 +144,13 @@ function SyncChip({ status }: { status: SyncStatus }) {
 }
 
 /** One item, until it's answered or marked, and what to do next. */
-function ItemView({ item, onDone }: { item: DeckItem; onDone: (right: boolean | null) => void }) {
+export function ItemView({
+  item,
+  onDone,
+}: {
+  item: DeckItem;
+  onDone: (right: boolean | null) => void;
+}) {
   const shown = useRef(Date.now());
   const record = (rating: Rating, extra: { response?: string; seed?: number } = {}) => {
     learning().record({
@@ -174,6 +181,14 @@ function ItemView({ item, onDone }: { item: DeckItem; onDone: (right: boolean | 
             });
             onDone(null);
           }}
+        />
+      ) : item.kind === "reading" ? (
+        <ReadingView
+          item={item}
+          onAnswer={(response, right) => {
+            record(right ? "good" : "again", response === null ? {} : { response });
+          }}
+          onNext={onDone}
         />
       ) : item.kind === "mental-maths" ? (
         <TypedAnswer
@@ -287,6 +302,108 @@ function CardView({
           Show answer
         </button>
       )}
+    </>
+  );
+}
+
+/** Code to read, and a question about it: what it prints, or a choice of answers. */
+function ReadingView({
+  item,
+  onAnswer,
+  onNext,
+}: {
+  item: Extract<DeckItem, { kind: "reading" }>;
+  onAnswer: (response: string | null, right: boolean) => void;
+  onNext: (right: boolean) => void;
+}) {
+  const [response, setResponse] = useState("");
+  const [right, setRight] = useState<boolean | null>(null);
+  const [chosen, setChosen] = useState<number | null>(null);
+  const answer = (given: string | null, correct: boolean) => {
+    if (right !== null) return;
+    setRight(correct);
+    onAnswer(given, correct);
+  };
+  return (
+    <>
+      <Markdown text={item.prompt} class="learn-prompt" />
+      {item.ask === "prints" ? (
+        <form
+          class="learn-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            answer(response, sameOutput(item.output, response));
+          }}
+        >
+          <label class="learn-question muted" for="learn-output">
+            What it prints
+          </label>
+          <textarea
+            id="learn-output"
+            class="learn-output"
+            rows={3}
+            autoComplete="off"
+            autoCorrect="off"
+            spellcheck={false}
+            value={response}
+            readOnly={right !== null}
+            onInput={(event) => setResponse(event.currentTarget.value)}
+          />
+          {right === null ? (
+            <span class="learn-actions">
+              <button type="button" class="pill" onClick={() => answer(null, false)}>
+                I don't know
+              </button>
+              <button type="submit" class="pill primary">
+                Check
+              </button>
+            </span>
+          ) : null}
+        </form>
+      ) : (
+        <ol class="learn-choices">
+          {item.choices.map((choice, index) => (
+            <li key={choice}>
+              <button
+                type="button"
+                class={`pill learn-choice ${
+                  right === null
+                    ? ""
+                    : index === item.answer
+                      ? "right"
+                      : index === chosen
+                        ? "wrong"
+                        : ""
+                }`}
+                aria-pressed={chosen === index}
+                disabled={right !== null}
+                onClick={() => {
+                  setChosen(index);
+                  answer(String(index + 1), index === item.answer);
+                }}
+              >
+                {choice}
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+      {right !== null ? (
+        <section class={`learn-answer ${right ? "right" : "wrong"}`} aria-label="Answer">
+          <p class="learn-verdict">
+            {right
+              ? "Right"
+              : item.ask === "prints"
+                ? "It prints:"
+                : `It's: ${item.choices[item.answer]}`}
+          </p>
+          {!right && item.ask === "prints" ? <pre class="learn-printed">{item.output}</pre> : null}
+          <Markdown text={item.explanation} class="muted" />
+          <button type="button" class="pill primary wide" onClick={() => onNext(right)}>
+            Next
+          </button>
+        </section>
+      ) : null}
     </>
   );
 }
