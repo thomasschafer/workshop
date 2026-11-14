@@ -57,6 +57,11 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+      - name: Check the sample pack
+        run: cargo run --locked -- pack check packs/sample
+        env:
+          WORKSHOP_HOME: ${{ runner.temp }}/workshop-home
+
       # End-to-end tests drive the real server and app in a browser, with a stand-in model and an
       # invented puzzle, so they need no network, model access or language toolchain beyond Python.
       - name: Build server

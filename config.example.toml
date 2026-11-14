@@ -69,6 +69,18 @@ format_automatically = true
 # X = "extend_line_above"
 # C-s = ":w"
 
+[learning]
+# Packs of things to learn, each a directory (see docs/packs.md). Until you list one, Workshop
+# uses its sample pack.
+packs = []
+# The most reviews Continue offers in a day; any more wait for the next.
+daily_reviews = 40
+# The minutes of practice to aim for each week, which the home screen counts towards.
+weekly_minutes = 90
+# How likely you should be to remember an item when it comes back, from 0.7 to 0.97. Higher means
+# more reviews.
+desired_retention = 0.9
+
 # Snippets you can insert by saying "snippet <name>", or from the snippet menu.
 # [[snippets]]
 # name = "parse ints"

@@ -9,6 +9,7 @@ mod eval;
 mod language;
 mod models;
 mod notify;
+mod packs;
 mod paths;
 mod practice;
 mod runner;
@@ -86,10 +87,25 @@ enum Command {
         #[arg(long, value_enum, default_value = "posix")]
         shell: commands::Shell,
     },
+    /// Work with packs of things to learn.
+    Pack {
+        #[command(subcommand)]
+        command: PackCommand,
+    },
     /// Print the link, including the access token, for opening Workshop.
     Token {
         #[command(flatten)]
         tailscale: TailscaleArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum PackCommand {
+    /// Read every item in a pack and run its check, such as a probability item's simulation,
+    /// listing anything wrong.
+    Check {
+        /// The pack's directory. By default, the packs in your config, or the sample pack.
+        dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -178,6 +194,14 @@ async fn main() -> Result<()> {
         }
         Command::Env { shell } => {
             print!("{}", commands::env(&config, &paths, shell).await?);
+            Ok(())
+        }
+        Command::Pack {
+            command: PackCommand::Check { dir },
+        } => {
+            if !packs::check(dir.as_deref(), &config.learning)? {
+                std::process::exit(1);
+            }
             Ok(())
         }
         Command::Token { tailscale } => {

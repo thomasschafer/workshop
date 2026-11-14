@@ -24,7 +24,34 @@ struct RawConfig {
     languages: BTreeMap<String, LanguageProfile>,
     snippets: Vec<Snippet>,
     editor: EditorConfig,
+    learning: RawLearningConfig,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct RawLearningConfig {
+    packs: Vec<String>,
+    daily_reviews: u32,
+    weekly_minutes: u32,
+    desired_retention: f64,
+}
+
+/// What's learnt in the tracks besides Advent of Code, and how much of it to do.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LearningConfig {
+    /// The packs' directories. Empty means the sample pack.
+    pub packs: Vec<PathBuf>,
+    /// The most reviews Continue offers in a day; the rest wait for the next.
+    pub daily_reviews: u32,
+    /// The minutes of practice to aim for each week.
+    pub weekly_minutes: u32,
+    /// How likely the learner should be to recall an item when it next comes up.
+    pub desired_retention: f64,
+}
+
+/// The range of retention FSRS schedules well for: below it items come back too rarely to
+/// learn, and above it far too often.
+const RETENTION: std::ops::RangeInclusive<f64> = 0.7..=0.97;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
@@ -213,6 +240,17 @@ impl Default for AocConfig {
     }
 }
 
+impl Default for RawLearningConfig {
+    fn default() -> Self {
+        Self {
+            packs: Vec::new(),
+            daily_reviews: 40,
+            weekly_minutes: 90,
+            desired_retention: 0.9,
+        }
+    }
+}
+
 impl Default for RunConfig {
     fn default() -> Self {
         Self { timeout_secs: 60 }
@@ -252,6 +290,7 @@ pub struct Config {
     pub languages: BTreeMap<String, LanguageProfile>,
     pub snippets: Vec<Snippet>,
     pub editor: EditorConfig,
+    pub learning: LearningConfig,
 }
 
 impl Config {
@@ -321,6 +360,23 @@ impl Config {
             }
         }
 
+        let learning = raw.learning;
+        if !RETENTION.contains(&learning.desired_retention) {
+            bail!(
+                "[learning] desired_retention should be from {} to {}",
+                RETENTION.start(),
+                RETENTION.end()
+            );
+        }
+        if learning.daily_reviews == 0 {
+            bail!("[learning] daily_reviews should be at least 1");
+        }
+        let packs = learning
+            .packs
+            .iter()
+            .map(|dir| files::expand_home(dir))
+            .collect::<Result<Vec<_>>>()?;
+
         Ok(Self {
             server: raw.server,
             solutions_dir: files::expand_home(&raw.solutions.dir)?,
@@ -333,6 +389,12 @@ impl Config {
             languages,
             snippets: raw.snippets,
             editor: raw.editor,
+            learning: LearningConfig {
+                packs,
+                daily_reviews: learning.daily_reviews,
+                weekly_minutes: learning.weekly_minutes,
+                desired_retention: learning.desired_retention,
+            },
         })
     }
 }
@@ -440,6 +502,24 @@ mod tests {
     fn rejects_helix_options_workshop_does_not_follow() {
         assert!(Config::parse("[editor.helix]\nbufferline = \"always\"").is_err());
         assert!(Config::parse("[editor]\nkeybindings = \"vim\"").is_err());
+    }
+
+    #[test]
+    fn reads_what_to_learn_and_how_much() {
+        let config = Config::parse(
+            "[learning]\npacks = [\"~/learning\"]\ndaily_reviews = 10\nweekly_minutes = 30",
+        )
+        .unwrap();
+        assert_eq!(
+            config.learning.packs,
+            [files::expand_home("~/learning").unwrap()]
+        );
+        assert_eq!(config.learning.daily_reviews, 10);
+        assert_eq!(config.learning.weekly_minutes, 30);
+        assert_eq!(config.learning.desired_retention, 0.9);
+        assert!(Config::parse("").unwrap().learning.packs.is_empty());
+        assert!(Config::parse("[learning]\ndesired_retention = 0.99").is_err());
+        assert!(Config::parse("[learning]\ndaily_reviews = 0").is_err());
     }
 
     #[test]
