@@ -38,7 +38,7 @@ fi
 
 [tasks.eval]
 description = "Check the edit model against the cases in evals/ (makes real model calls)"
-run = "cargo run --quiet -- eval"
+run = "cargo run --release --quiet -- eval"
 
 [tasks.build]
 description = "Build the release binary with the frontend embedded"
@@ -82,4 +82,4 @@ run = "cargo build && cd frontend && node demo/record.ts"
 
 [tasks.doctor]
 description = "Check your setup"
-run = "cargo run -- doctor"
+run = "cargo run --release -- doctor"

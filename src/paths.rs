@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// Directories Workshop reads and writes, outside of the user's solutions repo.
 #[derive(Debug, Clone)]
@@ -13,9 +13,26 @@ pub struct Paths {
 }
 
 impl Paths {
+    /// Under `WORKSHOP_HOME` if it's set, or else the user's own directories, which only a
+    /// release build uses, so building and trying out Workshop can't touch the user's real
+    /// data.
     pub fn from_env() -> Result<Self> {
-        if let Some(home) = std::env::var_os("WORKSHOP_HOME") {
-            return Ok(Self::under(Path::new(&home)));
+        Self::from_home(
+            std::env::var_os("WORKSHOP_HOME").as_deref(),
+            cfg!(debug_assertions),
+        )
+    }
+
+    fn from_home(home: Option<&std::ffi::OsStr>, debug_build: bool) -> Result<Self> {
+        match home {
+            Some(home) if home.is_empty() => {
+                bail!("WORKSHOP_HOME is set, but empty: set it to a directory, or unset it")
+            }
+            Some(home) => return Ok(Self::under(Path::new(home))),
+            None if debug_build => bail!(
+                "this is a development build of Workshop, which doesn't use your real config and data unless WORKSHOP_HOME says where they are: set it to a directory of their own, such as WORKSHOP_HOME=$PWD/.dev, as `mise run dev` does, or use a release build"
+            ),
+            None => {}
         }
         let config_dir = dirs::config_dir()
             .context("could not determine the config directory")?
@@ -84,5 +101,25 @@ impl Paths {
 
     pub fn day_meta_dir(&self) -> PathBuf {
         self.data_dir.join("days")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use super::*;
+
+    #[test]
+    fn uses_the_real_directories_only_in_a_release_build() {
+        let err = Paths::from_home(None, true).unwrap_err();
+        assert!(err.to_string().contains("WORKSHOP_HOME"), "{err}");
+        let real = Paths::from_home(None, false).unwrap();
+        assert!(real.config_dir.ends_with("workshop"));
+        for debug_build in [true, false] {
+            let home = Paths::from_home(Some(OsStr::new("/somewhere")), debug_build).unwrap();
+            assert_eq!(home.data_dir, Path::new("/somewhere/data"));
+            assert!(Paths::from_home(Some(OsStr::new("")), debug_build).is_err());
+        }
     }
 }
