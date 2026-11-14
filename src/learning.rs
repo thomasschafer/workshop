@@ -247,6 +247,23 @@ impl Learning {
         self.store.record_mistakes(&mistakes)
     }
 
+    /// Records an attempt the grader marked, with the mistakes it found. The mistake a wrong
+    /// attempt shows of itself, such as a card forgotten, is only logged when the grader found
+    /// none, so the log doesn't have the same mistake twice.
+    pub fn record_marked(
+        &self,
+        attempt: Attempt,
+        findings: &[workshop_learning::NewMistake],
+        now: i64,
+    ) -> Result<()> {
+        self.store.record_mistakes(findings)?;
+        if findings.is_empty() {
+            self.record(&[attempt], now)
+        } else {
+            self.store.record(&[attempt], now)
+        }
+    }
+
     /// How well each skill is known now, over the items there's practice of.
     pub fn skill_mastery(&self, now: i64) -> Result<Vec<SkillMastery>> {
         let packs = crate::packs::load(&self.config)?;
@@ -937,6 +954,45 @@ mod tests {
         );
         let deck = learning.deck(clock(NOW + 1)).unwrap();
         assert_eq!(deck.focus, ["probability.conditional"]);
+    }
+
+    #[test]
+    fn logs_a_marked_attempt_as_forgotten_only_without_the_graders_findings() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let finding = workshop_learning::NewMistake {
+            id: "grade-1-0".to_owned(),
+            item: "sample/binary-heap-costs".to_owned(),
+            at: NOW,
+            source: workshop_learning::MistakeSource::Grader,
+            attempt: None,
+            detail: "Says removing the smallest is constant".to_owned(),
+            suggested: Some("concept-gap".to_owned()),
+        };
+        let wrong = attempt("1", "sample/binary-heap-costs", NOW, Rating::Again);
+        learning.record_marked(wrong, &[finding], NOW).unwrap();
+        let mistakes = learning.store().mistakes(0).unwrap();
+        let details: Vec<&str> = mistakes.iter().map(|m| m.mistake.detail.as_str()).collect();
+        assert_eq!(details, ["Says removing the smallest is constant"]);
+        assert_eq!(
+            learning
+                .store()
+                .attempts("sample/binary-heap-costs")
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // With nothing found, the attempt's own mistake is all there is to log.
+        let wrong = attempt("2", "sample/binary-heap-costs", NOW + 1, Rating::Again);
+        learning.record_marked(wrong, &[], NOW + 1).unwrap();
+        let mistakes = learning.store().mistakes(0).unwrap();
+        let mut details: Vec<&str> = mistakes.iter().map(|m| m.mistake.detail.as_str()).collect();
+        details.sort_unstable();
+        assert_eq!(
+            details,
+            ["Forgot it", "Says removing the smallest is constant"]
+        );
     }
 
     #[test]

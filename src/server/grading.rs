@@ -95,10 +95,10 @@ pub(super) async fn mark(
         .map_err(|err| bad_request(format!("{err:#}")))?;
     let now = now_ms();
     let store = app.learning.store();
-    store.record_mistakes(&marked.mistakes(&body.id, &key, now))?;
+    let findings = marked.mistakes(&body.id, &key, now);
     let due = if body.work.is_attempt() {
-        app.learning.record(
-            &[Attempt {
+        app.learning.record_marked(
+            Attempt {
                 id: body.id,
                 item: key.clone(),
                 answered_at: now,
@@ -106,7 +106,8 @@ pub(super) async fn mark(
                 rating: marked.rating(),
                 response: Some(body.text),
                 seed: None,
-            }],
+            },
+            &findings,
             now,
         )?;
         store.schedules()?.get(&key).map(|schedule| {
@@ -115,6 +116,7 @@ pub(super) async fn mark(
                 .due(schedule, app.config.learning.desired_retention)
         })
     } else {
+        store.record_mistakes(&findings)?;
         None
     };
     let rubric = match &item.content {

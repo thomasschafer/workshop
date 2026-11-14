@@ -308,9 +308,9 @@ pub(super) async fn finish(
     .await
     .map_err(|err| bad_request(format!("{err:#}")))?;
     let now = now_ms();
-    store.record_mistakes(&marked.mistakes(&body.id, &key, now))?;
-    app.learning.record(
-        &[Attempt {
+    let findings = marked.mistakes(&body.id, &key, now);
+    app.learning.record_marked(
+        Attempt {
             id: body.id,
             item: key.clone(),
             answered_at: now,
@@ -318,7 +318,8 @@ pub(super) async fn finish(
             rating: marked.rating(),
             response: Some(transcript),
             seed: None,
-        }],
+        },
+        &findings,
         now,
     )?;
     app.design_sessions.remove(&key)?;
