@@ -2,54 +2,22 @@
 # Versions come from git tags rather than crates.io: Workshop is only distributed as GitHub release binaries.
 git_only = true
 publish = false
+# The binary is the only thing released. The crates under crates/ are parts of it, so they get
+# no versions or tags of their own, and their changes go into the binary's changelog.
+release = false
+# Only the binary is tagged, as v1.2.3; this keeps the crates from matching its tags.
+git_tag_name = "{{ package }}-v{{ version }}"
+semver_check = false
+pr_labels = ["release"]
+# Only release when the release PR is merged, rather than whenever the version in Cargo.toml has no tag.
+release_always = false
+
+[[package]]
+name = "workshop"
+release = true
 git_tag_name = "v{{ version }}"
 git_release_enable = true
 # Release binaries are attached by the release workflow, which publishes the draft once every asset is uploaded.
 git_release_draft = true
 changelog_update = true
-# Only release when the release PR is merged, rather than whenever the version in Cargo.toml has no tag.
-release_always = false
-semver_check = false
-pr_labels = ["release"]
-
-# The binary is the only thing released. The crates under crates/ are parts of it, so their
-# changes go into its changelog and release, and they get no versions or tags of their own.
-[[package]]
-name = "workshop"
-changelog_include = ["workshop-auth", "workshop-common", "workshop-lsp", "workshop-provider", "workshop-push", "workshop-runner", "workshop-tailscale", "workshop-toolchain", "workshop-tracks"]
-
-[[package]]
-name = "workshop-auth"
-release = false
-
-[[package]]
-name = "workshop-common"
-release = false
-
-[[package]]
-name = "workshop-lsp"
-release = false
-
-[[package]]
-name = "workshop-provider"
-release = false
-
-[[package]]
-name = "workshop-push"
-release = false
-
-[[package]]
-name = "workshop-runner"
-release = false
-
-[[package]]
-name = "workshop-tailscale"
-release = false
-
-[[package]]
-name = "workshop-toolchain"
-release = false
-
-[[package]]
-name = "workshop-tracks"
-release = false
+changelog_include = ["workshop-auth", "workshop-author", "workshop-coding", "workshop-common", "workshop-learning", "workshop-lsp", "workshop-pack", "workshop-provider", "workshop-push", "workshop-runner", "workshop-sessions", "workshop-tailscale", "workshop-toolchain", "workshop-tracks"]
