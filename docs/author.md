@@ -6,7 +6,7 @@ Run it with `workshop author`, or with the Top up button under Packs in the app,
 
 ## How a run goes
 
-1. Workshop copies your pack into a directory of its own, leaving out anything hidden, such as `.git`. The writer, by default the newest Opus through Claude Code, works in the copy with tools that can't reach anything else (see below), and writes at most `max_items` new items under `items/`. It's told the pack's format, your weakest skills, your most common kinds of mistake with some examples, the drafts waiting in `drafts/`, and your answers to its earlier questions. It can make an item from a draft, and delete the draft.
+1. Workshop copies your pack into a directory of its own, leaving out anything hidden, such as `.git`. The writer, by default the newest Opus through Claude Code, works in the copy with tools that can't reach anything else (see below), and writes at most `max_items` new items under `items/`. It's told the pack's format, your weakest skills, your most common kinds of mistake with some examples, the skills whose coding problems you found too easy, with the problems you retired and how hard each was, how hard each skill's problems should be, the drafts waiting in `drafts/`, and your answers to its earlier questions. It can make an item from a draft, and delete the draft.
 2. Anything else the writer changed in the copy, such as `pack.toml` or an existing item, is put back, and the run's summary says so. Items over the cap are left out.
 3. Each new item's check runs. The writer gets `fix_rounds` turns to fix those that fail, and those that still fail are left out. An item that can't be checked on this machine, such as C++ without a compiler, is left out too, as it hasn't been shown to be right.
 4. The reviewer, by default the newest Sol through Codex, with no tools, solves each item without seeing its answer, then compares its answer with the item's and says whether the item is right and unambiguous. Where an answer is a number, as for probability and mental maths, Workshop also compares them itself, and a mismatch counts as an objection whatever the reviewer says.
@@ -16,6 +16,10 @@ Run it with `workshop author`, or with the Top up button under Packs in the app,
 The writer can ask you questions, such as which topics you'd like more of. Each goes out as a notification to devices that turned them on, and waits under Packs for your answer, which the next run is told. The run carries on without waiting.
 
 Only one run happens at a time, from the app or the command.
+
+## Harder problems where they're too easy
+
+Rating a coding problem easy retires it, and tells the author to write harder ones for its skills. Each skill has a level from 1 to 5, on the same scale as an item's `difficulty`, worked out from your attempts at its problems: it starts at 3, a problem rated easy lifts it to one above that problem's difficulty if that's higher, and one you forgot lowers it to one below, if that's lower. So a level settles just above what you find easy and below what you forget. The writer is told each skill's level, to write its new problems at that level with their `difficulty` set, and, for skills with problems retired, which ones they were and how hard, so it writes nothing at the same level or easier.
 
 ## Settings
 

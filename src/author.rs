@@ -272,7 +272,8 @@ async fn models(config: &Config, pack: &Pack, work_dir: &Path) -> Result<Provide
 }
 
 /// What the author is told to write about: the pack's weakest skills, those in its goals first,
-/// the kinds of mistake made most, and the learner's answers to its questions.
+/// the kinds of mistake made most, the skills whose problems were found too easy, how hard each
+/// skill's problems should be, and the learner's answers to its questions.
 fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> Result<Brief> {
     let in_pack = |key: &str| {
         key.split_once('/')
@@ -330,11 +331,58 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
         .filter(|q| !q.told)
         .filter_map(|q| q.answer.clone().map(|a| (q.text.clone(), a)))
         .collect();
+    let levels = workshop_learning::levels(&learning.store().all_attempts()?, |key| {
+        items
+            .get(key)
+            .filter(|item| item.kind == workshop_pack::Kind::Coding)
+            .map(|item| workshop_learning::level::Problem {
+                skills: &item.skills,
+                difficulty: item.difficulty,
+            })
+    });
+    let mut too_easy: Vec<workshop_author::TooEasy> = Vec::new();
+    for (key, retirement) in learning.store().retirements()? {
+        let Some(item) = items.get(&key).filter(|_| retirement.is_retired()) else {
+            continue;
+        };
+        for skill in &item.skills {
+            let entry = match too_easy.iter_mut().find(|t| t.skill == *skill) {
+                Some(entry) => entry,
+                None => {
+                    too_easy.push(workshop_author::TooEasy {
+                        skill: skill.clone(),
+                        level: levels
+                            .get(skill)
+                            .map_or(workshop_learning::level::MIDDLE, |l| l.level),
+                        retired: Vec::new(),
+                    });
+                    too_easy.last_mut().expect("just pushed")
+                }
+            };
+            entry.retired.push((item.label(), item.difficulty));
+        }
+    }
+    too_easy.sort_by(|a, b| {
+        b.retired
+            .len()
+            .cmp(&a.retired.len())
+            .then(a.skill.cmp(&b.skill))
+    });
+    too_easy.truncate(5);
+    for entry in &mut too_easy {
+        entry.retired.truncate(5);
+    }
     Ok(Brief {
         weakest,
         mistakes,
         examples,
         answers,
+        too_easy,
+        levels: levels
+            .into_iter()
+            .filter(|(skill, _)| pack.manifest.has_skill(skill))
+            .map(|(skill, level)| (skill, level.level))
+            .collect(),
     })
 }
 

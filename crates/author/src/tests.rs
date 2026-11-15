@@ -153,6 +153,12 @@ where
             mistakes: vec![("concept-gap".to_owned(), 3)],
             examples: vec!["Answered 1/12; it's 1/6".to_owned()],
             answers: vec![("More cards?".to_owned(), "Yes".to_owned())],
+            too_easy: vec![super::TooEasy {
+                skill: "dice.sums".to_owned(),
+                level: 4,
+                retired: vec![("Two dice".to_owned(), Some(3)), ("Pips".to_owned(), None)],
+            }],
+            levels: vec![("dice.sums".to_owned(), 4)],
         },
         limits,
         &|question: &str| asked.lock().unwrap().push(question.to_owned()),
@@ -205,6 +211,12 @@ async fn accepts_items_both_models_agree_on() {
     assert!(writes[0].contains("A: Yes"));
     assert!(writes[0].contains("drafts/two-sixes.md"));
     assert!(writes[0].contains("Write at most 3 new items"));
+    // Harder problems where they were found too easy, at the skill's level.
+    assert!(writes[0].contains(
+        "- dice.sums (level 4): \"Two dice\" (difficulty 3), \"Pips\" (no difficulty given, so taken as 3)"
+    ));
+    assert!(writes[0].contains("none at the same difficulty as these or easier"));
+    assert!(writes[0].contains("give each its `difficulty`:\n- dice.sums: 4\n"));
     // The pack itself is as it was.
     assert!(!dir.path().join("pack/items/doubles.md").exists());
 }

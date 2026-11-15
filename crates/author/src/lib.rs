@@ -83,6 +83,21 @@ pub struct Brief {
     pub examples: Vec<String>,
     /// The learner's answers to questions asked in earlier runs.
     pub answers: Vec<(String, String)>,
+    /// The skills whose problems the learner found too easy, and retired, most first.
+    pub too_easy: Vec<TooEasy>,
+    /// How hard each skill's problems should be, by skill, from 1 to 5, for the skills with
+    /// problems attempted: higher as they're found easy, and lower as they're forgotten.
+    pub levels: Vec<(String, u8)>,
+}
+
+/// A skill whose problems were found too easy, so the author writes harder ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TooEasy {
+    pub skill: String,
+    /// The level its new problems should be at, from 1 to 5.
+    pub level: u8,
+    /// The problems retired as easy, by title, with how hard each is, if its pack says.
+    pub retired: Vec<(String, Option<u8>)>,
 }
 
 /// An item from a run, and what happened to it.
@@ -579,6 +594,31 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
             out.push_str(&format!("- {skill}: {mastery:.2}\n"));
         }
     }
+    if !brief.too_easy.is_empty() {
+        out.push_str("\nProblems the learner found too easy, and retired, by skill. Write harder problems for these skills, at the skill's level, which is above what they found easy, and none at the same difficulty as these or easier:\n");
+        for too_easy in &brief.too_easy {
+            let retired: Vec<String> = too_easy
+                .retired
+                .iter()
+                .map(|(title, difficulty)| match difficulty {
+                    Some(difficulty) => format!("\"{title}\" (difficulty {difficulty})"),
+                    None => format!("\"{title}\" (no difficulty given, so taken as 3)"),
+                })
+                .collect();
+            out.push_str(&format!(
+                "- {} (level {}): {}\n",
+                too_easy.skill,
+                too_easy.level,
+                retired.join(", ")
+            ));
+        }
+    }
+    if !brief.levels.is_empty() {
+        out.push_str("\nHow hard each skill's coding problems should be, from 1 to 5, as their `difficulty` goes. A level rises as the learner finds problems easy and falls as they forget them. Write a skill's new problems at its level, and give each its `difficulty`:\n");
+        for (skill, level) in &brief.levels {
+            out.push_str(&format!("- {skill}: {level}\n"));
+        }
+    }
     if !brief.mistakes.is_empty() {
         out.push_str("\nThe kinds of mistake they've made most lately:\n");
         for (kind, count) in &brief.mistakes {
@@ -611,7 +651,7 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
         }
     }
     out.push_str(&format!(
-        "\nWrite at most {} new items, for the weakest skills and the kinds of mistake above, so the learner practises what they get wrong. Then reply with JSON: {{\"items\": [{{\"path\": the item's file, such as items/x.md or items/x/item.md, \"from_draft\": the draft's path, if you made it from one, or null}}], \"questions\": [questions for the learner, if any]}}",
+        "\nWrite at most {} new items, for the weakest skills and the kinds of mistake above, so the learner practises what they get wrong, and harder problems where they found them too easy. Then reply with JSON: {{\"items\": [{{\"path\": the item's file, such as items/x.md or items/x/item.md, \"from_draft\": the draft's path, if you made it from one, or null}}], \"questions\": [questions for the learner, if any]}}",
         limits.max_items
     ));
     out

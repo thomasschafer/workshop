@@ -374,3 +374,43 @@ async fn runs_on_its_schedule_for_each_pack_keeping_when_it_last_ran() {
     );
     assert_eq!(calls(), 2);
 }
+
+#[test]
+fn asks_for_harder_problems_in_the_skills_whose_problems_were_found_too_easy() {
+    let s = setup();
+    let now = crate::learning::now_ms();
+    let attempt = |id: &str, item: &str, rating| workshop_learning::Attempt {
+        id: format!("attempt-{id}"),
+        item: item.to_owned(),
+        answered_at: now,
+        duration_ms: 1000,
+        rating,
+        response: None,
+        seed: None,
+    };
+    use workshop_learning::Rating;
+    let record = |a| s.learning.record_problem(a, &[], now).unwrap();
+    assert!(record(attempt("1", "sample/islands", Rating::Easy)));
+    assert!(record(attempt("2", "sample/fewest-hops", Rating::Easy)));
+    assert!(!record(attempt("3", "sample/pair-sums", Rating::Again)));
+    let pack = Pack::load(&s.pack).unwrap();
+    let brief = brief(&s.learning, &pack, &[], now).unwrap();
+    let graphs = &brief.too_easy[0];
+    assert_eq!(graphs.skill, "algorithms.graphs");
+    assert_eq!(graphs.level, 4);
+    let titles: Vec<&str> = graphs.retired.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"Count the islands"), "{titles:?}");
+    assert!(
+        brief.levels.contains(&("algorithms.graphs".to_owned(), 4)),
+        "{:?}",
+        brief.levels
+    );
+    // Forgotten, a skill's problems should be easier.
+    let hashing = brief
+        .levels
+        .iter()
+        .find(|(skill, _)| skill == "algorithms.hashing")
+        .unwrap();
+    assert!(hashing.1 < 3, "{hashing:?}");
+}

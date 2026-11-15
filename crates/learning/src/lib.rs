@@ -4,12 +4,14 @@
 //! The log of attempts is what's true; schedules and mastery are worked out from it, so
 //! attempts made offline on another device fit in wherever they belong once they arrive.
 
+pub mod level;
 pub mod mastery;
 pub mod mistakes;
 pub mod plan;
 pub mod schedule;
 pub mod store;
 
+pub use level::{SkillLevel, levels};
 pub use mastery::{SkillMastery, history, mastery};
 pub use mistakes::{Mistake, MistakeSource, NewMistake};
 pub use plan::{Clock, ItemRef, Limits, Progress, TrackPlan, due, plan};
