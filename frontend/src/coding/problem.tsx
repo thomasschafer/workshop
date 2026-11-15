@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { Bootstrap } from "../api";
+import { type Bootstrap, ConnectionError } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
@@ -31,6 +31,7 @@ import {
   stepAfter,
   stepsFor,
   suggestedRating,
+  TWIST_KINDS,
 } from "./steps";
 import { TutorSheet } from "./tutor";
 import type {
@@ -41,6 +42,7 @@ import type {
   Session,
   StepName,
   Submitted,
+  TwistMarked,
 } from "./types";
 
 /** How long typing in the plan pauses before it's saved. */
@@ -74,8 +76,9 @@ function writeUnsaved(key: string, unsaved: Unsaved | null): void {
 
 /**
  * A coding problem, in steps of a few minutes: understand it, plan, code, test and review, or
- * for one solved before, recall the plan and review it. Each step is saved as it goes, so the
- * learner can stop at any moment, and opening it again carries on where they were.
+ * for one solved before, answer a twist on it, or with no twist to be had, recall the plan and
+ * review it. Each step is saved as it goes, so the learner can stop at any moment, and opening
+ * it again carries on where they were.
  */
 export function ProblemView({
   boot,
@@ -97,6 +100,7 @@ export function ProblemView({
   const [notice, setNotice] = useState<string | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
   const [finished, setFinished] = useState<FinishedReply | null>(null);
+  const [twistMarked, setTwistMarked] = useState<TwistMarked | null>(null);
 
   const saver = useMemo(
     () =>
@@ -166,6 +170,34 @@ export function ProblemView({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A twist is posed once the review starts, and kept, so a reload shows the same one. If it
+  // can't be, the review is a recall instead, which says why.
+  const posing = useRef(false);
+  useEffect(() => {
+    if (session?.mode !== "twist" || !opened || opened.twist !== null || posing.current) return;
+    posing.current = true;
+    codingApi
+      .twist(itemKey)
+      .then(
+        (fresh) => {
+          setOpened(fresh);
+          sessionRef.current = fresh.session;
+          setSession(fresh.session);
+          writeUnsaved(itemKey, null);
+        },
+        (e: unknown) => {
+          const why =
+            e instanceof ConnectionError
+              ? "The server can't be reached to pose a twist, so recall how to solve it instead."
+              : `Couldn't get a twist (${errorMessage(e)}), so recall how to solve it instead.`;
+          void change((s) => ({ ...s, mode: "recall", step: "plan", no_twist: why }), true);
+        },
+      )
+      .finally(() => {
+        posing.current = false;
+      });
+  }, [session?.mode, opened, itemKey, change]);
 
   // Once it's being reviewed, the solution comes with the session's save.
   useEffect(() => {
@@ -284,13 +316,30 @@ export function ProblemView({
     notify: setNotice,
   };
 
-  const body = finished ? (
+  const done = finished !== null || twistMarked !== null;
+  const body = twistMarked ? (
+    <TwistResult result={twistMarked} onHome={onHome} onList={onList} />
+  ) : finished ? (
     <Finished
       finished={finished}
       mode={session.mode}
       onHome={onHome}
       onList={onList}
       onSolve={() => void load(true)}
+    />
+  ) : session.step === "twist" ? (
+    <TwistStep
+      {...shared}
+      boot={boot}
+      itemKey={itemKey}
+      settings={settings}
+      keyboard={keyboard}
+      editor={editor}
+      draftSaver={draftSaver}
+      onMarked={(result) => {
+        writeUnsaved(itemKey, null);
+        setTwistMarked(result);
+      }}
     />
   ) : session.step === "understand" ? (
     <UnderstandStep {...shared} onNext={next} />
@@ -344,7 +393,7 @@ export function ProblemView({
         steps={steps}
         current={session.step}
         label={(step) => STEP_LABELS[step]}
-        reachable={(step) => reached(session.mode, session.step, step) && finished === null}
+        reachable={(step) => reached(session.mode, session.step, step) && !done}
         onGo={goTo}
       />
       {offlineBanner}
@@ -495,6 +544,11 @@ function PlanStep({
   };
   return (
     <main class="learn-content">
+      {recall && session.no_twist ? (
+        <p class="banner" role="status">
+          {session.no_twist}
+        </p>
+      ) : null}
       <Statement opened={opened} open />
       <form
         class="learn-form"
@@ -1033,6 +1087,216 @@ function ReviewStep({
   );
 }
 
+/**
+ * Answering a twist on a problem solved before, posed for its review: explaining how the
+ * approach would change, typed, dictated or aloud, or changing the code, for the grader to mark,
+ * which is the review's rating.
+ */
+function TwistStep({
+  opened,
+  session,
+  change,
+  online,
+  notify,
+  boot,
+  itemKey,
+  settings,
+  keyboard,
+  editor,
+  draftSaver,
+  onMarked,
+}: StepProps & {
+  boot: Bootstrap;
+  itemKey: string;
+  settings: EditorSettings;
+  keyboard: CodeKeyboardState;
+  editor: { current: CodeEditor | null };
+  draftSaver: { current: VersionedSaver | null };
+  onMarked: (result: TwistMarked) => void;
+}) {
+  const [withCode, setWithCode] = useState(false);
+  const [aloud, setAloud] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const twist = opened.twist;
+  const language = opened.languages.find((l) => l.id === session.language) ?? opened.languages[0];
+  if (!twist) {
+    return (
+      <main class="learn-content">
+        <p class="muted" role="status">
+          The tutor is posing a twist on it…
+        </p>
+      </main>
+    );
+  }
+  const answer = async (text: string, spoken: boolean) => {
+    await draftSaver.current?.flush();
+    return codingApi.answerTwist(itemKey, newId(), text, spoken, withCode);
+  };
+  const markWritten = () => {
+    setMarking(true);
+    setProblem(null);
+    answer(session.plan, false)
+      .then(onMarked, (e: unknown) => setProblem(errorMessage(e)))
+      .finally(() => setMarking(false));
+  };
+  const keyboardShown = settings.ownKeyboard && keyboard.wanted;
+  return (
+    <main class="learn-content">
+      <Statement opened={opened} open={false} />
+      <section class="coding-twist" aria-label="Twist">
+        <h2 class="coding-subheading">{TWIST_KINDS[twist.kind]}</h2>
+        <Markdown text={twist.prompt} class="learn-prompt" />
+      </section>
+      <form
+        class="learn-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          markWritten();
+        }}
+      >
+        <label class="learn-question" for="coding-twist-answer">
+          How would you change your approach, and what would it cost?
+        </label>
+        <textarea
+          id="coding-twist-answer"
+          class="coding-plan"
+          rows={5}
+          value={session.plan}
+          placeholder="A few lines is plenty: what changes, why it still works, and its cost"
+          onInput={(event) => {
+            const plan = event.currentTarget.value;
+            change((s) => ({ ...s, plan }));
+          }}
+        />
+        <DictateButton
+          serverDictation={boot.server_dictation}
+          onHeard={(text) => {
+            const plan = sessionPlan(session.plan, text);
+            change((s) => ({ ...s, plan }), true);
+          }}
+          onNotice={notify}
+        />
+        <span class="learn-actions">
+          <button type="button" class="pill" onClick={() => setWithCode((on) => !on)}>
+            {withCode ? "Leave the code as it is" : "Change your code too"}
+          </button>
+          <button
+            type="submit"
+            class="pill primary"
+            disabled={!online || marking || !session.plan.trim()}
+          >
+            {marking ? "Marking…" : "Mark my answer"}
+          </button>
+        </span>
+      </form>
+      {withCode && language ? (
+        <section class="coding-twist-code" aria-label="Your code">
+          <EditorPane
+            key={language.id}
+            itemKey={itemKey}
+            language={language}
+            settings={settings}
+            editor={editor}
+            saver={draftSaver}
+            statusHost={keyboard.statusHost}
+          />
+          {keyboardShown ? (
+            <CodeKeyboard
+              editor={editor}
+              keyOffsets={settings.keyOffsets}
+              onLower={() => keyboard.show(false)}
+              statusHost={keyboard.placeStatus}
+            />
+          ) : (
+            <span class="learn-actions">
+              <KeyboardToggle
+                shown={!settings.ownKeyboard && keyboard.wanted}
+                onToggle={() => keyboard.show(settings.ownKeyboard || !keyboard.wanted)}
+              />
+            </span>
+          )}
+          <p class="muted coding-hint">Your code goes to the grader with your answer.</p>
+        </section>
+      ) : null}
+      {problem ? (
+        <p class="error-text" role="alert">
+          {problem}
+        </p>
+      ) : null}
+      {online ? null : <p class="muted">Marking it needs the server.</p>}
+      {aloud ? (
+        <ExplainAloud
+          itemKey={opened.key}
+          work="explanation"
+          question="Explain how you'd change your approach for the twist, and what it would cost"
+          serverDictation={boot.server_dictation}
+          mark={(heard) =>
+            answer(heard, true).then((result) => {
+              onMarked(result);
+              return result;
+            })
+          }
+          onMarked={() => {}}
+        />
+      ) : (
+        <button type="button" class="learn-link" disabled={!online} onClick={() => setAloud(true)}>
+          Explain your answer aloud, to be marked
+        </button>
+      )}
+    </main>
+  );
+}
+
+/** How an answer to a twist was marked, which finished the review, and how it stands now. */
+function TwistResult({
+  result,
+  onHome,
+  onList,
+}: {
+  result: TwistMarked;
+  onHome: () => void;
+  onList: () => void;
+}) {
+  return (
+    <main class="learn-content">
+      <section class="learn-done" aria-label="Done">
+        <h2>That's the review done</h2>
+        <p class="muted">{comesBack(result)}</p>
+      </section>
+      <MarkedView marked={result.marked} />
+      <section aria-label="A good answer">
+        <h2 class="coding-subheading">What a good answer covers</h2>
+        <Markdown text={result.notes} />
+      </section>
+      <details class="coding-statement">
+        <summary>How the problem itself is solved</summary>
+        <Markdown text={result.approach} />
+      </details>
+      <span class="learn-actions">
+        <button type="button" class="pill" onClick={onHome}>
+          Home
+        </button>
+        <button type="button" class="pill primary" onClick={onList}>
+          More coding
+        </button>
+      </span>
+    </main>
+  );
+}
+
+/** When a problem comes back, or that it won't, once it's finished. */
+function comesBack(finished: FinishedReply): string {
+  if (finished.retired) {
+    return "Retired: it won't come back. Bring it back from the Coding list any time.";
+  }
+  if (finished.due === null) return "Saved.";
+  const days = Math.max(0, Math.round((finished.due - Date.now()) / 86_400_000));
+  return days === 0
+    ? "It comes back later today."
+    : `It comes back in about ${days} ${days === 1 ? "day" : "days"}.`;
+}
+
 function Finished({
   finished,
   mode,
@@ -1046,21 +1310,11 @@ function Finished({
   onList: () => void;
   onSolve: () => void;
 }) {
-  const { due } = finished;
-  const days = due === null ? null : Math.max(0, Math.round((due - Date.now()) / 86_400_000));
   return (
     <main class="learn-content">
       <section class="learn-done" aria-label="Done">
         <h2>That's it done</h2>
-        <p class="muted">
-          {finished.retired
-            ? "Retired: it won't come back. Bring it back from the Coding list any time."
-            : days === null
-              ? "Saved."
-              : days === 0
-                ? "It comes back later today."
-                : `It comes back in about ${days} ${days === 1 ? "day" : "days"}.`}
-        </p>
+        <p class="muted">{comesBack(finished)}</p>
         <span class="learn-actions">
           <button type="button" class="pill" onClick={onHome}>
             Home

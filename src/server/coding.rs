@@ -19,7 +19,7 @@ use super::error::{ApiError, ApiResult, bad_request};
 use super::learning::Where;
 use super::puzzles::{SaveText, saved};
 use super::state::{Shared, lock};
-use crate::coding::{Found, Opened, Overview, SUBMIT_RANDOM_INPUTS, Session, StepName, find};
+use crate::coding::{Found, Mode, Opened, Overview, SUBMIT_RANDOM_INPUTS, Session, StepName, find};
 use crate::discuss::{self, Turn};
 use crate::learning::now_ms;
 use crate::workspace::VersionedFile;
@@ -62,7 +62,8 @@ pub(super) struct OpenQuery {
     solve: bool,
 }
 
-/// Starts a problem, or carries on with it where it was left.
+/// Starts a problem, or carries on with it where it was left. A review is a twist, if there's
+/// a model to pose one, which the app then asks for.
 pub(super) async fn open(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
@@ -71,9 +72,12 @@ pub(super) async fn open(
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
     let attempts = app.learning.store().attempts(&found.key())?;
+    let no_twist = app.twist_target(None).err().map(|err| {
+        format!("There's no model to pose a twist ({err:#}), so recall how to solve it instead.")
+    });
     let session = app
         .problems
-        .start(&found, &attempts, query.solve, now_ms())?;
+        .start(&found, &attempts, query.solve, no_twist, now_ms())?;
     Ok(Json(app.problems.open(
         &app.config,
         &found,
@@ -401,6 +405,217 @@ pub(super) async fn bring_back(
     Ok(Json(finished(&app, &key)?))
 }
 
+/// The most of why posing a twist failed that's shown, as a model CLI can say a great deal.
+const WHY_CHARS: usize = 300;
+
+/// Poses the twist for a review, once: asked again, such as after a reload, it's the same one.
+/// If the tutor can't pose one, the review becomes a recall, saying why.
+pub(super) async fn twist(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+) -> ApiResult<Opened> {
+    let packs = packs(&app)?;
+    let found = found(&packs, &pack, &item)?;
+    let key = found.key();
+    let posing = app.posing_twist.lock().await;
+    let session = app
+        .problems
+        .session(&key)?
+        .ok_or_else(|| bad_request("Start the problem before asking for a twist on it."))?;
+    let posed = app.problems.twists(&key)?;
+    let session = if session.mode == Mode::Twist && posed.for_session(session.started_at).is_none()
+    {
+        match pose(&app, &found, &session, &posed).await {
+            Ok(twist) => {
+                app.problems.keep_twist(&key, twist)?;
+                session
+            }
+            Err(err) => {
+                tracing::warn!("posing a twist on {key}: {err:#}");
+                let why = format!("{err:#}");
+                let why = match why.char_indices().nth(WHY_CHARS) {
+                    Some((end, _)) => format!("{}…", &why[..end]),
+                    None => why,
+                };
+                let now = now_ms();
+                let (session, spent) = app.problems.save_session(
+                    &found,
+                    session.recall_instead(format!(
+                        "The tutor couldn't pose a twist ({why}), so recall how to solve it instead."
+                    )),
+                    now,
+                )?;
+                app.learning.store().record_time(&key, now, spent)?;
+                session
+            }
+        }
+    } else {
+        session
+    };
+    drop(posing);
+    let attempts = app.learning.store().attempts(&key)?;
+    Ok(Json(app.problems.open(
+        &app.config,
+        &found,
+        session,
+        &attempts,
+    )?))
+}
+
+async fn pose(
+    app: &Shared,
+    found: &Found<'_>,
+    session: &Session,
+    posed: &crate::twist::Posed,
+) -> anyhow::Result<crate::twist::Twist> {
+    let (runner, spec) =
+        app.twist_target(found.pack.prompt_add_ons.get("tutor").map(String::as_str))?;
+    let solution = app.problems.last_draft(found)?;
+    let kind = crate::twist::Kind::next(&posed.twists);
+    let (prompt, notes) = crate::twist::pose(
+        runner,
+        &spec,
+        &crate::twist::Asking {
+            problem: &found.item.prompt,
+            approach: &found.coding.approach,
+            solution: solution
+                .as_ref()
+                .map(|(language, code)| (language.name(), code.as_str())),
+            kind,
+            posed: &posed.twists,
+        },
+    )
+    .await?;
+    Ok(crate::twist::Twist {
+        session: session.started_at,
+        kind,
+        prompt,
+        notes,
+        posed_at: now_ms(),
+        answered: None,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct TwistAnswerBody {
+    /// Made by the app, for the attempt it records, so answering twice records one.
+    id: String,
+    text: String,
+    /// Whether it was explained aloud, so `text` is what was heard.
+    #[serde(default)]
+    spoken: bool,
+    /// Whether the answer is in the code too, which the grader is then shown.
+    #[serde(default)]
+    with_code: bool,
+}
+
+#[derive(Serialize)]
+pub(super) struct TwistMarked {
+    marked: crate::grader::Marked,
+    rubric: Vec<String>,
+    /// What a good answer covers, now it's been answered.
+    notes: String,
+    /// How the original problem is solved.
+    approach: String,
+    #[serde(flatten)]
+    finished: Finished,
+}
+
+/// Marks an answer to a review's twist with the grader. Its mark is the review's rating, which
+/// schedules the problem and feeds mastery, or retires it, if it was answered fully; what it
+/// finds goes in the mistake log; and the review is over.
+pub(super) async fn answer_twist(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+    Json(body): Json<TwistAnswerBody>,
+) -> ApiResult<TwistMarked> {
+    let packs = packs(&app)?;
+    let found = found(&packs, &pack, &item)?;
+    let key = found.key();
+    let reply = |twist: &crate::twist::Twist, marked: crate::grader::Marked| {
+        Ok::<_, ApiError>(Json(TwistMarked {
+            rubric: marked.points.iter().map(|p| p.point.clone()).collect(),
+            marked,
+            notes: twist.notes.clone(),
+            approach: found.coding.approach.clone(),
+            finished: finished(&app, &key)?,
+        }))
+    };
+    // Sent again, as after a lost reply, it's the answer already marked.
+    let posed = app.problems.twists(&key)?;
+    if let Some((twist, answered)) = posed.twists.iter().find_map(|twist| {
+        twist
+            .answered
+            .as_ref()
+            .filter(|a| a.attempt == body.id)
+            .map(|a| (twist, a))
+    }) {
+        return reply(twist, answered.marked.clone());
+    }
+    let session = app
+        .problems
+        .session(&key)?
+        .filter(|session| session.mode == Mode::Twist)
+        .ok_or_else(|| bad_request("There's no twist being answered on this problem."))?;
+    let twist = posed
+        .for_session(session.started_at)
+        .filter(|twist| twist.answered.is_none())
+        .cloned()
+        .ok_or_else(|| bad_request("The twist hasn't been posed yet."))?;
+    let code = if body.with_code {
+        Some(app.problems.draft(&found, session.language)?.text)
+    } else {
+        None
+    };
+    let answer = crate::grader::Answer {
+        spoken: body.spoken,
+        code: code.as_deref().map(|text| (session.language.name(), text)),
+        twist: Some((&twist.prompt, &twist.notes)),
+        ..crate::grader::Answer::written(&body.text)
+    };
+    let error_types = crate::mistakes::error_types(&packs);
+    let (runner, spec) =
+        app.grader_target(found.pack.prompt_add_ons.get("grader").map(String::as_str))?;
+    let marked = crate::grader::mark(
+        runner,
+        &spec,
+        found.item,
+        crate::grader::Work::Twist,
+        answer,
+        &error_types,
+    )
+    .await
+    .map_err(|err| bad_request(format!("{err:#}")))?;
+    let now = now_ms();
+    let spent = app.problems.touch(&key, now)?;
+    app.learning.record_problem(
+        Attempt {
+            id: body.id.clone(),
+            item: key.clone(),
+            answered_at: now,
+            duration_ms: spent,
+            rating: marked.twist_rating(),
+            // The answer is kept with its twist, so it isn't taken for a plan to recall.
+            response: None,
+            seed: None,
+        },
+        &marked.mistakes(&body.id, &key, now),
+        now,
+    )?;
+    let twist = crate::twist::Twist {
+        answered: Some(crate::twist::Answered {
+            attempt: body.id,
+            text: body.text,
+            marked: marked.clone(),
+        }),
+        ..twist
+    };
+    app.problems.keep_twist(&key, twist.clone())?;
+    app.problems.finish(&key)?;
+    reply(&twist, marked)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct TutorBody {
@@ -634,11 +849,13 @@ mod tests {
             .unwrap();
         assert_eq!(listed["status"], "done");
 
-        // Opened again, it's recalled, with the plan from last time.
+        // Opened again, it's reviewed with a twist, for the app to ask for, with the plan from
+        // last time.
         let opened =
             json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
-        assert_eq!(opened["session"]["mode"], "recall");
-        assert_eq!(opened["session"]["step"], "plan");
+        assert_eq!(opened["session"]["mode"], "twist");
+        assert_eq!(opened["session"]["step"], "twist");
+        assert_eq!(opened["twist"], serde_json::Value::Null);
         assert_eq!(opened["previous_plan"], "Remember the words I've seen");
         let solve = json(
             send(
@@ -730,6 +947,157 @@ mod tests {
         let refused = send(
             &router,
             request("POST", &format!("{item}/bring-back"), Some(other)),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    }
+
+    const TWIST: &str = r#"{"twist": "Now the words stream in, a billion of them.", "notes": "Keep a set as they arrive, and stop at the first repeat."}"#;
+    const TWIST_MARKED: &str = r#"{"score": 0.7, "points": [{"point": "Says what has to change", "met": "partly", "comment": "Memory?"}], "findings": [{"error_type": "missed-edge-case", "detail": "Says nothing of running out of memory"}], "feedback": "Think about memory."}"#;
+
+    /// A server with a stand-in tutor and grader, which pose and mark twists, or with `posing`
+    /// false, a tutor that can't pose them.
+    #[cfg(unix)]
+    fn twisting_app(dir: &std::path::Path, posing: bool) -> axum::Router {
+        std::fs::write(dir.join("twist.json"), TWIST).unwrap();
+        std::fs::write(dir.join("twist-marked.json"), TWIST_MARKED).unwrap();
+        let mut replies = vec![("<twist>", "twist-marked.json")];
+        if posing {
+            replies.push(("Pose a twist on it", "twist.json"));
+        }
+        let model = crate::server::testing::fake_discussion_model(dir, &replies);
+        crate::server::testing::test_app_in(dir, &model)
+    }
+
+    /// Solves a problem, rated good, then opens it again for its review.
+    async fn solve_then_review(router: &axum::Router, item: &str) -> serde_json::Value {
+        send(router, request("POST", &format!("{item}/open"), None)).await;
+        let finish =
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a71", "rating": "good" });
+        json(
+            send(
+                router,
+                request("POST", &format!("{item}/finish"), Some(finish)),
+            )
+            .await,
+        )
+        .await;
+        json(send(router, request("POST", &format!("{item}/open"), None)).await).await
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reviews_a_problem_with_a_twist_the_grader_marks() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = twisting_app(dir.path(), true);
+        let item = "/api/coding/items/sample/first-repeat";
+        let opened = solve_then_review(&router, item).await;
+        assert_eq!(opened["session"]["mode"], "twist");
+
+        let posed =
+            json(send(&router, request("POST", &format!("{item}/twist"), None)).await).await;
+        assert_eq!(posed["twist"]["kind"], "constraint");
+        assert_eq!(
+            posed["twist"]["prompt"],
+            "Now the words stream in, a billion of them."
+        );
+        // What a good answer covers isn't sent until it's answered.
+        assert!(!posed.to_string().contains("Keep a set as they arrive"));
+        // Asked again, or opened again, as after a reload, it's the same twist.
+        std::fs::write(dir.path().join("twist.json"), "not a twist").unwrap();
+        let again =
+            json(send(&router, request("POST", &format!("{item}/twist"), None)).await).await;
+        assert_eq!(again["twist"], posed["twist"]);
+        let reopened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(reopened["twist"], posed["twist"]);
+
+        let answer = serde_json::json!({
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a72",
+            "text": "Keep a set of the words seen, and stop at the first one already in it",
+        });
+        let marked = json(
+            send(
+                &router,
+                request(
+                    "POST",
+                    &format!("{item}/twist/answer"),
+                    Some(answer.clone()),
+                ),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(marked["marked"]["score"], 0.7);
+        assert!(marked["notes"].as_str().unwrap().contains("Keep a set"));
+        assert!(marked["approach"].as_str().unwrap().contains("set"));
+        // Its mark is the review's rating: hard, so it's due again, and not retired.
+        assert_eq!(marked["retired"], false);
+        assert!(marked["due"].as_i64().unwrap() > crate::learning::now_ms());
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        assert!(
+            log["mistakes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["detail"] == "Says nothing of running out of memory"),
+            "{log}"
+        );
+        // Sent again, as after a lost reply, it's the same answer, marked once.
+        let resent = json(
+            send(
+                &router,
+                request("POST", &format!("{item}/twist/answer"), Some(answer)),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(resent["marked"], marked["marked"]);
+        let overview =
+            json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await;
+        let listed = overview["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["key"] == "sample/first-repeat")
+            .unwrap();
+        assert_eq!(listed["status"], "done");
+
+        // The next review's twist is of another kind, told not to repeat this one.
+        std::fs::write(dir.path().join("twist.json"), TWIST).unwrap();
+        json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        let next = json(send(&router, request("POST", &format!("{item}/twist"), None)).await).await;
+        assert_eq!(next["twist"]["kind"], "scale");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn recalls_the_approach_instead_when_the_tutor_cant_pose_a_twist() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = twisting_app(dir.path(), false);
+        let item = "/api/coding/items/sample/first-repeat";
+        solve_then_review(&router, item).await;
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/twist"), None)).await).await;
+        assert_eq!(opened["session"]["mode"], "recall");
+        assert_eq!(opened["session"]["step"], "plan");
+        assert_eq!(opened["twist"], serde_json::Value::Null);
+        let why = opened["session"]["no_twist"].as_str().unwrap();
+        assert!(
+            why.starts_with("The tutor couldn't pose a twist ("),
+            "{why}"
+        );
+        assert!(why.ends_with("so recall how to solve it instead."), "{why}");
+        // It stays a recall, rather than asking again.
+        let reopened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(reopened["session"]["mode"], "recall");
+        // And there's no twist to answer.
+        let answer =
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a73", "text": "x" });
+        let refused = send(
+            &router,
+            request("POST", &format!("{item}/twist/answer"), Some(answer)),
         )
         .await;
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);

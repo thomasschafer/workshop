@@ -310,11 +310,106 @@ test("submits, shows a small input it fails on, then passes and is reviewed", as
   await expect.poll(() => overviewStatus("sample/first-repeat")).toBe("done");
 });
 
-test("comes back as a quick recall, comparing the plan with the approach", async () => {
+/** Solves a problem as far as the server's concerned, rated good, so it comes back for review. */
+async function solvedBefore(key: string): Promise<void> {
+  const item = `/api/coding/items/${key}`;
+  expect((await phone.request.post(`${item}/open`)).ok()).toBe(true);
+  const finished = await phone.request.post(`${item}/finish`, {
+    data: { id: crypto.randomUUID(), rating: "good" },
+  });
+  expect(finished.ok()).toBe(true);
+}
+
+test("comes back as a twist on it, posed once, answered and marked", async () => {
   await phone.goto("/coding/sample/first-repeat");
+  await expect(phone.locator(".step")).toHaveText(["Twist"]);
+  const twist = phone.getByRole("region", { name: "Twist" });
+  await expect(twist).toContainText("A new constraint");
+  await expect(twist).toContainText("Twist 1, a new constraint: now the input streams in");
+  // Kept for the review, so a reload shows the same one, with the answer as far as it got.
+  const answer = phone.getByLabel("How would you change your approach, and what would it cost?");
+  await answer.fill("Keep the set, and stop at the first repeat");
+  await expect
+    .poll(() =>
+      phone.evaluate(() =>
+        localStorage.getItem("workshop:unsaved:coding-session:sample/first-repeat"),
+      ),
+    )
+    .toBeNull();
+  await phone.reload();
+  await expect(twist).toContainText("Twist 1, a new constraint");
+  await expect(answer).toHaveValue("Keep the set, and stop at the first repeat");
+
+  // The code can be changed too, and goes to the grader with the answer.
+  await phone.getByRole("button", { name: "Change your code too" }).tap();
+  await expect(
+    phone.getByRole("region", { name: "Your code" }).locator(".cm-content"),
+  ).toContainText("seen.add(word)");
+  await phone.getByRole("button", { name: "Mark my answer" }).tap();
+
+  // The grader's mark is the review's rating: partly right, so it comes back.
+  await expect(phone.getByRole("region", { name: "Done" })).toContainText("comes back in about", {
+    timeout: 15_000,
+  });
+  await expect(phone.getByRole("region", { name: "Marked" })).toContainText("70%");
+  await expect(phone.getByRole("region", { name: "A good answer" })).toContainText("as it arrives");
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { item: string; detail: string }[];
+  };
+  expect(
+    log.mistakes.some(
+      (m) => m.item === "sample/first-repeat" && m.detail.includes("Unclear on memory"),
+    ),
+  ).toBe(true);
+  await expect.poll(() => overviewStatus("sample/first-repeat")).toBe("done");
+});
+
+test("retires a problem whose twist is answered in full, and brings it back from the list", async () => {
+  await phone.goto("/coding/sample/first-repeat");
+  // The next review's twist is another kind.
+  const twist = phone.getByRole("region", { name: "Twist" });
+  await expect(twist).toContainText("Twist 2, a far larger scale");
+  await phone.getByRole("button", { name: "Explain your answer aloud, to be marked" }).tap();
+  const explain = phone.getByRole("region", { name: "Explain it aloud" });
+  await holdToTalk(
+    phone,
+    explain.getByRole("button", { name: "Hold to explain" }),
+    "I keep what's been seen as it arrives and stop at the first repeat",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("first repeat"),
+  );
+  await explain.getByRole("button", { name: "Mark my explanation" }).tap();
+  await expect(phone.getByRole("region", { name: "Done" })).toContainText("Retired", {
+    timeout: 15_000,
+  });
+  await expect(phone.getByRole("region", { name: "Marked" })).toContainText("100%");
+  await expect(phone.getByRole("region", { name: "Clarity" })).toContainText("80%");
+
+  await phone.getByRole("button", { name: "More coding" }).tap();
+  const retired = phone.getByRole("region", { name: "Retired" });
+  await expect(retired).toContainText("The first word to repeat");
+  await expect(phone.locator(".coding-item", { hasText: "The first word to repeat" })).toHaveCount(
+    0,
+  );
+  await retired.getByRole("button", { name: "Bring back" }).tap();
+  await expect(retired).toHaveCount(0);
+  await expect(
+    phone.locator(".coding-item", { hasText: "The first word to repeat" }),
+  ).toContainText("Problem · Due");
+});
+
+test("recalls the approach instead when no twist can be posed, and retires it rated easy", async () => {
+  await solvedBefore("sample/rising-run");
+  await phone.goto("/coding/sample/rising-run");
   await expect(phone.locator(".step")).toHaveText(["Plan", "Review"]);
+  // It says why it's a recall.
+  await expect(phone.locator(".banner", { hasText: "pose a twist" })).toContainText(
+    "The tutor couldn't pose a twist (",
+  );
+  await expect(phone.locator(".banner", { hasText: "pose a twist" })).toContainText(
+    "so recall how to solve it instead.",
+  );
   const plan = phone.getByLabel("From memory: how would you solve it?");
-  await plan.fill("A set, stopping at the first word already in it");
+  await plan.fill("Walk once, keeping the length of the rise so far");
   // The grader checks it first, if asked.
   await phone.getByRole("button", { name: "Check my plan" }).tap();
   await expect(phone.getByRole("region", { name: "Marked" })).toContainText("50%");
@@ -325,20 +420,62 @@ test("comes back as a quick recall, comparing the plan with the approach", async
   await holdToTalk(
     phone,
     explain.getByRole("button", { name: "Hold to explain" }),
-    "I keep a set and stop at the first repeat",
-    () => expect(explain.locator(".dictate-hearing")).toContainText("repeat"),
+    "I walk once and reset the run when it falls",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("falls"),
   );
   await explain.getByRole("button", { name: "Mark my explanation" }).tap();
   await expect(phone.getByRole("region", { name: "Clarity" })).toContainText("75%");
   await phone.getByRole("button", { name: "Compare with the approach" }).tap();
   await expect(phone.locator(".step.current")).toHaveText("Review");
   await expect(phone.getByRole("region", { name: "Your plan" })).toContainText(
-    "Keep a set of the words seen so far.",
+    "keeping the length of the rise",
   );
-  await expect(phone.getByRole("region", { name: "Approach" })).toContainText("set");
+  await expect(phone.getByRole("region", { name: "Approach" })).toContainText("Walk the readings");
   await expect(phone.locator(".rating.suggested")).toHaveCount(0);
+  await expect(phone.getByText("Easy retires it")).toBeVisible();
   await phone.getByRole("button", { name: "Easy" }).tap();
-  await expect(phone.getByRole("region", { name: "Done" })).toBeVisible();
+  await expect(phone.getByRole("region", { name: "Done" })).toContainText("Retired");
+  await expect.poll(() => overviewStatus("sample/rising-run")).toBe("retired");
+  await phone.getByRole("button", { name: "More coding" }).tap();
+  await expect(phone.getByRole("region", { name: "Retired" })).toContainText("Longest rising run");
+});
+
+test("recalls the approach instead when the server can't be reached for a twist", async ({
+  browser,
+}) => {
+  await solvedBefore("sample/stair-ways");
+  // A phone of its own, without the service worker, which in WebKit would keep the request
+  // from being cut off below.
+  const own = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${CODING_PORT}`,
+    serviceWorkers: "block",
+  });
+  const page = await own.newPage();
+  await page.goto(`/?token=${token()}`);
+  // The connection drops just as the twist is asked for.
+  await page.route("**/api/coding/items/sample/stair-ways/twist", (route) =>
+    route.abort("internetdisconnected"),
+  );
+  await page.goto("/coding/sample/stair-ways");
+  await expect(page.locator(".step")).toHaveText(["Plan", "Review"]);
+  await expect(page.locator(".banner", { hasText: "pose a twist" })).toContainText(
+    "The server can't be reached to pose a twist, so recall how to solve it instead.",
+  );
+  await page.unroute("**/api/coding/items/sample/stair-ways/twist");
+  await expect(page.getByLabel("From memory: how would you solve it?")).toBeVisible();
+  // Saved as a recall, once the server's heard of it.
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get("/api/coding?utc_offset=0");
+        const { items } = (await response.json()) as { items: { key: string; mode: string }[] };
+        return items.find((item) => item.key === "sample/stair-ways")?.mode;
+      },
+      { timeout: 15_000 },
+    )
+    .toBe("recall");
+  await own.close();
 });
 
 test("says clearly that problems need the server, while code to read works offline", async () => {

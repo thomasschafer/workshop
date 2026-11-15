@@ -59,7 +59,8 @@ name = "Unit slip"
 description = "Mixed up units, such as seconds and milliseconds"
 
 # Text added to a coach role's instructions, to shape its style for this pack. The tutor gives
-# hints on coding problems and asks the follow-up questions in design sessions; the examiner
+# hints on coding problems, poses the twists their reviews are, and asks the follow-up questions
+# in design sessions; the examiner
 # runs timed rounds; the grader marks written and spoken work and checks cards; the author
 # writes new items (see docs/author.md).
 [prompts]
@@ -235,7 +236,9 @@ Sections: `## Approach` (required), how it's meant to be solved, shown once it's
 
 `workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. It needs Python and Rust installed; an item that can't be run for want of one is reported as skipped rather than failed. Everything is built and run in a sandbox, with no network and writing only to a directory of its own, where the system has one ([docs/author.md](author.md#running-what-the-writer-wrote) says which); where it doesn't, the check warns that it's running the pack's programs with all your access.
 
-A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed, dictated or explained aloud; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution, where they can explain their solution aloud for the grader to mark against the approach. When it comes back for review, it's usually to recall the approach: writing down how to solve it, then comparing that with the item's approach, which takes a few minutes rather than solving it again. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
+A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed, dictated or explained aloud; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution, where they can explain their solution aloud for the grader to mark against the approach. When it comes back for review, it's a twist on it, which takes a few minutes rather than solving it again: the tutor poses a follow-up, given the problem, its approach and the learner's solution from last time, such as a new constraint, a far larger scale, a streaming version, a better complexity target or different edge cases, a different sort each time. The learner answers by explaining how they'd change their approach, typed, dictated or aloud, and can change their code too; the grader marks the answer, and its mark is the review's rating, which schedules the problem and feeds mastery, and what it finds goes in the mistake log. Each review's twist is kept once it's posed, so opening it again shows the same one. When there's no model to pose one, or the server or the model can't be reached, the review says so and recalls the approach instead: writing down how to solve it, then comparing that with the item's approach. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
+
+Rating a problem easy retires it, as does answering its twist in full with nothing wrong: it's never offered again, for review or as new, and counts towards its skills as known for good. Retired problems are listed at the end of the Coding track, where any can be brought back, due straight away. Only coding problems retire: cards, mental maths, probability questions and code to read are short, and are what spaced review helps most, so rating one easy only sends it further off.
 
 ### Reading
 

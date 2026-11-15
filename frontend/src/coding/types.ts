@@ -2,13 +2,21 @@
 // running code in crates/coding.
 
 import type { VersionedFile } from "../api";
+import type { MarkedReply } from "../grading/types";
 
 export type Language = "python" | "rust" | "cpp";
 
-export type StepName = "understand" | "plan" | "code" | "test" | "review";
+export type StepName = "understand" | "plan" | "code" | "test" | "review" | "twist";
 
-/** A solve goes through every step; a recall writes down the approach, then reviews it. */
-export type Mode = "solve" | "recall";
+/**
+ * A solve goes through every step; a twist, a review of a problem solved before, answers a
+ * follow-up on it; and a recall, a review with no twist, writes down the approach, then
+ * compares it with the problem's.
+ */
+export type Mode = "solve" | "recall" | "twist";
+
+/** The sort of change a twist makes to the problem. */
+export type TwistKind = "constraint" | "scale" | "streaming" | "complexity" | "edge_case";
 
 export interface Session {
   mode: Mode;
@@ -20,6 +28,8 @@ export interface Session {
   runs: number;
   submissions: number;
   hints: number;
+  /** Why a review that would have been a twist is a recall instead. */
+  no_twist: string | null;
   started_at: number;
   updated_at: number;
 }
@@ -54,6 +64,8 @@ export interface Opened {
     notes: string | null;
     reference: { language: Language; text: string }[];
   } | null;
+  /** For a twist, the twist, once it's been posed. */
+  twist: { kind: TwistKind; prompt: string } | null;
 }
 
 export type Ending =
@@ -96,6 +108,14 @@ export interface Submitted {
 }
 
 export type Status = "in_progress" | "due" | "new" | "done" | "flagged" | "retired";
+
+/** How the grader marked an answer to a twist, which finished the review. */
+export interface TwistMarked extends MarkedReply, Finished {
+  /** What a good answer covers. */
+  notes: string;
+  /** How the original problem is solved. */
+  approach: string;
+}
 
 /** How a problem stands once it's finished, or brought back. */
 export interface Finished {

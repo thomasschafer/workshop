@@ -6,10 +6,12 @@
 //! meant to be solved and saying how it went. Each step is saved as it's done, and the code as
 //! it's typed, so the learner can stop at any moment and carry on from there, on any device.
 //!
-//! When a problem comes back for review it's usually to recall the approach, which takes a few
-//! minutes rather than solving it again: writing down how to solve it, then comparing that with
-//! the item's approach. A problem the learner couldn't solve last time is solved again instead,
-//! and they can always choose to.
+//! When a problem comes back for review, it's a twist on it, which takes a few minutes rather
+//! than solving it again: a follow-up the tutor poses, which the learner answers and the grader
+//! marks (see the twist module). With no model to pose one, or if posing one fails, it's a
+//! recall instead: writing down how to solve it, then comparing that with the item's approach.
+//! A problem the learner couldn't solve last time is solved again instead, and they can always
+//! choose to.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -63,6 +65,8 @@ pub enum StepName {
     Code,
     Test,
     Review,
+    /// Answering a twist on it, posed for its review.
+    Twist,
 }
 
 impl StepName {
@@ -73,6 +77,7 @@ impl StepName {
             Self::Code => "coding",
             Self::Test => "testing",
             Self::Review => "reviewing",
+            Self::Twist => "answering a twist on it",
         }
     }
 }
@@ -85,6 +90,8 @@ pub enum Mode {
     Solve,
     /// Writing down how to solve it, from memory, then comparing that with its approach.
     Recall,
+    /// Answering a twist on it, which the grader marks.
+    Twist,
 }
 
 impl Mode {
@@ -98,6 +105,15 @@ impl Mode {
                 StepName::Review,
             ],
             Self::Recall => &[StepName::Plan, StepName::Review],
+            Self::Twist => &[StepName::Twist],
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Self::Solve => "solving",
+            Self::Recall => "recalling",
+            Self::Twist => "answering a twist on",
         }
     }
 }
@@ -113,7 +129,7 @@ pub struct Session {
     /// What they worked out the first example prints, while understanding it.
     #[serde(default)]
     pub prediction: Option<String>,
-    /// How they mean to solve it, typed or dictated.
+    /// How they mean to solve it, typed or dictated, or for a twist, their answer to it.
     #[serde(default)]
     pub plan: String,
     /// Whether their code has passed every test.
@@ -126,17 +142,49 @@ pub struct Session {
     /// How many hints they've asked for, from the pack or the tutor.
     #[serde(default)]
     pub hints: u32,
+    /// Why a review that would have been a twist is a recall instead, such as there being no
+    /// model to pose one.
+    #[serde(default)]
+    pub no_twist: Option<String>,
     /// When it was started, and last saved, in milliseconds since 1970.
     pub started_at: i64,
     pub updated_at: i64,
 }
 
 impl Session {
+    fn new(mode: Mode, language: Language, now: i64) -> Self {
+        Self {
+            mode,
+            step: mode.steps()[0],
+            language,
+            prediction: None,
+            plan: String::new(),
+            passed: false,
+            runs: 0,
+            submissions: 0,
+            hints: 0,
+            no_twist: None,
+            started_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// The same review as a recall instead of a twist, saying why.
+    pub fn recall_instead(self, why: String) -> Self {
+        Self {
+            mode: Mode::Recall,
+            step: Mode::Recall.steps()[0],
+            no_twist: Some(why),
+            ..self
+        }
+    }
+
     fn check(&self, coding: &Coding) -> Result<(), String> {
         if !self.mode.steps().contains(&self.step) {
             return Err(format!(
-                "{} isn't a step when recalling a problem",
-                self.step.describe()
+                "{} isn't a step when {} a problem",
+                self.step.describe(),
+                self.mode.describe()
             ));
         }
         if !coding.languages.contains(&self.language) {
@@ -203,6 +251,16 @@ pub struct Opened {
     /// How they planned to solve it last time, for comparing with when recalling it.
     pub previous_plan: Option<String>,
     pub solution: Option<Solution>,
+    /// For a twist, the twist, once it's been posed.
+    pub twist: Option<OpenedTwist>,
+}
+
+/// A twist as the learner sees it before answering: without what a good answer covers.
+#[derive(Debug, Serialize)]
+pub struct OpenedTwist {
+    pub kind: crate::twist::Kind,
+    /// In Markdown.
+    pub prompt: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -241,6 +299,8 @@ pub struct Reference {
 pub struct Problems {
     dir: PathBuf,
     saved: workshop_sessions::Saved<Session>,
+    /// Every twist posed for each problem.
+    twists: workshop_sessions::Saved<crate::twist::Posed>,
     /// Held while saving a draft, so two saves from the same version can't both succeed.
     save_lock: std::sync::Mutex<()>,
 }
@@ -278,6 +338,7 @@ impl Problems {
         let dir = data_dir.join("coding");
         Self {
             saved: workshop_sessions::Saved::new(dir.join("sessions")),
+            twists: workshop_sessions::Saved::new(dir.join("twists")),
             dir,
             save_lock: std::sync::Mutex::new(()),
         }
@@ -364,40 +425,82 @@ impl Problems {
     }
 
     /// Starts a problem, or carries on with it: a solve the first time, or if it went badly
-    /// last time, and otherwise a recall, unless the learner asks for a solve.
+    /// last time, and otherwise a twist on it, unless the learner asks for a solve. `no_twist`
+    /// says why there can't be a twist, if there can't, which makes it a recall instead.
     pub fn start(
         &self,
         found: &Found<'_>,
         attempts: &[Attempt],
         solve: bool,
+        no_twist: Option<String>,
         now: i64,
     ) -> Result<Session> {
         let key = found.key();
         if let Some(session) = self.session(&key)?
-            && !(solve && session.mode == Mode::Recall)
+            && !(solve && session.mode != Mode::Solve)
         {
             return Ok(session);
         }
-        let recall = !solve
+        let review = !solve
             && attempts
                 .last()
                 .is_some_and(|last| last.rating != Rating::Again);
-        let mode = if recall { Mode::Recall } else { Mode::Solve };
-        let session = Session {
-            mode,
-            step: mode.steps()[0],
-            language: found.coding.languages[0],
-            prediction: None,
-            plan: String::new(),
-            passed: false,
-            runs: 0,
-            submissions: 0,
-            hints: 0,
-            started_at: now,
-            updated_at: now,
+        let session = if !review {
+            Session::new(Mode::Solve, found.coding.languages[0], now)
+        } else {
+            // In the language they last wrote it in, as the twist is on their solution.
+            let language = self
+                .last_draft(found)?
+                .map_or(found.coding.languages[0], |(language, _)| language);
+            let twist = Session::new(Mode::Twist, language, now);
+            match no_twist {
+                Some(why) => twist.recall_instead(why),
+                None => twist,
+            }
         };
         self.write_session(&key, &session)?;
         Ok(session)
+    }
+
+    /// The draft written in most recently, in any of the problem's languages, and its text.
+    pub fn last_draft(&self, found: &Found<'_>) -> Result<Option<(Language, String)>> {
+        let mut latest: Option<(std::time::SystemTime, Language, PathBuf)> = None;
+        for &language in &found.coding.languages {
+            let path = self.draft_path(&found.key(), language);
+            let modified = match std::fs::metadata(&path) {
+                Ok(metadata) => metadata.modified()?,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => {
+                    return Err(err).with_context(|| format!("reading {}", path.display()));
+                }
+            };
+            if latest.as_ref().is_none_or(|(at, ..)| modified > *at) {
+                latest = Some((modified, language, path));
+            }
+        }
+        latest
+            .map(|(_, language, path)| {
+                let text = std::fs::read_to_string(&path)
+                    .with_context(|| format!("reading {}", path.display()))?;
+                Ok((language, text))
+            })
+            .transpose()
+    }
+
+    /// Every twist posed for a problem.
+    pub fn twists(&self, key: &str) -> Result<crate::twist::Posed> {
+        Ok(self.twists.get(key)?.unwrap_or_default())
+    }
+
+    /// Keeps a twist posed for a problem, or replaces the one for the same review, such as once
+    /// it's answered.
+    pub fn keep_twist(&self, key: &str, twist: crate::twist::Twist) -> Result<()> {
+        let mut posed = self.twists(key)?;
+        match posed.twists.iter_mut().find(|t| t.session == twist.session) {
+            Some(same) => *same = twist,
+            None => posed.twists.push(twist),
+        }
+        self.twists.put(key, &posed)
     }
 
     /// Ends a problem's session, once its attempt is recorded.
@@ -488,6 +591,16 @@ impl Problems {
                 })
                 .collect(),
         });
+        let twist = match session.mode {
+            Mode::Twist => self
+                .twists(&found.key())?
+                .for_session(session.started_at)
+                .map(|twist| OpenedTwist {
+                    kind: twist.kind,
+                    prompt: twist.prompt.clone(),
+                }),
+            _ => None,
+        };
         Ok(Opened {
             key: found.key(),
             label: item.label(),
@@ -504,6 +617,7 @@ impl Problems {
                 .rev()
                 .find_map(|attempt| attempt.response.clone()),
             solution,
+            twist,
         })
     }
 }
@@ -614,7 +728,7 @@ pub fn track(
             .get(key)
             .is_some_and(|item| item.kind == Kind::Coding);
         let why = if recall {
-            "Due for review: recall how to solve it"
+            "Due for review: a quick follow-up on it"
         } else {
             "Due today"
         };
@@ -731,7 +845,7 @@ mod tests {
         let packs = vec![Pack::sample()];
         let found = find(&packs, "sample", "pair-sums").unwrap();
         let problems = Problems::new(dir.path());
-        let mut session = problems.start(&found, &[], false, NOW).unwrap();
+        let mut session = problems.start(&found, &[], false, None, NOW).unwrap();
         assert_eq!(
             (session.mode, session.step),
             (Mode::Solve, StepName::Understand)
@@ -752,7 +866,10 @@ mod tests {
         );
         let saved = problems.session(&found.key()).unwrap().unwrap();
         // Starting again carries on where it was left.
-        assert_eq!(problems.start(&found, &[], false, NOW + 9).unwrap(), saved);
+        assert_eq!(
+            problems.start(&found, &[], false, None, NOW + 9).unwrap(),
+            saved
+        );
         assert_eq!(problems.sessions().unwrap().len(), 1);
 
         let recall = Session {
@@ -790,24 +907,64 @@ mod tests {
     }
 
     #[test]
-    fn recalls_a_problem_solved_before_unless_it_went_badly() {
+    fn reviews_a_problem_solved_before_with_a_twist_unless_it_went_badly() {
         let dir = tempfile::tempdir().unwrap();
         let packs = vec![Pack::sample()];
         let found = find(&packs, "sample", "pair-sums").unwrap();
         let problems = Problems::new(dir.path());
         let solved = [attempt("1", NOW, Rating::Good, "A map of counts")];
-        let session = problems.start(&found, &solved, false, NOW).unwrap();
-        assert_eq!((session.mode, session.step), (Mode::Recall, StepName::Plan));
+        // Last written in Rust, the twist is on that.
+        let draft = problems.draft(&found, Language::Rust).unwrap();
+        let session = problems.start(&found, &solved, false, None, NOW).unwrap();
+        assert_eq!((session.mode, session.step), (Mode::Twist, StepName::Twist));
+        assert_eq!(session.language, Language::Rust);
+        assert_eq!(
+            problems.last_draft(&found).unwrap(),
+            Some((Language::Rust, draft.text))
+        );
+        let config = Config::parse("").unwrap();
+        let opened = problems
+            .open(&config, &found, session.clone(), &solved)
+            .unwrap();
+        assert!(opened.twist.is_none());
+        // The twist posed for this review, and not another's, is the one it shows.
+        let twist = |session: i64, prompt: &str| crate::twist::Twist {
+            session,
+            kind: crate::twist::Kind::Scale,
+            prompt: prompt.to_owned(),
+            notes: "Notes".to_owned(),
+            posed_at: NOW,
+            answered: None,
+        };
+        problems
+            .keep_twist(&found.key(), twist(NOW - 1, "An older one"))
+            .unwrap();
+        problems
+            .keep_twist(&found.key(), twist(session.started_at, "A billion pairs?"))
+            .unwrap();
+        let opened = problems
+            .open(&config, &found, session.clone(), &solved)
+            .unwrap();
+        assert_eq!(opened.twist.unwrap().prompt, "A billion pairs?");
+        assert_eq!(problems.twists(&found.key()).unwrap().twists.len(), 2);
         // Choosing to solve it starts it over as a solve.
-        let session = problems.start(&found, &solved, true, NOW).unwrap();
+        let session = problems.start(&found, &solved, true, None, NOW).unwrap();
         assert_eq!(session.mode, Mode::Solve);
+        problems.finish(&found.key()).unwrap();
+
+        // With no model to pose a twist, it's a recall, saying why.
+        let session = problems
+            .start(&found, &solved, false, Some("No model".to_owned()), NOW)
+            .unwrap();
+        assert_eq!((session.mode, session.step), (Mode::Recall, StepName::Plan));
+        assert_eq!(session.no_twist.as_deref(), Some("No model"));
         problems.finish(&found.key()).unwrap();
 
         let failed = [
             attempt("1", NOW, Rating::Good, "A map of counts"),
             attempt("2", NOW + 1, Rating::Again, ""),
         ];
-        let session = problems.start(&found, &failed, false, NOW).unwrap();
+        let session = problems.start(&found, &failed, false, None, NOW).unwrap();
         assert_eq!(session.mode, Mode::Solve);
         let config = Config::parse("").unwrap();
         let opened = problems.open(&config, &found, session, &failed).unwrap();
@@ -833,7 +990,7 @@ mod tests {
         let packs = vec![Pack::sample()];
         let found = find(&packs, "sample", "islands").unwrap();
         let problems = Problems::new(dir.path());
-        let mut session = problems.start(&found, &[], false, NOW).unwrap();
+        let mut session = problems.start(&found, &[], false, None, NOW).unwrap();
         session.step = StepName::Review;
         let config = Config::parse("").unwrap();
         let opened = problems.open(&config, &found, session, &[]).unwrap();
@@ -867,7 +1024,7 @@ mod tests {
         let packs = vec![Pack::sample()];
         let found = find(&packs, "sample", "islands").unwrap();
         let problems = Problems::new(dir.path());
-        let mut session = problems.start(&found, &[], false, NOW).unwrap();
+        let mut session = problems.start(&found, &[], false, None, NOW).unwrap();
         session.step = StepName::Code;
         problems.save_session(&found, session, NOW).unwrap();
         let sessions = problems.sessions().unwrap();

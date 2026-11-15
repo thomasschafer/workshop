@@ -34,6 +34,16 @@
   opacity: 0.55;
 }
 
+.coding-twist-code {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.coding-twist-code .code-pane {
+  height: 50dvh;
+}
+
 .coding-retired {
   margin-top: 20px;
 }

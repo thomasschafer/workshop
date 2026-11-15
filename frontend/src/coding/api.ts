@@ -1,7 +1,16 @@
 import { request, streamLines, type Turn, type VersionedFile } from "../api";
 import { utcOffset } from "../learning/local";
 import type { Rating } from "../learning/types";
-import type { Finished, Graded, Language, Opened, Overview, Session, Submitted } from "./types";
+import type {
+  Finished,
+  Graded,
+  Language,
+  Opened,
+  Overview,
+  Session,
+  Submitted,
+  TwistMarked,
+} from "./types";
 
 const item = (key: string) => {
   const [pack, id] = key.split("/");
@@ -26,6 +35,18 @@ export const codingApi = {
   submit: (key: string) => request<Submitted>("POST", `${item(key)}/submit`),
   finish: (key: string, id: string, rating: Rating) =>
     request<Finished>("POST", `${item(key)}/finish`, { id, rating }),
+  /** Has the tutor pose the review's twist, or gives the one posed; the review is a recall
+   * instead if it can't. */
+  twist: (key: string) => request<Opened>("POST", `${item(key)}/twist`),
+  /** Has the grader mark an answer to the twist, which finishes the review; `id` is the
+   * attempt's. With `withCode`, the code is part of the answer. */
+  answerTwist: (key: string, id: string, text: string, spoken: boolean, withCode: boolean) =>
+    request<TwistMarked>("POST", `${item(key)}/twist/answer`, {
+      id,
+      text,
+      spoken,
+      with_code: withCode,
+    }),
   /** Brings a retired problem back, due straight away; `id` is the change's. */
   bringBack: (key: string, id: string) =>
     request<Finished>("POST", `${item(key)}/bring-back`, { id }),

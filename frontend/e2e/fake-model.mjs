@@ -53,6 +53,45 @@ if (prompt.includes("Reply to their last message as the examiner.")) {
   process.exit(0);
 }
 
+// The tutor, posing a twist on a problem for its review, as the kind it's asked for. For the
+// problem of sensor readings it can't, as when no model can be reached.
+if (prompt.includes("Pose a twist on it")) {
+  if (prompt.includes("A sensor logs a list of readings")) {
+    process.stderr.write("The fake tutor can't be reached.\n");
+    process.exit(1);
+  }
+  const kind = prompt.match(/This time, make it ([^,.]+)/)?.[1] ?? "a twist";
+  const before = (prompt.match(/^- .*$/gm) ?? []).length;
+  await reply([
+    JSON.stringify({
+      twist: `Twist ${before + 1}, ${kind}: now the input **streams in**, one word at a time.`,
+      notes: "Keep what's been seen as it arrives, and answer as soon as a word repeats.",
+    }),
+  ]);
+  process.exit(0);
+}
+
+// The grader, marking an answer to a twist: in full, with nothing wrong, if it keeps what's
+// been seen as it arrives, and otherwise partly.
+if (prompt.includes("<twist>")) {
+  const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";
+  const full = work.includes("as it arrives");
+  await reply([
+    JSON.stringify({
+      score: full ? 1 : 0.7,
+      points: [{ point: "Says what has to change", met: full ? "yes" : "partly", comment: "" }],
+      findings: full
+        ? []
+        : [{ error_type: "missed-edge-case", detail: `Unclear on memory in "${work}"` }],
+      feedback: full ? "That's it." : "Say how much it **remembers**.",
+      ...(prompt.includes("explained this aloud")
+        ? { clarity: { score: 0.8, feedback: "Clear." } }
+        : {}),
+    }),
+  ]);
+  process.exit(0);
+}
+
 // The grader, marking written work or checking a card.
 if (prompt.includes("<work>")) {
   const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";

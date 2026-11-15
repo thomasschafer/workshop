@@ -20,9 +20,12 @@ export function ExplainAloud({
   question,
   serverDictation,
   onMarked,
+  mark: markWith,
 }: {
   itemKey: string;
   work: Work;
+  /** Marks what was heard some other way than as `work`, such as an answer to a twist. */
+  mark?: (heard: string) => Promise<MarkedReply>;
   /** What to explain, such as "How would you solve it?". */
   question: string;
   serverDictation: boolean;
@@ -39,8 +42,7 @@ export function ExplainAloud({
   const mark = () => {
     setMarking(true);
     setError(null);
-    gradingApi
-      .mark(itemKey, newId(), work, heard, true)
+    (markWith ? markWith(heard) : gradingApi.mark(itemKey, newId(), work, heard, true))
       .then(
         (reply) => {
           setMarked(reply);

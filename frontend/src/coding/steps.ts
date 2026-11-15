@@ -1,9 +1,10 @@
 import type { Rating } from "../learning/types";
-import type { CaseRef, Mode, Run, Session, StepName } from "./types";
+import type { CaseRef, Mode, Run, Session, StepName, TwistKind } from "./types";
 
 const STEPS: Record<Mode, StepName[]> = {
   solve: ["understand", "plan", "code", "test", "review"],
   recall: ["plan", "review"],
+  twist: ["twist"],
 };
 
 export function stepsFor(mode: Mode): StepName[] {
@@ -16,6 +17,15 @@ export const STEP_LABELS: Record<StepName, string> = {
   code: "Code",
   test: "Test",
   review: "Review",
+  twist: "Twist",
+};
+
+export const TWIST_KINDS: Record<TwistKind, string> = {
+  constraint: "A new constraint",
+  scale: "At a larger scale",
+  streaming: "Streaming",
+  complexity: "A better complexity",
+  edge_case: "Different edge cases",
 };
 
 /** The step after this one, or null at the end. */
@@ -33,10 +43,10 @@ export function reached(mode: Mode, current: StepName, step: StepName): boolean 
 /**
  * How it seems to have gone, which the learner can change: a solve passed first time without
  * hints was good, one that took more was hard, and one given up on was forgotten. A recall is
- * the learner's to judge, against the approach.
+ * the learner's to judge, against the approach, and a twist is the grader's.
  */
 export function suggestedRating(session: Session): Rating | null {
-  if (session.mode === "recall") return null;
+  if (session.mode !== "solve") return null;
   if (!session.passed) return "again";
   return session.submissions <= 1 && session.hints === 0 ? "good" : "hard";
 }

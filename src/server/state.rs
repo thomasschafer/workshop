@@ -70,6 +70,8 @@ pub struct App {
     /// Each coding problem's brute force and inputs program, built, with the random cases made
     /// with them so far, by item and what's in them.
     pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
+    /// Held while the tutor poses a twist, so a review asked for twice gets only the one.
+    pub(super) posing_twist: tokio::sync::Mutex<()>,
 }
 
 pub(super) type Shared = Arc<App>;
@@ -137,6 +139,7 @@ impl App {
             author: crate::author::Desk::new(&paths.data_dir),
             author_running: std::sync::atomic::AtomicBool::new(false),
             oracles: tokio::sync::Mutex::default(),
+            posing_twist: tokio::sync::Mutex::default(),
             config,
             paths,
             gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),
@@ -221,6 +224,13 @@ impl App {
             .with_context(|| format!("{provider} has no discussion models to coach with"))?;
         let spec = self.config.providers[&provider].spec(Role::Discuss, &model, system);
         Ok((&self.runners[&provider], spec))
+    }
+
+    /// The runner and call for the tutor posing a twist on a problem: the discussion
+    /// provider's first model, with the tutor's instructions and the pack's add-on to them.
+    /// Fails if there's no model to pose one with.
+    pub(super) fn twist_target(&self, add_on: Option<&str>) -> Result<(&ProviderRunner, CallSpec)> {
+        self.coach_target(crate::discuss::tutor_system_prompt(add_on))
     }
 
     pub(super) async fn warm_edit_model(&self) {

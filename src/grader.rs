@@ -43,6 +43,9 @@ pub enum Work {
     /// A timed round with the examiner, on a coding problem, a probability question or a
     /// design prompt: the learner's working and what was said.
     Round,
+    /// An answer to a twist on a coding problem solved before, posed for its review, against
+    /// what a good answer to the twist covers.
+    Twist,
 }
 
 impl Work {
@@ -65,6 +68,8 @@ pub struct Answer<'a> {
     /// What the grader should know about how the work was done, such as how a timed round
     /// ended.
     pub note: Option<&'a str>,
+    /// For an answer to a twist, the twist and what a good answer to it covers.
+    pub twist: Option<(&'a str, &'a str)>,
 }
 
 impl<'a> Answer<'a> {
@@ -74,14 +79,34 @@ impl<'a> Answer<'a> {
             spoken: false,
             code: None,
             note: None,
+            twist: None,
         }
     }
 }
 
 /// The rubric for a piece of work on an item, and what a good answer looks like, if the item
 /// has one. Fails for work the item can't have.
-fn rubric(item: &Item, work: Work) -> Result<(Vec<String>, Option<String>)> {
+fn rubric(
+    item: &Item,
+    work: Work,
+    twist: Option<(&str, &str)>,
+) -> Result<(Vec<String>, Option<String>)> {
     match (work, &item.content) {
+        (Work::Twist, Content::Coding(coding)) => {
+            let (_, notes) = twist.context("a twist's answer is marked against the twist")?;
+            Ok((
+                vec![
+                    "Says what has to change in the approach for the twist, and why it then gives the right answer".to_owned(),
+                    "Says what the changed approach costs, in time and space, and that it's good enough for the twist".to_owned(),
+                    "Handles the unusual inputs the twist brings".to_owned(),
+                ],
+                Some(format!(
+                    "{}\n\nHow the original problem is solved:\n\n{}",
+                    notes.trim(),
+                    coding.approach.trim()
+                )),
+            ))
+        }
         (Work::Design, Content::Design { rubric, notes }) => Ok((rubric.clone(), notes.clone())),
         (Work::Plan, Content::Coding(coding)) => Ok((
             vec![
@@ -152,17 +177,21 @@ pub fn mark_prompt(
     answer: Answer<'_>,
     error_types: &[ErrorType],
 ) -> Result<String> {
-    let (rubric, reference) = rubric(item, work)?;
-    let mut out = format!(
-        "<question>\n{}\n</question>\n\n<rubric>\n",
-        item.prompt.trim()
-    );
+    let (rubric, reference) = rubric(item, work, answer.twist)?;
+    let mut out = format!("<question>\n{}\n</question>\n\n", item.prompt.trim());
+    if let Some((twist, _)) = answer.twist {
+        out.push_str(&format!(
+            "<twist>\n{}\n</twist>\n\nThe learner solved the question before, and is answering this twist on it: mark their answer to the twist.\n\n",
+            twist.trim()
+        ));
+    }
+    out.push_str("<rubric>\n");
     for point in &rubric {
         out.push_str(&format!("- {point}\n"));
     }
     out.push_str("</rubric>\n\n");
     if let Some(reference) = reference {
-        let hidden = if work == Work::Explanation {
+        let hidden = if matches!(work, Work::Explanation | Work::Twist) {
             "they've solved it, or given up on it, and may have seen it since"
         } else {
             "the learner hasn't seen it"
@@ -261,6 +290,17 @@ impl Marked {
         }
     }
 
+    /// How an answer to a twist counts, as a coding problem's review: as other work, except
+    /// that a twist answered fully, with nothing wrong found, is easy. A harder follow-up done
+    /// that well says the problem's known, so like any problem rated easy it's retired.
+    pub fn twist_rating(&self) -> Rating {
+        if self.score >= 0.95 && self.findings.is_empty() {
+            Rating::Easy
+        } else {
+            self.rating()
+        }
+    }
+
     /// The mistakes the grader found, for the mistake log, with ids made from the grading's.
     pub fn mistakes(&self, id: &str, item: &str, at: i64) -> Vec<NewMistake> {
         self.findings
@@ -280,7 +320,7 @@ impl Marked {
 }
 
 /// The JSON object in a model's reply, which may be wrapped in a fenced code block.
-fn json_in(reply: &str) -> Result<&str> {
+pub fn json_in(reply: &str) -> Result<&str> {
     let start = reply
         .find('{')
         .context("the grader's reply has no JSON in it")?;
@@ -600,6 +640,48 @@ mod tests {
     }
 
     #[test]
+    fn marks_an_answer_to_a_twist_against_what_a_good_one_covers() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let problem = pack.item("islands").unwrap();
+        let answer = Answer {
+            twist: Some((
+                "Now the grid streams in a row at a time.",
+                "Keep a union-find of the last row's islands.",
+            )),
+            ..Answer::written("Remember the islands touching the row above")
+        };
+        let prompt = mark_prompt(problem, Work::Twist, answer, &types).unwrap();
+        assert!(prompt.contains("<twist>\nNow the grid streams in a row at a time.\n</twist>"));
+        assert!(prompt.contains(
+            "Keep a union-find of the last row's islands.\n\nHow the original problem is solved:"
+        ));
+        assert!(prompt.contains("breadth-first"));
+        assert!(prompt.contains("- Says what has to change in the approach for the twist"));
+        // A twist's answer can't be marked without the twist.
+        let bare = mark_prompt(problem, Work::Twist, Answer::written("x"), &types).unwrap_err();
+        assert!(bare.to_string().contains("against the twist"), "{bare}");
+
+        let marked = |score: f64, findings: Vec<Finding>| Marked {
+            score,
+            points: Vec::new(),
+            findings,
+            feedback: String::new(),
+            clarity: None,
+        };
+        // Answered fully, with nothing wrong, it's easy; otherwise as any other work.
+        assert_eq!(marked(1.0, Vec::new()).twist_rating(), Rating::Easy);
+        let slip = Finding {
+            error_type: None,
+            detail: "Forgot an empty row".to_owned(),
+        };
+        assert_eq!(marked(1.0, vec![slip]).twist_rating(), Rating::Good);
+        assert_eq!(marked(0.9, Vec::new()).twist_rating(), Rating::Good);
+        assert_eq!(marked(0.7, Vec::new()).twist_rating(), Rating::Hard);
+        assert_eq!(marked(0.2, Vec::new()).twist_rating(), Rating::Again);
+    }
+
+    #[test]
     fn marks_an_explanation_aloud_for_clarity_too() {
         let pack = Pack::sample();
         let types = workshop_pack::error_types::built_in();
@@ -609,6 +691,7 @@ mod tests {
             spoken: true,
             code: Some(("Python", "print(count(grid))\n")),
             note: None,
+            twist: None,
         };
         let prompt = mark_prompt(problem, Work::Explanation, answer, &types).unwrap();
         assert!(prompt.contains("explained this aloud"));

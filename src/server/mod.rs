@@ -97,6 +97,11 @@ pub fn router(app: Shared) -> Router {
             post(coding::bring_back),
         )
         .route("/coding/items/{pack}/{item}/tutor", post(coding::tutor))
+        .route("/coding/items/{pack}/{item}/twist", post(coding::twist))
+        .route(
+            "/coding/items/{pack}/{item}/twist/answer",
+            post(coding::answer_twist),
+        )
         .route("/coding/lsp/{language}", get(coding::lsp))
         .route("/state", put(client::save_state))
         .route("/doctor", get(setup::run_doctor))

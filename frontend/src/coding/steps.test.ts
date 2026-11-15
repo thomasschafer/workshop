@@ -12,6 +12,7 @@ const session = (changes: Partial<Session>): Session => ({
   runs: 3,
   submissions: 1,
   hints: 0,
+  no_twist: null,
   started_at: 0,
   updated_at: 0,
   ...changes,
@@ -26,6 +27,8 @@ describe("steps", () => {
     expect(reached("solve", "code", "plan")).toBe(true);
     expect(reached("solve", "code", "test")).toBe(false);
     expect(reached("recall", "review", "code")).toBe(false);
+    expect(stepsFor("twist")).toEqual(["twist"]);
+    expect(stepAfter("twist", "twist")).toBeNull();
   });
 
   it("suggest how it went from how it was solved", () => {
@@ -34,6 +37,7 @@ describe("steps", () => {
     expect(suggestedRating(session({ hints: 1 }))).toBe("hard");
     expect(suggestedRating(session({ passed: false }))).toBe("again");
     expect(suggestedRating(session({ mode: "recall" }))).toBeNull();
+    expect(suggestedRating(session({ mode: "twist", step: "twist" }))).toBeNull();
   });
 
   it("say what a case and a run were", () => {

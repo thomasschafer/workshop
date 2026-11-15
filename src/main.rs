@@ -29,6 +29,7 @@ mod settings;
 mod solutions;
 mod theme;
 mod tracks;
+mod twist;
 mod updates;
 mod whisper;
 mod workspace;
