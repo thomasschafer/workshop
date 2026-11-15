@@ -3,6 +3,7 @@
 //! Each program is built in a directory named after what's in it, so the same source is only
 //! built once, however many times it's checked against.
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -21,8 +22,9 @@ use crate::sandbox::Sandbox;
 pub struct Runtime {
     /// Where programs are written and built, a directory of Workshop's own.
     pub scratch: PathBuf,
-    /// Environment variables for building and running, such as a toolchain's `PATH`.
-    pub environment: Vec<(String, String)>,
+    /// Environment variables for building and running in each language, such as its
+    /// toolchain's `PATH`. A language with none is built and run with Workshop's own.
+    pub environments: BTreeMap<Language, Vec<(String, String)>>,
     /// How long building may take.
     pub build_timeout: Duration,
     /// How long each run may take.
@@ -33,6 +35,16 @@ pub struct Runtime {
 
 /// The C++ compilers to look for, in order.
 const CPP_COMPILERS: &[&str] = &["c++", "clang++", "g++"];
+
+/// The program building and running in `language` needs: its interpreter or compiler, or for
+/// C++, the first of the compilers looked for.
+pub fn needs(language: Language) -> &'static str {
+    match language {
+        Language::Python => "python3",
+        Language::Rust => "rustc",
+        Language::Cpp => CPP_COMPILERS[0],
+    }
+}
 
 /// How a program is built: plainly, or with the checks a language can add for mistakes found
 /// as it runs.
@@ -48,6 +60,7 @@ pub enum Flavour {
 /// A program that's been built, ready to run.
 #[derive(Debug, Clone)]
 pub struct Program {
+    language: Language,
     dir: PathBuf,
     command: Vec<String>,
 }
@@ -81,9 +94,19 @@ pub enum Built {
 }
 
 impl Runtime {
-    /// Finds a program as building and running do: on the environment's `PATH`, if it sets one.
-    pub fn find(&self, program: &str) -> Option<PathBuf> {
-        match self.environment.iter().find(|(name, _)| name == "PATH") {
+    /// The environment variables for building and running in `language`.
+    pub fn environment(&self, language: Language) -> &[(String, String)] {
+        self.environments.get(&language).map_or(&[], Vec::as_slice)
+    }
+
+    /// Finds a program as building and running in `language` do: on its environment's `PATH`,
+    /// if it sets one.
+    pub fn find(&self, language: Language, program: &str) -> Option<PathBuf> {
+        match self
+            .environment(language)
+            .iter()
+            .find(|(name, _)| name == "PATH")
+        {
             Some((_, path)) => find_program_in(program, OsStr::new(path)),
             None => find_program(program),
         }
@@ -98,13 +121,13 @@ impl Runtime {
         let owned = |args: &[&str]| args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
         match language {
             Language::Python => {
-                if self.find("python3").is_none() {
+                if self.find(language, needs(language)).is_none() {
                     return Err("Python isn't installed: install python3".to_owned());
                 }
                 Ok(None)
             }
             Language::Rust => {
-                if self.find("rustc").is_none() {
+                if self.find(language, needs(language)).is_none() {
                     return Err(
                         "Rust isn't installed: install it from https://rustup.rs".to_owned()
                     );
@@ -121,7 +144,7 @@ impl Runtime {
                 }
                 args.extend(owned(&["--crate-name", "main", "-o", &binary()]));
                 // rustc links with `cc`, which may need to be the compiler behind a shim.
-                if let Some(cc) = self.find("cc") {
+                if let Some(cc) = self.find(language, "cc") {
                     let linker = self.sandbox.program(&cc);
                     if linker != cc {
                         args.extend(["-C".to_owned(), format!("linker={}", linker.display())]);
@@ -130,7 +153,8 @@ impl Runtime {
                 Ok(Some(args))
             }
             Language::Cpp => {
-                let Some(compiler) = CPP_COMPILERS.iter().find_map(|c| self.find(c)) else {
+                let Some(compiler) = CPP_COMPILERS.iter().find_map(|c| self.find(language, c))
+                else {
                     return Err(format!(
                         "no C++ compiler was found (looked for {}); install one, such as clang or GCC",
                         CPP_COMPILERS.join(", ")
@@ -176,6 +200,7 @@ impl Runtime {
             }
         };
         let built = Program {
+            language,
             dir: dir.clone(),
             command,
         };
@@ -197,7 +222,7 @@ impl Runtime {
             args.push(file.clone());
             let confined = self
                 .sandbox
-                .confine(&args, &[], &staging, &self.environment)
+                .confine(&args, &[], &staging, self.environment(language))
                 .with_context(|| format!("sandboxing the build in {}", staging.display()))?;
             let output = workshop_runner::execute(
                 &confined.command,
@@ -251,7 +276,12 @@ impl Runtime {
         let output = async {
             let confined = self
                 .sandbox
-                .confine(&command, &[&program.dir], &scratch, &self.environment)
+                .confine(
+                    &command,
+                    &[&program.dir],
+                    &scratch,
+                    self.environment(program.language),
+                )
                 .with_context(|| format!("sandboxing a run of {}", program.dir.display()))?;
             workshop_runner::execute(
                 &confined.command,
@@ -322,7 +352,7 @@ mod tests {
     fn runtime(dir: &Path) -> Runtime {
         Runtime {
             scratch: dir.to_owned(),
-            environment: Vec::new(),
+            environments: BTreeMap::new(),
             build_timeout: Duration::from_secs(60),
             run_timeout: Duration::from_secs(60),
             sandbox: Sandbox::Unconfined,
@@ -410,7 +440,11 @@ mod tests {
     async fn says_what_to_install_when_a_compiler_is_missing() {
         let dir = tempfile::tempdir().unwrap();
         let mut runtime = runtime(dir.path());
-        runtime.environment = vec![("PATH".to_owned(), dir.path().display().to_string())];
+        let path = vec![("PATH".to_owned(), dir.path().display().to_string())];
+        runtime.environments = Language::ALL
+            .into_iter()
+            .map(|language| (language, path.clone()))
+            .collect();
         let Built::Unavailable(why) = built(&runtime, Language::Cpp, "int main() {}").await else {
             panic!("found a compiler where there's none");
         };

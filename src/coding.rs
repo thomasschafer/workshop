@@ -21,6 +21,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_learning::{Attempt, Rating, TrackPlan};
 use workshop_pack::{Case, Coding, Content, Item, Kind, Language, Pack};
+use workshop_toolchain::toolchain::Toolchain;
 use workshop_tracks::{Priority, Step, Track, TrackId};
 
 use crate::config::Config;
@@ -36,20 +37,44 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How many random inputs a submission is compared with the brute force on.
 pub const SUBMIT_RANDOM_INPUTS: u32 = 30;
 
+/// The Coding track's directory in Workshop's data, for problems' sessions, twists and drafts.
+fn coding_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("coding")
+}
+
+/// Where a language's drafts are, which its language server is started in. Its programs come
+/// from there too, as a solutions directory's do: from mise, if it has a mise config, which
+/// Workshop can write from the language's profile and install.
+pub fn language_dir(data_dir: &Path, language: Language) -> PathBuf {
+    coding_dir(data_dir).join(language.id())
+}
+
+/// The programs the Coding track builds, runs and checks code in `language` with, from mise if
+/// the language's directory has a mise config, and otherwise from Workshop's own `PATH`.
+pub async fn toolchain(paths: &Paths, language: Language) -> Result<Toolchain> {
+    Toolchain::load(&language_dir(&paths.data_dir, language))
+        .await
+        .with_context(|| format!("loading the Coding track's {} toolchain", language.name()))
+}
+
 /// Where and how coding items' programs are built and run: in Workshop's build directory, with
-/// the solutions' toolchain, if mise provides one, and inside this machine's sandbox, if it has
-/// one. Without one, they run with all the user's access, as Advent of Code solutions do; it's
-/// up to the caller whether to run model-written programs then.
+/// each language's toolchain, and inside this machine's sandbox, if it has one. Without one,
+/// they run with all the user's access, as Advent of Code solutions do; it's up to the caller
+/// whether to run model-written programs then.
 pub async fn runtime(config: &Config, paths: &Paths) -> Result<workshop_coding::Runtime> {
-    let toolchain = workshop_toolchain::toolchain::Toolchain::load(&config.solutions_dir).await?;
     let build_timeout = Duration::from_secs(config.run.timeout_secs);
-    let environment = toolchain.overlay(Vec::new());
-    let sandbox = workshop_coding::Sandbox::detect(&environment)
+    let mut environments = BTreeMap::new();
+    for language in Language::ALL {
+        let toolchain = toolchain(paths, language).await?;
+        environments.insert(language, toolchain.variables().to_vec());
+    }
+    let all: Vec<_> = environments.values().cloned().collect();
+    let sandbox = workshop_coding::Sandbox::detect(&all)
         .await
         .unwrap_or(workshop_coding::Sandbox::Unconfined);
     Ok(workshop_coding::Runtime {
         scratch: paths.build_dir().join("coding"),
-        environment,
+        environments,
         build_timeout,
         run_timeout: RUN_TIMEOUT.min(build_timeout),
         sandbox,
@@ -297,7 +322,7 @@ pub struct Reference {
 
 /// The problems' sessions and code drafts, kept in Workshop's data directory.
 pub struct Problems {
-    dir: PathBuf,
+    data_dir: PathBuf,
     saved: workshop_sessions::Saved<Session>,
     /// Every twist posed for each problem.
     twists: workshop_sessions::Saved<crate::twist::Posed>,
@@ -335,18 +360,18 @@ pub fn find<'a>(packs: &'a [Pack], pack: &str, item: &str) -> Result<Found<'a>> 
 
 impl Problems {
     pub fn new(data_dir: &Path) -> Self {
-        let dir = data_dir.join("coding");
+        let dir = coding_dir(data_dir);
         Self {
             saved: workshop_sessions::Saved::new(dir.join("sessions")),
             twists: workshop_sessions::Saved::new(dir.join("twists")),
-            dir,
+            data_dir: data_dir.to_owned(),
             save_lock: std::sync::Mutex::new(()),
         }
     }
 
     /// Where a language's drafts are, which its language server is started in.
     pub fn root(&self, language: Language) -> PathBuf {
-        self.dir.join(language.id())
+        language_dir(&self.data_dir, language)
     }
 
     /// The file a problem's draft in a language is kept in.

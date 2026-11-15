@@ -14,13 +14,17 @@ use workshop_coding::{CaseResult, Graded, Oracle};
 use workshop_learning::{Attempt, Rating};
 use workshop_pack::{Language, Pack};
 use workshop_provider::Role;
+use workshop_toolchain::toolchain::Toolchain;
 
 use super::error::{ApiError, ApiResult, bad_request};
+use super::install::InstallStatus;
 use super::learning::Where;
 use super::puzzles::{SaveText, saved};
+use super::setup::{Needs, install_programs};
 use super::state::{Shared, lock};
 use crate::coding::{Found, Mode, Opened, Overview, SUBMIT_RANDOM_INPUTS, Session, StepName, find};
 use crate::discuss::{self, Turn};
+use crate::language::LanguageProfile;
 use crate::learning::now_ms;
 use crate::workspace::VersionedFile;
 
@@ -673,21 +677,37 @@ pub(super) async fn tutor(
     ))
 }
 
+/// A language the learner writes code in, with its profile, which says how to install its
+/// programs and which language server to start.
+fn writable(app: &Shared, id: &str) -> Result<(Language, LanguageProfile), ApiError> {
+    let language = Language::from_id(id)
+        .filter(|l| l.is_writable())
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                serde_json::json!({ "error": format!("there's no language {id:?} to write code in") }),
+            )
+        })?;
+    let profile = app
+        .config
+        .languages
+        .get(language.id())
+        .cloned()
+        .ok_or_else(|| bad_request(format!("{} has no language profile", language.name())))?;
+    Ok((language, profile))
+}
+
 /// The editor's connection to a language's server, for the drafts of coding problems.
 pub(super) async fn lsp(
     State(app): State<Shared>,
     Path(id): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    let Some(language) = Language::from_id(&id).filter(|l| l.is_writable()) else {
-        return (StatusCode::NOT_FOUND, "There's no such language").into_response();
+    let (language, profile) = match writable(&app, &id) {
+        Ok(found) => found,
+        Err(err) => return err.into_response(),
     };
-    let Some(command) = app
-        .config
-        .languages
-        .get(language.id())
-        .and_then(|profile| profile.lsp.clone())
-    else {
+    let Some(command) = profile.lsp.clone() else {
         return (StatusCode::NOT_FOUND, "No language server is configured").into_response();
     };
     upgrade.on_upgrade(move |socket| async move {
@@ -695,22 +715,87 @@ pub(super) async fn lsp(
         if let Err(err) = std::fs::create_dir_all(&root) {
             tracing::warn!("language server: creating {}: {err}", root.display());
         }
-        let environment = match crate::coding::runtime(&app.config, &app.paths).await {
-            Ok(runtime) => runtime.environment,
+        let environment = match crate::coding::toolchain(&app.paths, language).await {
+            Ok(toolchain) => toolchain.variables().to_vec(),
             Err(err) => {
                 tracing::warn!("language server: {err:#}");
                 Vec::new()
             }
         };
         let restart = app.lsp_restarts.subscribe();
-        let help = "Install it on the computer Workshop runs on, then try again.";
+        let help = super::lsp::install_help(&profile, "Workshop", " for the Coding track");
         let relayed = app
             .lsp_servers
-            .relay(socket, &command, &root, &environment, help, restart);
+            .relay(socket, &command, &root, &environment, &help, restart);
         if let Err(err) = relayed.await {
             tracing::warn!("language server: {err:#}");
         }
     })
+}
+
+/// Whether the Coding track has what it needs to build, run and check code in a language, and
+/// installing it.
+#[derive(Serialize)]
+pub(super) struct ToolchainState {
+    name: String,
+    #[serde(flatten)]
+    needs: Needs,
+    /// Whether mise is installed, to install the language's programs with.
+    mise_installed: bool,
+    /// Why the language's mise config couldn't be read, if it couldn't.
+    problem: Option<String>,
+    install: InstallStatus,
+}
+
+pub(super) async fn toolchain(
+    State(app): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<ToolchainState> {
+    let (language, profile) = writable(&app, &id)?;
+    let (toolchain, problem) = match crate::coding::toolchain(&app.paths, language).await {
+        Ok(toolchain) => (toolchain, None),
+        Err(err) => (Toolchain::default(), Some(format!("{err:#}"))),
+    };
+    Ok(Json(ToolchainState {
+        name: profile.name.clone(),
+        needs: Needs::of(&profile, &[workshop_coding::needs(language)], &toolchain),
+        mise_installed: workshop_common::programs::find_program("mise").is_some(),
+        problem,
+        install: app.coding_toolchain_installs[&language].status(),
+    }))
+}
+
+/// Installs a language's programs with mise, for the Coding track only, into the directory its
+/// drafts are in.
+pub(super) async fn install_toolchain(
+    State(app): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<ToolchainState> {
+    let (language, profile) = writable(&app, &id)?;
+    let Some(toolchain) = profile.toolchain.clone() else {
+        return Err(bad_request(format!(
+            "Workshop doesn't know how to install {} with mise.",
+            profile.name
+        )));
+    };
+    install_programs(
+        &app,
+        move |app| &app.coding_toolchain_installs[&language],
+        toolchain,
+        app.problems.root(language),
+    )
+    .await?;
+    tracing::info!("installed {} for the Coding track with mise", profile.name);
+    self::toolchain(State(app), Path(id)).await
+}
+
+pub(super) async fn cancel_toolchain_install(
+    State(app): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<()> {
+    let (language, _) = writable(&app, &id)?;
+    app.coding_toolchain_installs[&language].cancel();
+    Ok(Json(()))
 }
 
 #[cfg(test)]
@@ -1104,6 +1189,23 @@ mod tests {
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// A server whose Python language server isn't installed anywhere.
+    fn without_a_language_server(dir: &std::path::Path) -> std::sync::Arc<crate::server::App> {
+        let mut config = crate::config::Config::parse("").unwrap();
+        config.solutions_dir = dir.join("aoc");
+        config.languages.get_mut("python").unwrap().lsp =
+            Some(vec!["workshop-no-such-language-server".to_owned()]);
+        std::sync::Arc::new(
+            crate::server::App::new(
+                config,
+                crate::paths::Paths::under(dir),
+                "secret".into(),
+                None,
+            )
+            .unwrap(),
+        )
+    }
+
     /// A language server that isn't installed is reported to the editor, with why and how to
     /// install it, rather than the connection just closing for the editor to try again.
     #[tokio::test]
@@ -1113,19 +1215,7 @@ mod tests {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
         let dir = tempfile::tempdir().unwrap();
-        let mut config = crate::config::Config::parse("").unwrap();
-        config.solutions_dir = dir.path().join("aoc");
-        config.languages.get_mut("python").unwrap().lsp =
-            Some(vec!["workshop-no-such-language-server".to_owned()]);
-        let app = std::sync::Arc::new(
-            crate::server::App::new(
-                config,
-                crate::paths::Paths::under(dir.path()),
-                "secret".into(),
-                None,
-            )
-            .unwrap(),
-        );
+        let app = without_a_language_server(dir.path());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, crate::server::router(app)).await });
@@ -1146,11 +1236,38 @@ mod tests {
             "{reason}"
         );
         let help = notice["params"]["help"].as_str().unwrap();
-        assert!(help.contains("Install"), "{help}");
+        assert!(help.contains("can install it with mise"), "{help}");
         assert!(matches!(
             socket.next().await,
             Some(Ok(Message::Close(_))) | None
         ));
+    }
+
+    /// What the Coding track needs for a language, and that it can install it with mise, for
+    /// the languages learners write code in.
+    #[tokio::test]
+    async fn says_what_a_language_needs_and_that_it_can_install_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = crate::server::router(without_a_language_server(dir.path()));
+        let response = send(
+            &router,
+            request("GET", "/api/coding/toolchain/python", None),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let state = json(response).await;
+        assert_eq!(state["name"], "Python");
+        assert_eq!(
+            state["missing_language_server"],
+            "workshop-no-such-language-server"
+        );
+        assert_eq!(state["installable"], true);
+        assert_eq!(state["install"]["installing"], false);
+        for language in ["cpp", "cobol"] {
+            let path = format!("/api/coding/toolchain/{language}");
+            let response = send(&router, request("GET", &path, None)).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{language}");
+        }
     }
 
     #[tokio::test]

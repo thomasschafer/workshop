@@ -39,6 +39,8 @@ pub struct App {
     pub(super) packages_install: Installs,
     /// Installing the language's programs with mise.
     pub(super) toolchain_install: Installs,
+    /// Installing each of the Coding track's languages' programs with mise.
+    pub(super) coding_toolchain_installs: BTreeMap<workshop_pack::Language, Installs>,
     /// Downloading Whisper's model for dictation.
     pub(super) speech_install: Installs,
     pub(super) dictation: Arc<crate::whisper::Dictation>,
@@ -115,6 +117,10 @@ impl App {
             install_lock: Arc::new(Mutex::new(())),
             packages_install: Installs::default(),
             toolchain_install: Installs::default(),
+            coding_toolchain_installs: workshop_pack::Language::ALL
+                .into_iter()
+                .map(|language| (language, Installs::default()))
+                .collect(),
             speech_install: Installs::default(),
             dictation: Arc::default(),
             notifier: Arc::new(workshop_push::Notifier::load(&paths.data_dir)?),

@@ -103,6 +103,14 @@ pub fn router(app: Shared) -> Router {
             post(coding::answer_twist),
         )
         .route("/coding/lsp/{language}", get(coding::lsp))
+        .route(
+            "/coding/toolchain/{language}",
+            get(coding::toolchain).post(coding::install_toolchain),
+        )
+        .route(
+            "/coding/toolchain/{language}/cancel",
+            post(coding::cancel_toolchain_install),
+        )
         .route("/state", put(client::save_state))
         .route("/doctor", get(setup::run_doctor))
         .route(

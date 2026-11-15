@@ -1,7 +1,7 @@
 // Types mirror the Coding track in src/coding.rs and src/server/coding.rs, and the results of
 // running code in crates/coding.
 
-import type { VersionedFile } from "../api";
+import type { InstallStatus, ProgramNeeds, VersionedFile } from "../api";
 import type { MarkedReply } from "../grading/types";
 
 export type Language = "python" | "rust" | "cpp";
@@ -37,6 +37,15 @@ export interface Session {
 export interface Case {
   input: string;
   output: string;
+}
+
+/** Whether the Coding track has a language's programs, and installing them with mise. */
+export interface Toolchain extends ProgramNeeds {
+  name: string;
+  mise_installed: boolean;
+  /** Why the language's mise config couldn't be read, if it couldn't. */
+  problem: string | null;
+  install: InstallStatus;
 }
 
 export interface OpenedLanguage {

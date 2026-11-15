@@ -275,7 +275,7 @@ test("says quietly why the language server can't start, and still runs the code"
     });
     await expect(note).toContainText("stopped (exit status: 1)");
     await expect(note).toContainText("told to fail as it starts");
-    await expect(note).toContainText("then try again");
+    await expect(note).toContainText("for the Coding track. Then try again.");
     await expect(page.locator(".status-line")).toContainText("no checks");
     // It isn't tried again on its own, as it would only fail the same way.
     await page.waitForTimeout(4000);

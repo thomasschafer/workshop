@@ -72,21 +72,22 @@ const SEATBELT_PROFILE: &str = r#"(version 1)
 "#;
 
 impl Sandbox {
-    /// The sandbox this machine offers, if any, for programs run with `environment`. Found once
-    /// for each environment, as finding it starts a few programs.
-    pub async fn detect(environment: &[(String, String)]) -> Option<Self> {
-        type Found = Vec<(Vec<(String, String)>, Option<Sandbox>)>;
+    /// The sandbox this machine offers, if any, for programs run with any of `environments`,
+    /// such as each language's, as well as with Workshop's own. Found once for each set of
+    /// environments, as finding it starts a few programs.
+    pub async fn detect(environments: &[Vec<(String, String)>]) -> Option<Self> {
+        type Found = Vec<(Vec<Vec<(String, String)>>, Option<Sandbox>)>;
         static FOUND: tokio::sync::Mutex<Found> = tokio::sync::Mutex::const_new(Vec::new());
         let mut found = FOUND.lock().await;
-        if let Some((_, sandbox)) = found.iter().find(|(e, _)| e == environment) {
+        if let Some((_, sandbox)) = found.iter().find(|(e, _)| e == environments) {
             return sandbox.clone();
         }
-        let sandbox = Self::find(environment).await;
-        found.push((environment.to_vec(), sandbox.clone()));
+        let sandbox = Self::find(environments).await;
+        found.push((environments.to_vec(), sandbox.clone()));
         sandbox
     }
 
-    async fn find(environment: &[(String, String)]) -> Option<Self> {
+    async fn find(environments: &[Vec<(String, String)>]) -> Option<Self> {
         if cfg!(target_os = "macos") {
             let sandbox_exec = Path::new("/usr/bin/sandbox-exec");
             if !sandbox_exec.is_file() {
@@ -114,7 +115,7 @@ impl Sandbox {
                 }
             }
             let seatbelt = Seatbelt {
-                toolchains: toolchains(environment, &hidden),
+                toolchains: all_toolchains(environments, &hidden),
                 hidden,
                 sdk: xcrun(&["--show-sdk-path"]).await,
                 shims,
@@ -137,7 +138,7 @@ impl Sandbox {
             );
             let probe = Self::Bubblewrap(Bubblewrap {
                 bwrap,
-                toolchains: toolchains(environment, &hidden),
+                toolchains: all_toolchains(environments, &hidden),
                 links: links_out(&hidden),
                 hidden,
             });
@@ -256,6 +257,20 @@ impl Bubblewrap {
         args.extend(command.iter().cloned());
         args
     }
+}
+
+/// The directories the toolchains of programs run with any of `environments`, or with Workshop's
+/// own, keep themselves in, inside the `hidden` ones.
+fn all_toolchains(environments: &[Vec<(String, String)>], hidden: &[PathBuf]) -> Vec<PathBuf> {
+    let mut all = toolchains(&[], hidden);
+    for environment in environments {
+        for dir in toolchains(environment, hidden) {
+            if !all.contains(&dir) {
+                all.push(dir);
+            }
+        }
+    }
+    all
 }
 
 /// The directories toolchains keep themselves in, inside the `hidden` ones: those that their
@@ -541,7 +556,7 @@ mod confinement {
         }
         Some(Runtime {
             scratch: scratch.to_owned(),
-            environment: Vec::new(),
+            environments: Default::default(),
             build_timeout: Duration::from_secs(120),
             run_timeout: Duration::from_secs(30),
             sandbox: sandbox?,
@@ -701,7 +716,7 @@ fn main() {{
         };
         if ["c++", "clang++", "g++"]
             .iter()
-            .all(|c| runtime.find(c).is_none())
+            .all(|c| runtime.find(Language::Cpp, c).is_none())
         {
             return;
         }

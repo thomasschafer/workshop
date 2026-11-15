@@ -29,7 +29,7 @@ pub(super) async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) ->
             }
         };
         let restart = app.lsp_restarts.subscribe();
-        let help = install_help(app.language());
+        let help = install_help(app.language(), "Setup", "");
         let relayed = app.lsp_servers.relay(
             socket,
             &command,
@@ -44,11 +44,17 @@ pub(super) async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) ->
     })
 }
 
-/// How to install a language server that isn't there, for the editor to show when it can't start.
-pub(super) fn install_help(profile: &crate::language::LanguageProfile) -> String {
+/// How to install a language server that isn't there, for the editor to show when it can't start:
+/// with mise, by `who`, along with the rest of the language's programs `for_what`, if Workshop
+/// knows how.
+pub(super) fn install_help(
+    profile: &crate::language::LanguageProfile,
+    who: &str,
+    for_what: &str,
+) -> String {
     match &profile.toolchain {
         Some(_) => format!(
-            "Setup can install it with mise, with the rest of {}'s programs. Then try again.",
+            "{who} can install it with mise, with the rest of {}'s programs{for_what}. Then try again.",
             profile.name
         ),
         None => "Install it on the computer Workshop runs on, then try again.".to_owned(),

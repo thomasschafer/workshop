@@ -3,7 +3,7 @@ import { api, type ModelsState, type SetupState } from "../api";
 import type { Packages } from "../hooks/usePackages";
 import { isUpToDate } from "../packages";
 import { Checks } from "./checks";
-import { InstallProgress, LastInstallLog } from "./install";
+import { ProgramsInstall } from "./install";
 import { ModelsSection } from "./models";
 import { PackagesSection } from "./packages";
 import { ServerSpeechSection } from "./speech";
@@ -20,9 +20,6 @@ interface Props {
   onServerSpeech: (ready: boolean) => void;
   onDone: () => void;
 }
-
-/** How often to check on an install, for its progress. */
-const INSTALL_PROGRESS_MS = 1000;
 
 /** Getting Workshop ready: language, model, Advent of Code login and phone access. */
 export function Setup({
@@ -130,29 +127,7 @@ function LanguageStep({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [installingSince, setInstallingSince] = useState<number | null>(null);
   const current = state.languages.find((l) => l.id === state.language);
-  const installing = installingSince !== null || state.toolchain_install.installing;
-
-  // Follows an install's progress, including one started elsewhere, such as in another tab.
-  useEffect(() => {
-    if (!installing) return;
-    const timer = setInterval(onRefresh, INSTALL_PROGRESS_MS);
-    return () => clearInterval(timer);
-  }, [installing]);
-
-  const install = async () => {
-    setInstallingSince(performance.now());
-    setError(null);
-    try {
-      onState(await api.installToolchain());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      onRefresh();
-    } finally {
-      setInstallingSince(null);
-    }
-  };
 
   const choose = async (id: string) => {
     setSaving(true);
@@ -181,52 +156,20 @@ function LanguageStep({
           </button>
         ))}
       </div>
-      {current && current.missing.length > 0 && !installing ? (
-        <p class="error-text">
-          {current.name} needs {current.missing.join(" and ")}, which isn't installed.
-        </p>
-      ) : null}
-      {current?.installable && (installing || current.missing.length > 0) ? (
-        installing ? (
-          <InstallProgress
-            label={`Installing ${current.name}…`}
-            since={installingSince}
-            progress={state.toolchain_install.progress}
-            onCancel={() => {
-              api.cancelToolchainInstall().catch(() => {});
-            }}
-          />
-        ) : state.mise_installed ? (
-          <>
-            <button type="button" class="pill primary" onClick={() => void install()}>
-              Install with mise
-            </button>
-            <p class="muted small">
-              Installs {current.name} and its language server for your solutions folder only,
-              without changing anything else on the server. It can take several minutes.
-            </p>
-          </>
-        ) : (
-          <p class="muted small">
-            Install it yourself, or install{" "}
-            <a href="https://mise.jdx.dev/getting-started.html" target="_blank" rel="noreferrer">
-              mise
-            </a>{" "}
-            on the server and Workshop can install it for your solutions folder only.{" "}
-            <button type="button" class="text-button" onClick={onRefresh}>
-              Check again
-            </button>
-          </p>
-        )
-      ) : null}
-      {state.toolchain_problem ? <p class="error-text small">{state.toolchain_problem}</p> : null}
-      {state.toolchain_install.last_install && !installing ? (
-        <LastInstallLog last={state.toolchain_install.last_install} />
-      ) : null}
-      {current?.missing_language_server ? (
-        <p class="muted small">
-          Optional: install {current.missing_language_server} for error underlines and types.
-        </p>
+      {current ? (
+        <ProgramsInstall
+          name={current.name}
+          needs={current}
+          miseInstalled={state.mise_installed}
+          problem={state.toolchain_problem}
+          install={state.toolchain_install}
+          scope="your solutions folder"
+          onInstall={async () => onState(await api.installToolchain())}
+          onCancel={() => {
+            api.cancelToolchainInstall().catch(() => {});
+          }}
+          onRefresh={onRefresh}
+        />
       ) : null}
       {error ? <p class="error-text">{error}</p> : null}
     </Step>

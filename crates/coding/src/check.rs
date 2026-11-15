@@ -151,12 +151,9 @@ pub async fn check_coding(
 /// A program that can't be built here is skipped; one that's broken is a failure.
 fn unavailable_or_failed(runtime: &Runtime, coding: &Coding, problem: String) -> Verdict {
     let unavailable = [&coding.brute_force, &coding.inputs].iter().any(|source| {
-        let needs = match source.language {
-            workshop_pack::Language::Python => "python3",
-            workshop_pack::Language::Rust => "rustc",
-            workshop_pack::Language::Cpp => "c++",
-        };
-        runtime.find(needs).is_none()
+        runtime
+            .find(source.language, crate::programs::needs(source.language))
+            .is_none()
     });
     if unavailable {
         Verdict::Skipped(problem)
@@ -326,7 +323,7 @@ mod tests {
         let checker = Checker {
             runtime: Runtime {
                 scratch: dir.path().to_owned(),
-                environment: Vec::new(),
+                environments: Default::default(),
                 build_timeout: Duration::from_secs(60),
                 run_timeout: Duration::from_secs(60),
                 sandbox: sandbox.unwrap_or(Sandbox::Unconfined),
@@ -360,7 +357,7 @@ mod tests {
     fn has_cpp(runtime: &Runtime) -> bool {
         ["c++", "clang++", "g++"]
             .iter()
-            .any(|compiler| runtime.find(compiler).is_some())
+            .any(|compiler| runtime.find(Language::Cpp, compiler).is_some())
     }
 
     #[tokio::test]
@@ -369,7 +366,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let runtime = Runtime {
             scratch: dir.path().to_owned(),
-            environment: Vec::new(),
+            environments: Default::default(),
             build_timeout: Duration::from_secs(60),
             run_timeout: Duration::from_secs(20),
             sandbox: Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
@@ -596,7 +593,7 @@ mod tests {
         let checker = Checker {
             runtime: Runtime {
                 scratch: dir.path().to_owned(),
-                environment: Vec::new(),
+                environments: Default::default(),
                 build_timeout: Duration::from_secs(60),
                 run_timeout: Duration::from_secs(60),
                 sandbox: Sandbox::Unconfined,

@@ -1,16 +1,19 @@
 //! Getting Workshop ready: what's installed and logged in, choosing a language, the Advent of
 //! Code session, installing the language's programs, and the link for a phone.
 
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
-use workshop_toolchain::toolchain::Toolchain;
+use workshop_toolchain::toolchain::{Toolchain, ToolchainProfile};
 
-use super::error::{ApiResult, bad_request};
-use super::install::{AfterInstall, InstallStatus, install_with};
-use super::state::Shared;
+use super::error::{ApiError, ApiResult, bad_request};
+use super::install::{AfterInstall, InstallStatus, Installs, install_with};
+use super::state::{App, Shared};
 use crate::doctor;
+use crate::language::LanguageProfile;
 use crate::models;
 
 pub(super) async fn run_doctor(State(app): State<Shared>) -> ApiResult<Vec<doctor::Check>> {
@@ -49,12 +52,59 @@ pub(super) struct SetupState {
 struct LanguageOption {
     id: String,
     name: String,
+    #[serde(flatten)]
+    needs: Needs,
+}
+
+/// What of a language's programs isn't installed, for setup to offer to install.
+#[derive(Serialize)]
+pub(super) struct Needs {
     /// Programs it needs that aren't installed.
     missing: Vec<String>,
     /// The language server, if it isn't installed. Workshop works without it.
     missing_language_server: Option<String>,
     /// Whether setup can install its programs with mise.
     installable: bool,
+}
+
+impl Needs {
+    /// Which of `programs`, and the profile's language server, `toolchain` doesn't have.
+    pub(super) fn of(profile: &LanguageProfile, programs: &[&str], toolchain: &Toolchain) -> Self {
+        Self {
+            missing: programs
+                .iter()
+                .filter(|p| toolchain.find_program(p).is_none())
+                .map(|p| (*p).to_owned())
+                .collect(),
+            missing_language_server: profile
+                .lsp
+                .as_ref()
+                .and_then(|c| c.first())
+                .filter(|p| toolchain.find_program(p).is_none())
+                .cloned(),
+            installable: profile.toolchain.is_some(),
+        }
+    }
+}
+
+/// Installs a language's programs with mise into `dir`, writing the profile's mise config there
+/// unless it has one, as one of `installs`, then restarts the language servers to find them.
+pub(super) async fn install_programs(
+    app: &Shared,
+    installs: impl Fn(&App) -> &Installs + Send + 'static,
+    profile: ToolchainProfile,
+    dir: PathBuf,
+) -> Result<(), ApiError> {
+    install_with(
+        app,
+        installs,
+        AfterInstall::RestartLanguageServers,
+        |_app, running| async move {
+            workshop_toolchain::toolchain::install(&profile, &dir, &running.cancel, &running.log)
+                .await
+        },
+    )
+    .await
 }
 
 #[derive(Serialize)]
@@ -79,19 +129,7 @@ pub(super) async fn setup_state(State(app): State<Shared>) -> ApiResult<SetupSta
         .map(|(id, profile)| LanguageOption {
             id: id.clone(),
             name: profile.name.clone(),
-            missing: profile
-                .required_programs()
-                .into_iter()
-                .filter(|p| toolchain.find_program(p).is_none())
-                .map(str::to_owned)
-                .collect(),
-            missing_language_server: profile
-                .lsp
-                .as_ref()
-                .and_then(|c| c.first())
-                .filter(|p| toolchain.find_program(p).is_none())
-                .cloned(),
-            installable: profile.toolchain.is_some(),
+            needs: Needs::of(profile, &profile.required_programs(), &toolchain),
         })
         .collect();
     let providers =
@@ -191,30 +229,17 @@ pub(super) async fn set_aoc_session(
 
 /// Installs the chosen language's programs with mise, into the solutions directory.
 pub(super) async fn install_toolchain(State(app): State<Shared>) -> ApiResult<SetupState> {
-    if app.language().toolchain.is_none() {
+    let Some(profile) = app.language().toolchain.clone() else {
         return Err(bad_request(format!(
             "Workshop doesn't know how to install {} with mise.",
             app.language().name
         )));
-    }
-    install_with(
+    };
+    install_programs(
         &app,
         |app| &app.toolchain_install,
-        AfterInstall::RestartLanguageServers,
-        |app, running| async move {
-            let profile = app
-                .language()
-                .toolchain
-                .clone()
-                .context("the language has no toolchain")?;
-            workshop_toolchain::toolchain::install(
-                &profile,
-                &app.config.solutions_dir,
-                &running.cancel,
-                &running.log,
-            )
-            .await
-        },
+        profile,
+        app.config.solutions_dir.clone(),
     )
     .await?;
     tracing::info!("installed {} with mise", app.language().name);

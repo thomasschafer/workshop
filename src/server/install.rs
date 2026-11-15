@@ -66,13 +66,14 @@ pub(super) enum AfterInstall {
 }
 
 /// Runs an install in its own task, so it finishes even if the phone disconnects while waiting.
-pub(super) async fn install_with<T, Job, Fut>(
+pub(super) async fn install_with<T, Which, Job, Fut>(
     app: &Shared,
-    installs: fn(&App) -> &Installs,
+    installs: Which,
     after: AfterInstall,
     job: Job,
 ) -> Result<T, ApiError>
 where
+    Which: Fn(&App) -> &Installs + Send + 'static,
     Job: FnOnce(Shared, Arc<RunningInstall>) -> Fut,
     Fut: std::future::Future<Output = Result<T>> + Send + 'static,
     T: Send + 'static,

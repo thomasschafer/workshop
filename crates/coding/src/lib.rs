@@ -9,5 +9,5 @@ pub mod sandbox;
 
 pub use check::{Checker, Unconfined};
 pub use grade::{CaseRef, CaseResult, Graded, Oracle, grade, run_examples};
-pub use programs::{Built, Flavour, Program, Run, Runtime};
+pub use programs::{Built, Flavour, Program, Run, Runtime, needs};
 pub use sandbox::Sandbox;

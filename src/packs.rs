@@ -183,7 +183,7 @@ mod tests {
     fn runtime(dir: &Path) -> workshop_coding::Runtime {
         workshop_coding::Runtime {
             scratch: dir.join("build"),
-            environment: Vec::new(),
+            environments: Default::default(),
             build_timeout: std::time::Duration::from_secs(60),
             run_timeout: std::time::Duration::from_secs(60),
             sandbox: workshop_coding::Sandbox::Unconfined,

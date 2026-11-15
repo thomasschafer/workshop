@@ -384,7 +384,7 @@ mod tests {
     fn runtime(dir: &std::path::Path, timeout: Duration) -> Runtime {
         Runtime {
             scratch: dir.to_owned(),
-            environment: Vec::new(),
+            environments: Default::default(),
             build_timeout: Duration::from_secs(60),
             run_timeout: timeout,
             sandbox: crate::Sandbox::Unconfined,

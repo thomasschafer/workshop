@@ -144,6 +144,16 @@ export interface InstallStatus {
   last_install: LastInstall | null;
 }
 
+/** What of a language's programs isn't installed. */
+export interface ProgramNeeds {
+  /** Programs it needs that aren't installed. */
+  missing: string[];
+  /** The language server, if it isn't installed. Workshop works without it. */
+  missing_language_server: string | null;
+  /** Whether Workshop can install its programs with mise. */
+  installable: boolean;
+}
+
 export interface PackagesResponse extends InstallStatus {
   /** Null when the language has no packages beyond its standard library. */
   state: PackagesState | null;
@@ -189,14 +199,7 @@ export interface SetupState {
   solutions_repo_exists: boolean;
   /** The config file, where the solutions folder can be changed. */
   config_file: string;
-  languages: {
-    id: string;
-    name: string;
-    missing: string[];
-    missing_language_server: string | null;
-    /** Whether setup can install its programs with mise. */
-    installable: boolean;
-  }[];
+  languages: ({ id: string; name: string } & ProgramNeeds)[];
   language: string;
   has_aoc_session: boolean;
   providers: {

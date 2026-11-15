@@ -8,6 +8,7 @@ import { ConflictBanner } from "../views/frame";
 import { ProblemsSheet } from "../views/problems";
 import { StatusLine } from "../views/status";
 import { codingApi } from "./api";
+import { ToolchainOffer } from "./toolchain";
 import type { OpenedLanguage } from "./types";
 
 /**
@@ -133,6 +134,7 @@ export function EditorPane({
         showProblem={!settings.helixOn}
         onProblems={() => setShowProblems(true)}
       />
+      <ToolchainOffer key={language.id} language={language.id} onInstalled={retryLsp} />
       <div class="editor" ref={host} />
       {showProblems ? (
         <ProblemsSheet

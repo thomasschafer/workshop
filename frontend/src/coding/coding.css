@@ -192,6 +192,16 @@
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+/* Installing the language's programs, above the code, while any of them is missing. */
+.coding-toolchain {
+  padding: 0 12px 8px;
+  font-size: 13px;
+}
+
+.coding-toolchain p {
+  margin: 4px 0;
+}
+
 /* Zen mode: just the code, with Helix's status line if it's on, and the keyboard, as in Advent of
    Code. */
 .coding-problem.zen {
@@ -206,7 +216,8 @@
 .coding-problem.zen .coding-hints,
 .coding-problem.zen .coding-results,
 .coding-problem.zen .status-line,
-.coding-problem.zen .lsp-unavailable {
+.coding-problem.zen .lsp-unavailable,
+.coding-problem.zen .coding-toolchain {
   display: none;
 }
 

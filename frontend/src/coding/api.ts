@@ -9,6 +9,7 @@ import type {
   Overview,
   Session,
   Submitted,
+  Toolchain,
   TwistMarked,
 } from "./types";
 
@@ -18,7 +19,15 @@ const item = (key: string) => {
   return `/coding/items/${encodeURIComponent(pack)}/${encodeURIComponent(id)}`;
 };
 
+const toolchain = (language: Language) => `/coding/toolchain/${encodeURIComponent(language)}`;
+
 export const codingApi = {
+  /** Whether the Coding track has a language's programs, from mise or Workshop's own PATH. */
+  toolchain: (language: Language) => request<Toolchain>("GET", toolchain(language)),
+  /** Installs a language's programs with mise, for the Coding track only. */
+  installToolchain: (language: Language) => request<Toolchain>("POST", toolchain(language)),
+  cancelToolchainInstall: (language: Language) =>
+    request<null>("POST", `${toolchain(language)}/cancel`),
   overview: () => request<Overview>("GET", `/coding?utc_offset=${utcOffset()}`),
   open: (key: string, solve = false) =>
     request<Opened>("POST", `${item(key)}/open${solve ? "?solve=true" : ""}`),
