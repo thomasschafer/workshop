@@ -12,7 +12,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { charFor, LAYOUT } from "../src/keyboard";
+import { charFor, DOUBLE_TAP_MS, LAYOUT } from "../src/keyboard";
 import { FAKE_LSP_FAILS, HOME, PORT } from "./fixture";
 import { installSimulatedSpeech } from "./speech";
 
@@ -1109,6 +1109,31 @@ const PLAIN_KEYS = new Map<string, { shift: boolean }>(
 );
 
 /**
+ * Taps a key twice in quick succession, as a thumb does. The second press is stamped as coming
+ * soon after the first, however long the test takes to send it, which on a slow machine can be
+ * longer than a double tap allows.
+ */
+async function doubleTap(page: Page, key: Locator): Promise<void> {
+  await page.evaluate((gap) => {
+    const presses: number[] = [];
+    const stamp = (event: Event) => {
+      const first = presses[0];
+      if (first !== undefined) Object.defineProperty(event, "timeStamp", { value: first + gap });
+      presses.push(event.timeStamp);
+      if (presses.length === 2) window.removeEventListener("pointerdown", stamp, true);
+    };
+    window.addEventListener("pointerdown", stamp, true);
+    Object.assign(window, { doubleTapPresses: presses });
+  }, DOUBLE_TAP_MS / 3);
+  await key.tap();
+  await key.tap();
+  const presses = await page.evaluate(
+    () => (window as unknown as { doubleTapPresses: number[] }).doubleTapPresses.length,
+  );
+  if (presses !== 2) throw new Error(`a double tap pressed ${presses} times, not twice`);
+}
+
+/**
  * Holds a key on the page down, with a finger of its own, while `during` runs. The finger is a
  * mouse, as Playwright's touch screen can only tap, but the key takes it just the same.
  */
@@ -1470,8 +1495,7 @@ test("works on a phone with Helix's keybindings, from Workshop's own keyboard", 
   await key("2").tap();
   await expect.poll(() => saved().split("\n")[0]).toBe(`a@2${original.split("\n")[0]}`);
   // Tapped twice quickly, it locks on for every key until it's tapped again.
-  await key("Shift").tap();
-  await key("Shift").tap();
+  await doubleTap(phone, key("Shift"));
   await expect(key("Shift")).toHaveClass(/\blocked\b/);
   await key("@").tap();
   await key("#").tap();
