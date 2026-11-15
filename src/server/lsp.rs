@@ -29,17 +29,30 @@ pub(super) async fn lsp(State(app): State<Shared>, upgrade: WebSocketUpgrade) ->
             }
         };
         let restart = app.lsp_restarts.subscribe();
+        let help = install_help(app.language());
         let relayed = app.lsp_servers.relay(
             socket,
             &command,
             &app.config.solutions_dir,
             &environment,
+            &help,
             restart,
         );
         if let Err(err) = relayed.await {
             tracing::warn!("language server: {err:#}");
         }
     })
+}
+
+/// How to install a language server that isn't there, for the editor to show when it can't start.
+pub(super) fn install_help(profile: &crate::language::LanguageProfile) -> String {
+    match &profile.toolchain {
+        Some(_) => format!(
+            "Setup can install it with mise, with the rest of {}'s programs. Then try again.",
+            profile.name
+        ),
+        None => "Install it on the computer Workshop runs on, then try again.".to_owned(),
+    }
 }
 
 /// Restarts every language server, such as one that's stopped answering: each editor connected to

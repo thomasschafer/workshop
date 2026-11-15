@@ -7,12 +7,13 @@
 //! stands between them: it answers a later editor's greeting as the server answered the first,
 //! closes the files an editor left open, and keeps each editor's requests apart.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use axum::extract::ws::{Message, WebSocket};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -31,6 +32,16 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(75);
 /// Long enough for a phone to be put down and picked up again, and no longer, as a language
 /// server is often over a gigabyte of memory.
 const KEEP_FOR: Duration = Duration::from_secs(10 * 60);
+/// How many of the last lines a language server wrote to stderr are kept, to say why it stopped.
+const STDERR_LINES: usize = 5;
+/// How long a language server that's closed its output is given to exit, and to finish writing
+/// to stderr, before saying why it stopped without that.
+const STOPPING_FOR: Duration = Duration::from_secs(2);
+
+/// What an editor is sent when its language server can't start, just before its connection is
+/// closed, with why and how to put it right: `{ "reason": ..., "help": ... }`. Connecting again
+/// would fail the same way, so the editor stops trying, and says so.
+pub const UNAVAILABLE: &str = "workshop/unavailable";
 
 // ---- Standing between the editor and the server ----
 
@@ -286,6 +297,10 @@ struct Server {
     /// Each message the server writes, read as it comes so the server is never kept waiting.
     from_server: mpsc::Receiver<Result<String>>,
     proxy: Proxy,
+    /// The last lines it wrote to stderr, to say why it stopped.
+    stderr: Arc<Mutex<VecDeque<String>>>,
+    /// Reading stderr, which ends once the server has stopped writing to it.
+    reading_stderr: Option<tokio::task::JoinHandle<()>>,
     /// After `child`, so the group is killed once the child has been.
     _group: ProcessGroup,
 }
@@ -304,16 +319,28 @@ impl Server {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .with_context(|| format!("starting language server `{program}`"))?;
+            .map_err(|err| match err.kind() {
+                std::io::ErrorKind::NotFound => anyhow!(
+                    "the language server, `{program}`, isn't installed: it isn't on the PATH it's started with"
+                ),
+                _ => anyhow!(err).context(format!("starting the language server, `{program}`")),
+            })?;
         let group = ProcessGroup::of(&child);
         let stdin = child.stdin.take().context("stdin not captured")?;
         let stdout = child.stdout.take().context("stdout not captured")?;
         let stderr = child.stderr.take().context("stderr not captured")?;
         let program_name = program.clone();
-        tokio::spawn(async move {
+        let said = Arc::new(Mutex::new(VecDeque::new()));
+        let keeping = said.clone();
+        let reading_stderr = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::debug!(target: "lsp", "{program_name}: {line}");
+                let mut kept = keeping.lock().expect("stderr lock poisoned");
+                if kept.len() == STDERR_LINES {
+                    kept.pop_front();
+                }
+                kept.push_back(line);
             }
         });
         let (messages, from_server) = mpsc::channel(64);
@@ -337,8 +364,37 @@ impl Server {
             stdin,
             from_server,
             proxy: Proxy::default(),
+            stderr: said,
+            reading_stderr: Some(reading_stderr),
             _group: group,
         })
+    }
+
+    /// Why the server stopped, once it has: how it exited, and the last of what it wrote to
+    /// stderr, which is usually where a server says what's wrong.
+    async fn why_stopped(&mut self) -> String {
+        let program = self.setup.command.first().map_or("", String::as_str);
+        let ended = match tokio::time::timeout(STOPPING_FOR, self.child.wait()).await {
+            Ok(Ok(status)) => format!("the language server, `{program}`, stopped ({status})"),
+            Ok(Err(err)) => format!("the language server, `{program}`, stopped: {err}"),
+            Err(_) => format!("the language server, `{program}`, closed its output"),
+        };
+        if let Some(reading) = self.reading_stderr.take() {
+            let _ = tokio::time::timeout(STOPPING_FOR, reading).await;
+        }
+        let said: Vec<String> = self
+            .stderr
+            .lock()
+            .expect("stderr lock poisoned")
+            .iter()
+            .map(|line| line.trim().to_owned())
+            .filter(|line| !line.is_empty())
+            .collect();
+        if said.is_empty() {
+            ended
+        } else {
+            format!("{ended}, saying:\n{}", said.join("\n"))
+        }
     }
 
     async fn write(&mut self, message: &str) -> Result<()> {
@@ -374,12 +430,16 @@ impl Servers {
     /// has gone, if there's one started the same way, or a new one. Returns once the editor has
     /// gone, the server has stopped, or `restart` changes, which ends the session so the editor
     /// reconnects to a fresh server.
+    ///
+    /// If the server can't start, or stops before the editor has greeted it, the editor is told
+    /// why, with `help`, which says how to put it right, as `UNAVAILABLE`.
     pub async fn relay(
         &self,
         socket: WebSocket,
         command: &[String],
         root: &Path,
         environment: &[(String, String)],
+        help: &str,
         mut restart: watch::Receiver<u64>,
     ) -> Result<()> {
         let setup = Setup {
@@ -393,9 +453,15 @@ impl Servers {
                 tracing::debug!(target: "lsp", "taking over a running language server");
                 server
             }
-            None => Server::start(setup)?,
+            None => match Server::start(setup) {
+                Ok(server) => server,
+                Err(err) => {
+                    unavailable(socket, &format!("{err:#}"), help).await;
+                    return Err(err);
+                }
+            },
         };
-        match serve(socket, &mut server, &mut restart).await? {
+        match serve(socket, &mut server, help, &mut restart).await? {
             Ending::EditorGone => self.keep(server, restart).await,
             Ending::Restart => tracing::info!("restarting the language server"),
         }
@@ -478,10 +544,38 @@ impl Servers {
     }
 }
 
+/// Tells the editor its language server can't start, and why, then closes the connection.
+async fn unavailable(mut socket: WebSocket, reason: &str, help: &str) {
+    let notice = json!({
+        "jsonrpc": "2.0",
+        "method": UNAVAILABLE,
+        "params": { "reason": reason, "help": help },
+    });
+    // The editor may have gone already, and then there's nobody to tell.
+    if socket
+        .send(Message::Text(notice.to_string().into()))
+        .await
+        .is_ok()
+    {
+        let _ = socket.send(Message::Close(None)).await;
+    }
+}
+
+/// Ends a session whose server has stopped, saying why. One that stopped before it was greeted
+/// didn't start properly, and the editor is told so, as connecting again would go the same way.
+async fn stopped(socket: WebSocket, server: &mut Server, help: &str) -> anyhow::Error {
+    let why = server.why_stopped().await;
+    if !server.proxy.ready() {
+        unavailable(socket, &why, help).await;
+    }
+    anyhow!(why)
+}
+
 /// Relays between an editor and a server until one of them goes.
 async fn serve(
     mut socket: WebSocket,
     server: &mut Server,
+    help: &str,
     restart: &mut watch::Receiver<u64>,
 ) -> Result<Ending> {
     let mut last_heard = Instant::now();
@@ -510,7 +604,10 @@ async fn serve(
                 }
             }
             message = server.from_server.recv() => {
-                let text = message.context("the language server closed its output")??;
+                let Some(text) = message else {
+                    return Err(stopped(socket, server, help).await);
+                };
+                let text = text?;
                 if let Some(message) = server.proxy.server_said(&text)?
                     && socket.send(Message::Text(message.into())).await.is_err()
                 {
@@ -525,10 +622,7 @@ async fn serve(
                 }
             }
             _ = restart.changed() => return Ok(Ending::Restart),
-            status = server.child.wait() => {
-                let status = status?;
-                bail!("language server exited with {status}");
-            }
+            _ = server.child.wait() => return Err(stopped(socket, server, help).await),
         }
     }
 }

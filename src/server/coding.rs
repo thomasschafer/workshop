@@ -703,9 +703,10 @@ pub(super) async fn lsp(
             }
         };
         let restart = app.lsp_restarts.subscribe();
+        let help = "Install it on the computer Workshop runs on, then try again.";
         let relayed = app
             .lsp_servers
-            .relay(socket, &command, &root, &environment, restart);
+            .relay(socket, &command, &root, &environment, help, restart);
         if let Err(err) = relayed.await {
             tracing::warn!("language server: {err:#}");
         }
@@ -1101,6 +1102,55 @@ mod tests {
         )
         .await;
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// A language server that isn't installed is reported to the editor, with why and how to
+    /// install it, rather than the connection just closing for the editor to try again.
+    #[tokio::test]
+    async fn says_why_a_language_server_cant_start() {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::parse("").unwrap();
+        config.solutions_dir = dir.path().join("aoc");
+        config.languages.get_mut("python").unwrap().lsp =
+            Some(vec!["workshop-no-such-language-server".to_owned()]);
+        let app = std::sync::Arc::new(
+            crate::server::App::new(
+                config,
+                crate::paths::Paths::under(dir.path()),
+                "secret".into(),
+                None,
+            )
+            .unwrap(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, crate::server::router(app)).await });
+
+        let mut request = format!("ws://{address}/api/coding/lsp/python")
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert(header::COOKIE, "workshop_token=secret".parse().unwrap());
+        let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        let notice = socket.next().await.unwrap().unwrap();
+        let notice: serde_json::Value = serde_json::from_str(notice.to_text().unwrap()).unwrap();
+        assert_eq!(notice["method"], workshop_lsp::UNAVAILABLE);
+        let reason = notice["params"]["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("`workshop-no-such-language-server`, isn't installed"),
+            "{reason}"
+        );
+        let help = notice["params"]["help"].as_str().unwrap();
+        assert!(help.contains("Install"), "{help}");
+        assert!(matches!(
+            socket.next().await,
+            Some(Ok(Message::Close(_))) | None
+        ));
     }
 
     #[tokio::test]

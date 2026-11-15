@@ -112,6 +112,7 @@ urlencoding.workspace = true
 [dev-dependencies]
 rusqlite.workspace = true
 tempfile.workspace = true
+tokio-tungstenite = "0.29.0"
 tower.workspace = true
 
 # Pack checks run thousands of simulated trials, which an unoptimised script engine makes slow in
