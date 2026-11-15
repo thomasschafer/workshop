@@ -2005,36 +2005,51 @@ test("runs, enters zen mode and turns between tabs from the keyboard, and lists 
   await computer.keyboard.press(`${mod}+Period`);
   await expect(computer.locator("nav.tabs")).toBeHidden();
   // Turning slides the tab that's left out the way it's turned, as the next comes in, in
-  // browsers that can: the animations that run are noted as they do.
+  // browsers that can: the animations that run are noted as they do, at each of the browser's
+  // own frames, which the page's clock, held still below, doesn't hold up.
   const slides = await computer.evaluate(() => {
     const seen = new Set<string>();
     Object.assign(window, { slidesSeen: seen });
+    const frame = window.requestAnimationFrame.bind(window);
     const note = () => {
       for (const animation of document.getAnimations()) {
         if (animation instanceof CSSAnimation) seen.add(animation.animationName);
       }
-      requestAnimationFrame(note);
+      frame(note);
     };
     note();
     return typeof document.startViewTransition === "function";
   });
   const slidesSeen = () =>
     computer.evaluate(() => [...(window as unknown as { slidesSeen: Set<string> }).slidesSeen]);
-  await computer.keyboard.press("Alt+BracketLeft");
+  const forgetSlides = () =>
+    computer.evaluate(() => (window as unknown as { slidesSeen: Set<string> }).slidesSeen.clear());
+  // A turn only waits a moment for the browser to be ready to slide, then changes tabs without
+  // sliding, and a slow runner can take longer than that to draw the page. So the page's clock
+  // is held still while turning, and only moved on once each turn has changed the tab. It's held
+  // throughout, as letting it run between turns and holding it again can let a timer through.
+  await computer.clock.install();
+  // A second on from the clock it started from, which it can't have passed yet.
+  await computer.clock.pauseAt(Date.now() + 1000);
+  /** Turns with `keys`, and lets a second pass on the page's clock once `shown` is. */
+  const turn = async (keys: string[], shown: Locator) => {
+    for (const key of keys) await computer.keyboard.press(key);
+    await expect(shown).toBeVisible();
+    await computer.clock.runFor(1000);
+  };
+  await turn(["Alt+BracketLeft"], computer.locator(".pane.problem"));
   await expect(computer.locator(".zen-tabs .selected")).toHaveText("Problem");
-  await expect(computer.locator(".pane.problem")).toBeVisible();
   if (slides) {
     await expect.poll(slidesSeen).toEqual(expect.arrayContaining(["tab-out-right", "tab-in-left"]));
   }
   await expect(computer.locator("html")).not.toHaveAttribute("data-tab-turn");
-  await computer.keyboard.press("Alt+BracketRight");
-  await computer.keyboard.press("Alt+BracketRight");
-  await expect(computer.locator(".notes textarea")).toBeVisible();
+  await forgetSlides();
+  await turn(["Alt+BracketRight", "Alt+BracketRight"], computer.locator(".notes textarea"));
   if (slides) {
     await expect.poll(slidesSeen).toEqual(expect.arrayContaining(["tab-out-left", "tab-in-right"]));
   }
-  await computer.keyboard.press("Alt+BracketLeft");
-  await expect(computer.locator(".cm-content")).toBeVisible();
+  await turn(["Alt+BracketLeft"], computer.locator(".cm-content"));
+  await computer.clock.resume();
   await computer.keyboard.press(`${mod}+Period`);
   await expect(computer.locator("nav.tabs")).toBeVisible();
 
