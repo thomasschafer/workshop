@@ -13,7 +13,7 @@ import {
   test,
 } from "@playwright/test";
 import { charFor, LAYOUT } from "../src/keyboard";
-import { HOME, PORT } from "./fixture";
+import { FAKE_LSP_FAILS, HOME, PORT } from "./fixture";
 import { installSimulatedSpeech } from "./speech";
 
 // The tests share one page and run in order, like one session with the app.
@@ -2371,6 +2371,52 @@ test("keeps the language server for an editor that comes back, with its files as
   await expect(other.locator(".cm-helix-info-markdown")).not.toContainText(`from server ${first}.`);
   await otherContext.close();
   await context.close();
+});
+
+test("says quietly why the language server can't start, and keeps editing the code", async ({
+  browser,
+}) => {
+  const { context, phone: computer } = await openOnPhone(browser, "helix", "computer");
+  const fails = join(HOME, "solutions", FAKE_LSP_FAILS);
+  writeFileSync(fails, "");
+  try {
+    // So the server kept for an editor that went is stopped, and the next one starts afresh.
+    expect((await computer.request.post("/api/lsp/restart")).ok()).toBe(true);
+    const attempts: string[] = [];
+    computer.on("websocket", (socket) => {
+      if (socket.url().endsWith("/api/lsp")) attempts.push(socket.url());
+    });
+    await computer.reload();
+    const note = computer.locator(".lsp-unavailable");
+    await expect(note).toContainText("Completions and error checks are unavailable", {
+      timeout: 15_000,
+    });
+    await expect(note).toContainText("told to fail as it starts");
+    await expect(note).toContainText("Setup can install it with mise");
+    await expect(computer.locator(".status-line")).toContainText("no checks");
+    await computer.waitForTimeout(4000);
+    expect(attempts).toHaveLength(1);
+
+    // The code can still be changed, and is saved.
+    const saved = () => readFileSync(solution, "utf8");
+    const original = saved();
+    await computer.locator(".cm-content").click();
+    await computer.keyboard.type("ggOoops");
+    await computer.keyboard.press("Escape");
+    await expect.poll(saved).toBe(`oops\n${original}`);
+    await computer.keyboard.type("xd");
+    await expect.poll(saved).toBe(original);
+
+    rmSync(fails);
+    await note.getByRole("button", { name: "Try again" }).click();
+    await expect(note).toHaveCount(0);
+    await expect(computer.locator(".status-line")).toContainText("no errors", {
+      timeout: 15_000,
+    });
+  } finally {
+    rmSync(fails, { force: true });
+    await context.close();
+  }
 });
 
 test("types and deletes in Helix's insert mode however a keyboard other than Workshop's sends it", async ({

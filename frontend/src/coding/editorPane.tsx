@@ -38,17 +38,18 @@ export function EditorPane({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [conflict, setConflict] = useState<FileVersion | null>(null);
   const [showProblems, setShowProblems] = useState(false);
-  const { lsp, lspStatus, lspError, dismissLspError, restartLsp } = useLanguageServer(
-    language.lsp
-      ? {
-          rootUri: language.lsp.root_uri,
-          options: language.lsp.options,
-          path: `/api/coding/lsp/${language.id}`,
-        }
-      : null,
-    language.id,
-    editor,
-  );
+  const { lsp, lspStatus, lspError, lspUnavailable, dismissLspError, restartLsp, retryLsp } =
+    useLanguageServer(
+      language.lsp
+        ? {
+            rootUri: language.lsp.root_uri,
+            options: language.lsp.options,
+            path: `/api/coding/lsp/${language.id}`,
+          }
+        : null,
+      language.id,
+      editor,
+    );
 
   useEffect(() => {
     const parent = host.current;
@@ -123,6 +124,8 @@ export function EditorPane({
       {conflict ? <ConflictBanner what="code" onResolve={resolve} /> : null}
       <StatusLine
         checks={lsp ? lspStatus : null}
+        unavailable={lspUnavailable}
+        onRetry={retryLsp}
         serverError={lspError !== null}
         diagnostics={diagnostics}
         saveStatus={saveStatus}

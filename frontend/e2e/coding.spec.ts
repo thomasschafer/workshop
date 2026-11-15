@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type BrowserContext,
@@ -8,7 +8,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { CODING_HOME, CODING_PORT } from "./fixture";
+import { CODING_HOME, CODING_PORT, FAKE_LSP_FAILS } from "./fixture";
 import { holdToTalk, installSimulatedSpeech } from "./speech";
 
 // One learner on one phone, working through a problem of the sample pack's a step at a time,
@@ -252,6 +252,54 @@ test("brings up the phone's own keyboard for the code without Helix's keybinding
   await page.getByRole("button", { name: "Hide keyboard" }).tap();
   await expect(editor).toHaveAttribute("inputmode", "none");
   await page.close();
+});
+
+test("says quietly why the language server can't start, and still runs the code", async () => {
+  const root = join(CODING_HOME, "data", "coding", "python");
+  mkdirSync(root, { recursive: true });
+  const fails = join(root, FAKE_LSP_FAILS);
+  writeFileSync(fails, "");
+  // So the server kept for the editor that went is stopped, and the next one starts afresh.
+  expect((await phone.request.post("/api/lsp/restart")).ok()).toBe(true);
+  const page = await context.newPage();
+  const attempts: string[] = [];
+  page.on("websocket", (socket) => {
+    if (socket.url().includes("/api/coding/lsp/")) attempts.push(socket.url());
+  });
+  try {
+    await page.goto(phone.url());
+    await expect(page.locator(".step.current")).toHaveText("Code");
+    const note = page.locator(".lsp-unavailable");
+    await expect(note).toContainText("Completions and error checks are unavailable", {
+      timeout: 15_000,
+    });
+    await expect(note).toContainText("stopped (exit status: 1)");
+    await expect(note).toContainText("told to fail as it starts");
+    await expect(note).toContainText("then try again");
+    await expect(page.locator(".status-line")).toContainText("no checks");
+    // It isn't tried again on its own, as it would only fail the same way.
+    await page.waitForTimeout(4000);
+    expect(attempts).toHaveLength(1);
+
+    // The code still runs without it.
+    await page.getByRole("button", { name: "Run examples" }).tap();
+    await expect(page.getByRole("region", { name: "Examples run" })).toContainText(
+      "examples right",
+      { timeout: 20_000 },
+    );
+
+    // Once it can start, trying again connects to it.
+    rmSync(fails);
+    await note.getByRole("button", { name: "Try again" }).tap();
+    await expect(note).toHaveCount(0);
+    await expect(page.locator(".status-line")).toContainText(/no errors|\d+ (error|warning)/, {
+      timeout: 15_000,
+    });
+    expect(attempts).toHaveLength(2);
+  } finally {
+    rmSync(fails, { force: true });
+    await page.close();
+  }
 });
 
 test("submits, shows a small input it fails on, then passes and is reviewed", async () => {

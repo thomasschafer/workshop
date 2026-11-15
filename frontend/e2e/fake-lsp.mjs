@@ -14,6 +14,17 @@
 // lines, sending the whole file back as one edit, as some servers do. It can't format a file with
 // `unparsable` in it, and says so as the Haskell language server does, with a message to show as
 // well as in answer. A change that adds an `alarm` to the file has it report an error of its own.
+//
+// Started where there's a file named `fake-lsp-fails`, it fails as it starts, saying why on
+// stderr, as a server missing something it needs would.
+
+import { existsSync } from "node:fs";
+
+// As FAKE_LSP_FAILS in fixture.ts.
+if (existsSync("fake-lsp-fails")) {
+  process.stderr.write("fake-lsp: told to fail as it starts\n");
+  process.exit(1);
+}
 
 const documents = new Map();
 let nextRequest = 0;

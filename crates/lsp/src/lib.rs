@@ -320,9 +320,9 @@ impl Server {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|err| match err.kind() {
-                std::io::ErrorKind::NotFound => anyhow!(
-                    "the language server, `{program}`, isn't installed: it isn't on the PATH it's started with"
-                ),
+                std::io::ErrorKind::NotFound => {
+                    anyhow!("the language server, `{program}`, isn't installed")
+                }
                 _ => anyhow!(err).context(format!("starting the language server, `{program}`")),
             })?;
         let group = ProcessGroup::of(&child);

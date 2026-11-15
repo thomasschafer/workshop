@@ -222,6 +222,17 @@ html[data-tab-turn] .content {
   flex: none;
 }
 
+/* Why completions and checks are off, under the status line. A server's reason can run to a few
+   lines of what it wrote as it stopped. */
+.lsp-unavailable {
+  margin: 0;
+  padding: 0 12px 4px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .status-count,
 .status-problem {
   padding: 0;
@@ -2281,7 +2292,8 @@ html[data-tab-turn] .content {
    the keyboard. */
 .app.zen > .top,
 .app.zen > .tabs,
-.app.zen .status-line {
+.app.zen .status-line,
+.app.zen .lsp-unavailable {
   display: none;
 }
 

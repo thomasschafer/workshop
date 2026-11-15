@@ -13,7 +13,7 @@ import {
   findReferencesKeymap,
   hoverTooltips,
   jumpToDefinitionKeymap,
-  LSPClient,
+  type LSPClient,
   renameKeymap,
   serverDiagnostics,
   signatureHelp,
@@ -63,7 +63,7 @@ import {
   setHelixBottomInset,
   setHelixStatusHost,
 } from "./helix/view";
-import { adjustCapabilities, languageServerCompletion, messageToShow } from "./lsp";
+import { adjustCapabilities, LanguageClient, languageServerCompletion, messageToShow } from "./lsp";
 import { applyWorkspaceEdit } from "./lspEdits";
 import { pinchToZoom } from "./pinch";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
@@ -801,7 +801,13 @@ class SocketTransport implements Transport {
   }
 }
 
-export type LanguageServerStatus = "connecting" | "ready" | "reconnecting";
+export type LanguageServerStatus = "connecting" | "ready" | "reconnecting" | "unavailable";
+
+/** Why the language server can't be used, and how to put that right, if that's known. */
+export interface LanguageServerUnavailable {
+  reason: string;
+  help: string | null;
+}
 
 /** How long a run waits for the code to be formatted first. */
 const FORMAT_BEFORE_RUN_MS = 3000;
@@ -810,15 +816,32 @@ const MIN_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 30_000;
 
 /**
+ * How many times in a row a connection may close before the language server is ready, before
+ * it's given up on: about a minute, waiting longer each time.
+ */
+export const MAX_CONNECTION_ATTEMPTS = 6;
+
+/** What the relay sends, just before closing the connection, when the server can't start. */
+const UNAVAILABLE = "workshop/unavailable";
+
+/**
  * Keeps one language server client connected through Workshop's websocket relay, reconnecting
  * whenever the connection drops (for example when the server restarts or the phone sleeps).
  * Editors keep using the same client, so they pick the server back up without being recreated.
+ *
+ * A server that can't start is given up on, rather than tried again and again: at once if the
+ * relay says why, and otherwise once connecting has failed a few times in a row.
  */
 export class LanguageServerConnection {
-  readonly client: LSPClient;
+  readonly client: LanguageClient;
   private socket: WebSocket | null = null;
   private retryDelay = MIN_RECONNECT_MS;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Connections in a row that closed before the server was ready. */
+  private failures = 0;
+  /** What the relay said, if it said the server can't start. */
+  private refused: LanguageServerUnavailable | null = null;
+  private givenUp = false;
   private closed = false;
 
   constructor(
@@ -827,10 +850,12 @@ export class LanguageServerConnection {
     private readonly onStatus: (status: LanguageServerStatus) => void,
     /** Called with an error the language server reports, other than one formatting reports. */
     private readonly onError: (message: string) => void,
+    /** Called with why the server's been given up on, and with null when it's tried again. */
+    private readonly onUnavailable: (why: LanguageServerUnavailable | null) => void,
     /** The relay's address on the server, for the language and the files it serves. */
     private readonly path = "/api/lsp",
   ) {
-    this.client = new LSPClient({
+    this.client = new LanguageClient({
       rootUri,
       initializationOptions,
       timeout: 30_000,
@@ -842,6 +867,13 @@ export class LanguageServerConnection {
           if (error !== null) this.onError(error);
           return true;
         },
+        [UNAVAILABLE]: (_client, params: { reason?: unknown; help?: unknown }) => {
+          this.refused = {
+            reason: typeof params.reason === "string" ? params.reason : "it couldn't start",
+            help: typeof params.help === "string" ? params.help : null,
+          };
+          return true;
+        },
       },
     });
     document.addEventListener("visibilitychange", this.onVisibility);
@@ -849,7 +881,12 @@ export class LanguageServerConnection {
   }
 
   private readonly onVisibility = () => {
-    if (document.visibilityState === "visible" && this.socket === null && !this.closed) {
+    if (
+      document.visibilityState === "visible" &&
+      this.socket === null &&
+      !this.closed &&
+      !this.givenUp
+    ) {
       clearTimeout(this.retryTimer);
       this.open();
     }
@@ -859,9 +896,9 @@ export class LanguageServerConnection {
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${scheme}://${location.host}${this.path}`);
     this.socket = socket;
+    let ready = false;
     this.onStatus(this.retryDelay === MIN_RECONNECT_MS ? "connecting" : "reconnecting");
     socket.addEventListener("open", () => {
-      this.retryDelay = MIN_RECONNECT_MS;
       // Until the server has initialised, the diagnostics on screen may be stale.
       this.client
         .connect(
@@ -870,7 +907,12 @@ export class LanguageServerConnection {
           }),
         )
         .initializing.then(() => {
-          if (this.socket === socket) this.onStatus("ready");
+          if (this.socket !== socket) return;
+          ready = true;
+          // Only now, as the relay accepts the connection before it starts the server.
+          this.retryDelay = MIN_RECONNECT_MS;
+          this.failures = 0;
+          this.onStatus("ready");
         })
         .catch(() => {});
     });
@@ -881,6 +923,18 @@ export class LanguageServerConnection {
       }
       this.socket = null;
       if (this.closed) return;
+      if (this.refused !== null) {
+        this.giveUp(this.refused);
+        return;
+      }
+      if (!ready) this.failures++;
+      if (this.failures >= MAX_CONNECTION_ATTEMPTS) {
+        this.giveUp({
+          reason: "the connection to the language server kept closing before it was ready",
+          help: null,
+        });
+        return;
+      }
       this.onStatus("reconnecting");
       // Hidden pages wait for `visibilitychange` instead of retrying in the background.
       if (document.visibilityState === "visible") {
@@ -888,6 +942,25 @@ export class LanguageServerConnection {
         this.retryDelay = Math.min(this.retryDelay * 2, MAX_RECONNECT_MS);
       }
     });
+  }
+
+  private giveUp(why: LanguageServerUnavailable): void {
+    this.givenUp = true;
+    this.client.unavailable = why.reason;
+    this.onStatus("unavailable");
+    this.onUnavailable(why);
+  }
+
+  /** Connects afresh to a server that's been given up on, such as once it's been installed. */
+  retry(): void {
+    if (this.closed || !this.givenUp) return;
+    this.givenUp = false;
+    this.refused = null;
+    this.failures = 0;
+    this.retryDelay = MIN_RECONNECT_MS;
+    this.client.unavailable = null;
+    this.onUnavailable(null);
+    this.open();
   }
 
   close(): void {

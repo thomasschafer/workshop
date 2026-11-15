@@ -205,7 +205,8 @@
 .coding-problem.zen .coding-toolbar,
 .coding-problem.zen .coding-hints,
 .coding-problem.zen .coding-results,
-.coding-problem.zen .status-line {
+.coding-problem.zen .status-line,
+.coding-problem.zen .lsp-unavailable {
   display: none;
 }
 

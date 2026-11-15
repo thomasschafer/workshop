@@ -1,4 +1,4 @@
-import type { Diagnostics, LanguageServerStatus } from "../editor";
+import type { Diagnostics, LanguageServerStatus, LanguageServerUnavailable } from "../editor";
 import { headline } from "../problems";
 import type { SaveStatus } from "../saver";
 
@@ -16,10 +16,13 @@ export function describeCounts({ errors, warnings, others }: Diagnostics): strin
 
 /**
  * The line above the code: the language server's checks, saving, and what there is to say of
- * where the cursor is, which is the problem there if there is one, and otherwise its type.
+ * where the cursor is, which is the problem there if there is one, and otherwise its type. If
+ * the language server's been given up on, a quiet note below it says why.
  */
 export function StatusLine({
   checks,
+  unavailable,
+  onRetry,
   serverError,
   diagnostics,
   saveStatus,
@@ -29,6 +32,10 @@ export function StatusLine({
 }: {
   /** The language server's status, or null if the language has none. */
   checks: LanguageServerStatus | null;
+  /** Why the language server's been given up on, if it has. */
+  unavailable: LanguageServerUnavailable | null;
+  /** Tries the language server again, once it's been given up on. */
+  onRetry: () => void;
   /** Whether the language server has reported an error of its own, shown with the problems. */
   serverError: boolean;
   diagnostics: Diagnostics;
@@ -48,40 +55,69 @@ export function StatusLine({
   const any = diagnostics.errors + diagnostics.warnings + diagnostics.others > 0;
   const problem = showProblem ? diagnostics.atCursor : null;
   return (
-    <div class="status-line">
-      <span class="status-checks">
-        {checks === null ? null : checks !== "ready" ? (
-          "starting checks"
-        ) : any ? (
-          <button type="button" class="status-count" onClick={onProblems}>
-            {describeCounts(diagnostics)}
-          </button>
-        ) : (
-          describeCounts(diagnostics)
-        )}
-        {checks === "ready" && serverError ? (
-          <>
-            {" · "}
-            <button type="button" class="status-count severity-error" onClick={onProblems}>
-              server error
+    <>
+      <div class="status-line">
+        <span class="status-checks">
+          {checks === null ? null : checks === "unavailable" ? (
+            "no checks"
+          ) : checks !== "ready" ? (
+            "starting checks"
+          ) : any ? (
+            <button type="button" class="status-count" onClick={onProblems}>
+              {describeCounts(diagnostics)}
             </button>
-          </>
+          ) : (
+            describeCounts(diagnostics)
+          )}
+          {checks === "ready" && serverError ? (
+            <>
+              {" · "}
+              <button type="button" class="status-count severity-error" onClick={onProblems}>
+                server error
+              </button>
+            </>
+          ) : null}
+          {checks !== null && saving ? " · " : null}
+          {saving}
+        </span>
+        {problem ? (
+          <button
+            type="button"
+            class={`status-problem severity-${problem.severity}`}
+            title="Show the whole message"
+            onClick={onProblems}
+          >
+            {headline(problem)}
+          </button>
+        ) : hover ? (
+          <code class="hover">{hover}</code>
         ) : null}
-        {checks !== null && saving ? " · " : null}
-        {saving}
-      </span>
-      {problem ? (
-        <button
-          type="button"
-          class={`status-problem severity-${problem.severity}`}
-          title="Show the whole message"
-          onClick={onProblems}
-        >
-          {headline(problem)}
-        </button>
-      ) : hover ? (
-        <code class="hover">{hover}</code>
+      </div>
+      {checks === "unavailable" && unavailable ? (
+        <UnavailableNote unavailable={unavailable} onRetry={onRetry} />
       ) : null}
-    </div>
+    </>
+  );
+}
+
+/**
+ * Says completions and checks are off, and why, without getting in the way: the code can still
+ * be edited, run and submitted without the language server.
+ */
+function UnavailableNote({
+  unavailable,
+  onRetry,
+}: {
+  unavailable: LanguageServerUnavailable;
+  onRetry: () => void;
+}) {
+  return (
+    <p class="lsp-unavailable" role="status">
+      Completions and error checks are unavailable: {unavailable.reason}.
+      {unavailable.help ? ` ${unavailable.help}` : null}{" "}
+      <button type="button" class="text-button" onClick={onRetry}>
+        Try again
+      </button>
+    </p>
   );
 }

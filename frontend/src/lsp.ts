@@ -1,4 +1,5 @@
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
+import { LSPClient, type Transport } from "@codemirror/lsp-client";
 import type { Extension } from "@codemirror/state";
 import { EXTRA_CAPABILITIES, isRecord } from "./lspActions";
 import { serverCompletionSource } from "./lspCompletion";
@@ -95,4 +96,42 @@ export function languageServerCompletion(options: {
     activateOnTypingDelay: COMPLETION_DELAY_MS,
     selectOnOpen,
   });
+}
+
+/**
+ * The language client, with nothing it does left to fail unhandled.
+ *
+ * The library sends notifications, such as of a file being opened or changed, once the server's
+ * greeted, but if the connection closes first, the greeting fails 30 seconds later, and every
+ * notification waiting on it with it, where nothing can catch that. Here they're dropped
+ * instead, with the connection. Once the server's been given up on, requests fail at once,
+ * rather than waiting for a server that isn't coming.
+ */
+export class LanguageClient extends LSPClient {
+  private sending: Transport | null = null;
+  /** Why the language server can't be used, once it's been given up on. */
+  unavailable: string | null = null;
+
+  override connect(transport: Transport): this {
+    this.sending = transport;
+    super.connect(transport);
+    // Whoever waits on the greeting handles its failing; this is for when nobody is.
+    this.initializing.catch(() => {});
+    return this;
+  }
+
+  override notification<Params>(method: string, params: Params): void {
+    if (this.sending === null) return;
+    this.initializing.then(
+      () => this.sending?.send(JSON.stringify({ jsonrpc: "2.0", method, params })),
+      () => {},
+    );
+  }
+
+  override request<Params, Result>(method: string, params: Params): Promise<Result> {
+    if (this.unavailable !== null) {
+      return Promise.reject(new Error(`the language server is unavailable: ${this.unavailable}`));
+    }
+    return super.request(method, params);
+  }
 }

@@ -149,13 +149,14 @@ export function App({
   const stackHeightRef = useRef(0);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
-  const { lsp, lspStatus, lspError, dismissLspError, restartLsp } = useLanguageServer(
-    boot.language.has_lsp
-      ? { rootUri: boot.language.root_uri, options: boot.language.lsp_options, path: "/api/lsp" }
-      : null,
-    boot,
-    editor,
-  );
+  const { lsp, lspStatus, lspError, lspUnavailable, dismissLspError, restartLsp, retryLsp } =
+    useLanguageServer(
+      boot.language.has_lsp
+        ? { rootUri: boot.language.root_uri, options: boot.language.lsp_options, path: "/api/lsp" }
+        : null,
+      boot,
+      editor,
+    );
   const fileUri = useRef<string | null>(null);
   const puzzleRef = useRef(puzzle);
   // Utterances are handled one at a time, in the order they were spoken. The handler is set
@@ -851,6 +852,8 @@ export function App({
           ) : null}
           <StatusLine
             checks={lsp ? lspStatus : null}
+            unavailable={lspUnavailable}
+            onRetry={retryLsp}
             serverError={lspError !== null}
             diagnostics={diagnostics}
             saveStatus={saveStatus}

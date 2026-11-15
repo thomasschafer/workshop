@@ -81,6 +81,12 @@ function pythonProfile(): string {
   return `[languages.python]\n${profile}`;
 }
 
+/**
+ * A file that has the stand-in language server fail as it starts, saying why, when it's in the
+ * directory the server's started in.
+ */
+export const FAKE_LSP_FAILS = "fake-lsp-fails";
+
 export interface HomeOptions {
   home: string;
   port: number;
