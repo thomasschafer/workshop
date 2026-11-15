@@ -6,6 +6,7 @@ import { ItemView, SyncChip, useLearning } from "../learning/practice";
 import "../learning/practice.css";
 import { HomeButton, TrackTitle } from "../progress/page";
 import "./coding.css";
+import { newId } from "../learning/local";
 import { codingApi } from "./api";
 import { CodingLink, ProblemView } from "./problem";
 import { STEP_LABELS } from "./steps";
@@ -76,6 +77,7 @@ const STATUS: Record<Status, string> = {
   new: "New",
   done: "Done",
   flagged: "Flagged",
+  retired: "Retired",
 };
 
 function statusOf(item: Listed): string {
@@ -98,8 +100,22 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
 
   const order: Status[] = ["in_progress", "due", "new", "done", "flagged"];
   const items = overview
-    ? [...overview.items].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
+    ? overview.items
+        .filter((item) => item.status !== "retired")
+        .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
     : null;
+  const retired = overview ? overview.items.filter((item) => item.status === "retired") : [];
+  const [bringing, setBringing] = useState<string | null>(null);
+  const [bringError, setBringError] = useState<string | null>(null);
+  const bringBack = (key: string) => {
+    setBringing(key);
+    setBringError(null);
+    codingApi
+      .bringBack(key, newId())
+      .then(() => codingApi.overview())
+      .then(setOverview, (e: unknown) => setBringError(errorMessage(e)))
+      .finally(() => setBringing(null));
+  };
   const offlineReading = (learning.deck?.items ?? []).filter(
     (i) => i.kind === "reading" && i.track === "coding",
   );
@@ -127,7 +143,35 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
               </li>
             ))}
           </ul>
-        ) : error ? (
+        ) : null}
+        {items && retired.length > 0 ? (
+          <section class="coding-retired" aria-label="Retired">
+            <h2 class="coding-subheading">Retired</h2>
+            <p class="muted coding-hint">
+              Rated easy, so they won't come back. Bring one back to have it reviewed again.
+            </p>
+            <ul class="coding-list">
+              {retired.map((item) => (
+                <li key={item.key} class="coding-retired-item">
+                  <span class="coding-item-name">{item.label}</span>
+                  <button
+                    type="button"
+                    class="pill"
+                    disabled={!online || bringing !== null}
+                    onClick={() => bringBack(item.key)}
+                  >
+                    {bringing === item.key ? "Bringing back…" : "Bring back"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {bringError ? (
+              <p class="error-text" role="alert">
+                {bringError}
+              </p>
+            ) : null}
+          </section>
+        ) : items ? null : error ? (
           <>
             <p class="banner offline" role="status">
               Coding problems need the server, which can't be reached. Code to read works offline.

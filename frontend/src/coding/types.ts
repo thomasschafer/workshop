@@ -95,7 +95,15 @@ export interface Submitted {
   opened: Opened;
 }
 
-export type Status = "in_progress" | "due" | "new" | "done" | "flagged";
+export type Status = "in_progress" | "due" | "new" | "done" | "flagged" | "retired";
+
+/** How a problem stands once it's finished, or brought back. */
+export interface Finished {
+  /** When it comes back, unless it's retired. */
+  due: number | null;
+  /** Rated easy, so it never comes back, until it's brought back. */
+  retired: boolean;
+}
 
 export interface Listed {
   key: string;

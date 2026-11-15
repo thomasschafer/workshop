@@ -33,7 +33,15 @@ import {
   suggestedRating,
 } from "./steps";
 import { TutorSheet } from "./tutor";
-import type { CaseResult, Graded, Opened, Session, StepName, Submitted } from "./types";
+import type {
+  CaseResult,
+  Finished as FinishedReply,
+  Graded,
+  Opened,
+  Session,
+  StepName,
+  Submitted,
+} from "./types";
 
 /** How long typing in the plan pauses before it's saved. */
 const SAVE_DELAY_MS = 600;
@@ -88,7 +96,7 @@ export function ProblemView({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
-  const [finished, setFinished] = useState<{ due: number | null } | null>(null);
+  const [finished, setFinished] = useState<FinishedReply | null>(null);
 
   const saver = useMemo(
     () =>
@@ -278,7 +286,7 @@ export function ProblemView({
 
   const body = finished ? (
     <Finished
-      due={finished.due}
+      finished={finished}
       mode={session.mode}
       onHome={onHome}
       onList={onList}
@@ -1018,6 +1026,7 @@ function ReviewStep({
           Suggested: {RATINGS.find(([r]) => r === suggested)?.[1]}, from how it went.
         </p>
       ) : null}
+      <p class="muted coding-hint">Easy retires it: it won't come back unless you bring it back.</p>
       {online ? null : <p class="muted">Saying how it went needs the server.</p>}
       {problem ? <p class="error-text">{problem}</p> : null}
     </main>
@@ -1025,29 +1034,32 @@ function ReviewStep({
 }
 
 function Finished({
-  due,
+  finished,
   mode,
   onHome,
   onList,
   onSolve,
 }: {
-  due: number | null;
+  finished: FinishedReply;
   mode: Session["mode"];
   onHome: () => void;
   onList: () => void;
   onSolve: () => void;
 }) {
+  const { due } = finished;
   const days = due === null ? null : Math.max(0, Math.round((due - Date.now()) / 86_400_000));
   return (
     <main class="learn-content">
       <section class="learn-done" aria-label="Done">
         <h2>That's it done</h2>
         <p class="muted">
-          {days === null
-            ? "Saved."
-            : days === 0
-              ? "It comes back later today."
-              : `It comes back in about ${days} ${days === 1 ? "day" : "days"}.`}
+          {finished.retired
+            ? "Retired: it won't come back. Bring it back from the Coding list any time."
+            : days === null
+              ? "Saved."
+              : days === 0
+                ? "It comes back later today."
+                : `It comes back in about ${days} ${days === 1 ? "day" : "days"}.`}
         </p>
         <span class="learn-actions">
           <button type="button" class="pill" onClick={onHome}>

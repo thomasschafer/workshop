@@ -1,7 +1,7 @@
 import { request, streamLines, type Turn, type VersionedFile } from "../api";
 import { utcOffset } from "../learning/local";
 import type { Rating } from "../learning/types";
-import type { Graded, Language, Opened, Overview, Session, Submitted } from "./types";
+import type { Finished, Graded, Language, Opened, Overview, Session, Submitted } from "./types";
 
 const item = (key: string) => {
   const [pack, id] = key.split("/");
@@ -25,7 +25,10 @@ export const codingApi = {
   run: (key: string) => request<Graded>("POST", `${item(key)}/run`),
   submit: (key: string) => request<Submitted>("POST", `${item(key)}/submit`),
   finish: (key: string, id: string, rating: Rating) =>
-    request<{ due: number | null }>("POST", `${item(key)}/finish`, { id, rating }),
+    request<Finished>("POST", `${item(key)}/finish`, { id, rating }),
+  /** Brings a retired problem back, due straight away; `id` is the change's. */
+  bringBack: (key: string, id: string) =>
+    request<Finished>("POST", `${item(key)}/bring-back`, { id }),
   tutor: async (
     key: string,
     body: { model: string; turns: Turn[]; code: string; errors: string; last_run: string },
