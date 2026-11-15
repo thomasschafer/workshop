@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 use workshop_learning::schedule::DAY_MS;
-use workshop_learning::{Attempt, ItemRef, Mistake, Scheduler, SkillMastery};
+use workshop_learning::{Attempt, ItemRef, Mistake, RetirementChange, Scheduler, SkillMastery};
 use workshop_pack::Pack;
 
 /// How many weeks back the trend goes.
@@ -53,11 +53,14 @@ pub struct Point {
 }
 
 /// Every goal in the packs, with how it's going at `now`. `items` are the items there's
-/// practice of, and `attempts` every attempt, in the order they were made.
+/// practice of, and `attempts` and `retirements` every attempt and retirement change, in the
+/// order they were made.
+#[allow(clippy::too_many_arguments)]
 pub fn progress(
     packs: &[Pack],
     items: &[ItemRef<'_>],
     attempts: &[Attempt],
+    retirements: &[RetirementChange],
     mistakes: &[Mistake],
     scheduler: &Scheduler,
     now: i64,
@@ -66,7 +69,7 @@ pub fn progress(
         .rev()
         .map(|weeks| now - weeks * 7 * DAY_MS)
         .collect();
-    let history = workshop_learning::history(items, attempts, scheduler, &times);
+    let history = workshop_learning::history(items, attempts, retirements, scheduler, &times);
     let at = |index: usize| -> BTreeMap<&str, &SkillMastery> {
         history[index]
             .iter()

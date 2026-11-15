@@ -167,6 +167,8 @@ pub enum Status {
     Done,
     /// Flagged as wrong.
     Flagged,
+    /// Rated easy, so never offered again, until it's brought back.
+    Retired,
 }
 
 #[derive(Debug, Serialize)]
@@ -537,10 +539,13 @@ pub fn overview(
     let items = coding_items(planned)
         .map(|(key, item)| {
             let session = sessions.get(&key);
+            let retired = planned.is_retired(&key);
             let status = if flags.contains_key(&key) {
                 Status::Flagged
             } else if session.is_some() {
                 Status::InProgress
+            } else if retired {
+                Status::Retired
             } else if plan.is_some_and(|plan| plan.due.contains(&key)) {
                 Status::Due
             } else if plan.is_some_and(|plan| plan.is_new(&key)) {

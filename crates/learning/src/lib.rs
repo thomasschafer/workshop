@@ -12,6 +12,8 @@ pub mod store;
 
 pub use mastery::{SkillMastery, history, mastery};
 pub use mistakes::{Mistake, MistakeSource, NewMistake};
-pub use plan::{Clock, ItemRef, Limits, Progress, TrackPlan, plan};
+pub use plan::{Clock, ItemRef, Limits, Progress, TrackPlan, due, plan};
 pub use schedule::{ItemSchedule, Rating, Scheduler};
-pub use store::{Activity, Attempt, Flag, FlagChange, Store};
+pub use store::{
+    Activity, Attempt, Flag, FlagChange, Retirement, RetirementChange, Store, standings,
+};

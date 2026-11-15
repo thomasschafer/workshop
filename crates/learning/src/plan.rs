@@ -7,7 +7,7 @@ use serde::Serialize;
 use workshop_tracks::TrackId;
 
 use crate::schedule::{DAY_MS, ItemSchedule, Scheduler};
-use crate::store::Flag;
+use crate::store::{Flag, Retirement};
 
 /// How much to do, from the config.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -79,6 +79,8 @@ pub struct TrackPlan {
     pub new_waiting: Vec<String>,
     /// Flagged as wrong, so left out.
     pub flagged: usize,
+    /// Retired, so never offered again.
+    pub retired: usize,
     /// When the soonest item that isn't due yet will be, if there is one.
     pub next_due: Option<i64>,
 }
@@ -95,13 +97,30 @@ impl TrackPlan {
     }
 }
 
+/// When an item that's been attempted is due, or None if it's retired: as its schedule says,
+/// unless it was brought back since it was last attempted, which makes it due from then.
+pub fn due(
+    schedule: &ItemSchedule,
+    retirement: Option<Retirement>,
+    scheduler: &Scheduler,
+    retention: f64,
+) -> Option<i64> {
+    match retirement {
+        Some(Retirement::Retired { .. }) => None,
+        Some(Retirement::BroughtBack { at }) if at > schedule.last_review => Some(at),
+        _ => Some(scheduler.due(schedule, retention)),
+    }
+}
+
 /// Each track's plan, for the items given. Tracks with none of them aren't included. New items
-/// with any of the `focus` skills, such as those of recent mistakes, come first.
+/// with any of the `focus` skills, such as those of recent mistakes, come first. Retired items
+/// are left out, and one brought back since it was last attempted is due from then.
 #[allow(clippy::too_many_arguments)]
 pub fn plan(
     items: &[ItemRef<'_>],
     schedules: &BTreeMap<String, ItemSchedule>,
     flags: &BTreeMap<String, Flag>,
+    retirements: &BTreeMap<String, Retirement>,
     progress: Progress,
     limits: Limits,
     focus: &[String],
@@ -116,10 +135,16 @@ pub fn plan(
             plan.flagged += 1;
             continue;
         }
+        let retirement = retirements.get(item.key).copied();
+        if retirement.is_some_and(Retirement::is_retired) {
+            plan.retired += 1;
+            continue;
+        }
         match schedules.get(item.key) {
             None => plan.new.push(item.key.to_owned()),
             Some(schedule) => {
-                let when = scheduler.due(schedule, limits.retention);
+                let when = self::due(schedule, retirement, scheduler, limits.retention)
+                    .expect("retired items are left out above");
                 if when <= now {
                     due.push((when, item.key, item.track));
                 } else if plan.next_due.is_none_or(|next| when < next) {
@@ -239,6 +264,7 @@ mod tests {
             &items,
             &schedules,
             &flags,
+            &BTreeMap::new(),
             progress,
             limits,
             &[],
@@ -262,6 +288,7 @@ mod tests {
             &items,
             &schedules,
             &flags,
+            &BTreeMap::new(),
             done,
             limits,
             &[],
@@ -305,6 +332,7 @@ mod tests {
             &items,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
             Progress::default(),
             limits,
             &["graphs".to_owned()],
@@ -326,6 +354,7 @@ mod tests {
             &items,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
             started,
             limited,
             &["graphs".to_owned()],
@@ -344,6 +373,7 @@ mod tests {
             &items,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
             all_started,
             limited,
             &[],
@@ -352,5 +382,64 @@ mod tests {
         );
         assert!(plans[review].new.is_empty());
         assert_eq!(plans[review].new_waiting.len(), 3);
+    }
+
+    #[test]
+    fn leaves_retired_items_out_and_brings_back_the_ones_brought_back() {
+        let scheduler = Scheduler::default();
+        let coding = &TrackId::Coding;
+        let skills = Vec::new();
+        let item = |key| ItemRef {
+            key,
+            track: coding,
+            skills: &skills,
+        };
+        let items = [item("p/retired"), item("p/back"), item("p/again")];
+        // Solved yesterday, so none would be due yet.
+        let solved = scheduler.review(None, NOW - DAY_MS, Rating::Easy);
+        let schedules = BTreeMap::from([
+            ("p/retired".to_owned(), solved),
+            ("p/back".to_owned(), solved),
+            ("p/again".to_owned(), solved),
+        ]);
+        let retirements = BTreeMap::from([
+            (
+                "p/retired".to_owned(),
+                Retirement::Retired { at: NOW - DAY_MS },
+            ),
+            (
+                "p/back".to_owned(),
+                Retirement::BroughtBack { at: NOW - 60_000 },
+            ),
+            // Brought back, then attempted since, so it's as its schedule says.
+            (
+                "p/again".to_owned(),
+                Retirement::BroughtBack {
+                    at: NOW - 2 * DAY_MS,
+                },
+            ),
+        ]);
+        let limits = Limits {
+            daily_reviews: 5,
+            daily_new: 10,
+            weekly_minutes: 60,
+            retention: 0.9,
+        };
+        let plans = plan(
+            &items,
+            &schedules,
+            &BTreeMap::new(),
+            &retirements,
+            Progress::default(),
+            limits,
+            &[],
+            &scheduler,
+            NOW,
+        );
+        let plan = &plans[coding];
+        assert_eq!(plan.retired, 1);
+        assert_eq!(plan.due, ["p/back"]);
+        assert!(plan.new.is_empty());
+        assert!(plan.next_due.is_some_and(|next| next > NOW));
     }
 }

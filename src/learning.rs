@@ -10,11 +10,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_learning::{
-    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, Limits, Progress, SkillMastery, Store,
-    TrackPlan,
+    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, Limits, Progress, Rating,
+    RetirementChange, SkillMastery, Store, TrackPlan,
 };
 use workshop_pack::number::Tolerance;
 use workshop_pack::{Content, Item, Pack};
@@ -151,6 +151,22 @@ impl Learning {
         })
     }
 
+    /// The packs, as the config lists them. The first time they're read after the log is
+    /// brought up to date, the problems last rated easy before retiring existed are retired.
+    fn packs(&self) -> Result<Vec<Pack>> {
+        let packs = crate::packs::load(&self.config)?;
+        let items = crate::mistakes::items_by_key(&packs);
+        let retired = self.store.retire_past_easy(|key| {
+            items
+                .get(key)
+                .is_some_and(|item| item.kind.retires_when_easy())
+        })?;
+        if retired > 0 {
+            tracing::info!("retired {retired} problems last rated easy");
+        }
+        Ok(packs)
+    }
+
     fn limits(&self) -> Limits {
         Limits {
             daily_reviews: self.config.daily_reviews,
@@ -171,7 +187,7 @@ impl Learning {
     }
 
     pub fn deck(&self, clock: Clock) -> Result<Deck> {
-        let packs = crate::packs::load(&self.config)?;
+        let packs = self.packs()?;
         let shorts = shorts(&packs);
         let counts = self.store.attempt_counts()?;
         let schedules = self.store.schedules()?;
@@ -180,8 +196,13 @@ impl Learning {
             .map(|short| deck_item(short, counts.get(&short.key).copied().unwrap_or(0)))
             .collect::<Result<Vec<_>>>()?;
         let refs = item_refs(&shorts);
-        let mastery =
-            workshop_learning::mastery(&refs, &schedules, self.store.scheduler(), clock.now);
+        let mastery = workshop_learning::mastery(
+            &refs,
+            &schedules,
+            &self.store.retirements()?,
+            self.store.scheduler(),
+            clock.now,
+        );
         let skills = mastery
             .into_iter()
             .map(|mastery| {
@@ -238,7 +259,7 @@ impl Learning {
         {
             return Ok(());
         }
-        let packs = crate::packs::load(&self.config)?;
+        let packs = self.packs()?;
         let items = crate::mistakes::items_by_key(&packs);
         let mistakes: Vec<_> = attempts
             .iter()
@@ -267,13 +288,77 @@ impl Learning {
         }
     }
 
+    /// Records how a coding problem went, from the attempt finishing it. Rated easy, it's
+    /// retired, by a change with the attempt's id, so sending it again changes nothing. Returns
+    /// whether it's retired now.
+    pub fn record_problem(
+        &self,
+        attempt: Attempt,
+        findings: &[workshop_learning::NewMistake],
+        now: i64,
+    ) -> Result<bool> {
+        let packs = self.packs()?;
+        let items = crate::mistakes::items_by_key(&packs);
+        let item = items
+            .get(&attempt.item)
+            .with_context(|| format!("there's no item {}", attempt.item))?;
+        let retiring = attempt.rating == Rating::Easy && item.kind.retires_when_easy();
+        let retirement = retiring.then(|| RetirementChange {
+            id: attempt.id.clone(),
+            item: attempt.item.clone(),
+            at: attempt.answered_at,
+            retired: true,
+        });
+        // A forgotten attempt's own mistake, unless the grader found what went wrong.
+        let own = (findings.is_empty())
+            .then(|| crate::mistakes::from_attempt(item, &attempt))
+            .flatten();
+        self.store
+            .record_changes(std::slice::from_ref(&attempt), retirement.as_slice(), now)?;
+        self.store.record_mistakes(findings)?;
+        self.store.record_mistakes(own.as_slice())?;
+        Ok(self
+            .store
+            .retirements()?
+            .get(&attempt.item)
+            .is_some_and(|r| r.is_retired()))
+    }
+
+    /// Brings a retired item back, due from now. `id` is the change's, made by the app, so
+    /// bringing it back twice is one change. Fails for an item that isn't retired.
+    pub fn bring_back(&self, item: &str, id: &str, now: i64) -> Result<()> {
+        let already = self
+            .store
+            .retirement_changes()?
+            .into_iter()
+            .any(|change| change.id == id && change.item == item && !change.retired);
+        if already {
+            return Ok(());
+        }
+        if !self
+            .store
+            .retirements()?
+            .get(item)
+            .is_some_and(|r| r.is_retired())
+        {
+            bail!("{item} isn't retired");
+        }
+        self.store.record_retirements(&[RetirementChange {
+            id: id.to_owned(),
+            item: item.to_owned(),
+            at: now,
+            retired: false,
+        }])
+    }
+
     /// How well each skill is known now, over the items there's practice of.
     pub fn skill_mastery(&self, now: i64) -> Result<Vec<SkillMastery>> {
-        let packs = crate::packs::load(&self.config)?;
+        let packs = self.packs()?;
         let items = practised(&packs);
         Ok(workshop_learning::mastery(
             &item_refs(&items),
             &self.store.schedules()?,
+            &self.store.retirements()?,
             self.store.scheduler(),
             now,
         ))
@@ -281,13 +366,14 @@ impl Learning {
 
     /// How each of the packs' goals is going.
     pub fn goals(&self, now: i64) -> Result<Vec<crate::goals::GoalProgress>> {
-        let packs = crate::packs::load(&self.config)?;
+        let packs = self.packs()?;
         let items = practised(&packs);
         let recent = self.store.mistakes(now - crate::mistakes::RECENT_MS)?;
         Ok(crate::goals::progress(
             &packs,
             &item_refs(&items),
             &self.store.all_attempts()?,
+            &self.store.retirement_changes()?,
             &recent,
             self.store.scheduler(),
             now,
@@ -302,16 +388,18 @@ impl Learning {
 
     /// What's due and new in every track, as one plan, with the packs it was made from.
     pub fn planned(&self, clock: Clock) -> Result<Planned> {
-        let packs = crate::packs::load(&self.config)?;
+        let packs = self.packs()?;
         let items = practised(&packs);
         let refs = item_refs(&items);
         let progress = self.progress(clock)?;
         let limits = self.limits();
         let focus = self.focus(&packs, clock.now)?;
+        let retirements = self.store.retirements()?;
         let plans = workshop_learning::plan(
             &refs,
             &self.store.schedules()?,
             &self.store.flags()?,
+            &retirements,
             progress,
             limits,
             &focus,
@@ -333,6 +421,7 @@ impl Learning {
             },
             problems: problems(&packs),
             plans,
+            retirements,
             names,
             packs,
         })
@@ -387,6 +476,8 @@ pub struct Planned {
     /// Every skill's name, by id.
     pub skill_names: BTreeMap<String, String>,
     pub plans: BTreeMap<TrackId, TrackPlan>,
+    /// Where each item that's ever been retired stands.
+    pub retirements: BTreeMap<String, workshop_learning::Retirement>,
     /// Each track with items in it, and its name and icon.
     pub names: BTreeMap<TrackId, (String, TrackIcon)>,
     pub week: Week,
@@ -624,6 +715,11 @@ impl Planned {
                     .get(skill)
                     .map_or(skill.as_str(), String::as_str)
             })
+    }
+
+    /// Whether an item is retired, so it's never offered.
+    pub fn is_retired(&self, key: &str) -> bool {
+        self.retirements.get(key).is_some_and(|r| r.is_retired())
     }
 
     pub fn item(&self, key: &str) -> Option<&Item> {
@@ -995,6 +1091,93 @@ mod tests {
         assert_eq!(
             details,
             ["Forgot it", "Says removing the smallest is constant"]
+        );
+    }
+
+    #[test]
+    fn retires_the_problems_an_older_log_last_rated_easy() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            // A log as Workshop wrote it before problems were retired, at version 3.
+            let connection =
+                rusqlite::Connection::open(dir.path().join("learning.sqlite")).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE attempts (id TEXT PRIMARY KEY, item TEXT NOT NULL,
+                         answered_at INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+                         rating INTEGER NOT NULL, response TEXT, seed INTEGER,
+                         received_at INTEGER NOT NULL);
+                     CREATE TABLE flag_changes (id TEXT PRIMARY KEY, item TEXT NOT NULL,
+                         at INTEGER NOT NULL, flagged INTEGER NOT NULL, note TEXT);
+                     CREATE TABLE schedules (item TEXT PRIMARY KEY, stability REAL NOT NULL,
+                         difficulty REAL NOT NULL, stability_fast REAL NOT NULL,
+                         last_review INTEGER NOT NULL, reviews INTEGER NOT NULL,
+                         lapses INTEGER NOT NULL);
+                     CREATE TABLE time_spent (id INTEGER PRIMARY KEY, item TEXT NOT NULL,
+                         at INTEGER NOT NULL, ms INTEGER NOT NULL);
+                     CREATE TABLE mistakes (id TEXT PRIMARY KEY, item TEXT NOT NULL,
+                         at INTEGER NOT NULL, source TEXT NOT NULL, attempt TEXT,
+                         detail TEXT NOT NULL, suggested TEXT, confirmed TEXT);
+                     PRAGMA user_version = 3;",
+                )
+                .unwrap();
+            let insert = |id: &str, item: &str, at: i64, rating: u32| {
+                connection
+                    .execute(
+                        "INSERT INTO attempts VALUES (?, ?, ?, 600000, ?, NULL, NULL, ?)",
+                        rusqlite::params![id, item, at, rating, at],
+                    )
+                    .unwrap();
+            };
+            // A problem rated easy, one rated easy and then hard, and a card rated easy.
+            insert("attempt-1", "sample/islands", NOW - 3 * 86_400_000, 4);
+            insert("attempt-2", "sample/pair-sums", NOW - 3 * 86_400_000, 4);
+            insert("attempt-3", "sample/pair-sums", NOW - 86_400_000, 2);
+            insert("attempt-4", "sample/stable-sorting", NOW - 86_400_000, 4);
+        }
+        let learning = learning(dir.path());
+        let planned = learning.planned(clock(NOW)).unwrap();
+        let retired: Vec<&String> = planned
+            .retirements
+            .iter()
+            .filter(|(_, r)| r.is_retired())
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(retired, ["sample/islands"]);
+        assert_eq!(planned.plans[&TrackId::Coding].retired, 1);
+        // Every attempt is still there.
+        assert_eq!(learning.store().all_attempts().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn retires_a_problem_rated_easy_but_not_a_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let card = attempt("1", "sample/stable-sorting", NOW, Rating::Easy);
+        assert!(!learning.record_problem(card, &[], NOW).unwrap());
+        let problem = attempt("2", "sample/islands", NOW, Rating::Easy);
+        assert!(learning.record_problem(problem, &[], NOW).unwrap());
+        let hard = attempt("3", "sample/pair-sums", NOW, Rating::Hard);
+        assert!(!learning.record_problem(hard, &[], NOW).unwrap());
+        let retirements = learning.store().retirements().unwrap();
+        assert_eq!(retirements.keys().collect::<Vec<_>>(), ["sample/islands"]);
+        assert!(
+            learning
+                .bring_back("sample/pair-sums", "back-1234", NOW)
+                .is_err()
+        );
+        learning
+            .bring_back("sample/islands", "back-1234", NOW + 1)
+            .unwrap();
+        learning
+            .bring_back("sample/islands", "back-1234", NOW + 2)
+            .unwrap();
+        assert!(!learning.store().retirements().unwrap()["sample/islands"].is_retired());
+        let planned = learning.planned(clock(NOW + 3)).unwrap();
+        assert!(
+            planned.plans[&TrackId::Coding]
+                .due
+                .contains(&"sample/islands".to_owned())
         );
     }
 

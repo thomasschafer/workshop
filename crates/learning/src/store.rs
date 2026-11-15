@@ -61,6 +61,36 @@ pub struct Flag {
     pub note: Option<String>,
 }
 
+/// Retiring an item, so it's never offered again, or bringing it back. Rating a coding problem
+/// easy retires it, as solving it again would teach little.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetirementChange {
+    /// For a retirement an attempt made, the attempt's id; otherwise one of its own.
+    pub id: String,
+    pub item: String,
+    /// When, in milliseconds since 1970.
+    pub at: i64,
+    /// Whether the item is now retired.
+    pub retired: bool,
+}
+
+/// Where an item stands, once it's been retired: its latest retirement change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Retirement {
+    /// Never offered again, for review or as new, and counted as known for good.
+    Retired { at: i64 },
+    /// Retired, then brought back, which makes it due from then.
+    BroughtBack { at: i64 },
+}
+
+impl Retirement {
+    pub fn is_retired(self) -> bool {
+        matches!(self, Self::Retired { .. })
+    }
+}
+
 /// How much was done since a moment, such as the start of the day.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Activity {
@@ -79,7 +109,7 @@ pub struct Store {
 }
 
 /// The schema's version, in SQLite's `user_version`.
-const VERSION: i64 = 3;
+const VERSION: i64 = 4;
 
 const SCHEMA: &str = "
 CREATE TABLE attempts (
@@ -140,7 +170,23 @@ CREATE TABLE mistakes (
 );
 CREATE INDEX mistakes_by_time ON mistakes (at);
 ",
+    "
+-- Items retired, as rating a coding problem easy does, and brought back.
+CREATE TABLE retirement_changes (
+    id TEXT PRIMARY KEY,
+    item TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    retired INTEGER NOT NULL
+);
+CREATE INDEX retirement_changes_by_item ON retirement_changes (item, at, id);
+-- Changes to the log that need to know what's in the packs, made once they're next read.
+CREATE TABLE pending (task TEXT PRIMARY KEY);
+INSERT INTO pending (task) VALUES ('retire-past-easy');
+",
 ];
+
+/// The pending task that retires the problems last rated easy before retiring them existed.
+const RETIRE_PAST_EASY: &str = "retire-past-easy";
 
 /// The earliest an attempt can be from: anything before is a broken clock.
 const EARLIEST: i64 = 1_577_836_800_000; // 2020-01-01
@@ -202,6 +248,20 @@ impl Store {
     /// items they're for. An attempt with the id of one already there but different in any
     /// other way is refused, along with the rest of the batch.
     pub fn record(&self, attempts: &[Attempt], now: i64) -> Result<()> {
+        self.record_changes(attempts, &[], now)
+    }
+
+    /// Adds attempts to the log, as `record` does, and retirement changes, as
+    /// `record_retirements` does, all or none of them.
+    pub fn record_changes(
+        &self,
+        attempts: &[Attempt],
+        retirements: &[RetirementChange],
+        now: i64,
+    ) -> Result<()> {
+        for change in retirements {
+            validate_id(&change.id)?;
+        }
         for attempt in attempts {
             validate_id(&attempt.id)?;
             if attempt.item.is_empty() {
@@ -258,8 +318,78 @@ impl Store {
         for item in touched {
             reschedule(&transaction, &self.scheduler, &item)?;
         }
+        insert_retirements(&transaction, retirements)?;
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Adds retirement changes to the log, ignoring any already there. One with the id of one
+    /// already there but different in any other way is refused, along with the rest.
+    pub fn record_retirements(&self, changes: &[RetirementChange]) -> Result<()> {
+        self.record_changes(&[], changes, 0)
+    }
+
+    /// Every retirement change, in the order they were made.
+    pub fn retirement_changes(&self) -> Result<Vec<RetirementChange>> {
+        let connection = self.connection();
+        let mut statement = connection
+            .prepare("SELECT id, item, at, retired FROM retirement_changes ORDER BY at, id")?;
+        let rows = statement.query_map([], row_to_retirement)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Where each item that's ever been retired stands now, from its latest change.
+    pub fn retirements(&self) -> Result<BTreeMap<String, Retirement>> {
+        Ok(standings(&self.retirement_changes()?, i64::MAX))
+    }
+
+    /// Retires the items last rated easy before retiring them existed, of those `retires`
+    /// says retire when rated easy, such as coding problems. That needs the packs, which the
+    /// log doesn't know, so it's done the first time they're read after the log is brought up
+    /// to date, and only then. Returns how many it retired.
+    pub fn retire_past_easy(&self, retires: impl Fn(&str) -> bool) -> Result<usize> {
+        let mut connection = self.connection();
+        let transaction = connection.transaction()?;
+        let pending: bool = transaction.query_row(
+            "SELECT EXISTS (SELECT 1 FROM pending WHERE task = ?)",
+            [RETIRE_PAST_EASY],
+            |row| row.get(0),
+        )?;
+        if !pending {
+            return Ok(0);
+        }
+        // Each item's latest attempt, where it was rated easy and the item has never been
+        // retired or brought back.
+        let latest: Vec<(String, i64)> = {
+            let mut statement = transaction.prepare(
+                "SELECT a.item, a.answered_at FROM attempts a
+                 WHERE a.rating = ?
+                   AND NOT EXISTS (
+                       SELECT 1 FROM attempts b WHERE b.item = a.item
+                       AND (b.answered_at > a.answered_at
+                            OR (b.answered_at = a.answered_at AND b.id > a.id)))
+                   AND NOT EXISTS (SELECT 1 FROM retirement_changes r WHERE r.item = a.item)
+                 ORDER BY a.item",
+            )?;
+            let rows = statement.query_map([Rating::Easy.number()], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let changes: Vec<RetirementChange> = latest
+            .into_iter()
+            .filter(|(item, _)| retires(item))
+            .map(|(item, at)| RetirementChange {
+                id: format!("retired-before-{:016x}", fnv1a(&item)),
+                item,
+                at,
+                retired: true,
+            })
+            .collect();
+        insert_retirements(&transaction, &changes)?;
+        transaction.execute("DELETE FROM pending WHERE task = ?", [RETIRE_PAST_EASY])?;
+        transaction.commit()?;
+        Ok(changes.len())
     }
 
     /// Adds flag changes to the log, ignoring any already there.
@@ -500,6 +630,62 @@ impl Store {
         let rows = statement.query_map([item], row_to_attempt)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
+}
+
+fn insert_retirements(connection: &Connection, changes: &[RetirementChange]) -> Result<()> {
+    for change in changes {
+        let existing: Option<RetirementChange> = connection
+            .query_row(
+                "SELECT id, item, at, retired FROM retirement_changes WHERE id = ?",
+                [&change.id],
+                row_to_retirement,
+            )
+            .optional()?;
+        match existing {
+            Some(existing) if existing == *change => continue,
+            Some(_) => bail!(
+                "retirement change {} was sent before with different details",
+                change.id
+            ),
+            None => {}
+        }
+        connection.execute(
+            "INSERT INTO retirement_changes (id, item, at, retired) VALUES (?, ?, ?, ?)",
+            params![change.id, change.item, change.at, change.retired],
+        )?;
+    }
+    Ok(())
+}
+
+fn row_to_retirement(row: &rusqlite::Row<'_>) -> rusqlite::Result<RetirementChange> {
+    Ok(RetirementChange {
+        id: row.get(0)?,
+        item: row.get(1)?,
+        at: row.get(2)?,
+        retired: row.get(3)?,
+    })
+}
+
+/// Where each item stood at `at`, from the changes made by then, which must be in the order
+/// they were made.
+pub fn standings(changes: &[RetirementChange], at: i64) -> BTreeMap<String, Retirement> {
+    let mut standings = BTreeMap::new();
+    for change in changes.iter().filter(|change| change.at <= at) {
+        let standing = if change.retired {
+            Retirement::Retired { at: change.at }
+        } else {
+            Retirement::BroughtBack { at: change.at }
+        };
+        standings.insert(change.item.clone(), standing);
+    }
+    standings
+}
+
+/// FNV-1a, whose value never changes between versions, for ids made from an item's key.
+fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 fn validate_id(id: &str) -> Result<()> {
@@ -799,6 +985,145 @@ mod tests {
                 .record_flags(&[change("1", "sample/a", NOW, false)])
                 .is_err()
         );
+    }
+
+    fn retirement(id: &str, item: &str, at: i64, retired: bool) -> RetirementChange {
+        RetirementChange {
+            id: format!("retirement-{id}"),
+            item: item.to_owned(),
+            at,
+            retired,
+        }
+    }
+
+    #[test]
+    fn keeps_the_latest_word_on_each_retirement() {
+        let store = Store::in_memory().unwrap();
+        let easy = attempt("1", "sample/a", NOW, Rating::Easy);
+        let retired = RetirementChange {
+            id: easy.id.clone(),
+            ..retirement("1", "sample/a", NOW, true)
+        };
+        store
+            .record_changes(
+                std::slice::from_ref(&easy),
+                std::slice::from_ref(&retired),
+                NOW,
+            )
+            .unwrap();
+        // Sent again, as after a lost reply, it's the same retirement.
+        store
+            .record_changes(&[easy], std::slice::from_ref(&retired), NOW)
+            .unwrap();
+        assert_eq!(
+            store.retirements().unwrap(),
+            BTreeMap::from([("sample/a".to_owned(), Retirement::Retired { at: NOW })])
+        );
+        store
+            .record_retirements(&[retirement("2", "sample/a", NOW + 5, false)])
+            .unwrap();
+        let retirements = store.retirements().unwrap();
+        assert_eq!(
+            retirements["sample/a"],
+            Retirement::BroughtBack { at: NOW + 5 }
+        );
+        assert!(!retirements["sample/a"].is_retired());
+        assert_eq!(store.retirement_changes().unwrap().len(), 2);
+        // Where it stood before it was brought back.
+        assert!(standings(&store.retirement_changes().unwrap(), NOW + 1)["sample/a"].is_retired());
+
+        let changed = RetirementChange {
+            retired: false,
+            ..retired
+        };
+        let err = store.record_retirements(&[changed]).unwrap_err();
+        assert!(err.to_string().contains("different details"), "{err}");
+        // A batch with a bad change in it changes nothing, attempts included.
+        let err = store
+            .record_changes(
+                &[attempt("3", "sample/b", NOW, Rating::Easy)],
+                &[RetirementChange {
+                    id: "x".to_owned(),
+                    ..retirement("3", "sample/b", NOW, true)
+                }],
+                NOW,
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("isn't an id"), "{err}");
+        assert!(store.attempts("sample/b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn retires_problems_last_rated_easy_once_the_log_is_brought_up_to_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("learning.sqlite");
+        {
+            // A log from before retiring existed, at version 3.
+            let connection = Connection::open(&path).unwrap();
+            connection.execute_batch(SCHEMA).unwrap();
+            for migration in &MIGRATIONS[..2] {
+                connection.execute_batch(migration).unwrap();
+            }
+            connection.pragma_update(None, "user_version", 3).unwrap();
+            let insert = |id: &str, item: &str, at: i64, rating: Rating| {
+                connection
+                    .execute(
+                        "INSERT INTO attempts
+                         (id, item, answered_at, duration_ms, rating, response, seed, received_at)
+                         VALUES (?, ?, ?, 1000, ?, NULL, NULL, ?)",
+                        params![id, item, at, rating.number(), at],
+                    )
+                    .unwrap();
+            };
+            // Easy last time: retired.
+            insert("attempt-1", "sample/easy", NOW - 9 * DAY_MS, Rating::Good);
+            insert("attempt-2", "sample/easy", NOW - 2 * DAY_MS, Rating::Easy);
+            // Easy once, but not last time, so it's kept.
+            insert(
+                "attempt-3",
+                "sample/then-hard",
+                NOW - 9 * DAY_MS,
+                Rating::Easy,
+            );
+            insert("attempt-4", "sample/then-hard", NOW - DAY_MS, Rating::Hard);
+            // Easy, but not something that retires, such as a card.
+            insert("attempt-5", "sample/card", NOW - DAY_MS, Rating::Easy);
+        }
+        let store = Store::open(&path).unwrap();
+        // Nothing's retired until the packs say what retires.
+        assert!(store.retirements().unwrap().is_empty());
+        let retires = |item: &str| item != "sample/card";
+        assert_eq!(store.retire_past_easy(retires).unwrap(), 1);
+        assert_eq!(
+            store.retirements().unwrap(),
+            BTreeMap::from([(
+                "sample/easy".to_owned(),
+                Retirement::Retired {
+                    at: NOW - 2 * DAY_MS
+                }
+            )])
+        );
+        // Only ever once: bringing it back keeps it back.
+        store
+            .record_retirements(&[retirement("1", "sample/easy", NOW, false)])
+            .unwrap();
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.retire_past_easy(|_| true).unwrap(), 0);
+        assert!(!store.retirements().unwrap()["sample/easy"].is_retired());
+        assert_eq!(store.attempts("sample/then-hard").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn has_nothing_to_retire_in_a_new_log() {
+        let store = Store::in_memory().unwrap();
+        assert_eq!(store.retire_past_easy(|_| true).unwrap(), 0);
+        // Easy after the log was made is the caller's to retire, as it's recorded.
+        store
+            .record(&[attempt("1", "sample/a", NOW, Rating::Easy)], NOW)
+            .unwrap();
+        assert_eq!(store.retire_past_easy(|_| true).unwrap(), 0);
+        assert!(store.retirements().unwrap().is_empty());
     }
 
     #[test]

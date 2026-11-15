@@ -4099,6 +4099,7 @@ dependencies = [
  "qrcode",
  "regex",
  "reqwest",
+ "rusqlite",
  "rust-embed",
  "scraper",
  "serde",

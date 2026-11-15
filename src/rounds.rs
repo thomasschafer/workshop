@@ -62,7 +62,7 @@ pub fn suggest(planned: &Planned) -> Option<(String, Priority, String)> {
         ));
     }
     items(planned)
-        .next()
+        .find(|(key, _)| !planned.is_retired(key))
         .map(|(key, _)| (key, Priority::Browse, "Again, against the clock".to_owned()))
 }
 

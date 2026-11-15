@@ -318,11 +318,14 @@ pub(super) struct FinishBody {
 
 #[derive(Serialize)]
 pub(super) struct Finished {
-    /// When it comes back, in milliseconds since 1970.
+    /// When it comes back, in milliseconds since 1970, unless it's retired.
     due: Option<i64>,
+    /// Whether it's retired, as rating it easy does, so it never comes back.
+    retired: bool,
 }
 
-/// Records how the problem went, which schedules it, and ends its session.
+/// Records how the problem went, which schedules it, or retires it if it was easy, and ends
+/// its session.
 pub(super) async fn finish(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
@@ -340,8 +343,8 @@ pub(super) async fn finish(
             .ok_or_else(|| bad_request("The problem hasn't been started."))?;
         let now = now_ms();
         let spent = app.problems.touch(&key, now)?;
-        app.learning.record(
-            &[Attempt {
+        app.learning.record_problem(
+            Attempt {
                 id: body.id,
                 item: key.clone(),
                 answered_at: now,
@@ -349,17 +352,53 @@ pub(super) async fn finish(
                 rating: body.rating,
                 response: Some(session.plan.clone()),
                 seed: None,
-            }],
+            },
+            &[],
             now,
         )?;
         app.problems.finish(&key)?;
     }
-    let due = store.schedules()?.get(&key).map(|schedule| {
-        store
-            .scheduler()
-            .due(schedule, app.config.learning.desired_retention)
+    Ok(Json(finished(&app, &key)?))
+}
+
+/// How a problem stands once it's finished: when it's due, or that it's retired.
+fn finished(app: &Shared, key: &str) -> Result<Finished, ApiError> {
+    let store = app.learning.store();
+    let retirement = store.retirements()?.get(key).copied();
+    let due = store.schedules()?.get(key).and_then(|schedule| {
+        workshop_learning::due(
+            schedule,
+            retirement,
+            store.scheduler(),
+            app.config.learning.desired_retention,
+        )
     });
-    Ok(Json(Finished { due }))
+    Ok(Finished {
+        due,
+        retired: retirement.is_some_and(|r| r.is_retired()),
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BringBackBody {
+    /// Made by the app, so bringing it back twice, such as after a lost reply, is one change.
+    id: String,
+}
+
+/// Brings a retired problem back, due straight away.
+pub(super) async fn bring_back(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+    Json(body): Json<BringBackBody>,
+) -> ApiResult<Finished> {
+    let packs = packs(&app)?;
+    let found = found(&packs, &pack, &item)?;
+    let key = found.key();
+    app.learning
+        .bring_back(&key, &body.id, now_ms())
+        .map_err(|err| bad_request(format!("{err:#}")))?;
+    Ok(Json(finished(&app, &key)?))
 }
 
 #[derive(Deserialize)]
@@ -610,6 +649,90 @@ mod tests {
         )
         .await;
         assert_eq!(solve["session"]["mode"], "solve");
+    }
+
+    #[tokio::test]
+    async fn retires_a_problem_rated_easy_until_its_brought_back() {
+        let (_dir, router) = test_app().await;
+        let item = "/api/coding/items/sample/islands";
+        let status = |overview: &serde_json::Value| {
+            overview["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["key"] == "sample/islands")
+                .unwrap()["status"]
+                .clone()
+        };
+        let overview = || async {
+            json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await
+        };
+        send(&router, request("POST", &format!("{item}/open"), None)).await;
+        let finish =
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a61", "rating": "easy" });
+        let finished = json(
+            send(
+                &router,
+                request("POST", &format!("{item}/finish"), Some(finish.clone())),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(finished["retired"], true);
+        assert_eq!(finished["due"], serde_json::Value::Null);
+        // Sent again, it's the same attempt and the same retirement.
+        let again = json(
+            send(
+                &router,
+                request("POST", &format!("{item}/finish"), Some(finish)),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(again["retired"], true);
+        assert_eq!(status(&overview().await), "retired");
+        // It's never offered, even as the only thing left to do.
+        let home = json(send(&router, request("GET", "/api/home?utc_offset=0", None)).await).await;
+        assert!(!home.to_string().contains("Count the islands"), "{home}");
+        // It still counts towards its skill, as known for good.
+        let goals =
+            json(send(&router, request("GET", "/api/goals?utc_offset=0", None)).await).await;
+        let graphs = goals["goals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|goal| goal["skills"].as_array().unwrap())
+            .find(|skill| skill["id"] == "algorithms.graphs")
+            .unwrap();
+        let items = graphs["items"].as_f64().unwrap();
+        assert_eq!(graphs["mastery"].as_f64().unwrap(), 1.0 / items, "{graphs}");
+
+        let back = serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a62" });
+        let brought = json(
+            send(
+                &router,
+                request("POST", &format!("{item}/bring-back"), Some(back.clone())),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(brought["retired"], false);
+        assert!(brought["due"].as_i64().unwrap() <= crate::learning::now_ms());
+        assert_eq!(status(&overview().await), "due");
+        // Twice is once, and an item that isn't retired can't be brought back.
+        let twice = send(
+            &router,
+            request("POST", &format!("{item}/bring-back"), Some(back)),
+        )
+        .await;
+        assert_eq!(twice.status(), StatusCode::OK);
+        let other = serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a63" });
+        let refused = send(
+            &router,
+            request("POST", &format!("{item}/bring-back"), Some(other)),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

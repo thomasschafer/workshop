@@ -1,5 +1,5 @@
 //! How well each skill is known: the chance of recalling its items now, on average, counting
-//! items never attempted as not known at all.
+//! items never attempted as not known at all, and retired ones as known for good.
 //!
 //! Kept simple so it can grow, such as by weighting items by difficulty, or a goal's progress
 //! from its skills' mastery.
@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::plan::ItemRef;
 use crate::schedule::{ItemSchedule, Scheduler};
-use crate::store::Attempt;
+use crate::store::{Attempt, Retirement, RetirementChange, standings};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SkillMastery {
@@ -22,18 +22,28 @@ pub struct SkillMastery {
     pub attempted: usize,
 }
 
-/// Mastery of every skill the items have, in order of the skills' ids.
+/// Mastery of every skill the items have, in order of the skills' ids. A retired item was
+/// rated easy, as a problem solved with ease, and is never reviewed again, so its recall would
+/// only ever fade: it counts as recalled with certainty instead.
 pub fn mastery(
     items: &[ItemRef<'_>],
     schedules: &BTreeMap<String, ItemSchedule>,
+    retirements: &BTreeMap<String, Retirement>,
     scheduler: &Scheduler,
     now: i64,
 ) -> Vec<SkillMastery> {
     let mut skills: BTreeMap<&str, (f64, usize, usize)> = BTreeMap::new();
     for item in items {
-        let recall = schedules
+        let retired = retirements
             .get(item.key)
-            .map(|schedule| scheduler.recall(schedule, now));
+            .is_some_and(|retirement| retirement.is_retired());
+        let recall = schedules.get(item.key).map(|schedule| {
+            if retired {
+                1.0
+            } else {
+                scheduler.recall(schedule, now)
+            }
+        });
         for skill in item.skills {
             let (sum, count, attempted) = skills.entry(skill).or_default();
             *sum += recall.unwrap_or(0.0);
@@ -52,11 +62,13 @@ pub fn mastery(
         .collect()
 }
 
-/// Mastery of every skill as it was at each of `times`, worked out from the attempts made by
-/// then, for showing how it's changed. `attempts` must be in the order they were made.
+/// Mastery of every skill as it was at each of `times`, worked out from the attempts made and
+/// the items retired by then, for showing how it's changed. `attempts` and `retirements` must
+/// be in the order they were made.
 pub fn history(
     items: &[ItemRef<'_>],
     attempts: &[Attempt],
+    retirements: &[RetirementChange],
     scheduler: &Scheduler,
     times: &[i64],
 ) -> Vec<Vec<SkillMastery>> {
@@ -79,7 +91,13 @@ pub fn history(
                         .map(|schedule| ((*item).to_owned(), schedule))
                 })
                 .collect();
-            mastery(items, &schedules, scheduler, at)
+            mastery(
+                items,
+                &schedules,
+                &standings(retirements, at),
+                scheduler,
+                at,
+            )
         })
         .collect()
 }
@@ -112,7 +130,7 @@ mod tests {
         ];
         let seen = scheduler.review(None, now - DAY_MS, Rating::Good);
         let schedules = BTreeMap::from([("p/a".to_owned(), seen)]);
-        let mastery = mastery(&items, &schedules, &scheduler, now);
+        let mastery = mastery(&items, &schedules, &BTreeMap::new(), &scheduler, now);
         let recall = scheduler.recall(&seen, now);
         assert_eq!(mastery[0].skill, "speed");
         assert_eq!(mastery[0].mastery, recall);
@@ -145,6 +163,7 @@ mod tests {
         let history = history(
             &items,
             &attempts,
+            &[],
             &scheduler,
             &[now - 20 * DAY_MS, now - 5 * DAY_MS, now],
         );
@@ -163,5 +182,68 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(history[2][0].mastery, scheduler.recall(&twice, now));
+    }
+
+    #[test]
+    fn counts_a_retired_item_as_known_for_good() {
+        let scheduler = Scheduler::default();
+        let now = 1_790_000_000_000;
+        let graphs = vec!["graphs".to_owned()];
+        let track = TrackId::Coding;
+        let items = [
+            ItemRef {
+                key: "p/retired",
+                track: &track,
+                skills: &graphs,
+            },
+            ItemRef {
+                key: "p/kept",
+                track: &track,
+                skills: &graphs,
+            },
+        ];
+        let solved_at = now - 100 * DAY_MS;
+        let solved = scheduler.review(None, solved_at, Rating::Easy);
+        let schedules = BTreeMap::from([
+            ("p/retired".to_owned(), solved),
+            ("p/kept".to_owned(), solved),
+        ]);
+        let changes = [RetirementChange {
+            id: "retirement-1".to_owned(),
+            item: "p/retired".to_owned(),
+            at: solved_at,
+            retired: true,
+        }];
+        let mastery = mastery(
+            &items,
+            &schedules,
+            &standings(&changes, now),
+            &scheduler,
+            now,
+        );
+        let faded = scheduler.recall(&solved, now);
+        assert!(faded < 0.9);
+        assert_eq!(mastery[0].mastery, (1.0 + faded) / 2.0);
+        assert_eq!(mastery[0].attempted, 2);
+
+        // Before it was retired, it counts as its recall did.
+        let attempt = |id: &str, item: &str| Attempt {
+            id: id.to_owned(),
+            item: item.to_owned(),
+            answered_at: solved_at,
+            duration_ms: 1000,
+            rating: Rating::Easy,
+            response: None,
+            seed: None,
+        };
+        let history = history(
+            &items,
+            &[attempt("1", "p/retired"), attempt("2", "p/kept")],
+            &changes,
+            &scheduler,
+            &[solved_at - 1, now],
+        );
+        assert_eq!(history[0][0].mastery, 0.0);
+        assert_eq!(history[1][0].mastery, (1.0 + faded) / 2.0);
     }
 }

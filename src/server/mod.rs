@@ -92,6 +92,10 @@ pub fn router(app: Shared) -> Router {
         .route("/coding/items/{pack}/{item}/run", post(coding::run))
         .route("/coding/items/{pack}/{item}/submit", post(coding::submit))
         .route("/coding/items/{pack}/{item}/finish", post(coding::finish))
+        .route(
+            "/coding/items/{pack}/{item}/bring-back",
+            post(coding::bring_back),
+        )
         .route("/coding/items/{pack}/{item}/tutor", post(coding::tutor))
         .route("/coding/lsp/{language}", get(coding::lsp))
         .route("/state", put(client::save_state))
