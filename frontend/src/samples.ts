@@ -33,7 +33,9 @@ export function withSuggestions(meta: DayMeta, problem: Problem): DayMeta {
   let changed = false;
   for (const i of [0, 1] as const) {
     const block = problem.suggested_sample_blocks[i];
-    if (blocks[i] === null && block !== null && block !== undefined) {
+    // A sample written inline, by the user or as found by the model, has no block, so it's the
+    // input that says whether the part has one.
+    if (inputs[i] === null && block !== null && block !== undefined) {
       blocks[i] = block;
       inputs[i] = problem.blocks[block] ?? null;
       changed = true;

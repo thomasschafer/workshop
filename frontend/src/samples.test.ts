@@ -54,6 +54,22 @@ describe("withSuggestions", () => {
     expect(meta.sample_answers[0]).toBe("99");
   });
 
+  it("keeps a sample that isn't a code block", () => {
+    const typed = setSampleText(EMPTY_META, 0, "+1\n-2\n");
+    expect(withSuggestions(typed, problem()).sample_inputs[0]).toBe("+1\n-2\n");
+    const found = withFoundSample(
+      withSuggestions(EMPTY_META, problem()),
+      problem(),
+      0,
+      { input: "+2\n-5\n+4\n", answer: "1" },
+      true,
+    );
+    const reloaded = withSuggestions(found, problem());
+    expect(reloaded.sample_blocks[0]).toBeNull();
+    expect(reloaded.sample_inputs[0]).toBe("+2\n-5\n+4\n");
+    expect(reloaded.sample_answers[0]).toBe("1");
+  });
+
   it("returns the same object when nothing changes", () => {
     const meta = withSuggestions(EMPTY_META, problem());
     expect(withSuggestions(meta, problem())).toBe(meta);
