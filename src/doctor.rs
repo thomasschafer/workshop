@@ -1,11 +1,13 @@
 //! Setup checks, shared by `workshop doctor` and the app.
 
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Serialize;
 use tokio::process::Command;
 use workshop_common::programs::find_program;
+use workshop_pack::Language;
 use workshop_toolchain::toolchain::{self, Toolchain};
 
 use crate::config::Config;
@@ -85,7 +87,7 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         checks.extend(check_provider(config, id).await);
     }
 
-    let (toolchain, toolchain_check) = check_toolchain(config).await;
+    let (toolchain, toolchain_check) = check_toolchain(&config.solutions_dir, "Toolchain").await;
     checks.extend(toolchain_check);
     let solutions = Solutions {
         config,
@@ -100,38 +102,26 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         ""
     };
     for program in language.required_programs() {
-        checks.push(match solutions.toolchain.find_program(program) {
-            Some(path) => Check::ok(
-                format!("{} runner", language.name),
-                format!("Found {program} at {}", path.display()),
+        checks.push(check_program(
+            &solutions.toolchain,
+            format!("{} runner", language.name),
+            program,
+            Status::Fail,
+            format!(
+                "Install {} so that `{program}` is on your PATH, or change the commands in your language profile.{install_hint}",
+                language.name
             ),
-            None => Check::problem(
-                Status::Fail,
-                format!("{} runner", language.name),
-                format!("`{program}` isn't on your PATH"),
-                format!(
-                    "Install {} so that `{program}` is on your PATH, or change the commands in your language profile.{install_hint}",
-                    language.name
-                ),
-            ),
-        });
+        ));
     }
     if let Some(lsp) = language.lsp.as_ref().and_then(|c| c.first()) {
-        checks.push(match solutions.toolchain.find_program(lsp) {
-            Some(path) => Check::ok(
-                "Language server",
-                format!("Found {lsp} at {}", path.display()),
-            ),
-            None => Check::problem(
-                Status::Warn,
-                "Language server",
-                format!(
-                    "`{lsp}` isn't on your PATH, so there will be no error underlines or types"
-                ),
-                format!("Optional: install `{lsp}` for inline errors and types."),
-            ),
-        });
+        checks.push(check_language_server(
+            &solutions.toolchain,
+            "Language server".to_owned(),
+            lsp,
+            "",
+        ));
     }
+    checks.extend(check_coding_languages(config, paths).await);
 
     if let Some(packages) = solutions.packages() {
         checks.push(check_packages(&packages));
@@ -208,12 +198,92 @@ fn check_speech(paths: &Paths) -> Check {
     }
 }
 
-/// The environment from the solutions directory's mise config, if it has one, and how that went.
-async fn check_toolchain(config: &Config) -> (Toolchain, Option<Check>) {
-    let Some(file) = toolchain::mise_config(&config.solutions_dir) else {
+/// Whether `toolchain` has `program`, which building or running needs, as `name`, with how to
+/// install it if it doesn't, and how bad that is.
+fn check_program(
+    toolchain: &Toolchain,
+    name: String,
+    program: &str,
+    missing: Status,
+    fix: String,
+) -> Check {
+    match toolchain.find_program(program) {
+        Some(path) => Check::ok(name, format!("Found {program} at {}", path.display())),
+        None => Check::problem(
+            missing,
+            name,
+            format!("`{program}` isn't on your PATH"),
+            fix,
+        ),
+    }
+}
+
+/// Whether `toolchain` has the language server `lsp`, which is optional, with `install_hint`
+/// added to how to install it.
+fn check_language_server(
+    toolchain: &Toolchain,
+    name: String,
+    lsp: &str,
+    install_hint: &str,
+) -> Check {
+    match toolchain.find_program(lsp) {
+        Some(path) => Check::ok(name, format!("Found {lsp} at {}", path.display())),
+        None => Check::problem(
+            Status::Warn,
+            name,
+            format!("`{lsp}` isn't on your PATH, so there will be no error underlines or types"),
+            format!("Optional: install `{lsp}` for inline errors and types.{install_hint}"),
+        ),
+    }
+}
+
+/// The programs and language servers of the languages the Coding track has code written in,
+/// which come from each language's own directory, as the solutions' come from theirs. Only a
+/// warning when missing, as the rest of Workshop works without them.
+async fn check_coding_languages(config: &Config, paths: &Paths) -> Vec<Check> {
+    let mut checks = Vec::new();
+    for language in Language::ALL.into_iter().filter(|l| l.is_writable()) {
+        let Some(profile) = config.languages.get(language.id()) else {
+            continue;
+        };
+        let name = format!("Coding track: {}", profile.name);
+        let dir = crate::coding::language_dir(&paths.data_dir, language);
+        let (toolchain, toolchain_check) =
+            check_toolchain(&dir, &format!("{name} toolchain")).await;
+        checks.extend(toolchain_check);
+        let install_hint = if profile.toolchain.is_some() {
+            " The app offers to install it for you with mise, with a problem open in the language."
+        } else {
+            ""
+        };
+        let program = workshop_coding::needs(language);
+        checks.push(check_program(
+            &toolchain,
+            name.clone(),
+            program,
+            Status::Warn,
+            format!(
+                "Install {} so that `{program}` is on your PATH, to solve problems in it.{install_hint}",
+                profile.name
+            ),
+        ));
+        if let Some(lsp) = profile.lsp.as_ref().and_then(|c| c.first()) {
+            checks.push(check_language_server(
+                &toolchain,
+                format!("{name} language server"),
+                lsp,
+                install_hint,
+            ));
+        }
+    }
+    checks
+}
+
+/// The environment from the mise config in `dir`, if it has one, and how that went, as `name`.
+async fn check_toolchain(dir: &Path, name: &str) -> (Toolchain, Option<Check>) {
+    let Some(file) = toolchain::mise_config(dir) else {
         return (Toolchain::default(), None);
     };
-    let name = "Toolchain";
     if find_program("mise").is_none() {
         return (
             Toolchain::default(),
@@ -228,7 +298,7 @@ async fn check_toolchain(config: &Config) -> (Toolchain, Option<Check>) {
             )),
         );
     }
-    match Toolchain::load(&config.solutions_dir).await {
+    match Toolchain::load(dir).await {
         Ok(toolchain) => (
             toolchain,
             Some(Check::ok(
@@ -242,10 +312,7 @@ async fn check_toolchain(config: &Config) -> (Toolchain, Option<Check>) {
                 Status::Fail,
                 name,
                 format!("{err:#}"),
-                format!(
-                    "Run `mise trust` and `mise install` in {}.",
-                    config.solutions_dir.display()
-                ),
+                format!("Run `mise trust` and `mise install` in {}.", dir.display()),
             )),
         ),
     }
