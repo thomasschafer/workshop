@@ -340,6 +340,7 @@ export function ProblemView({
         writeUnsaved(itemKey, null);
         setTwistMarked(result);
       }}
+      onSolve={() => void load(true)}
     />
   ) : session.step === "understand" ? (
     <UnderstandStep {...shared} onNext={next} />
@@ -1105,6 +1106,7 @@ function TwistStep({
   editor,
   draftSaver,
   onMarked,
+  onSolve,
 }: StepProps & {
   boot: Bootstrap;
   itemKey: string;
@@ -1113,6 +1115,7 @@ function TwistStep({
   editor: { current: CodeEditor | null };
   draftSaver: { current: VersionedSaver | null };
   onMarked: (result: TwistMarked) => void;
+  onSolve: () => void;
 }) {
   const [withCode, setWithCode] = useState(false);
   const [aloud, setAloud] = useState(false);
@@ -1244,6 +1247,9 @@ function TwistStep({
           Explain your answer aloud, to be marked
         </button>
       )}
+      <button type="button" class="learn-link" onClick={onSolve}>
+        Solve it again instead
+      </button>
     </main>
   );
 }

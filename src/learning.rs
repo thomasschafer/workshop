@@ -289,8 +289,9 @@ impl Learning {
     }
 
     /// Records how a coding problem went, from the attempt finishing it. Rated easy, it's
-    /// retired, by a change with the attempt's id, so sending it again changes nothing. Returns
-    /// whether it's retired now.
+    /// retired, and a retired problem done again by choice and rated otherwise is brought back,
+    /// by a change with the attempt's id, so sending it again changes nothing. Returns whether
+    /// it's retired now.
     pub fn record_problem(
         &self,
         attempt: Attempt,
@@ -302,15 +303,22 @@ impl Learning {
         let item = items
             .get(&attempt.item)
             .with_context(|| format!("there's no item {}", attempt.item))?;
-        let retiring = attempt.rating == Rating::Easy && item.kind.retires_when_easy();
-        let retirement = retiring.then(|| RetirementChange {
-            id: attempt.id.clone(),
-            item: attempt.item.clone(),
-            at: attempt.answered_at,
-            retired: true,
-        });
+        let retired = self
+            .store
+            .retirements()?
+            .get(&attempt.item)
+            .is_some_and(|r| r.is_retired());
+        let easy = attempt.rating == Rating::Easy;
+        let retirement =
+            (item.kind.retires_when_easy() && easy != retired).then(|| RetirementChange {
+                id: attempt.id.clone(),
+                item: attempt.item.clone(),
+                at: attempt.answered_at,
+                retired: easy,
+            });
         // A forgotten attempt's own mistake, unless the grader found what went wrong.
-        let own = (findings.is_empty())
+        let own = findings
+            .is_empty()
             .then(|| crate::mistakes::from_attempt(item, &attempt))
             .flatten();
         self.store
