@@ -227,6 +227,7 @@ mod tests {
     fn config(packs: Vec<PathBuf>) -> LearningConfig {
         LearningConfig {
             packs,
+            sample_pack: false,
             daily_reviews: 40,
             daily_new: 10,
             weekly_minutes: 90,

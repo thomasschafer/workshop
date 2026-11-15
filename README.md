@@ -124,6 +124,7 @@ models = ["sonnet", "opus", "fable"]    # for Codex, ["sol", "astra"]
 
 [learning]
 packs = []              # pack directories; the sample pack until you list one
+sample_pack = false     # also use the sample pack alongside your own
 daily_reviews = 40      # the most reviews Continue offers in a day
 daily_new = 10          # the most new items Continue offers in a day
 weekly_minutes = 90     # the week's target

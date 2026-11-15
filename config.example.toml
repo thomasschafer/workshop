@@ -79,6 +79,8 @@ format_automatically = true
 # Packs of things to learn, each a directory (see docs/packs.md). Until you list one, Workshop
 # uses its sample pack.
 packs = []
+# Whether to use the sample pack as well, alongside your own.
+sample_pack = false
 # The most reviews Continue offers in a day; any more wait for the next.
 daily_reviews = 40
 # The most new items Continue offers in a day, across every track; any more wait for the next.

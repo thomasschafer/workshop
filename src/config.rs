@@ -32,6 +32,7 @@ struct RawConfig {
 #[serde(deny_unknown_fields, default)]
 struct RawLearningConfig {
     packs: Vec<String>,
+    sample_pack: bool,
     daily_reviews: u32,
     daily_new: u32,
     weekly_minutes: u32,
@@ -43,6 +44,9 @@ struct RawLearningConfig {
 pub struct LearningConfig {
     /// The packs' directories. Empty means the sample pack.
     pub packs: Vec<PathBuf>,
+    /// Whether to learn from the sample pack as well as the packs listed. It's used anyway when
+    /// none are.
+    pub sample_pack: bool,
     /// The most reviews Continue offers in a day; the rest wait for the next.
     pub daily_reviews: u32,
     /// The most new items Continue offers in a day; the rest wait for the next.
@@ -315,6 +319,7 @@ impl Default for RawLearningConfig {
     fn default() -> Self {
         Self {
             packs: Vec::new(),
+            sample_pack: false,
             daily_reviews: 40,
             daily_new: 10,
             weekly_minutes: 90,
@@ -510,6 +515,7 @@ impl Config {
             editor: raw.editor,
             learning: LearningConfig {
                 packs,
+                sample_pack: learning.sample_pack,
                 daily_reviews: learning.daily_reviews,
                 daily_new: learning.daily_new,
                 weekly_minutes: learning.weekly_minutes,
@@ -672,6 +678,13 @@ mod tests {
         assert_eq!(config.learning.weekly_minutes, 30);
         assert_eq!(config.learning.desired_retention, 0.9);
         assert!(Config::parse("").unwrap().learning.packs.is_empty());
+        assert!(!config.learning.sample_pack);
+        assert!(
+            Config::parse("[learning]\nsample_pack = true")
+                .unwrap()
+                .learning
+                .sample_pack
+        );
         assert!(Config::parse("[learning]\ndesired_retention = 0.99").is_err());
         assert!(Config::parse("[learning]\ndaily_reviews = 0").is_err());
         assert!(Config::parse("[learning]\ndaily_new = 0").is_err());

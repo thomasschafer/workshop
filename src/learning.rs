@@ -715,6 +715,7 @@ mod tests {
     fn learning(dir: &Path) -> Learning {
         let config = LearningConfig {
             packs: Vec::new(),
+            sample_pack: false,
             daily_reviews: 3,
             daily_new: 10,
             weekly_minutes: 1,

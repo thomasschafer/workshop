@@ -1,6 +1,6 @@
 # Packs
 
-A pack is a directory of things to learn, usually a git repo of its own. Workshop reads it as it is, so you can write and edit items in any editor, and keep your pack private while Workshop stays public. Workshop comes with a small sample pack, in `packs/sample`, which it uses until you configure your own.
+A pack is a directory of things to learn, usually a git repo of its own. Workshop reads it as it is, so you can write and edit items in any editor, and keep your pack private while Workshop stays public. Workshop comes with a small sample pack, in `packs/sample`, which it uses until you configure your own. To keep using it alongside your own, set `sample_pack = true` under `[learning]` in your config.
 
 What you've done stays in Workshop's own data, never in the pack: attempts, when each item is due again, cards you've flagged, and your code and plans for coding problems.
 
@@ -398,4 +398,4 @@ loop {
 workshop pack check ~/my-pack
 ```
 
-reads every item, runs each one's check, and lists what's wrong, exiting with an error if anything is. Items that can't be checked here, such as C++ without a compiler, are listed as skipped, with what to install, and don't count as wrong. Without a path, it checks the packs in your config, or the sample pack if there are none. CI runs it on the sample pack.
+reads every item, runs each one's check, and lists what's wrong, exiting with an error if anything is. Items that can't be checked here, such as C++ without a compiler, are listed as skipped, with what to install, and don't count as wrong. Without a path, it checks the packs in your config, and the sample pack if there are none or `sample_pack` is set. CI runs it on the sample pack.

@@ -7,13 +7,10 @@ use workshop_pack::{Pack, Verdict};
 
 use crate::config::LearningConfig;
 
-/// The packs to learn from: those in the config, or the sample pack if there are none. A pack
-/// whose items have problems still loads, without them; one whose `pack.toml` can't be read,
-/// or that has the same id as another, is an error.
+/// The packs to learn from: those in the config, then the sample pack if there are none or the
+/// config asks for it too. A pack whose items have problems still loads, without them; one
+/// whose `pack.toml` can't be read, or that has the same id as another, is an error.
 pub fn load(config: &LearningConfig) -> Result<Vec<Pack>> {
-    if config.packs.is_empty() {
-        return Ok(vec![Pack::sample()]);
-    }
     let mut packs: Vec<Pack> = Vec::new();
     for dir in &config.packs {
         let pack = Pack::load(dir)?;
@@ -25,7 +22,22 @@ pub fn load(config: &LearningConfig) -> Result<Vec<Pack>> {
         }
         packs.push(pack);
     }
+    if with_sample(config) {
+        let sample = Pack::sample();
+        if packs.iter().any(|p| p.manifest.id == sample.manifest.id) {
+            bail!(
+                "a pack of yours has the sample pack's id, {:?}, so the two can't be used together; give yours another in its pack.toml",
+                sample.manifest.id
+            );
+        }
+        packs.push(sample);
+    }
     Ok(packs)
+}
+
+/// Whether the sample pack is learnt from: when there's no other, or as well as the others.
+fn with_sample(config: &LearningConfig) -> bool {
+    config.packs.is_empty() || config.sample_pack
 }
 
 /// Checks the pack in `dir`, or else the packs in the config, printing what's wrong, with its
@@ -39,12 +51,17 @@ pub async fn check(
 ) -> Result<bool> {
     let packs: Vec<(String, Pack)> = match dir {
         Some(dir) => vec![(dir.display().to_string(), Pack::load(dir)?)],
-        None if config.packs.is_empty() => vec![("the sample pack".to_owned(), Pack::sample())],
-        None => config
-            .packs
-            .iter()
-            .map(|dir: &PathBuf| Ok((dir.display().to_string(), Pack::load(dir)?)))
-            .collect::<Result<_>>()?,
+        None => {
+            let mut packs = config
+                .packs
+                .iter()
+                .map(|dir: &PathBuf| Ok((dir.display().to_string(), Pack::load(dir)?)))
+                .collect::<Result<Vec<_>>>()?;
+            if with_sample(config) {
+                packs.push(("the sample pack".to_owned(), Pack::sample()));
+            }
+            packs
+        }
     };
     if !runtime.sandbox.confines() {
         eprintln!(
@@ -97,6 +114,7 @@ mod tests {
     fn config(packs: Vec<PathBuf>) -> LearningConfig {
         LearningConfig {
             packs,
+            sample_pack: false,
             daily_reviews: 40,
             daily_new: 10,
             weekly_minutes: 90,
@@ -128,6 +146,29 @@ mod tests {
         let packs = load(&config(vec![dir.path().join("mine")])).unwrap();
         assert_eq!(packs.len(), 1);
         assert_eq!(packs[0].manifest.id, "mine");
+    }
+
+    #[test]
+    fn uses_the_sample_pack_alongside_ones_own_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        write_pack(&dir.path().join("mine"), "mine");
+        let both = LearningConfig {
+            sample_pack: true,
+            ..config(vec![dir.path().join("mine")])
+        };
+        let ids: Vec<String> = load(&both)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.manifest.id)
+            .collect();
+        assert_eq!(ids, ["mine", "sample"]);
+
+        write_pack(&dir.path().join("clash"), "sample");
+        let clash = LearningConfig {
+            sample_pack: true,
+            ..config(vec![dir.path().join("clash")])
+        };
+        assert!(load(&clash).is_err());
     }
 
     #[test]
