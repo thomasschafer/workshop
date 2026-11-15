@@ -194,7 +194,7 @@ The patterns are matched in the browser too, so keep to regex syntax that Rust a
 
 ### Toolchain
 
-A `[toolchain]` table lets setup install the language's programs with [mise](https://mise.jdx.dev) when they're missing. Workshop writes `mise` to the solutions directory as `mise.toml`, unless the directory has a mise config already, then runs `mise install` and any `after_install` commands there. Building, running, installing packages and the language server then happen in that environment, as does `workshop env`. Prefer mise's own tools; when one isn't good enough, install it with another installer, keeping everything inside the solutions directory, as the Haskell profile does with ghcup.
+A `[toolchain]` table lets setup install the language's programs with [mise](https://mise.jdx.dev) when they're missing. Workshop writes `mise` to the solutions directory as `mise.toml`, unless the directory has a mise config already, then runs `mise install` and any `after_install` commands there. Building, running, installing packages and the language server then happen in that environment, as does `workshop env`. The Coding track does the same for each language learners write code in, in that language's own directory in Workshop's data, and offers to install it with a problem open. Prefer mise's own tools; when one isn't good enough, install it with another installer, keeping everything inside the solutions directory, as the Haskell profile does with ghcup.
 
 ```toml
 [toolchain]
