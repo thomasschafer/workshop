@@ -10,7 +10,10 @@ import { useKeyOffsets } from "./useKeyOffsets";
 import { useMediaQuery } from "./useMediaQuery";
 
 /** What the editor's Helix commands do with the file it's showing. */
-export type FileActions = Pick<HelixActions, "write" | "reload" | "showProblems">;
+export type FileActions = Pick<
+  HelixActions,
+  "write" | "reload" | "showProblems" | "restartLanguageServer"
+>;
 
 /**
  * How the code editor looks and is typed into on this device, wherever it's used: its line

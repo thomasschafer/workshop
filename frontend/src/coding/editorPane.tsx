@@ -38,7 +38,7 @@ export function EditorPane({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [conflict, setConflict] = useState<FileVersion | null>(null);
   const [showProblems, setShowProblems] = useState(false);
-  const { lsp, lspStatus } = useLanguageServer(
+  const { lsp, lspStatus, lspError, dismissLspError, restartLsp } = useLanguageServer(
     language.lsp
       ? {
           rootUri: language.lsp.root_uri,
@@ -80,6 +80,7 @@ export function EditorPane({
           if (fresh && code.adopt(fresh.code)) created.replaceAll(fresh.code.text);
         },
         showProblems: () => setShowProblems(true),
+        restartLanguageServer: restartLsp,
       }),
       lsp: lsp
         ? {
@@ -122,6 +123,7 @@ export function EditorPane({
       {conflict ? <ConflictBanner what="code" onResolve={resolve} /> : null}
       <StatusLine
         checks={lsp ? lspStatus : null}
+        serverError={lspError !== null}
         diagnostics={diagnostics}
         saveStatus={saveStatus}
         hover={null}
@@ -133,6 +135,9 @@ export function EditorPane({
         <ProblemsSheet
           problems={editor.current?.problems() ?? []}
           current={diagnostics.atCursor}
+          server={
+            lsp ? { error: lspError, onDismiss: dismissLspError, onRestart: restartLsp } : null
+          }
           onGoto={(problem) => {
             editor.current?.gotoProblem(problem);
             setShowProblems(false);

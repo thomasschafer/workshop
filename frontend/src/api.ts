@@ -554,6 +554,8 @@ export const api = {
   format: (p: Puzzle, code: string) =>
     request<{ code: string }>("POST", `${day(p)}/format`, { code }).then((r) => r.code),
   cancelRun: () => request<null>("POST", "/run/cancel"),
+  /** Restarts every language server, which editors reconnect to. */
+  restartLanguageServers: () => request<null>("POST", "/lsp/restart"),
   submit: (p: Puzzle, part: number, answer: string) =>
     request<{
       outcome: SubmitOutcome;

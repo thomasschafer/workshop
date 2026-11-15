@@ -49,6 +49,17 @@ function formattingOptions(state: EditorState): { tabSize: number; insertSpaces:
   return { tabSize: getIndentUnit(state), insertSpaces: !state.facet(indentUnit).includes("\t") };
 }
 
+/** How many requests to format each language server has yet to answer. */
+const formatting = new WeakMap<LSPClient, number>();
+
+/**
+ * Whether `client` is waiting for its language server to format code. Messages the server shows
+ * meanwhile can be put down to formatting, which says itself if it fails.
+ */
+export function isFormatting(client: LSPClient): boolean {
+  return (formatting.get(client) ?? 0) > 0;
+}
+
 /**
  * Formats with the language server, if it formats, or returns null if it doesn't, or hasn't
  * started yet.
@@ -61,10 +72,16 @@ export function languageServerFormatter(client: LSPClient, view: EditorView): Fo
     client.sync();
     const doc = plugin.syncedDoc;
     if (doc.toString() !== code) throw new Error("the language server has other code than this");
-    const result = await client.request<unknown, unknown>("textDocument/formatting", {
-      textDocument: { uri: plugin.uri },
-      options: formattingOptions(view.state),
-    });
+    formatting.set(client, (formatting.get(client) ?? 0) + 1);
+    let result: unknown;
+    try {
+      result = await client.request<unknown, unknown>("textDocument/formatting", {
+        textDocument: { uri: plugin.uri },
+        options: formattingOptions(view.state),
+      });
+    } finally {
+      formatting.set(client, (formatting.get(client) ?? 1) - 1);
+    }
     const edits = result === null ? [] : textEdits(result);
     const changes = edits.map((e) => ({
       from: offsetIn(doc, e.range.start),

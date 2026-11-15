@@ -220,6 +220,7 @@ const TYPED: Readonly<Record<string, TypedFn>> = {
     quitUnavailable(cx);
   },
   format: (cx) => cx.editor.host.action("format", ""),
+  "lsp-restart": (cx) => cx.editor.host.action("lsp_restart", ""),
   "indent-style": (cx, args) => {
     const editor = cx.editor;
     const arg = args[0];
@@ -452,7 +453,7 @@ const UNSUPPORTED_TYPED: Readonly<Record<string, string>> = {
     ]),
   ),
   ...Object.fromEntries(
-    ["lsp-workspace-command", "lsp-restart", "lsp-stop"].map((n) => [
+    ["lsp-workspace-command", "lsp-stop"].map((n) => [
       n,
       "Workshop runs the language server itself",
     ]),

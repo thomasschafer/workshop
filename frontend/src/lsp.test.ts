@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustCapabilities, quietMessage, typedEnoughToComplete } from "./lsp";
+import { adjustCapabilities, messageToShow, typedEnoughToComplete } from "./lsp";
 
 describe("adjustCapabilities", () => {
   it("stops the client offering pull diagnostics, and adds what Workshop does to what it offers", () => {
@@ -48,12 +48,19 @@ describe("adjustCapabilities", () => {
   });
 });
 
-describe("quietMessage", () => {
+describe("messageToShow", () => {
   it("shows errors, and keeps the rest out of the way", () => {
-    expect(quietMessage({ type: 1, message: "Failed to load the project" })).toBe(false);
+    expect(messageToShow({ type: 1, message: "Failed to load the project" }, false)).toBe(
+      "Failed to load the project",
+    );
     for (const type of [2, 3, 4]) {
-      expect(quietMessage({ type, message: "Finished loading packages." })).toBe(true);
+      expect(messageToShow({ type, message: "Finished loading packages." }, false)).toBeNull();
     }
+  });
+
+  it("keeps errors to the console while the server's formatting, which says if it fails", () => {
+    const failed = "ormolu: Internal Error: ormoluCmd: OrmoluParsingFailed";
+    expect(messageToShow({ type: 1, message: failed }, true)).toBeNull();
   });
 });
 

@@ -287,6 +287,10 @@ html[data-tab-turn] .content {
   border-color: var(--accent);
 }
 
+.server-error-dismiss {
+  align-self: flex-start;
+}
+
 .problem-where {
   font-size: 12px;
 }

@@ -20,6 +20,7 @@ export function describeCounts({ errors, warnings, others }: Diagnostics): strin
  */
 export function StatusLine({
   checks,
+  serverError,
   diagnostics,
   saveStatus,
   hover,
@@ -28,6 +29,8 @@ export function StatusLine({
 }: {
   /** The language server's status, or null if the language has none. */
   checks: LanguageServerStatus | null;
+  /** Whether the language server has reported an error of its own, shown with the problems. */
+  serverError: boolean;
   diagnostics: Diagnostics;
   saveStatus: SaveStatus;
   hover: string | null;
@@ -56,6 +59,14 @@ export function StatusLine({
         ) : (
           describeCounts(diagnostics)
         )}
+        {checks === "ready" && serverError ? (
+          <>
+            {" · "}
+            <button type="button" class="status-count severity-error" onClick={onProblems}>
+              server error
+            </button>
+          </>
+        ) : null}
         {checks !== null && saving ? " · " : null}
         {saving}
       </span>

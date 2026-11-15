@@ -11,7 +11,9 @@
 // the completion in full; and `fetchSnippet`, a snippet sent with its import.
 //
 // It formats by squeezing runs of spaces within a line to one and dropping spaces at the ends of
-// lines, sending the whole file back as one edit, as some servers do.
+// lines, sending the whole file back as one edit, as some servers do. It can't format a file with
+// `unparsable` in it, and says so as the Haskell language server does, with a message to show as
+// well as in answer. A change that adds an `alarm` to the file has it report an error of its own.
 
 const documents = new Map();
 let nextRequest = 0;
@@ -42,6 +44,16 @@ function wordAt(text, offset) {
   while (from > 0 && /\w/.test(text[from - 1])) from--;
   while (to < text.length && /\w/.test(text[to])) to++;
   return from === to ? null : { from, to, word: text.slice(from, to) };
+}
+
+/** Reports an error of the server's own if `text` has an `alarm` that `before` didn't. */
+function raiseAlarm(before, text) {
+  if (appearances(text, "alarm").length > appearances(before, "alarm").length) {
+    send({
+      method: "window/showMessage",
+      params: { type: 1, message: `server ${process.pid} raised the alarm` },
+    });
+  }
 }
 
 function diagnose(uri) {
@@ -149,6 +161,14 @@ const handlers = {
   },
   "textDocument/formatting": ({ textDocument: { uri } }) => {
     const text = documents.get(uri);
+    if (appearances(text, "unparsable").length > 0) {
+      const failed = "couldn't parse the file to format it";
+      send({
+        method: "window/showMessage",
+        params: { type: 1, message: `Error condition: ${failed}` },
+      });
+      throw new Error(failed);
+    }
     const formatted = text
       .split("\n")
       .map((line) => {
@@ -207,10 +227,13 @@ const handlers = {
 const notifications = {
   "textDocument/didOpen": ({ textDocument }) => {
     documents.set(textDocument.uri, textDocument.text);
+    raiseAlarm("", textDocument.text);
     diagnose(textDocument.uri);
   },
   "textDocument/didChange": ({ textDocument, contentChanges }) => {
-    documents.set(textDocument.uri, contentChanges.at(-1).text);
+    const text = contentChanges.at(-1).text;
+    raiseAlarm(documents.get(textDocument.uri), text);
+    documents.set(textDocument.uri, text);
     diagnose(textDocument.uri);
   },
   "textDocument/didClose": ({ textDocument }) => documents.delete(textDocument.uri),
@@ -232,8 +255,15 @@ process.stdin.on("data", (chunk) => {
     buffer = buffer.subarray(headerEnd + 4 + length);
     if (message.id !== undefined && message.method) {
       const handler = handlers[message.method];
-      if (handler) send({ id: message.id, result: handler(message.params) });
-      else send({ id: message.id, error: { code: -32601, message: `no ${message.method}` } });
+      if (!handler) {
+        send({ id: message.id, error: { code: -32601, message: `no ${message.method}` } });
+        continue;
+      }
+      try {
+        send({ id: message.id, result: handler(message.params) });
+      } catch (error) {
+        send({ id: message.id, error: { code: -32603, message: error.message } });
+      }
     } else if (message.method) {
       notifications[message.method]?.(message.params);
     }

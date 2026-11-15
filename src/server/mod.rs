@@ -176,7 +176,8 @@ pub fn router(app: Shared) -> Router {
         .route("/discuss", post(discuss::discuss))
         .route("/git/sync", post(git::git_sync))
         .route("/log", post(client::client_log))
-        .route("/lsp", get(lsp::lsp));
+        .route("/lsp", get(lsp::lsp))
+        .route("/lsp/restart", post(lsp::restart));
     Router::new()
         .nest("/api", api)
         .fallback(static_asset)
@@ -241,10 +242,14 @@ mod testing {
 
     /// A server with its data in `dir`, and this config.
     pub fn test_app_in(dir: &std::path::Path, config: &str) -> Router {
+        router(test_state_in(dir, config))
+    }
+
+    /// The state of a server with its data in `dir`, and this config, for tests that look at it.
+    pub fn test_state_in(dir: &std::path::Path, config: &str) -> Arc<App> {
         let mut config = Config::parse(config).unwrap();
         config.solutions_dir = dir.join("aoc");
-        let app = App::new(config, Paths::under(dir), "secret".into(), None).unwrap();
-        router(Arc::new(app))
+        Arc::new(App::new(config, Paths::under(dir), "secret".into(), None).unwrap())
     }
 
     /// Config for a stand-in discussion model, a shell script in `dir` that replies with the

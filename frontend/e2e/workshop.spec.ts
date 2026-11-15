@@ -2238,6 +2238,87 @@ test("formats the code when asked, before a run, and once Helix is left alone", 
   await helixContext.close();
 });
 
+test("keeps the language server's own errors out of the code's way, and restarts it when asked", async ({
+  browser,
+}) => {
+  const { context, phone: computer } = await openOnPhone(browser, "helix", "computer");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  const status = computer.locator(".status-line");
+  const sheet = computer.getByRole("dialog");
+  const logged: string[] = [];
+  computer.on("console", (message) => logged.push(message.text()));
+  await expect(status).toContainText("no errors", { timeout: 15_000 });
+  await computer.locator(".cm-content").click();
+  const command = async (text: string) => {
+    await computer.keyboard.type(`:${text}`);
+    await computer.keyboard.press("Enter");
+  };
+
+  // Formatting code the server can't parse leaves it as it is, and what the server says of it,
+  // as well as answering, goes to the console rather than over the code.
+  await computer.keyboard.type("ggOunparsable  =  1");
+  await computer.keyboard.press("Escape");
+  await expect.poll(saved).toBe(`unparsable  =  1\n${original}`);
+  await expect
+    .poll(() => logged.some((text) => text.includes("Error condition")), { timeout: 8000 })
+    .toBe(true);
+  expect(saved()).toBe(`unparsable  =  1\n${original}`);
+  await expect(computer.locator(".cm-lsp-message")).toHaveCount(0);
+  await expect(status).not.toContainText("server error");
+  // Asked for, it says why it couldn't.
+  await command("format");
+  await expect(computer.locator(".cm-helix-error")).toContainText(
+    "Couldn't format the code: couldn't parse the file to format it",
+  );
+  await computer.keyboard.type("ggxd");
+  await expect.poll(saved).toBe(original);
+
+  /** Has the server raise an alarm, returning the server's process ID that its message gives. */
+  const raiseAlarm = async () => {
+    await computer.locator(".cm-content").click();
+    await computer.keyboard.type("ggOalarm");
+    await computer.keyboard.press("Escape");
+    await expect(status).toContainText("server error");
+    await computer.keyboard.type("xd");
+    await expect.poll(saved).toBe(original);
+    await status.getByRole("button", { name: "server error" }).click();
+    const text = (await sheet.locator(".server-error").textContent()) ?? "";
+    const pid = /server (\d+) raised the alarm/.exec(text)?.[1];
+    if (pid === undefined) throw new Error(`the error names no server: ${text}`);
+    return pid;
+  };
+
+  // An error of the server's own is a word in the status line, with the whole of it among the
+  // problems, until it's dismissed.
+  const first = await raiseAlarm();
+  await expect(computer.locator(".cm-lsp-message")).toHaveCount(0);
+  await sheet.getByRole("button", { name: "Dismiss" }).click();
+  await expect(sheet.locator(".server-error")).toHaveCount(0);
+  await expect(status).not.toContainText("server error");
+  await sheet.getByRole("button", { name: "Close" }).click();
+  await expect(sheet).toHaveCount(0);
+
+  // Restarting it from there starts a fresh server, and so does Helix's `:lsp-restart`.
+  await raiseAlarm();
+  await sheet.getByRole("button", { name: "Restart the language server" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(status).not.toContainText("server error");
+  await expect(status).toContainText("no errors", { timeout: 15_000 });
+  const second = await raiseAlarm();
+  expect(second).not.toBe(first);
+  await sheet.getByRole("button", { name: "Close" }).click();
+  await computer.locator(".cm-content").click();
+  await command("lsp-restart");
+  await expect(computer.locator(".cm-helix-message")).toContainText(
+    "Restarting the language server",
+  );
+  await expect(status).not.toContainText("server error");
+  await expect(status).toContainText("no errors", { timeout: 15_000 });
+  expect(await raiseAlarm()).not.toBe(second);
+  await context.close();
+});
+
 test("keeps the language server for an editor that comes back, with its files as they then are", async ({
   browser,
 }) => {

@@ -139,6 +139,8 @@ With a keyboard, the code editor can use [Helix](https://helix-editor.com)'s mod
 
 The code is formatted, by the language server or for Python by Ruff, before each run and, with Helix's keybindings, once it's been left in normal mode for a few seconds after a change. Only what formatting changes is touched, so the cursor stays where it was, and undoing a format keeps it undone. Shift-Alt-F, or `:format` and `=` in Helix, formats whenever you like; `format_automatically = false` under `[editor]` turns the rest off.
 
+An error the language server reports itself, rather than in the code, shows as "server error" above the code; tap it to read the whole message with the code's problems. The language server can be restarted from there, or with `:lsp-restart` in Helix.
+
 With a keyboard there are shortcuts for running, zen mode and turning between tabs, whichever keybindings the code has; the help lists them, as does Cmd-Shift-/ on a Mac or Ctrl-Shift-/ elsewhere.
 
 To compare models on the same set of example utterances, use `workshop eval --model codex:luna`, for example. Workshop checks once a day for a newer release; set `check_for_updates = false` under `[server]` to turn this off.

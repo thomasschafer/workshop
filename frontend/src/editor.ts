@@ -40,7 +40,13 @@ import {
 } from "@codemirror/view";
 import { markCursor, minimalChange, unmarkCursor } from "./diff";
 import { errorMessage } from "./errors";
-import { type Formatter, formatCode, formatWhenSettled, languageServerFormatter } from "./format";
+import {
+  type Formatter,
+  formatCode,
+  formatWhenSettled,
+  isFormatting,
+  languageServerFormatter,
+} from "./format";
 import type { HelixOptions } from "./helix/editor";
 import { isHelixTransaction } from "./helix/editor";
 import type { KeyTrieNode, Mode } from "./helix/keymap";
@@ -57,7 +63,7 @@ import {
   setHelixBottomInset,
   setHelixStatusHost,
 } from "./helix/view";
-import { adjustCapabilities, languageServerCompletion, quietMessage } from "./lsp";
+import { adjustCapabilities, languageServerCompletion, messageToShow } from "./lsp";
 import { applyWorkspaceEdit } from "./lspEdits";
 import { pinchToZoom } from "./pinch";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
@@ -819,6 +825,8 @@ export class LanguageServerConnection {
     rootUri: string,
     initializationOptions: unknown,
     private readonly onStatus: (status: LanguageServerStatus) => void,
+    /** Called with an error the language server reports, other than one formatting reports. */
+    private readonly onError: (message: string) => void,
     /** The relay's address on the server, for the language and the files it serves. */
     private readonly path = "/api/lsp",
   ) {
@@ -827,7 +835,14 @@ export class LanguageServerConnection {
       initializationOptions,
       timeout: 30_000,
       extensions: [serverDiagnostics()],
-      notificationHandlers: { "window/showMessage": (_client, params) => quietMessage(params) },
+      // Handled here rather than shown over the code, as the client would.
+      notificationHandlers: {
+        "window/showMessage": (client, params) => {
+          const error = messageToShow(params, isFormatting(client));
+          if (error !== null) this.onError(error);
+          return true;
+        },
+      },
     });
     document.addEventListener("visibilitychange", this.onVisibility);
     this.open();

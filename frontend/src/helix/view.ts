@@ -84,6 +84,8 @@ export interface HelixActions {
   reload(): Promise<void>;
   /** Shows every problem the language server has found, with their whole messages. */
   showProblems(): void;
+  /** Restarts the language server, for `:lsp-restart`. */
+  restartLanguageServer(): Promise<unknown>;
   /** Formats the code, returning whether that changed it, or throws saying why it can't. */
   format(): Promise<boolean>;
   setLineWrapping(enabled: boolean): void;
@@ -757,6 +759,15 @@ class HelixView implements PluginValue, Host {
       case "reload":
         await this.config.actions.reload();
         return;
+      case "lsp_restart":
+        return this.withLsp(async () => {
+          try {
+            await this.config.actions.restartLanguageServer();
+            editor.setStatus("Restarting the language server");
+          } catch (error) {
+            editor.setError(`Couldn't restart the language server: ${errorMessage(error)}`);
+          }
+        });
       case "format":
         try {
           editor.setStatus(

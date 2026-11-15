@@ -41,14 +41,19 @@ export function adjustCapabilities(message: string): string {
 const MESSAGE_ERROR = 1;
 
 /**
- * Keeps a language server's message to itself unless it's an error, as servers announce routine
- * progress this way, such as gopls's "Finished loading packages", which would otherwise cover the
- * code. Returns whether the message was handled, so the client doesn't show it.
+ * The error in a language server's `window/showMessage` to show, or null if it's kept to the
+ * console. Servers announce routine progress this way, such as gopls's "Finished loading
+ * packages", so only errors are shown, and not while the server's formatting: some report its
+ * failures this way as well as in answer, such as haskell-language-server for code that doesn't
+ * parse yet, and formatting says itself if it fails.
  */
-export function quietMessage(params: { type: number; message: string }): boolean {
-  if (params.type === MESSAGE_ERROR) return false;
+export function messageToShow(
+  params: { type: number; message: string },
+  formatting: boolean,
+): string | null {
+  if (params.type === MESSAGE_ERROR && !formatting) return params.message;
   console.info(`[lsp] ${params.message}`);
-  return true;
+  return null;
 }
 
 /** How long typing has to pause for before completions come up unasked. */

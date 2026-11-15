@@ -149,7 +149,7 @@ export function App({
   const stackHeightRef = useRef(0);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
-  const { lsp, lspStatus } = useLanguageServer(
+  const { lsp, lspStatus, lspError, dismissLspError, restartLsp } = useLanguageServer(
     boot.language.has_lsp
       ? { rootUri: boot.language.root_uri, options: boot.language.lsp_options, path: "/api/lsp" }
       : null,
@@ -251,6 +251,7 @@ export function App({
         if (s.adopt(opened.code)) current.replaceAll(opened.code.text);
       },
       showProblems: () => setSheet("problems"),
+      restartLanguageServer: restartLsp,
     });
   const helixSetupRef = useRef(helixSetup);
   helixSetupRef.current = helixSetup;
@@ -850,6 +851,7 @@ export function App({
           ) : null}
           <StatusLine
             checks={lsp ? lspStatus : null}
+            serverError={lspError !== null}
             diagnostics={diagnostics}
             saveStatus={saveStatus}
             hover={hover}
@@ -914,6 +916,9 @@ export function App({
           <ProblemsSheet
             problems={editor.current?.problems() ?? []}
             current={diagnostics.atCursor}
+            server={
+              lsp ? { error: lspError, onDismiss: dismissLspError, onRestart: restartLsp } : null
+            }
             onGoto={(problem) => {
               editor.current?.gotoProblem(problem);
               setSheet(null);

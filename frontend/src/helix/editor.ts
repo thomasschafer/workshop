@@ -123,6 +123,7 @@ export type HostAction =
   | "write"
   | "reload"
   | "format"
+  | "lsp_restart"
   | "hover"
   | "goto_definition"
   | "goto_declaration"
