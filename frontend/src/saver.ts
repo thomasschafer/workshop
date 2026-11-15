@@ -8,6 +8,12 @@ export interface FileVersion {
   version: string;
 }
 
+/**
+ * When a read of the file from the server began, from `VersionedSaver.readMark`, so `adopt` can
+ * tell whether one of the saver's own saves may have landed since.
+ */
+export type ReadMark = number & { readonly __readMark: unique symbol };
+
 /** Saves `text` if the file is still at `version`, rejecting with a 409 `ApiError` if not. */
 export type SaveFile = (text: string, version: string, keepalive: boolean) => Promise<FileVersion>;
 
@@ -42,6 +48,8 @@ export class VersionedSaver {
   private conflicted = false;
   private closed = false;
   private retryDelay = MIN_RETRY_MS;
+  /** How many times the version has changed, so a read can tell whether it's out of date. */
+  private versionChanges = 0;
 
   constructor(
     private readonly saveFile: SaveFile,
@@ -119,8 +127,7 @@ export class VersionedSaver {
 
   /** Overwrites the version from elsewhere with the local text. */
   keepMine(theirs: FileVersion): void {
-    this.version = theirs.version;
-    this.confirmed = theirs.text;
+    this.setConfirmed(theirs);
     this.conflicted = false;
     if (this.hasUnsavedChanges) {
       this.queue(this.latest);
@@ -132,20 +139,28 @@ export class VersionedSaver {
 
   /** Discards local changes in favour of the version from elsewhere. */
   takeTheirs(theirs: FileVersion): void {
-    this.version = theirs.version;
-    this.confirmed = theirs.text;
+    this.setConfirmed(theirs);
     this.latest = theirs.text;
     this.pending = null;
     this.conflicted = false;
     this.markSaved();
   }
 
+  /** Marks a read of the file from the server beginning, to give `adopt` with what it read. */
+  readMark(): ReadMark {
+    return this.versionChanges as ReadMark;
+  }
+
   /**
    * Takes a newer version of the file from elsewhere if there are no local changes, returning
    * whether it did. Otherwise the local changes are saved, which reports a conflict if needed.
+   * `since` is when the read that found `theirs` began.
    */
-  adopt(theirs: FileVersion): boolean {
+  adopt(theirs: FileVersion, since: ReadMark): boolean {
     if (theirs.version === this.version) return false;
+    // A save of ours landed after the read began, which may have read the file before it: what
+    // was read can be older than what's saved, rather than from elsewhere. The next read tells.
+    if (since !== this.versionChanges) return false;
     if (!this.hasUnsavedChanges && !this.conflicted) {
       this.takeTheirs(theirs);
       return true;
@@ -201,8 +216,7 @@ export class VersionedSaver {
   }
 
   private confirm(file: FileVersion): void {
-    this.version = file.version;
-    this.confirmed = file.text;
+    this.setConfirmed(file);
     this.retryDelay = MIN_RETRY_MS;
     if (this.hasUnsavedChanges) {
       this.writeUnsaved();
@@ -211,6 +225,12 @@ export class VersionedSaver {
     } else {
       this.markSaved();
     }
+  }
+
+  private setConfirmed(file: FileVersion): void {
+    if (file.version !== this.version) this.versionChanges++;
+    this.version = file.version;
+    this.confirmed = file.text;
   }
 
   private enterConflict(theirs: FileVersion): void {

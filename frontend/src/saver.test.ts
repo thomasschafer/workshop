@@ -172,7 +172,7 @@ describe("VersionedSaver", () => {
     expect(conflicts).toEqual([]);
     expect(server.text).toBe("abc");
     // On waking, an unchanged version from the server is not taken over the local text.
-    expect(saver.adopt(server.file)).toBe(false);
+    expect(saver.adopt(server.file, saver.readMark())).toBe(false);
   });
 
   it("stops on a real conflict and keeps the local text until the user chooses", async () => {
@@ -213,24 +213,45 @@ describe("VersionedSaver", () => {
     const server = new FakeServer("a");
     const { saver } = saverFor(server);
     server.editElsewhere("desk");
-    expect(saver.adopt(server.file)).toBe(true);
+    expect(saver.adopt(server.file, saver.readMark())).toBe(true);
     saver.schedule("desk, then phone");
     await vi.advanceTimersByTimeAsync(400);
     expect(server.text).toBe("desk, then phone");
+  });
+
+  it("doesn't take a version read before one of its own saves landed for a change elsewhere", async () => {
+    const server = new FakeServer("a");
+    const { saver, conflicts } = saverFor(server);
+    saver.schedule("ab");
+    // The file is read just before the save reaches it, and what was read arrives after.
+    const mark = saver.readMark();
+    const read = server.file;
+    await vi.advanceTimersByTimeAsync(400);
+    expect(server.text).toBe("ab");
+    expect(saver.adopt(read, mark)).toBe(false);
+    expect(saver.hasUnsavedChanges).toBe(false);
+    // The next read finds what was saved, and a change made elsewhere since is still taken.
+    expect(saver.adopt(server.file, saver.readMark())).toBe(false);
+    server.editElsewhere("desk");
+    expect(saver.adopt(server.file, saver.readMark())).toBe(true);
+    saver.schedule("desk, then phone");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(server.text).toBe("desk, then phone");
+    expect(conflicts).toEqual([]);
   });
 
   it("doesn't save back a version from elsewhere as it's shown, racing the next change there", async () => {
     const server = new FakeServer("a");
     const { saver, conflicts } = saverFor(server);
     server.editElsewhere("desk");
-    expect(saver.adopt(server.file)).toBe(true);
+    expect(saver.adopt(server.file, saver.readMark())).toBe(true);
     // The editor reports showing it as a change.
     saver.schedule("desk");
     server.editElsewhere("desk, again");
     await vi.advanceTimersByTimeAsync(1000);
     expect(server.saves).toEqual([]);
     expect(conflicts).toEqual([]);
-    expect(saver.adopt(server.file)).toBe(true);
+    expect(saver.adopt(server.file, saver.readMark())).toBe(true);
   });
 
   it("recovers unsaved text after a reload and saves it", async () => {

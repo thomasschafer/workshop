@@ -248,8 +248,9 @@ export function App({
         // Changes here are saved first, so reloading only ever picks up changes made
         // elsewhere.
         await s.flush();
+        const mark = s.readMark();
         const opened = await api.open(p);
-        if (s.adopt(opened.code)) current.replaceAll(opened.code.text);
+        if (s.adopt(opened.code, mark)) current.replaceAll(opened.code.text);
       },
       showProblems: () => setSheet("problems"),
       restartLanguageServer: restartLsp,

@@ -47,16 +47,23 @@ export function useFileSync({
       const current = editor.current;
       if (!p || !current || checking || document.visibilityState === "hidden") return;
       checking = true;
+      // Marked before the file is read, so a save landing meanwhile isn't taken for a change made
+      // elsewhere.
+      const code = saver.current && { saver: saver.current, mark: saver.current.readMark() };
+      const notes = notesSaver.current && {
+        saver: notesSaver.current,
+        mark: notesSaver.current.readMark(),
+      };
       try {
         const opened = await api.open(p);
         if (puzzleRef.current !== p || editor.current !== current) return;
         // Each saver only takes the version from elsewhere if there are no local changes;
         // otherwise it saves them, which reports a conflict if the file changed.
-        if (saver.current?.adopt(opened.code)) {
+        if (code?.saver.adopt(opened.code, code.mark)) {
           current.replaceAll(opened.code.text);
           notify("info", "Loaded code changed elsewhere.");
         }
-        if (notesSaver.current?.adopt(opened.notes)) {
+        if (notes?.saver.adopt(opened.notes, notes.mark)) {
           onNotes(opened.notes.text);
         }
       } catch {

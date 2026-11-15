@@ -77,9 +77,10 @@ export function EditorPane({
         },
         reload: async () => {
           await code.flush();
+          const mark = code.readMark();
           const opened = await codingApi.open(itemKey);
           const fresh = opened.languages.find((l) => l.id === language.id);
-          if (fresh && code.adopt(fresh.code)) created.replaceAll(fresh.code.text);
+          if (fresh && code.adopt(fresh.code, mark)) created.replaceAll(fresh.code.text);
         },
         showProblems: () => setShowProblems(true),
         restartLanguageServer: restartLsp,
