@@ -2,6 +2,7 @@
 kind = "coding"
 title = "Fewest hops between towns"
 skills = ["algorithms.graphs"]
+difficulty = 3
 minutes = 20
 
 languages = ["python", "rust"]

@@ -2,6 +2,7 @@
 kind = "coding"
 title = "Ways up a broken staircase"
 skills = ["algorithms.dynamic-programming"]
+difficulty = 2
 minutes = 20
 
 languages = ["python", "rust"]

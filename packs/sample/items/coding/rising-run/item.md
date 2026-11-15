@@ -2,6 +2,7 @@
 kind = "coding"
 title = "Longest rising run"
 skills = ["algorithms.arrays"]
+difficulty = 2
 minutes = 15
 
 languages = ["python", "rust"]

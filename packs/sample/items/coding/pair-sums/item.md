@@ -2,6 +2,7 @@
 kind = "coding"
 title = "Pairs with a given sum"
 skills = ["algorithms.hashing"]
+difficulty = 2
 minutes = 15
 
 languages = ["python", "rust"]

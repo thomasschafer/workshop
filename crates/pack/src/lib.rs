@@ -24,7 +24,9 @@ use anyhow::{Context, Result};
 pub use code::{Case, Coding, Language, Question, Reading, ReadingCheck, Source};
 pub use drafts::Draft;
 pub use error_types::ErrorType;
-pub use item::{Content, Item, Kind, MentalMaths, Param, Probability, Simulation, replace_section};
+pub use item::{
+    Content, DIFFICULTY, Item, Kind, MentalMaths, Param, Probability, Simulation, replace_section,
+};
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
 
 /// How many questions a mental maths template must make without fault to pass its check.

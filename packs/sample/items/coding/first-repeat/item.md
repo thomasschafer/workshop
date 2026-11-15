@@ -2,6 +2,7 @@
 kind = "coding"
 title = "The first word to repeat"
 skills = ["algorithms.hashing"]
+difficulty = 1
 minutes = 10
 
 languages = ["python", "rust"]

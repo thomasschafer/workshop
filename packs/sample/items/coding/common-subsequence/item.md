@@ -2,6 +2,7 @@
 kind = "coding"
 title = "Longest common subsequence"
 skills = ["algorithms.dynamic-programming"]
+difficulty = 4
 minutes = 25
 
 languages = ["python", "rust"]

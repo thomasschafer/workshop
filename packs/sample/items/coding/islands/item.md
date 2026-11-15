@@ -2,6 +2,7 @@
 kind = "coding"
 title = "Count the islands"
 skills = ["algorithms.graphs"]
+difficulty = 3
 minutes = 20
 
 languages = ["python", "rust"]

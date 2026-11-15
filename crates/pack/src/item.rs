@@ -96,6 +96,8 @@ pub struct Item {
     pub source: Option<String>,
     /// Roughly how long it takes.
     pub minutes: u32,
+    /// How hard it is, from `DIFFICULTY`'s easiest to its hardest, if the pack says.
+    pub difficulty: Option<u8>,
     /// What the learner is asked, in Markdown.
     pub prompt: String,
     pub content: Content,
@@ -169,8 +171,19 @@ pub struct Simulation {
     pub tolerance: f64,
 }
 
+/// How hard an item can be: 1 is a warm-up, 3 typical of its kind, and 5 among the hardest of
+/// its kind.
+pub const DIFFICULTY: std::ops::RangeInclusive<u8> = 1..=5;
+
 const COMMON_KEYS: &[&str] = &[
-    "id", "kind", "title", "skills", "track", "source", "minutes",
+    "id",
+    "kind",
+    "title",
+    "skills",
+    "track",
+    "source",
+    "minutes",
+    "difficulty",
 ];
 
 #[derive(Deserialize)]
@@ -183,6 +196,7 @@ struct Common {
     track: Option<String>,
     source: Option<String>,
     minutes: Option<u32>,
+    difficulty: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -262,6 +276,15 @@ impl Item {
         if common.minutes == Some(0) {
             return Err("minutes should be at least 1".to_owned());
         }
+        if let Some(difficulty) = common.difficulty
+            && !DIFFICULTY.contains(&difficulty)
+        {
+            return Err(format!(
+                "difficulty should be from {} to {}, not {difficulty}",
+                DIFFICULTY.start(),
+                DIFFICULTY.end()
+            ));
+        }
 
         let (prompt, mut sections) = split_sections(body, common.kind)?;
         let mut section = |name: &str| sections.remove(name);
@@ -336,6 +359,7 @@ impl Item {
             track,
             source: common.source,
             minutes: common.minutes.unwrap_or(common.kind.default_minutes()),
+            difficulty: common.difficulty,
             prompt,
             content,
         })
@@ -828,6 +852,12 @@ mod tests {
         .unwrap();
         assert_eq!(coding.track, TrackId::Coding);
         assert_eq!(coding.minutes, 20);
+        assert_eq!(coding.difficulty, None);
+        let hard = parse(
+            "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\ndifficulty = 4\n+++\nQ\n\n## Answer\n\nA\n",
+        )
+        .unwrap();
+        assert_eq!(hard.difficulty, Some(4));
         let Content::Coding(problem) = &coding.content else {
             panic!("not coding");
         };
@@ -1124,6 +1154,10 @@ mod tests {
             (
                 "+++\nkind = \"design\"\nskills = [\"dice\"]\n+++\nQ\n## Rubric\nBe good.",
                 "a list",
+            ),
+            (
+                &*format!("+++\n{card}\ndifficulty = 6\n+++\nQ\n## Answer\nA"),
+                "from 1 to 5, not 6",
             ),
         ];
         for (source, expected) in broken {
