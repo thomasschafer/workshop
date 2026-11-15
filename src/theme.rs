@@ -75,6 +75,28 @@ impl Rgb {
     }
 }
 
+/// The least contrast text should have with what's behind it, as WCAG asks of body text.
+const READABLE: f64 = 4.5;
+
+/// The colour for text on a fill, such as the accent: the theme's background or foreground,
+/// whichever stands out more, unless neither is readable on it, as a mid-toned fill's often
+/// isn't; then black or white, whichever stands out more.
+fn text_on(fill: Rgb, bg: Rgb, fg: Rgb) -> Rgb {
+    let best = |candidates: &[Rgb]| {
+        candidates
+            .iter()
+            .copied()
+            .max_by(|a, b| fill.contrast(*a).total_cmp(&fill.contrast(*b)))
+            .expect("there are candidates")
+    };
+    let own = best(&[bg, fg]);
+    if fill.contrast(own) >= READABLE {
+        own
+    } else {
+        best(&[own, Rgb(0, 0, 0), Rgb(255, 255, 255)])
+    }
+}
+
 /// A terminal theme: background, foreground and the 16 ANSI colours.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalTheme {
@@ -163,11 +185,7 @@ impl TerminalTheme {
     pub fn css_variables(&self) -> BTreeMap<&'static str, String> {
         let (bg, fg) = (self.background, self.foreground);
         let accent = self.colour(4).unwrap_or(fg);
-        let accent_fg = if accent.contrast(bg) >= accent.contrast(fg) {
-            bg
-        } else {
-            fg
-        };
+        let accent_fg = text_on(accent, bg, fg);
         let muted = fg.mix(bg, 0.4);
         let colour = |index: usize, fallback: Rgb| self.colour(index).unwrap_or(fallback);
         BTreeMap::from([
@@ -349,8 +367,34 @@ mod tests {
         assert_eq!(vars["--accent"], "#3366ff");
         assert_eq!(vars["--error"], "#cc3333");
         assert_eq!(vars["--selection"], "#404040");
-        // Light text reads better on this blue than the dark background does.
-        assert_eq!(vars["--accent-fg"], "#f0f0f0");
+        // Light text reads better on this blue than the dark background does, and the
+        // foreground's grey isn't quite light enough, so it's white.
+        assert_eq!(vars["--accent-fg"], "#ffffff");
+    }
+
+    #[test]
+    fn keeps_text_on_the_accent_readable() {
+        let rgb = |text: &str| Rgb::parse(text).unwrap();
+        // Neither a dark grey background nor a light grey foreground reads well on a mid-toned
+        // teal, so it's black.
+        let teal = rgb("#458588");
+        let text = text_on(teal, rgb("#282828"), rgb("#ebdbb2"));
+        assert_eq!(text, Rgb(0, 0, 0));
+        assert!(teal.contrast(text) >= READABLE);
+        // The theme's own colour, where one reads well.
+        assert_eq!(
+            text_on(rgb("#7aa2f7"), rgb("#1a1b26"), rgb("#c0caf5")),
+            rgb("#1a1b26")
+        );
+        for (fill, bg, fg) in [
+            ("#268bd2", "#002b36", "#839496"),
+            ("#8fa1b3", "#2b303b", "#c0c5ce"),
+            ("#4078f2", "#fafafa", "#383a42"),
+        ] {
+            let fill = rgb(fill);
+            let text = text_on(fill, rgb(bg), rgb(fg));
+            assert!(fill.contrast(text) >= READABLE, "{fill:?} with {text:?}");
+        }
     }
 
     #[test]

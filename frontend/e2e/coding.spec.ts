@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type BrowserContext, devices, expect, type Page, test } from "@playwright/test";
+import {
+  type BrowserContext,
+  devices,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from "@playwright/test";
 import { CODING_HOME, CODING_PORT } from "./fixture";
 import { holdToTalk, installSimulatedSpeech } from "./speech";
 
@@ -310,6 +317,34 @@ test("submits, shows a small input it fails on, then passes and is reviewed", as
   await expect.poll(() => overviewStatus("sample/first-repeat")).toBe("done");
 });
 
+/**
+ * How well an element's text stands out from its fill, as WCAG works it out, in light and dark
+ * mode: the lower of the two. A faded element counts as not standing out at all.
+ */
+async function contrast(locator: Locator): Promise<number> {
+  const ratios: number[] = [];
+  for (const colorScheme of ["light", "dark"] as const) {
+    await phone.emulateMedia({ colorScheme });
+    ratios.push(
+      await locator.evaluate((element) => {
+        const style = getComputedStyle(element);
+        if (style.opacity !== "1") return 0;
+        const luminance = (colour: string) => {
+          const [r = 0, g = 0, b = 0] = (colour.match(/[\d.]+/g) ?? []).map(Number);
+          const linear = (c: number) =>
+            c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
+          return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+        };
+        const text = luminance(style.color);
+        const fill = luminance(style.backgroundColor);
+        return (Math.max(text, fill) + 0.05) / (Math.min(text, fill) + 0.05);
+      }),
+    );
+  }
+  await phone.emulateMedia({ colorScheme: null });
+  return Math.min(...ratios);
+}
+
 /** Solves a problem as far as the server's concerned, rated good, so it comes back for review. */
 async function solvedBefore(key: string): Promise<void> {
   const item = `/api/coding/items/${key}`;
@@ -326,6 +361,11 @@ test("comes back as a twist on it, posed once, answered and marked", async () =>
   const twist = phone.getByRole("region", { name: "Twist" });
   await expect(twist).toContainText("A new constraint");
   await expect(twist).toContainText("Twist 1, a new constraint: now the input streams in");
+  // The step it's at, and a button that can't be pressed yet, are readable in either mode.
+  expect(await contrast(phone.locator(".step.current"))).toBeGreaterThanOrEqual(4.5);
+  const mark = phone.getByRole("button", { name: "Mark my answer" });
+  await expect(mark).toBeDisabled();
+  expect(await contrast(mark)).toBeGreaterThanOrEqual(4.5);
   // Kept for the review, so a reload shows the same one, with the answer as far as it got.
   const answer = phone.getByLabel("How would you change your approach, and what would it cost?");
   await answer.fill("Keep the set, and stop at the first repeat");
@@ -352,6 +392,9 @@ test("comes back as a twist on it, posed once, answered and marked", async () =>
     timeout: 15_000,
   });
   await expect(phone.getByRole("region", { name: "Marked" })).toContainText("70%");
+  // Done, the steps can't be gone back to, and the one it was at is still readable.
+  await expect(phone.locator(".step.current")).toBeDisabled();
+  expect(await contrast(phone.locator(".step.current"))).toBeGreaterThanOrEqual(4.5);
   await expect(phone.getByRole("region", { name: "A good answer" })).toContainText("as it arrives");
   const log = (await (await phone.request.get("/api/mistakes")).json()) as {
     mistakes: { item: string; detail: string }[];

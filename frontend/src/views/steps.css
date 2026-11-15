@@ -42,3 +42,11 @@
   border-style: dashed;
   opacity: 0.7;
 }
+
+/* The step the learner's at stays as readable once the steps can't be gone back to, such as
+   when it's done: muted text, or a faded fill, on the accent is hard to read. */
+.step.current:disabled {
+  color: var(--accent-fg);
+  border-style: solid;
+  opacity: 1;
+}
