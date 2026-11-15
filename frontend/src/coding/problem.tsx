@@ -6,9 +6,10 @@ import { gradingApi } from "../grading/api";
 import { ExplainAloud } from "../grading/explain";
 import { MarkedView } from "../grading/marked";
 import type { Marked } from "../grading/types";
+import { type CodeKeyboardState, useCodeKeyboard } from "../hooks/useCodeKeyboard";
 import { useConnection } from "../hooks/useConnection";
 import { useConversation } from "../hooks/useConversation";
-import { useEditorSettings } from "../hooks/useEditorSettings";
+import { type EditorSettings, useEditorSettings } from "../hooks/useEditorSettings";
 import { newId } from "../learning/local";
 import { sameOutput } from "../learning/output";
 import { Markdown } from "../learning/practice";
@@ -17,8 +18,9 @@ import { HomeButton } from "../progress/page";
 import { LatestSaver, type VersionedSaver } from "../saver";
 import { TrackIcon } from "../tracks/icons";
 import { DictateButton } from "../views/dictate";
-import { Keyboard } from "../views/keyboard";
+import { CodeKeyboard, KeyboardToggle } from "../views/keyboard";
 import { StepNav } from "../views/steps";
+import { useZen, ZenButton, ZenExit, ZenKeyboardButton } from "../views/zen";
 import { codingApi } from "./api";
 import { EditorPane } from "./editorPane";
 import {
@@ -171,6 +173,20 @@ export function ProblemView({
       : (models[0] ?? ""),
   );
   const editor = useRef<CodeEditor | null>(null);
+  const settings = useEditorSettings(boot.editor, editor);
+  const keyboard = useCodeKeyboard(editor);
+  const zen = useZen(setNotice);
+  const coding = session?.step === "code" && finished === null;
+  // Zen mode is only for writing the code: moving on from it, it's left.
+  useEffect(() => {
+    if (zen.on && !coding) zen.exit();
+  }, [coding]);
+  const enterZen = () => {
+    setTutorOpen(false);
+    // In the tap itself, as phones only open the keyboard for something the user started.
+    keyboard.show(true);
+    zen.enter();
+  };
   const draftSaver = useRef<VersionedSaver | null>(null);
   const lastRun = useRef("");
   const tutor = useConversation(
@@ -198,11 +214,14 @@ export function ProblemView({
         <HomeButton onHome={onHome} />
         <CodingLink onList={onList} />
       </span>
-      {online ? null : (
-        <span class="learn-sync offline" role="status">
-          Offline
-        </span>
-      )}
+      <span class="header-actions">
+        {online ? null : (
+          <span class="learn-sync offline" role="status">
+            Offline
+          </span>
+        )}
+        {coding ? <ZenButton onClick={enterZen} /> : null}
+      </span>
     </header>
   );
 
@@ -277,8 +296,10 @@ export function ProblemView({
   ) : session.step === "code" || session.step === "test" ? (
     <CodeStep
       {...shared}
-      boot={boot}
       itemKey={itemKey}
+      settings={settings}
+      keyboard={keyboard}
+      zen={zen.on ? { onExit: zen.exit } : null}
       editor={editor}
       draftSaver={draftSaver}
       onRan={(summary) => {
@@ -307,7 +328,7 @@ export function ProblemView({
 
   return (
     <div
-      class={`learn coding-problem ${session.step === "code" || session.step === "test" ? "coding-at-code" : ""}`}
+      class={`learn coding-problem ${session.step === "code" || session.step === "test" ? "coding-at-code" : ""} ${zen.on ? "zen" : ""}`}
     >
       {header}
       <StepNav
@@ -553,29 +574,27 @@ function CodeStep({
   change,
   online,
   openTutor,
-  boot,
   itemKey,
+  settings,
+  keyboard,
+  zen,
   editor,
   draftSaver,
   onRan,
   onReloaded,
   onGiveUp,
 }: StepProps & {
-  boot: Bootstrap;
   itemKey: string;
+  settings: EditorSettings;
+  keyboard: CodeKeyboardState;
+  /** Leaves zen mode, while in it: just the code and the keyboard. */
+  zen: { onExit: () => void } | null;
   editor: { current: CodeEditor | null };
   draftSaver: { current: VersionedSaver | null };
   onRan: (summary: string) => void;
   onReloaded: (opened: Opened) => void;
   onGiveUp: () => void;
 }) {
-  const settings = useEditorSettings(boot.editor, editor);
-  const [keyboard, setKeyboard] = useState(false);
-  const statusHost = useRef<HTMLElement | null>(null);
-  const placeStatus = useCallback((host: HTMLElement | null) => {
-    statusHost.current = host;
-    editor.current?.setStatusHost(host);
-  }, []);
   const [busy, setBusy] = useState<"running" | "submitting" | null>(null);
   const [ran, setRan] = useState<Graded | null>(null);
   const [submitted, setSubmitted] = useState<Submitted | null>(null);
@@ -584,14 +603,7 @@ function CodeStep({
   const language = opened.languages.find((l) => l.id === session.language) ?? opened.languages[0];
   const testing = session.step === "test";
 
-  const showKeyboard = (shown: boolean) => {
-    setKeyboard(shown);
-    editor.current?.setKeyboard(shown);
-  };
-  const keyboardShown = settings.ownKeyboard && keyboard && !testing;
-  useEffect(() => {
-    if (keyboardShown) editor.current?.revealCursor();
-  }, [keyboardShown]);
+  const keyboardShown = settings.ownKeyboard && keyboard.wanted && !testing;
 
   const runExamples = async () => {
     setBusy("running");
@@ -610,7 +622,7 @@ function CodeStep({
   };
 
   const submit = async () => {
-    showKeyboard(false);
+    keyboard.show(false);
     setBusy("submitting");
     setRunError(null);
     setSubmitted(null);
@@ -636,6 +648,10 @@ function CodeStep({
   const hints = opened.hints.slice(0, hintsShown);
   return (
     <main class="coding-work">
+      {zen ? <ZenExit onExit={zen.onExit} /> : null}
+      {zen && settings.ownKeyboard && !keyboard.wanted ? (
+        <ZenKeyboardButton onClick={() => keyboard.show(true)} />
+      ) : null}
       {testing ? (
         <TestResults
           busy={busy === "submitting"}
@@ -714,7 +730,7 @@ function CodeStep({
             settings={settings}
             editor={editor}
             saver={draftSaver}
-            statusHost={statusHost}
+            statusHost={keyboard.statusHost}
           />
           {ran || runError ? (
             <ExampleResults
@@ -727,20 +743,14 @@ function CodeStep({
             />
           ) : null}
           {keyboardShown ? (
-            <Keyboard
-              onKey={(key) => editor.current?.pressKey(key)}
-              onLower={() => showKeyboard(false)}
-              offsets={settings.keyOffsets.offsets}
-              onTouch={settings.keyOffsets.onTouch}
-              statusHost={placeStatus}
+            <CodeKeyboard
+              editor={editor}
+              keyOffsets={settings.keyOffsets}
+              onLower={() => keyboard.show(false)}
+              statusHost={keyboard.placeStatus}
             />
-          ) : (
+          ) : zen ? null : (
             <footer class="coding-actions">
-              {settings.ownKeyboard ? (
-                <button type="button" class="pill" onClick={() => showKeyboard(true)}>
-                  Type
-                </button>
-              ) : null}
               <button
                 type="button"
                 class="pill"
@@ -761,6 +771,11 @@ function CodeStep({
               >
                 Submit
               </button>
+              <KeyboardToggle
+                // Workshop's own keyboard takes the footer's place, so here it's only ever down.
+                shown={!settings.ownKeyboard && keyboard.wanted}
+                onToggle={() => keyboard.show(settings.ownKeyboard || !keyboard.wanted)}
+              />
             </footer>
           )}
         </>

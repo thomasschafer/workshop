@@ -167,3 +167,24 @@
 .pill.rating.suggested {
   box-shadow: 0 0 0 2px var(--accent);
 }
+
+/* Zen mode: just the code, with Helix's status line if it's on, and the keyboard, as in Advent of
+   Code. */
+.coding-problem.zen {
+  padding-top: 0;
+  /* Where the keyboard covers the page, rather than shrinking it, as zen mode asks. */
+  height: calc(100dvh - env(keyboard-inset-height, 0px));
+}
+
+.coding-problem.zen > .top,
+.coding-problem.zen > .steps,
+.coding-problem.zen .coding-toolbar,
+.coding-problem.zen .coding-hints,
+.coding-problem.zen .coding-results,
+.coding-problem.zen .status-line {
+  display: none;
+}
+
+.coding-problem.zen .coding-work {
+  position: relative;
+}

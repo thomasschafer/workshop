@@ -4,6 +4,7 @@ import { type LocalCommand, matchCommand } from "./commands";
 import { CodeEditor, type Diagnostics, type HelixSetup, hoverText, NO_DIAGNOSTICS } from "./editor";
 import { errorMessage } from "./errors";
 import { describeProblems } from "./helix/config";
+import { useCodeKeyboard } from "./hooks/useCodeKeyboard";
 import { useConnection } from "./hooks/useConnection";
 import { useDayMeta } from "./hooks/useDayMeta";
 import { useDictation } from "./hooks/useDictation";
@@ -46,7 +47,7 @@ import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
 import { Header, TABS, Tabs, tabBeside } from "./views/header";
 import { Help } from "./views/help";
-import { Keyboard } from "./views/keyboard";
+import { CodeKeyboard } from "./views/keyboard";
 import { Modal } from "./views/modal";
 import { MissingPackageBanner, OutdatedPackagesBanner } from "./views/packages";
 import { Picker } from "./views/picker";
@@ -58,14 +59,7 @@ import { Setup } from "./views/setup";
 import { ShortcutsModal } from "./views/shortcuts";
 import { Stack } from "./views/stack";
 import { StatusLine } from "./views/status";
-import {
-  enterFullscreen,
-  exitFullscreen,
-  keepEscape,
-  ZenExit,
-  ZenKeyboardButton,
-  ZenTabs,
-} from "./views/zen";
+import { useZen, ZenExit, ZenKeyboardButton, ZenTabs } from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
 
@@ -101,8 +95,8 @@ export function App({
   // On a wide screen the puzzle has a column of its own, beside the other tabs.
   const wide = useMediaQuery("(min-width: 1000px)");
   const online = useConnection();
-  // Just the code and the keyboard, for typing on a phone without the rest of the app in the way.
-  const [zen, setZen] = useState(false);
+  const zenMode = useZen((text) => notify("warn", text));
+  const zen = zenMode.on;
   // In zen mode the puzzle has no column, so it's a tab there on any screen.
   const split = wide && !zen;
   const shownTab: Tab = split && tab === "problem" ? "code" : tab;
@@ -130,7 +124,6 @@ export function App({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [codeConflict, setCodeConflict] = useState<FileVersion | null>(null);
   const [notesConflict, setNotesConflict] = useState<FileVersion | null>(null);
-  const [keyboard, setKeyboard] = useState(false);
   const packages = usePackages(boot.language.packages !== null);
   const discussion = useDiscussion(puzzle, discussModel, () => {
     const last = latest.current.run.last;
@@ -146,15 +139,14 @@ export function App({
   const editorHost = useRef<HTMLDivElement>(null);
   const codePane = useRef<HTMLDivElement>(null);
   const editor = useRef<CodeEditor | null>(null);
+  // Shown in the tap rather than on the next render, so the editor can take the focus.
+  const keyboard = useCodeKeyboard(editor, () => {
+    setTab("code");
+    codePane.current?.classList.remove("hidden");
+  });
   // Utterances spoken while a puzzle's editor is still loading wait for it.
   const editorWaiters = useRef<((editor: CodeEditor) => void)[]>([]);
   const stackHeightRef = useRef(0);
-  // Where Helix's status line shows while Workshop's own keyboard is up, beneath its keys.
-  const statusHost = useRef<HTMLElement | null>(null);
-  const placeStatus = useCallback((host: HTMLElement | null) => {
-    statusHost.current = host;
-    editor.current?.setStatusHost(host);
-  }, []);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
   const { lsp, lspStatus } = useLanguageServer(
@@ -407,7 +399,7 @@ export function App({
           onDiagnostics: setDiagnostics,
         });
         created.setBottomInset(insetFor(stackHeightRef.current));
-        created.setStatusHost(statusHost.current);
+        created.setStatusHost(keyboard.statusHost.current);
         editor.current = created;
         for (const waiter of editorWaiters.current.splice(0)) waiter(created);
       } catch (e) {
@@ -634,28 +626,11 @@ export function App({
     [dictationMethod],
   );
 
-  const showKeyboard = (shown: boolean) => {
-    setKeyboard(shown);
-    setTab("code");
-    // Shown now rather than on the next render, as the editor can't take focus while hidden,
-    // and phones only open the keyboard for a focus in the tap itself.
-    codePane.current?.classList.remove("hidden");
-    editor.current?.setKeyboard(shown);
-  };
-
   const enterZen = () => {
     setSheet(null);
-    setZen(true);
-    // In the tap itself, as browsers only go full screen, and phones only open the keyboard,
-    // for something the user started.
-    showKeyboard(true);
-    enterFullscreen().then(
-      () =>
-        keepEscape().catch((e: unknown) =>
-          notify("warn", `Escape will leave full screen: ${errorMessage(e)}`),
-        ),
-      (e: unknown) => notify("warn", `Couldn't go full screen: ${errorMessage(e)}`),
-    );
+    // In the tap itself, as phones only open the keyboard for something the user started.
+    keyboard.show(true);
+    zenMode.enter();
   };
   // Turning between tabs by a sweep or a shortcut slides the one that's left out as the next
   // comes in, the way it's turned. Not by tapping a tab: while a tab slides in it takes no
@@ -688,12 +663,7 @@ export function App({
     );
   }, [zen, touchScreen]);
 
-  const exitZen = () => {
-    setZen(false);
-    exitFullscreen().catch((e: unknown) =>
-      notify("warn", `Couldn't leave full screen: ${errorMessage(e)}`),
-    );
-  };
+  const exitZen = zenMode.exit;
 
   // With a dialog open, only the shortcut that lists the shortcuts works, to show or hide them.
   const puzzleOpen = puzzle !== null && !picking && (sheet === null || sheet === "run");
@@ -772,12 +742,8 @@ export function App({
   const showPicker = picking || puzzle === null;
   // The talk button's state, and where it's hidden, apply to the Ctrl key just the same.
   // Only for the code, and in place of the controls, which lowering it brings back.
-  const keyboardShown = ownKeyboard && keyboard && shownTab === "code" && !showPicker;
+  const keyboardShown = ownKeyboard && keyboard.wanted && shownTab === "code" && !showPicker;
   const controlsHidden = showPicker || shownTab === "problem" || zen || keyboardShown;
-  // The code gets shorter as the keyboard comes up, which can leave the cursor below it.
-  useEffect(() => {
-    if (keyboardShown) editor.current?.revealCursor();
-  }, [keyboardShown]);
   useTalkKey(dictationMethod !== "keyboard" && !controlsHidden && sheet === null, talk);
 
   const problemView = puzzle ? (
@@ -879,8 +845,8 @@ export function App({
           ref={codePane}
           class={`code-pane ${shownTab === "code" && !showPicker ? "" : "hidden"}`}
         >
-          {zen && ownKeyboard && !keyboard ? (
-            <ZenKeyboardButton onClick={() => showKeyboard(true)} />
+          {zen && ownKeyboard && !keyboard.wanted ? (
+            <ZenKeyboardButton onClick={() => keyboard.show(true)} />
           ) : null}
           <StatusLine
             checks={lsp ? lspStatus : null}
@@ -1058,16 +1024,15 @@ export function App({
         onRedo={() => editor.current?.redo()}
         onRun={() => setSheet(sheet === "run" ? null : "run")}
         // Workshop's own keyboard only shows for the code, so elsewhere the button brings it up.
-        keyboard={ownKeyboard ? keyboardShown : keyboard}
-        onToggleKeyboard={() => showKeyboard(ownKeyboard ? !keyboardShown : !keyboard)}
+        keyboard={ownKeyboard ? keyboardShown : keyboard.wanted}
+        onToggleKeyboard={() => keyboard.show(ownKeyboard ? !keyboardShown : !keyboard.wanted)}
       />
       {keyboardShown ? (
-        <Keyboard
-          onKey={(key) => editor.current?.pressKey(key)}
-          onLower={() => showKeyboard(false)}
-          offsets={keyOffsets.offsets}
-          onTouch={keyOffsets.onTouch}
-          statusHost={placeStatus}
+        <CodeKeyboard
+          editor={editor}
+          keyOffsets={keyOffsets}
+          onLower={() => keyboard.show(false)}
+          statusHost={keyboard.placeStatus}
         />
       ) : null}
     </div>

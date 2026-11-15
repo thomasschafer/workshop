@@ -1,5 +1,8 @@
+import type { RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import type { CodeEditor } from "../editor";
 import type { Key } from "../helix/keys";
+import type { KeyOffsetsState } from "../hooks/useKeyOffsets";
 import {
   COLUMNS,
   charFor,
@@ -256,6 +259,50 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** Workshop's own keyboard, typing into the code. */
+export function CodeKeyboard({
+  editor,
+  keyOffsets,
+  onLower,
+  statusHost,
+}: {
+  editor: RefObject<CodeEditor | null>;
+  keyOffsets: KeyOffsetsState;
+  onLower: () => void;
+  statusHost: (el: HTMLElement | null) => void;
+}) {
+  // The code gets shorter as the keyboard comes up, which can leave the cursor below it.
+  useEffect(() => {
+    editor.current?.revealCursor();
+  }, []);
+  return (
+    <Keyboard
+      onKey={(key) => editor.current?.pressKey(key)}
+      onLower={onLower}
+      offsets={keyOffsets.offsets}
+      onTouch={keyOffsets.onTouch}
+      statusHost={statusHost}
+    />
+  );
+}
+
+/**
+ * The button in the thumb-zone controls that brings the keyboard up for the code, or lowers the
+ * device's own. Workshop's own keyboard takes the controls' place, and has its own way down.
+ */
+export function KeyboardToggle({ shown, onToggle }: { shown: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      class={`round ${shown ? "selected" : ""}`}
+      aria-label={shown ? "Hide keyboard" : "Type"}
+      onClick={onToggle}
+    >
+      ⌨
+    </button>
   );
 }
 

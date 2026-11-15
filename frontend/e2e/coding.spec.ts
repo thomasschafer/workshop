@@ -193,6 +193,60 @@ test("codes on the phone with Helix's keys, its own keyboard and the language se
   );
 });
 
+test("codes in zen mode, with just the code and the keyboard", async () => {
+  const editor = phone.locator(".cm-content");
+  const keyboard = phone.locator(".keyboard");
+  await phone.getByRole("button", { name: "Zen mode" }).tap();
+  await expect(keyboard).toBeVisible();
+  for (const hidden of [".top", ".steps", ".coding-toolbar", ".coding-actions", ".status-line"]) {
+    await expect(phone.locator(hidden)).toBeHidden();
+  }
+  await expect(editor).toBeVisible();
+  // Full screen where the browser allows it, which iPhones' doesn't.
+  const fullscreen = await phone.evaluate(() => document.fullscreenEnabled === true);
+  await expect
+    .poll(() => phone.evaluate(() => document.fullscreenElement !== null))
+    .toBe(fullscreen);
+
+  // Lowered, the keyboard comes back from a button of its own, as the footer stays hidden.
+  await keyboard.getByRole("button", { name: "Hide keyboard" }).tap();
+  await expect(keyboard).toBeHidden();
+  await expect(phone.locator(".coding-actions")).toBeHidden();
+  await phone.getByRole("button", { name: "Show keyboard" }).tap();
+  await expect(keyboard).toBeVisible();
+  await keyboard.getByRole("button", { name: "Hide keyboard" }).tap();
+
+  await phone.getByRole("button", { name: "Leave zen mode" }).tap();
+  await expect(phone.locator(".steps")).toBeVisible();
+  await expect(phone.locator(".coding-actions")).toBeVisible();
+  await expect.poll(() => phone.evaluate(() => document.fullscreenElement !== null)).toBe(false);
+
+  // Going back leaves zen mode too, staying on the problem.
+  await phone.getByRole("button", { name: "Zen mode" }).tap();
+  await expect(phone.locator(".steps")).toBeHidden();
+  await phone.goBack();
+  await expect(phone.getByRole("button", { name: "Leave zen mode" })).toHaveCount(0);
+  await expect(phone.locator(".step.current")).toHaveText("Code");
+});
+
+test("brings up the phone's own keyboard for the code without Helix's keybindings", async () => {
+  // A page of its own, as the phone's page turns Helix's keybindings on as it loads.
+  const page = await context.newPage();
+  await page.addInitScript(() => localStorage.setItem("workshop:keybindings", "default"));
+  await page.goto(phone.url());
+  await expect(page.locator(".step.current")).toHaveText("Code");
+  const editor = page.locator(".cm-content");
+  // Taps only move the cursor until the keyboard's asked for.
+  await expect(editor).toHaveAttribute("inputmode", "none");
+  await page.getByRole("button", { name: "Type" }).tap();
+  await expect(editor).toHaveAttribute("inputmode", "text");
+  await expect(editor).toBeFocused();
+  await expect(page.locator(".keyboard")).toHaveCount(0);
+  await page.getByRole("button", { name: "Hide keyboard" }).tap();
+  await expect(editor).toHaveAttribute("inputmode", "none");
+  await page.close();
+});
+
 test("submits, shows a small input it fails on, then passes and is reviewed", async () => {
   // Right on both examples, but it takes the word that first appeared earliest, rather than
   // the first to appear again.

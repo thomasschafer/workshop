@@ -2,6 +2,7 @@ import { useRef, useState } from "preact/hooks";
 import type { DictationMethod } from "../dictation";
 import type { TalkPhase } from "../hooks/usePushToTalk";
 import { TALK_LABEL } from "./help";
+import { KeyboardToggle } from "./keyboard";
 
 interface Props {
   hidden: boolean;
@@ -139,14 +140,7 @@ export function Controls(props: Props) {
         <button type="button" class="round" aria-label="Run" onClick={props.onRun}>
           ▶
         </button>
-        <button
-          type="button"
-          class={`round ${props.keyboard ? "selected" : ""}`}
-          aria-label={props.keyboard ? "Hide keyboard" : "Type"}
-          onClick={props.onToggleKeyboard}
-        >
-          ⌨
-        </button>
+        <KeyboardToggle shown={props.keyboard} onToggle={props.onToggleKeyboard} />
       </div>
     </footer>
   );

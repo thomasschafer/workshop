@@ -145,6 +145,7 @@ code {
 
 .header-actions {
   display: flex;
+  align-items: center;
 }
 
 .icon-button {

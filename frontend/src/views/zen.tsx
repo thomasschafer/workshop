@@ -1,4 +1,6 @@
+import { useState } from "preact/hooks";
 import type { Tab } from "../api";
+import { errorMessage } from "../errors";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
 import { TABS, tabLabel } from "./header";
 
@@ -88,10 +90,34 @@ function overlayKeyboard(overlay: boolean): void {
 }
 
 /**
+ * Zen mode: just the code and the keyboard, for typing on a phone without the rest of the screen
+ * in the way, full screen where the browser allows it. Enter it in a tap, as browsers only go
+ * full screen for something the user started; `warn` says what didn't work.
+ */
+export function useZen(warn: (text: string) => void) {
+  const [on, setOn] = useState(false);
+  const enter = () => {
+    setOn(true);
+    enterFullscreen().then(
+      () =>
+        keepEscape().catch((e: unknown) =>
+          warn(`Escape will leave full screen: ${errorMessage(e)}`),
+        ),
+      (e: unknown) => warn(`Couldn't go full screen: ${errorMessage(e)}`),
+    );
+  };
+  const exit = () => {
+    setOn(false);
+    exitFullscreen().catch((e: unknown) => warn(`Couldn't leave full screen: ${errorMessage(e)}`));
+  };
+  return { on, enter, exit };
+}
+
+/**
  * Hides the phone's own status and navigation bars, where the browser allows it. iPhones only
  * let video go full screen, so there zen mode keeps them.
  */
-export async function enterFullscreen(): Promise<void> {
+async function enterFullscreen(): Promise<void> {
   overlayKeyboard(true);
   const root = document.documentElement;
   if (!document.fullscreenEnabled || typeof root.requestFullscreen !== "function") return;
@@ -109,14 +135,14 @@ interface KeyboardLock {
  * elsewhere Escape still leaves. Only with a mouse or trackpad, as a phone has no Escape key of
  * its own to keep.
  */
-export async function keepEscape(): Promise<void> {
+async function keepEscape(): Promise<void> {
   const keyboard = (navigator as Navigator & { keyboard?: Partial<KeyboardLock> }).keyboard;
   if (typeof keyboard?.lock !== "function") return;
   if (!document.fullscreenElement || !window.matchMedia("(pointer: fine)").matches) return;
   await keyboard.lock(["Escape"]);
 }
 
-export async function exitFullscreen(): Promise<void> {
+async function exitFullscreen(): Promise<void> {
   overlayKeyboard(false);
   if (document.fullscreenElement) await document.exitFullscreen();
 }
