@@ -158,6 +158,11 @@ where
                 level: 4,
                 retired: vec![("Two dice".to_owned(), Some(3)), ("Pips".to_owned(), None)],
             }],
+            fixed_too_easy: vec![super::TooEasy {
+                skill: "dice.sums".to_owned(),
+                level: 3,
+                retired: vec![("Doubles".to_owned(), Some(2))],
+            }],
             levels: vec![("dice.sums".to_owned(), 4)],
         },
         limits,
@@ -217,6 +222,15 @@ async fn accepts_items_both_models_agree_on() {
     ));
     assert!(writes[0].contains("none at the same difficulty as these or easier"));
     assert!(writes[0].contains("give each its `difficulty`:\n- dice.sums: 4\n"));
+    // Harder variants, testing the concept differently, where items with a fixed answer were
+    // known by heart.
+    let fixed = writes[0]
+        .split_once("Code to read and probability questions the learner found too easy")
+        .expect("the writer is told of items with a fixed answer found too easy")
+        .1;
+    assert!(fixed.contains("test the concept differently"));
+    assert!(fixed.contains("Never a copy of one of these reworded"));
+    assert!(fixed.contains("- dice.sums (level 3): \"Doubles\" (difficulty 2)\n"));
     // The pack itself is as it was.
     assert!(!dir.path().join("pack/items/doubles.md").exists());
 }

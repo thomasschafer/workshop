@@ -83,20 +83,24 @@ pub struct Brief {
     pub examples: Vec<String>,
     /// The learner's answers to questions asked in earlier runs.
     pub answers: Vec<(String, String)>,
-    /// The skills whose problems the learner found too easy, and retired, most first.
+    /// The skills whose coding problems the learner found too easy, and retired, most first.
     pub too_easy: Vec<TooEasy>,
+    /// The skills whose items with a fixed answer, code to read and probability questions, the
+    /// learner found too easy, and retired, most first. Each one's level is the difficulty its
+    /// new items should be: one above the hardest retired, as far as 5.
+    pub fixed_too_easy: Vec<TooEasy>,
     /// How hard each skill's problems should be, by skill, from 1 to 5, for the skills with
     /// problems attempted: higher as they're found easy, and lower as they're forgotten.
     pub levels: Vec<(String, u8)>,
 }
 
-/// A skill whose problems were found too easy, so the author writes harder ones.
+/// A skill whose items were found too easy, so the author writes harder ones.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TooEasy {
     pub skill: String,
     /// The level its new problems should be at, from 1 to 5.
     pub level: u8,
-    /// The problems retired as easy, by title, with how hard each is, if its pack says.
+    /// The items retired as easy, by title, with how hard each is, if its pack says.
     pub retired: Vec<(String, Option<u8>)>,
 }
 
@@ -577,6 +581,26 @@ async fn failures(
     Ok(failing)
 }
 
+/// Each skill found too easy, with its level and the items retired, one per line.
+fn push_too_easy(out: &mut String, too_easy: &[TooEasy]) {
+    for too_easy in too_easy {
+        let retired: Vec<String> = too_easy
+            .retired
+            .iter()
+            .map(|(title, difficulty)| match difficulty {
+                Some(difficulty) => format!("\"{title}\" (difficulty {difficulty})"),
+                None => format!("\"{title}\" (no difficulty given, so taken as 3)"),
+            })
+            .collect();
+        out.push_str(&format!(
+            "- {} (level {}): {}\n",
+            too_easy.skill,
+            too_easy.level,
+            retired.join(", ")
+        ));
+    }
+}
+
 fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
     let mut out = format!(
         "<format>\n{}\n</format>\n\nThe pack is \"{}\". Its skills:\n",
@@ -596,22 +620,11 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
     }
     if !brief.too_easy.is_empty() {
         out.push_str("\nProblems the learner found too easy, and retired, by skill. Write harder problems for these skills, at the skill's level, which is above what they found easy, and none at the same difficulty as these or easier:\n");
-        for too_easy in &brief.too_easy {
-            let retired: Vec<String> = too_easy
-                .retired
-                .iter()
-                .map(|(title, difficulty)| match difficulty {
-                    Some(difficulty) => format!("\"{title}\" (difficulty {difficulty})"),
-                    None => format!("\"{title}\" (no difficulty given, so taken as 3)"),
-                })
-                .collect();
-            out.push_str(&format!(
-                "- {} (level {}): {}\n",
-                too_easy.skill,
-                too_easy.level,
-                retired.join(", ")
-            ));
-        }
+        push_too_easy(&mut out, &brief.too_easy);
+    }
+    if !brief.fixed_too_easy.is_empty() {
+        out.push_str("\nCode to read and probability questions the learner found too easy, and retired, by skill: they knew the answer by heart, so seeing these again would test their memory of it rather than the concept. For these skills, write new items of the same kind that are harder, at the level given, with their `difficulty` set, and that test the concept differently: different code or a different situation, where the concept shows up in a less obvious way or combines with another, so the answer can't be recalled from these. Never a copy of one of these reworded, with its names or numbers changed, or asking the same question of the same code:\n");
+        push_too_easy(&mut out, &brief.fixed_too_easy);
     }
     if !brief.levels.is_empty() {
         out.push_str("\nHow hard each skill's coding problems should be, from 1 to 5, as their `difficulty` goes. A level rises as the learner finds problems easy and falls as they forget them. Write a skill's new problems at its level, and give each its `difficulty`:\n");

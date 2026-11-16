@@ -414,3 +414,64 @@ fn asks_for_harder_problems_in_the_skills_whose_problems_were_found_too_easy() {
         .unwrap();
     assert!(hashing.1 < 3, "{hashing:?}");
 }
+
+#[test]
+fn asks_for_harder_variants_of_items_with_a_fixed_answer_retired_as_too_easy() {
+    let s = setup();
+    let now = crate::learning::now_ms();
+    let easy = |id: &str, item: &str| workshop_learning::Attempt {
+        id: format!("attempt-{id}"),
+        item: item.to_owned(),
+        answered_at: now,
+        duration_ms: 1000,
+        rating: workshop_learning::Rating::Easy,
+        response: None,
+        seed: None,
+    };
+    let retire = |attempt: &workshop_learning::Attempt| workshop_learning::RetirementChange {
+        id: attempt.id.clone(),
+        item: attempt.item.clone(),
+        at: attempt.answered_at,
+        retired: true,
+    };
+    let reading = easy("1", "sample/negative-division");
+    let probability = easy("2", "sample/two-dice-seven");
+    // Got it, rather than retired, says nothing about being too easy.
+    let got_it = easy("3", "sample/overflowing-sum");
+    let request = crate::learning::SyncRequest {
+        retirements: vec![retire(&reading), retire(&probability)],
+        attempts: vec![reading, probability, got_it],
+        ..Default::default()
+    };
+    let clock = workshop_learning::Clock {
+        now,
+        utc_offset_minutes: 0,
+    };
+    s.learning.sync(&request, clock).unwrap();
+    let pack = Pack::load(&s.pack).unwrap();
+    let brief = brief(&s.learning, &pack, &[], now).unwrap();
+    // They're no coding problems, so they're asked for apart from those, and don't change how
+    // hard a skill's problems should be.
+    assert!(brief.too_easy.is_empty(), "{:?}", brief.too_easy);
+    assert!(brief.levels.is_empty(), "{:?}", brief.levels);
+    let skills: Vec<(&str, u8, Vec<&str>)> = brief
+        .fixed_too_easy
+        .iter()
+        .map(|t| {
+            let titles = t.retired.iter().map(|(title, _)| title.as_str()).collect();
+            (t.skill.as_str(), t.level, titles)
+        })
+        .collect();
+    // With no difficulty given, each is taken as 3, so new ones should be 4.
+    assert_eq!(
+        skills,
+        [
+            ("cpp.semantics", 4, vec!["Dividing negative numbers"]),
+            (
+                "probability.counting",
+                4,
+                vec!["Two fair dice are rolled. What's the probability…"]
+            ),
+        ]
+    );
+}

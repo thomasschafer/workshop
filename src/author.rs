@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use workshop_author::{Brief, Limits, Models, Report, Written};
-use workshop_pack::Pack;
+use workshop_author::{Brief, Limits, Models, Report, TooEasy, Written};
+use workshop_pack::{Item, Kind, Pack};
 use workshop_provider::{AgentConfig, CallSpec, ProviderRunner, Role};
 
 use crate::config::Config;
@@ -334,56 +334,96 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
     let levels = workshop_learning::levels(&learning.store().all_attempts()?, |key| {
         items
             .get(key)
-            .filter(|item| item.kind == workshop_pack::Kind::Coding)
+            .filter(|item| item.kind == Kind::Coding)
             .map(|item| workshop_learning::level::Problem {
                 skills: &item.skills,
                 difficulty: item.difficulty,
             })
     });
-    let mut too_easy: Vec<workshop_author::TooEasy> = Vec::new();
-    for (key, retirement) in learning.store().retirements()? {
-        let Some(item) = items.get(&key).filter(|_| retirement.is_retired()) else {
-            continue;
-        };
-        for skill in &item.skills {
-            let entry = match too_easy.iter_mut().find(|t| t.skill == *skill) {
-                Some(entry) => entry,
-                None => {
-                    too_easy.push(workshop_author::TooEasy {
-                        skill: skill.clone(),
-                        level: levels
-                            .get(skill)
-                            .map_or(workshop_learning::level::MIDDLE, |l| l.level),
-                        retired: Vec::new(),
-                    });
-                    too_easy.last_mut().expect("just pushed")
-                }
-            };
-            entry.retired.push((item.label(), item.difficulty));
-        }
-    }
-    too_easy.sort_by(|a, b| {
-        b.retired
-            .len()
-            .cmp(&a.retired.len())
-            .then(a.skill.cmp(&b.skill))
-    });
-    too_easy.truncate(5);
-    for entry in &mut too_easy {
-        entry.retired.truncate(5);
-    }
+    let retired: Vec<&Item> = learning
+        .store()
+        .retirements()?
+        .into_iter()
+        .filter(|(_, retirement)| retirement.is_retired())
+        .filter_map(|(key, _)| items.get(&key).copied())
+        .collect();
+    let too_easy = found_too_easy(
+        retired
+            .iter()
+            .copied()
+            .filter(|item| item.kind == Kind::Coding),
+        |skill, _| {
+            levels
+                .get(skill)
+                .map_or(workshop_learning::level::MIDDLE, |l| l.level)
+        },
+    );
+    // Items with a fixed answer have no level of their own, so their new ones are one above the
+    // hardest retired.
+    let fixed_too_easy = found_too_easy(
+        retired
+            .iter()
+            .copied()
+            .filter(|item| item.kind.has_fixed_answer()),
+        |_, retired| {
+            let hardest = retired
+                .iter()
+                .map(|(_, difficulty)| difficulty.unwrap_or(workshop_learning::level::MIDDLE))
+                .max()
+                .unwrap_or(workshop_learning::level::MIDDLE);
+            (hardest + 1).min(*workshop_learning::level::LEVELS.end())
+        },
+    );
     Ok(Brief {
         weakest,
         mistakes,
         examples,
         answers,
         too_easy,
+        fixed_too_easy,
         levels: levels
             .into_iter()
             .filter(|(skill, _)| pack.manifest.has_skill(skill))
             .map(|(skill, level)| (skill, level.level))
             .collect(),
     })
+}
+
+/// The skills of the items retired, each with the items, its most retired first, and at most
+/// five of each. `level` gives a skill's level from it and its items retired.
+#[allow(clippy::type_complexity)]
+fn found_too_easy<'a>(
+    retired: impl Iterator<Item = &'a Item>,
+    level: impl Fn(&str, &[(String, Option<u8>)]) -> u8,
+) -> Vec<TooEasy> {
+    // Each item's title and difficulty, by skill.
+    let mut by_skill: Vec<(String, Vec<(String, Option<u8>)>)> = Vec::new();
+    for item in retired {
+        for skill in &item.skills {
+            let entry = match by_skill.iter_mut().position(|(s, _)| s == skill) {
+                Some(index) => &mut by_skill[index].1,
+                None => {
+                    by_skill.push((skill.clone(), Vec::new()));
+                    &mut by_skill.last_mut().expect("just pushed").1
+                }
+            };
+            entry.push((item.label(), item.difficulty));
+        }
+    }
+    by_skill.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
+    by_skill.truncate(5);
+    by_skill
+        .into_iter()
+        .map(|(skill, mut retired)| {
+            let level = level(&skill, &retired);
+            retired.truncate(5);
+            TooEasy {
+                level,
+                skill,
+                retired,
+            }
+        })
+        .collect()
 }
 
 /// Tells subscribed devices about a question, as a Web Push notification.
