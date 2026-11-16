@@ -89,9 +89,11 @@ test("reads code and says what it prints, checked on the phone", async () => {
   await expect(phone.locator(".learn-printed")).toHaveText("-3 -1");
   await phone.getByRole("button", { name: "Next" }).tap();
   await expect(phone).toHaveURL(/\/coding$/);
-  await expect
-    .poll(() => overviewStatus("sample/negative-division"), { timeout: 10_000 })
-    .not.toBe("new");
+  // The list asks the server once the answer's reached it.
+  const read = phone.locator(".coding-item", { hasText: "Dividing negative numbers" });
+  await expect(read).toContainText("Code to read ·");
+  await expect(read).not.toContainText("· New");
+  expect(await overviewStatus("sample/negative-division")).not.toBe("new");
 });
 
 test("retires code to read answered right as too easy, and brings it back from the list", async () => {
@@ -102,10 +104,10 @@ test("retires code to read answered right as too easy, and brings it back from t
   await expect(phone.getByRole("button", { name: "Got it" })).toBeFocused();
   await phone.getByRole("button", { name: "Too easy: retire it" }).tap();
   await expect(phone).toHaveURL(/\/coding$/);
-  await expect.poll(() => overviewStatus("sample/lazy-map")).toBe("retired");
   // Listed with the retired problems, rather than among what's to do.
   const retired = phone.getByRole("region", { name: "Retired" });
   await expect(retired).toContainText("When a map's closure runs");
+  expect(await overviewStatus("sample/lazy-map")).toBe("retired");
   await expect(phone.locator(".coding-item", { hasText: "When a map's closure runs" })).toHaveCount(
     0,
   );
@@ -145,14 +147,21 @@ test("understands and plans a problem, each step saved, and carries on after a r
     "Keep a set of the words seen so far.\nthe first one already in it is the answer",
   );
 
-  // Saved as it goes, so a reload, or coming back later, carries on from here.
+  // Saved as it goes, and kept on the phone only until it is, so a reload, or coming back later,
+  // carries on from here.
   await expect
-    .poll(async () => {
-      const response = await phone.request.get("/api/coding?utc_offset=0");
-      const { items } = (await response.json()) as { items: { key: string; step: string }[] };
-      return items.find((item) => item.key === "sample/first-repeat")?.step;
-    })
-    .toBe("plan");
+    .poll(() =>
+      phone.evaluate(() =>
+        localStorage.getItem("workshop:unsaved:coding-session:sample/first-repeat"),
+      ),
+    )
+    .toBeNull();
+  const listed = await (await phone.request.get("/api/coding?utc_offset=0")).json();
+  expect(
+    (listed as { items: { key: string; step: string }[] }).items.find(
+      (item) => item.key === "sample/first-repeat",
+    )?.step,
+  ).toBe("plan");
   await phone.reload();
   await expect(phone.locator(".step.current")).toHaveText("Plan");
   await expect(phone.getByLabel("How will you solve it?")).toHaveValue(/first one already in it/);
@@ -290,6 +299,8 @@ test("says quietly why the language server can't start, and still runs the code"
     if (socket.url().includes("/api/coding/lsp/")) attempts.push(socket.url());
   });
   try {
+    // The page's clock, to move it on rather than wait to see nothing more is tried.
+    await page.clock.install();
     await page.goto(phone.url());
     await expect(page.locator(".step.current")).toHaveText("Code");
     const note = page.locator(".lsp-unavailable");
@@ -301,8 +312,9 @@ test("says quietly why the language server can't start, and still runs the code"
     await expect(note).toContainText("told to fail as it starts");
     await expect(note).toContainText("for the Coding track. Then try again.");
     await expect(page.locator(".status-line")).toContainText("no checks");
-    // It isn't tried again on its own, as it would only fail the same way.
-    await page.waitForTimeout(4000);
+    // It isn't tried again on its own, as it would only fail the same way, however long it's
+    // left: a minute is twice the longest the app waits between tries.
+    await page.clock.runFor(60_000);
     expect(attempts).toHaveLength(1);
 
     // The code still runs without it.
@@ -579,17 +591,17 @@ test("recalls the approach instead when the server can't be reached for a twist"
   );
   await page.unroute("**/api/coding/items/sample/stair-ways/twist");
   await expect(page.getByLabel("From memory: how would you solve it?")).toBeVisible();
-  // Saved as a recall, once the server's heard of it.
+  // Saved as a recall, and kept on the phone only until the server's heard of it.
   await expect
-    .poll(
-      async () => {
-        const response = await page.request.get("/api/coding?utc_offset=0");
-        const { items } = (await response.json()) as { items: { key: string; mode: string }[] };
-        return items.find((item) => item.key === "sample/stair-ways")?.mode;
-      },
-      { timeout: 15_000 },
+    .poll(() =>
+      page.evaluate(() =>
+        localStorage.getItem("workshop:unsaved:coding-session:sample/stair-ways"),
+      ),
     )
-    .toBe("recall");
+    .toBeNull();
+  const response = await page.request.get("/api/coding?utc_offset=0");
+  const { items } = (await response.json()) as { items: { key: string; mode: string }[] };
+  expect(items.find((item) => item.key === "sample/stair-ways")?.mode).toBe("recall");
   await own.close();
 });
 

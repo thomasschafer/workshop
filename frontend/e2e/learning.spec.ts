@@ -186,8 +186,8 @@ test("reviews cards a few at a time, saving each, and flags one that's wrong", a
   await phone.getByRole("button", { name: "Good" }).tap();
   await expect(phone.locator(".learn-count")).toHaveText("2 of 3");
   // Saved as soon as it's marked, so the learner can stop at any moment.
-  await expect.poll(() => scheduled()).toBe(1);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  expect(await scheduled()).toBe(1);
 
   await phone.getByRole("button", { name: "Show answer" }).tap();
   await phone.getByRole("button", { name: "This is wrong" }).tap();
@@ -199,10 +199,11 @@ test("reviews cards a few at a time, saving each, and flags one that's wrong", a
   await expect(phone.getByRole("heading", { name: "That's a step done" })).toBeVisible();
   await expect(phone.getByLabel(/mastered$/).first()).toBeVisible();
 
-  await expect.poll(() => scheduled()).toBe(2);
-  await expect
-    .poll(async () => Object.values((await serverDeck()).flags).map((flag) => flag.note))
-    .toEqual(["The example contradicts the answer"]);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  expect(await scheduled()).toBe(2);
+  expect(Object.values((await serverDeck()).flags).map((flag) => flag.note)).toEqual([
+    "The example contradicts the answer",
+  ]);
 
   // The flagged card is left out, and the rest go on.
   await goHome();
@@ -237,7 +238,8 @@ test("checks mental maths as it's typed, right or wrong", async () => {
   await expect(
     phone.getByRole("heading", { name: "That's a step done: 1 of 3 right" }),
   ).toBeVisible();
-  await expect.poll(() => scheduled("mental-maths")).toBe(3);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  expect(await scheduled("mental-maths")).toBe(3);
 });
 
 test("keeps a log of mistakes, whose kinds can be confirmed or changed", async () => {
@@ -313,8 +315,9 @@ test("has the grader check a flagged card, and unflags it", async () => {
   await fix.getByRole("button", { name: "Turn down" }).tap();
   await expect(fix).toHaveCount(0);
   await card.getByRole("button", { name: "Unflag" }).tap();
+  // Shown once the server has it.
   await expect(phone.getByText("No cards are flagged.")).toBeVisible();
-  await expect.poll(async () => Object.keys((await serverDeck()).flags)).toEqual([]);
+  expect(Object.keys((await serverDeck()).flags)).toEqual([]);
   // Questions can only be added to a pack of one's own.
   await expect(phone.getByRole("region", { name: "Add a question" })).toContainText(
     "The sample pack is built in",
@@ -602,9 +605,7 @@ test("sends a question answered right further off with Got it, and brings a reti
   await retired.getByRole("button", { name: "Bring back" }).tap();
   await expect(retired).toHaveCount(0);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
-  await expect
-    .poll(async () => (await serverDeck()).retirements[back.key]?.state)
-    .toBe("brought_back");
+  expect((await serverDeck()).retirements[back.key]?.state).toBe("brought_back");
   // Due straight away, it's first in the next step.
   await phone.getByRole("button", { name: "Another step" }).tap();
   expect((await shown()).key).toBe(back.key);
