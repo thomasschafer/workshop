@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BrowserContext, devices, expect, type Page, test } from "@playwright/test";
 import { LEARNING_HOME, LEARNING_PORT } from "./fixture";
+import { setOffline } from "./offline";
 import { holdToTalk, installSimulatedSpeech } from "./speech";
 
 // The tests share one phone and run in order, like one learner using the app, from a server
@@ -487,7 +488,7 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
   await goHome();
   await expect(phone.locator(".track")).toHaveCount(7);
 
-  await context.setOffline(true);
+  await setOffline(context, true);
   // Opened afresh with no connection at all, the app still starts, from what the phone kept.
   await phone.goto("/practice/probability");
   await expect(phone.getByRole("heading", { name: "Probability" })).toBeVisible();
@@ -519,8 +520,8 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
   await expect(phone.getByRole("region", { name: "Retired" })).toContainText(question.label);
   expect(await scheduled("probability")).toBe(0);
 
-  await context.setOffline(false);
-  await expect(phone.locator(".learn-sync")).toHaveText("Saved", { timeout: 15_000 });
+  await setOffline(context, false);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   expect(await scheduled("probability")).toBe(2);
   expect((await serverDeck()).retirements[question.key]?.state).toBe("retired");
   retiredProbability = question;

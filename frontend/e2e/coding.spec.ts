@@ -9,6 +9,7 @@ import {
   test,
 } from "@playwright/test";
 import { CODING_HOME, CODING_PORT, FAKE_LSP_FAILS } from "./fixture";
+import { setOffline } from "./offline";
 import { holdToTalk, installSimulatedSpeech } from "./speech";
 
 // One learner on one phone, working through a problem of the sample pack's a step at a time,
@@ -601,7 +602,7 @@ test("says clearly that problems need the server, while code to read works offli
   await expect
     .poll(() => phone.evaluate(() => navigator.serviceWorker.controller !== null))
     .toBe(true);
-  await context.setOffline(true);
+  await setOffline(context, true);
   await phone.goto("/coding");
   await expect(phone.locator(".banner.offline")).toContainText("Coding problems need the server");
   await phone.locator(".coding-item", { hasText: "A reference into a growing vector" }).tap();
@@ -612,7 +613,7 @@ test("says clearly that problems need the server, while code to read works offli
 
   await phone.goto("/coding/sample/islands");
   await expect(phone.locator(".error-text")).toContainText("need the server");
-  await context.setOffline(false);
+  await setOffline(context, false);
   await phone.getByRole("button", { name: "Try again" }).tap();
   await expect(phone.locator(".step.current")).toHaveText("Understand");
   await expect(phone.locator(".learn-sync")).toHaveCount(0);
