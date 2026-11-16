@@ -2425,6 +2425,8 @@ test("says quietly why the language server can't start, and keeps editing the co
     computer.on("websocket", (socket) => {
       if (socket.url().endsWith("/api/lsp")) attempts.push(socket.url());
     });
+    // The page's clock, to move it on rather than wait to see nothing more is tried.
+    await computer.clock.install();
     await computer.reload();
     const note = computer.locator(".lsp-unavailable");
     await expect(note).toContainText("Completions and error checks are unavailable", {
@@ -2433,7 +2435,9 @@ test("says quietly why the language server can't start, and keeps editing the co
     await expect(note).toContainText("told to fail as it starts");
     await expect(note).toContainText("Setup can install it with mise");
     await expect(computer.locator(".status-line")).toContainText("no checks");
-    await computer.waitForTimeout(4000);
+    // It isn't tried again on its own, however long it's left: a minute is twice the longest the
+    // app waits between tries.
+    await computer.clock.runFor(60_000);
     expect(attempts).toHaveLength(1);
 
     // The code can still be changed, and is saved.
