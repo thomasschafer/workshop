@@ -10,6 +10,8 @@ test.describe.configure({ mode: "serial" });
 
 let context: BrowserContext;
 let phone: Page;
+/** The probability question retired offline, to bring back later. */
+let retiredProbability: { key: string; label: string } | null = null;
 
 const token = () => readFileSync(join(LEARNING_HOME, "config", "token"), "utf8").trim();
 
@@ -17,13 +19,15 @@ interface Deck {
   items: {
     key: string;
     kind: string;
+    label: string;
     prompt: string;
     answer?: number;
     instances?: { prompt: string; answer: number }[];
     tolerance?: { absolute: number; relative: number; factor?: number };
   }[];
-  schedules: Record<string, { reviews: number }>;
+  schedules: Record<string, { reviews: number; stability: number }>;
   flags: Record<string, { note: string | null }>;
+  retirements: Record<string, { state: string; at: number }>;
 }
 
 /** The deck as the server has it now, which is what it's learnt from the attempts it's been sent. */
@@ -33,25 +37,31 @@ async function serverDeck(): Promise<Deck> {
   return (await response.json()) as Deck;
 }
 
-/** The answer to the question showing, from the deck the phone keeps. */
-async function answerShown(on: Page = phone): Promise<string> {
-  const shown = (await on.locator(".learn-prompt").innerText()).trim();
+/** The question showing, from the deck the phone keeps: its item, and its answer. */
+async function shown(on: Page = phone): Promise<{ key: string; label: string; answer: string }> {
+  const prompt = (await on.locator(".learn-prompt").innerText()).trim();
   return on.evaluate((prompt) => {
     const saved = JSON.parse(localStorage.getItem("workshop:learning") ?? "null") as {
       deck: Deck;
     };
     for (const item of saved.deck.items) {
+      const found = { key: item.key, label: item.label };
       if (
         item.kind === "probability" &&
         item.prompt.replace(/\s+/g, " ") === prompt.replace(/\s+/g, " ")
       ) {
-        return String(item.answer);
+        return { ...found, answer: String(item.answer) };
       }
       const instance = item.instances?.find((i) => i.prompt === prompt);
-      if (instance) return String(instance.answer);
+      if (instance) return { ...found, answer: String(instance.answer) };
     }
     throw new Error(`no item in the deck asks ${JSON.stringify(prompt)}`);
-  }, shown);
+  }, prompt);
+}
+
+/** The answer to the question showing, from the deck the phone keeps. */
+async function answerShown(on: Page = phone): Promise<string> {
+  return (await shown(on)).answer;
 }
 
 /** How many items the server has a schedule for, as it learns of attempts. */
@@ -217,6 +227,8 @@ test("checks mental maths as it's typed, right or wrong", async () => {
 
   await answer(await answerShown());
   await expect(phone.locator(".learn-verdict")).toHaveText("Right");
+  // Made afresh each time, a sum is never the same question again, so isn't offered retiring.
+  await expect(phone.getByRole("button", { name: /Too easy/ })).toHaveCount(0);
   await phone.getByRole("button", { name: "Next" }).tap();
   await phone.getByRole("button", { name: "I don't know" }).tap();
   await expect(phone.locator(".learn-verdict")).toContainText("The answer is");
@@ -475,19 +487,35 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
   // Answers can be fractions or percentages, which a phone's number pad can't type.
   await expect(phone.getByLabel("Your answer")).toHaveAttribute("inputmode", "text");
 
-  await answer(await answerShown());
+  const question = await shown();
+  await answer(question.answer);
   await expect(phone.locator(".learn-verdict")).toHaveText("Right");
+  // Answered right, it waits to hear whether it was too easy, and retiring works offline too.
+  await expect(phone.getByRole("button", { name: "Got it" })).toBeFocused();
+  await expect(phone.locator(".learn-sync")).toHaveText("Offline");
+  await phone.getByRole("button", { name: "Too easy: retire it" }).tap();
+  // The retirement goes with the attempt that made it.
   await expect(phone.locator(".learn-sync")).toHaveText("Offline · 1 to sync");
+  const retired = phone.getByRole("region", { name: "Retired" });
+  await expect(retired).toContainText(question.label);
 
   await phone.reload();
   await expect(phone.locator(".learn-sync")).toHaveText("Offline · 1 to sync");
+  // It's never offered again, even offline.
+  expect((await shown()).key).not.toBe(question.key);
   await answer("0");
   await expect(phone.locator(".learn-sync")).toHaveText("Offline · 2 to sync");
+  // A wrong answer offers nothing but going on.
+  await expect(phone.getByRole("button", { name: "Got it" })).toHaveCount(0);
+  await phone.getByRole("button", { name: "Next" }).tap();
+  await expect(phone.getByRole("region", { name: "Retired" })).toContainText(question.label);
   expect(await scheduled("probability")).toBe(0);
 
   await context.setOffline(false);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved", { timeout: 15_000 });
   expect(await scheduled("probability")).toBe(2);
+  expect((await serverDeck()).retirements[question.key]?.state).toBe("retired");
+  retiredProbability = question;
 });
 
 test("sends an answer again when the reply was lost, without counting it twice", async ({
@@ -514,6 +542,7 @@ test("sends an answer again when the reply was lost, without counting it twice",
     await route.abort("connectionreset");
   });
   await answer(await answerShown(page), page);
+  await page.getByRole("button", { name: "Got it" }).tap();
   await expect(page.locator(".learn-sync")).toContainText("Offline");
   // Tried again, it's taken once.
   await expect(page.locator(".learn-sync")).toHaveText("Saved", { timeout: 20_000 });
@@ -535,6 +564,48 @@ test("counts what was done towards the week, and offers more", async () => {
   // Every answer's in, so nothing's waiting on this phone.
   await expect(phone.locator(".home-pending")).toHaveCount(0);
   await expect(phone.locator(".track", { hasText: "Probability" })).toContainText("7 new");
+});
+
+test("sends a question answered right further off with Got it, and brings a retired one back", async () => {
+  if (!retiredProbability) throw new Error("the offline test retires a question first");
+  const back = retiredProbability;
+  await phone.goto("/practice/probability");
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  const question = await shown();
+  await answer(question.answer);
+  // Got it is focused, so Enter is enough.
+  await expect(phone.getByRole("button", { name: "Got it" })).toBeFocused();
+  await phone.keyboard.press("Enter");
+  await expect(phone.getByRole("region", { name: "Done" })).toBeVisible();
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  // Rated easy, it's further off than a card answered Good for the first time.
+  const deck = await serverDeck();
+  expect(deck.retirements[question.key]).toBeUndefined();
+  const cards = Object.entries(deck.schedules).filter(([key]) =>
+    deck.items.some((item) => item.key === key && item.kind === "card"),
+  );
+  const good = Math.max(...cards.map(([, schedule]) => schedule.stability));
+  expect(deck.schedules[question.key]?.stability).toBeGreaterThan(good * 2);
+
+  // The one retired offline is listed after the step, to bring back.
+  const retired = phone.getByRole("region", { name: "Retired" });
+  await expect(retired).toContainText(back.label);
+  await retired.getByRole("button", { name: "Bring back" }).tap();
+  await expect(retired).toHaveCount(0);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  await expect
+    .poll(async () => (await serverDeck()).retirements[back.key]?.state)
+    .toBe("brought_back");
+  // Due straight away, it's first in the next step.
+  await phone.getByRole("button", { name: "Another step" }).tap();
+  expect((await shown()).key).toBe(back.key);
+  await answer("0");
+  await phone.getByRole("button", { name: "Next" }).tap();
+  // It all fits across a phone's screen.
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
 });
 
 test("marks a card answered in the learner's own words", async () => {

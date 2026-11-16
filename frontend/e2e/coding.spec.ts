@@ -93,6 +93,28 @@ test("reads code and says what it prints, checked on the phone", async () => {
     .not.toBe("new");
 });
 
+test("retires code to read answered right as too easy, and brings it back from the list", async () => {
+  await phone.locator(".coding-item", { hasText: "When a map's closure runs" }).tap();
+  await phone.getByLabel("What it prints").fill("start 1 2 3 Some(6)");
+  await phone.getByRole("button", { name: "Check" }).tap();
+  await expect(phone.locator(".learn-verdict")).toHaveText("Right");
+  await expect(phone.getByRole("button", { name: "Got it" })).toBeFocused();
+  await phone.getByRole("button", { name: "Too easy: retire it" }).tap();
+  await expect(phone).toHaveURL(/\/coding$/);
+  await expect.poll(() => overviewStatus("sample/lazy-map")).toBe("retired");
+  // Listed with the retired problems, rather than among what's to do.
+  const retired = phone.getByRole("region", { name: "Retired" });
+  await expect(retired).toContainText("When a map's closure runs");
+  await expect(phone.locator(".coding-item", { hasText: "When a map's closure runs" })).toHaveCount(
+    0,
+  );
+  await retired.getByRole("button", { name: "Bring back" }).tap();
+  await expect(retired).toHaveCount(0);
+  await expect(
+    phone.locator(".coding-item", { hasText: "When a map's closure runs" }),
+  ).toContainText("Code to read · Due");
+});
+
 test("understands and plans a problem, each step saved, and carries on after a reload", async () => {
   await phone.locator(".coding-item", { hasText: "The first word to repeat" }).tap();
   await expect(phone).toHaveURL(/\/coding\/sample\/first-repeat$/);
@@ -584,6 +606,7 @@ test("says clearly that problems need the server, while code to read works offli
   await phone.locator(".coding-item", { hasText: "A reference into a growing vector" }).tap();
   await phone.getByRole("button", { name: /push_back can move the elements to new memory/ }).tap();
   await expect(phone.locator(".learn-verdict")).toHaveText("Right");
+  await phone.getByRole("button", { name: "Got it" }).tap();
   await expect(phone.locator(".learn-sync")).toContainText("Offline · 1 to sync");
 
   await phone.goto("/coding/sample/islands");
