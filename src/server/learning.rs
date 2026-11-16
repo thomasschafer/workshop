@@ -105,6 +105,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retires_code_to_read_from_a_sync_until_its_brought_back() {
+        let (_dir, router) = test_app().await;
+        let now = crate::learning::now_ms();
+        let id = "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a71";
+        let body = serde_json::json!({
+            "attempts": [{
+                "id": id,
+                "item": "sample/negative-division",
+                "answered_at": now,
+                "duration_ms": 9000,
+                "rating": "easy",
+                "response": "-3 -1",
+            }],
+            "retirements": [{
+                "id": id,
+                "item": "sample/negative-division",
+                "at": now,
+                "retired": true,
+            }],
+        });
+        let deck = json(send(&router, sync_request(&body)).await).await;
+        assert_eq!(
+            deck["retirements"]["sample/negative-division"],
+            serde_json::json!({ "state": "retired", "at": now })
+        );
+        // Sent again, as when the reply was lost, it's the same.
+        let again = send(&router, sync_request(&body)).await;
+        assert_eq!(again.status(), StatusCode::OK);
+        let again = json(again).await;
+        assert_eq!(again["retirements"], deck["retirements"]);
+        assert_eq!(again["schedules"]["sample/negative-division"]["reviews"], 1);
+
+        let overview = || async {
+            let request = Request::get("/api/coding?utc_offset=60")
+                .header(header::COOKIE, "workshop_token=secret")
+                .body(Body::empty())
+                .unwrap();
+            let overview = json(send(&router, request).await).await;
+            overview["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["key"] == "sample/negative-division")
+                .unwrap()["status"]
+                .clone()
+        };
+        assert_eq!(overview().await, "retired");
+        // Brought back, from the outbox as it was retired, it's due straight away.
+        let back = serde_json::json!({
+            "retirements": [{
+                "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a72",
+                "item": "sample/negative-division",
+                "at": now + 1,
+                "retired": false,
+            }],
+        });
+        let deck = json(send(&router, sync_request(&back)).await).await;
+        assert_eq!(
+            deck["retirements"]["sample/negative-division"],
+            serde_json::json!({ "state": "brought_back", "at": now + 1 })
+        );
+        assert_eq!(overview().await, "due");
+
+        // A card can't be retired this way, and nothing sent with it is kept.
+        let card = serde_json::json!({
+            "attempts": [{
+                "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a73",
+                "item": "sample/binary-heap-costs",
+                "answered_at": now,
+                "duration_ms": 9000,
+                "rating": "easy",
+            }],
+            "retirements": [{
+                "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a73",
+                "item": "sample/binary-heap-costs",
+                "at": now,
+                "retired": true,
+            }],
+        });
+        let refused = send(&router, sync_request(&card)).await;
+        assert!(!refused.status().is_success());
+        let error = json(refused).await;
+        assert!(
+            error["error"].as_str().unwrap().contains("no fixed answer"),
+            "{error}"
+        );
+        let deck = json(send(&router, sync_request(&serde_json::json!({}))).await).await;
+        assert!(deck["schedules"]["sample/binary-heap-costs"].is_null());
+    }
+
+    #[tokio::test]
     async fn refuses_an_offset_no_time_zone_has() {
         let (_dir, router) = test_app().await;
         let request = Request::get("/api/learning/deck?utc_offset=9999")

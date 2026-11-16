@@ -63,11 +63,19 @@ impl Kind {
 
     /// Whether rating an item of this kind easy retires it, so it's never offered again. Only a
     /// coding problem: solving one again that came easily teaches little, as spacing helps
-    /// remembering facts far more than solving problems. Short items, such as cards, mental
-    /// maths and code to read, take a minute and are what spacing is for, so an easy rating
-    /// only sends them further off.
+    /// remembering facts far more than solving problems. Short items, such as cards and mental
+    /// maths, take a minute and are what spacing is for, so an easy rating only sends them
+    /// further off.
     pub fn retires_when_easy(self) -> bool {
         self == Self::Coding
+    }
+
+    /// Whether an item of this kind has one fixed answer that the app marks itself: code to
+    /// read and probability questions. Seen again, such an item soon tests memory of its answer
+    /// rather than the concept, so a right answer offers retiring it, as well as sending it
+    /// further off. Mental maths is made afresh each time, and cards are marked by the learner.
+    pub fn has_fixed_answer(self) -> bool {
+        matches!(self, Self::Reading | Self::Probability)
     }
 
     fn sections(self) -> &'static [(&'static str, bool)] {

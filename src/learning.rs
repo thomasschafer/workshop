@@ -13,7 +13,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_learning::{
-    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, Limits, Progress, Rating,
+    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, Limits, Progress, Rating, Retirement,
     RetirementChange, SkillMastery, Store, TrackPlan,
 };
 use workshop_pack::number::Tolerance;
@@ -45,6 +45,8 @@ pub struct Deck {
     pub items: Vec<DeckItem>,
     pub schedules: BTreeMap<String, ItemSchedule>,
     pub flags: BTreeMap<String, Flag>,
+    /// Where each item that's ever been retired stands, so the app leaves retired ones out.
+    pub retirements: BTreeMap<String, Retirement>,
     pub skills: Vec<DeckSkill>,
     /// The skills recent mistakes point to, whose new items come first.
     pub focus: Vec<String>,
@@ -115,6 +117,10 @@ pub struct SyncRequest {
     pub attempts: Vec<Attempt>,
     #[serde(default)]
     pub flags: Vec<FlagChange>,
+    /// Items with a fixed answer retired after a right answer, each with the id of the attempt
+    /// that retired it, and items brought back.
+    #[serde(default)]
+    pub retirements: Vec<RetirementChange>,
 }
 
 /// The learning tracks for the home screen, and the week's practice so far.
@@ -196,10 +202,11 @@ impl Learning {
             .map(|short| deck_item(short, counts.get(&short.key).copied().unwrap_or(0)))
             .collect::<Result<Vec<_>>>()?;
         let refs = item_refs(&shorts);
+        let retirements = self.store.retirements()?;
         let mastery = workshop_learning::mastery(
             &refs,
             &schedules,
-            &self.store.retirements()?,
+            &retirements,
             self.store.scheduler(),
             clock.now,
         );
@@ -236,6 +243,10 @@ impl Learning {
                 .filter(|(key, _)| keys.contains(key.as_str()))
                 .collect(),
             flags: self.store.flags()?,
+            retirements: retirements
+                .into_iter()
+                .filter(|(key, _)| keys.contains(key.as_str()))
+                .collect(),
             skills,
             focus: self.focus(&packs, clock.now)?,
             problems: problems(&packs),
@@ -243,16 +254,100 @@ impl Learning {
     }
 
     /// Records what a device did, then gives it the deck as it now is. Sending the same
-    /// attempts again changes nothing.
+    /// attempts and changes again changes nothing.
     pub fn sync(&self, request: &SyncRequest, clock: Clock) -> Result<Deck> {
-        self.record(&request.attempts, clock.now)?;
+        let retirements = self.retirements_to_record(&request.attempts, &request.retirements)?;
+        self.record_with(&request.attempts, &retirements, clock.now)?;
         self.store.record_flags(&request.flags)?;
         self.deck(clock)
     }
 
+    /// The retirement changes a device sent that change where an item stands, in the order
+    /// they were made. Another device may have retired an item or brought it back first, so a
+    /// change to where it already stands is left out, rather than refused, which would keep
+    /// everything else the device sent from being recorded. Only an item with a fixed answer
+    /// can be retired this way, by the attempt answering it right that has the change's id;
+    /// anything else is refused.
+    fn retirements_to_record(
+        &self,
+        attempts: &[Attempt],
+        changes: &[RetirementChange],
+    ) -> Result<Vec<RetirementChange>> {
+        if changes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let packs = self.packs()?;
+        let items = crate::mistakes::items_by_key(&packs);
+        let logged = self.store.retirement_changes()?;
+        let mut standings = workshop_learning::standings(&logged, i64::MAX);
+        let mut ordered: Vec<&RetirementChange> = changes.iter().collect();
+        ordered.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.id.cmp(&b.id)));
+        let mut kept = Vec::new();
+        for change in ordered {
+            // The same change sent again, after a reply was lost. One with the same id but
+            // different details is kept, for the log to refuse.
+            if logged.contains(change) {
+                continue;
+            }
+            if change.retired {
+                if let Some(item) = items.get(&change.item)
+                    && !item.kind.has_fixed_answer()
+                {
+                    bail!(
+                        "{} can't be retired from practice, as it has no fixed answer",
+                        change.item
+                    );
+                }
+                let by_easy_attempt = attempts
+                    .iter()
+                    .chain(self.store.attempts(&change.item)?.iter())
+                    .any(|a| {
+                        a.id == change.id && a.item == change.item && a.rating == Rating::Easy
+                    });
+                if !by_easy_attempt {
+                    bail!(
+                        "retiring {} needs the attempt it was retired by, rated easy, with the id {}",
+                        change.item,
+                        change.id
+                    );
+                }
+            }
+            let retired = standings.get(&change.item).is_some_and(|r| r.is_retired());
+            if retired == change.retired {
+                tracing::info!(
+                    "left out a change to {}, which is already {}",
+                    change.item,
+                    if retired { "retired" } else { "not retired" }
+                );
+                continue;
+            }
+            standings.insert(
+                change.item.clone(),
+                if change.retired {
+                    Retirement::Retired { at: change.at }
+                } else {
+                    Retirement::BroughtBack { at: change.at }
+                },
+            );
+            kept.push(change.clone());
+        }
+        Ok(kept)
+    }
+
     /// Records attempts, and logs the mistakes the wrong ones show.
     pub fn record(&self, attempts: &[Attempt], now: i64) -> Result<()> {
-        self.store.record(attempts, now)?;
+        self.record_with(attempts, &[], now)
+    }
+
+    /// Records attempts with retirement changes, all or none of them, and logs the mistakes
+    /// the wrong attempts show.
+    fn record_with(
+        &self,
+        attempts: &[Attempt],
+        retirements: &[RetirementChange],
+        now: i64,
+    ) -> Result<()> {
+        self.store.record_changes(attempts, retirements, now)?;
         if !attempts
             .iter()
             .any(|a| a.rating == workshop_learning::Rating::Again)
@@ -485,7 +580,7 @@ pub struct Planned {
     pub skill_names: BTreeMap<String, String>,
     pub plans: BTreeMap<TrackId, TrackPlan>,
     /// Where each item that's ever been retired stands.
-    pub retirements: BTreeMap<String, workshop_learning::Retirement>,
+    pub retirements: BTreeMap<String, Retirement>,
     /// Each track with items in it, and its name and icon.
     pub names: BTreeMap<TrackId, (String, TrackIcon)>,
     pub week: Week,
@@ -928,6 +1023,7 @@ mod tests {
         let request = SyncRequest {
             attempts: vec![attempt("1", "sample/times-eleven", NOW, Rating::Good)],
             flags: Vec::new(),
+            ..Default::default()
         };
         let after = instances(&learning.sync(&request, clock(NOW)).unwrap());
         assert_eq!(after[0], before[1]);
@@ -959,6 +1055,7 @@ mod tests {
         let request = SyncRequest {
             attempts: vec![attempt("1", "sample/stable-sorting", NOW, Rating::Again)],
             flags: Vec::new(),
+            ..Default::default()
         };
         learning.sync(&request, clock(NOW)).unwrap();
         let later = tracks_at(&learning, clock(NOW + 2 * 86_400_000));
@@ -997,6 +1094,7 @@ mod tests {
                 &SyncRequest {
                     attempts: Vec::new(),
                     flags: vec![flag("1", true, NOW)],
+                    ..Default::default()
                 },
                 clock(NOW),
             )
@@ -1014,6 +1112,7 @@ mod tests {
                 &SyncRequest {
                     attempts: Vec::new(),
                     flags: vec![flag("2", false, NOW + 1)],
+                    ..Default::default()
                 },
                 clock(NOW),
             )
@@ -1032,6 +1131,7 @@ mod tests {
                 &SyncRequest {
                     attempts: vec![wrong],
                     flags: Vec::new(),
+                    ..Default::default()
                 },
                 clock(NOW),
             )
@@ -1189,6 +1289,136 @@ mod tests {
         );
     }
 
+    fn retire(attempt: &Attempt) -> RetirementChange {
+        RetirementChange {
+            id: attempt.id.clone(),
+            item: attempt.item.clone(),
+            at: attempt.answered_at,
+            retired: true,
+        }
+    }
+
+    #[test]
+    fn retires_an_item_with_a_fixed_answer_from_a_sync_until_its_brought_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let right = attempt("1", "sample/two-dice-seven", NOW, Rating::Easy);
+        let request = SyncRequest {
+            attempts: vec![right.clone()],
+            retirements: vec![retire(&right)],
+            ..Default::default()
+        };
+        let deck = learning.sync(&request, clock(NOW)).unwrap();
+        assert_eq!(
+            deck.retirements,
+            BTreeMap::from([(
+                "sample/two-dice-seven".to_owned(),
+                Retirement::Retired { at: NOW }
+            )])
+        );
+        // Sent again, as after a lost reply, it's the same attempt and retirement.
+        learning.sync(&request, clock(NOW)).unwrap();
+        assert_eq!(learning.store().retirement_changes().unwrap().len(), 1);
+        assert_eq!(
+            learning
+                .store()
+                .attempts("sample/two-dice-seven")
+                .unwrap()
+                .len(),
+            1
+        );
+        // Never offered, however long it's been, and known for good.
+        let planned = learning.planned(clock(NOW + 400 * 86_400_000)).unwrap();
+        let plan = &planned.plans[&TrackId::Probability];
+        assert_eq!(plan.retired, 1);
+        assert!(!plan.due.contains(&"sample/two-dice-seven".to_owned()));
+        assert!(!plan.is_new("sample/two-dice-seven"));
+
+        // Brought back, from another sync, it's due from then.
+        let back = RetirementChange {
+            id: "back-1234".to_owned(),
+            item: "sample/two-dice-seven".to_owned(),
+            at: NOW + 5,
+            retired: false,
+        };
+        let request = SyncRequest {
+            retirements: vec![back.clone()],
+            ..Default::default()
+        };
+        let deck = learning.sync(&request, clock(NOW + 6)).unwrap();
+        assert_eq!(
+            deck.retirements["sample/two-dice-seven"],
+            Retirement::BroughtBack { at: NOW + 5 }
+        );
+        let planned = learning.planned(clock(NOW + 6)).unwrap();
+        assert!(
+            planned.plans[&TrackId::Probability]
+                .due
+                .contains(&"sample/two-dice-seven".to_owned())
+        );
+        // Brought back again by a device that hadn't heard, it's left as it is.
+        let request = SyncRequest {
+            retirements: vec![RetirementChange {
+                id: "back-5678".to_owned(),
+                at: NOW + 7,
+                ..back
+            }],
+            ..Default::default()
+        };
+        learning.sync(&request, clock(NOW + 8)).unwrap();
+        assert_eq!(learning.store().retirement_changes().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn retires_from_a_sync_only_items_with_a_fixed_answer_by_an_easy_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let refused = |attempt: Attempt, change: RetirementChange| {
+            let request = SyncRequest {
+                attempts: vec![attempt],
+                retirements: vec![change],
+                ..Default::default()
+            };
+            learning.sync(&request, clock(NOW)).unwrap_err().to_string()
+        };
+        // A card, mental maths and a coding problem retire otherwise, or never.
+        for item in [
+            "sample/stable-sorting",
+            "sample/times-eleven",
+            "sample/islands",
+        ] {
+            let easy = attempt("1", item, NOW, Rating::Easy);
+            let why = refused(easy.clone(), retire(&easy));
+            assert!(why.contains("no fixed answer"), "{why}");
+        }
+        // Code to read retires only by an attempt rated easy, with the change's id.
+        let good = attempt("2", "sample/negative-division", NOW, Rating::Good);
+        let why = refused(good.clone(), retire(&good));
+        assert!(why.contains("rated easy"), "{why}");
+        let easy = attempt("3", "sample/negative-division", NOW, Rating::Easy);
+        let other = RetirementChange {
+            id: "attempt-other".to_owned(),
+            ..retire(&easy)
+        };
+        let why = refused(easy, other);
+        assert!(why.contains("rated easy"), "{why}");
+        // Nothing in a refused sync is recorded.
+        assert!(learning.store().retirement_changes().unwrap().is_empty());
+        assert!(learning.store().all_attempts().unwrap().is_empty());
+
+        // Rated easy without retiring, it's only sent further off than a right answer was.
+        let easy = attempt("4", "sample/negative-division", NOW, Rating::Easy);
+        let good = attempt("5", "sample/both-heads", NOW, Rating::Good);
+        let request = SyncRequest {
+            attempts: vec![easy, good],
+            ..Default::default()
+        };
+        let deck = learning.sync(&request, clock(NOW)).unwrap();
+        assert!(deck.retirements.is_empty());
+        let due = |key: &str| learning.store().scheduler().due(&deck.schedules[key], 0.9);
+        assert!(due("sample/negative-division") > due("sample/both-heads") + 7 * 86_400_000);
+    }
+
     #[test]
     fn counts_the_weeks_minutes() {
         let dir = tempfile::tempdir().unwrap();
@@ -1205,6 +1435,7 @@ mod tests {
                 })
                 .collect(),
             flags: Vec::new(),
+            ..Default::default()
         };
         learning.sync(&request, clock(NOW)).unwrap();
         let tracks = tracks_at(&learning, clock(NOW + 10));
