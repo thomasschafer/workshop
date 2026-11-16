@@ -38,8 +38,8 @@ export class Learning {
   private status: SyncStatus = { pending: 0, syncing: false, offline: false, error: null };
   private readonly listeners = new Set<() => void>();
   private running: Promise<void> | null = null;
-  /** Whether more was done while a sync was under way, so another is needed after it. */
-  private again = false;
+  /** The sync to follow the one under way, which every sync asked for meanwhile waits for. */
+  private following: Promise<void> | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private retryMs = RETRY_MS;
 
@@ -149,18 +149,19 @@ export class Learning {
    * has failed: failures are kept in the status, and tried again later.
    */
   sync(): Promise<void> {
-    if (this.running) {
-      this.again = true;
+    if (!this.running) {
+      this.running = this.run().finally(() => {
+        this.running = null;
+      });
       return this.running;
     }
-    this.running = this.run().finally(() => {
-      this.running = null;
-      if (this.again && this.pending() > 0) {
-        this.again = false;
-        void this.sync();
-      }
+    // The sync under way took what to send as it started, so what's been done since goes in
+    // another straight after it.
+    this.following ??= this.running.then(() => {
+      this.following = null;
+      return this.pending() > 0 ? this.sync() : undefined;
     });
-    return this.running;
+    return this.following;
   }
 
   private async run(): Promise<void> {

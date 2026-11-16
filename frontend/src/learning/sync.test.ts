@@ -108,6 +108,39 @@ describe("Learning", () => {
     expect(bodies[1]?.attempts).toEqual([second]);
   });
 
+  it("resolves a sync asked for while one's on its way once what's waiting has been sent", async () => {
+    const answers: (() => void)[] = [];
+    const bodies: { attempts: Attempt[] }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        bodies.push(JSON.parse(String(init.body)));
+        await new Promise<void>((resolve) => answers.push(resolve));
+        return new Response(JSON.stringify(DECK));
+      }),
+    );
+    const learning = new Learning(new MemoryStorage());
+    // A sync with nothing to send, such as a screen's as it opens, is on its way when an
+    // answer's given, and the screen that follows asks for one to show what the server has.
+    const opening = learning.sync();
+    const given = attempt();
+    learning.record(given);
+    let synced = false;
+    const following = learning.sync().then(() => {
+      synced = true;
+    });
+    await vi.waitFor(() => expect(answers).toHaveLength(1));
+    answers[0]?.();
+    await opening;
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    expect(synced).toBe(false);
+    expect(bodies[1]?.attempts).toEqual([given]);
+    answers[1]?.();
+    await following;
+    expect(learning.syncStatus.pending).toBe(0);
+    expect(bodies).toHaveLength(2);
+  });
+
   it("retires an item offline with the attempt that retired it, and sends both once", async () => {
     const storage = new MemoryStorage();
     vi.stubGlobal(
