@@ -92,6 +92,29 @@ function toSave(edit: DesignEdit): DesignEdit {
 }
 
 /**
+ * The edits that save `edit` when the server has reached `reached`. The server takes a session
+ * one stage on at a time, but stages moved through while a save was on its way, or offline, are
+ * only in the latest edit, so each stage between is sent first, with the notes up to it.
+ */
+function inTurn(edit: DesignEdit, reached: Stage, stages: readonly Stage[]): DesignEdit[] {
+  const index = (stage: Stage) => {
+    const at = stages.indexOf(stage);
+    if (at === -1) throw new Error(`${stage} isn't one of the session's stages`);
+    return at;
+  };
+  const edits: DesignEdit[] = [];
+  for (let at = index(reached) + 1; at < index(edit.stage); at++) {
+    const upTo = stages.slice(0, at + 1);
+    const notes = Object.fromEntries(
+      Object.entries(edit.notes).filter(([stage]) => upTo.includes(stage as Stage)),
+    );
+    edits.push({ ...edit, stage: upTo[at] as Stage, notes });
+  }
+  edits.push(edit);
+  return edits;
+}
+
+/**
  * A design prompt worked through as a session, in stages: clarifying the requirements,
  * estimating the scale, outlining the design, going into one component, and its trade-offs
  * and failure modes. A coach asks follow-up questions at each. Everything's saved as it's
@@ -110,8 +133,15 @@ export function DesignSessionView({
   onDone: () => void;
 }) {
   const key = opened.key;
+  const stageIds = useMemo(() => opened.stages.map((s) => s.id), [opened.stages]);
   const online = useConnection();
-  const [session, setSession] = useState(initial);
+  const [session, setSessionState] = useState(initial);
+  // As the server last said it was, for saves to know which stages it's reached.
+  const sessionRef = useRef(initial);
+  const setSession = (saved: DesignSession) => {
+    sessionRef.current = saved;
+    setSessionState(saved);
+  };
   const [edit, setEdit] = useState<DesignEdit>(() => {
     // What was done here while the server couldn't hear of it wins over what it has.
     const unsaved = readUnsaved(key);
@@ -131,7 +161,11 @@ export function DesignSessionView({
     () =>
       new LatestSaver<DesignEdit>(
         async (next, keepalive) => {
-          const saved = await gradingApi.saveDesign(key, next, keepalive);
+          let saved = sessionRef.current;
+          for (const edit of inTurn(next, saved.reached, stageIds)) {
+            saved = await gradingApi.saveDesign(key, edit, keepalive);
+            sessionRef.current = saved;
+          }
           if (JSON.stringify(toSave(editRef.current)) === JSON.stringify(next)) {
             writeUnsaved(key, null);
           }
@@ -141,7 +175,7 @@ export function DesignSessionView({
         SAVE_DELAY_MS,
         setSaveError,
       ),
-    [key],
+    [key, stageIds],
   );
   useEffect(() => {
     // Changes kept on the device from before are sent as soon as it opens.

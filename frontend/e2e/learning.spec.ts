@@ -422,6 +422,13 @@ test("works through a design session in stages, with the coach, stopping and car
   ).toHaveValue(/by key/);
   await phone.locator(".step", { hasText: "Scale" }).tap();
 
+  // From here, each save takes a while to reach the server, as on a poor connection, so the
+  // stages are moved through, and the session finished, with saves still on their way.
+  const saves = "**/api/design/*/*/session";
+  await phone.route(saves, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.fallback();
+  });
   await phone.getByRole("button", { name: "Next: outline the design" }).tap();
   const components = phone.getByRole("region", { name: "Components" });
   await components.getByRole("button", { name: "Add a component" }).tap();
@@ -454,6 +461,7 @@ test("works through a design session in stages, with the coach, stopping and car
   const marked = phone.getByRole("region", { name: "Marked" });
   await expect(marked).toContainText("90%");
   await expect(marked).toContainText("Mistakes, kept in your log");
+  await phone.unroute(saves);
   await phone.getByRole("button", { name: "Done" }).tap();
   await expect(phone).toHaveURL(/\/design$/);
   await expect(phone.getByRole("button", { name: /key-value/ })).toContainText("last time 90%");
