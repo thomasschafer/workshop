@@ -296,9 +296,15 @@ export class VersionedSaver {
  * if the server is briefly unreachable. Only the most recent value is ever sent.
  */
 export class LatestSaver<T> {
-  private latest: { value: T } | null = null;
+  /** The value waiting to be sent, with how many values had been scheduled when it was. */
+  private latest: { value: T; count: number } | null = null;
+  private scheduled = 0;
+  /** The count of the newest value the server has confirmed. */
+  private landed = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private saving: Promise<void> | null = null;
+  /** Saves sent as the page was hidden, which aren't one at a time with the rest. */
+  private readonly exiting = new Set<Promise<void>>();
   private retryDelay = MIN_RETRY_MS;
 
   constructor(
@@ -308,28 +314,55 @@ export class LatestSaver<T> {
   ) {}
 
   schedule(value: T): void {
-    this.latest = { value };
+    this.scheduled++;
+    this.latest = { value, count: this.scheduled };
     this.wait(this.delayMs);
   }
 
-  /** Saves any pending value now, resolving once it's saved and rejecting if it couldn't be. */
+  /**
+   * Saves any pending value now, resolving once the server has it, or a newer one, and
+   * rejecting if it couldn't be saved.
+   */
   async flush(): Promise<void> {
     clearTimeout(this.timer);
-    if (this.saving) await this.saving;
-    if (this.latest !== null) await this.run();
-    if (this.latest !== null) throw new Error("Couldn't save; check the connection and try again.");
+    const wanted = this.scheduled;
+    let tried = false;
+    while (this.landed < wanted) {
+      // A save already on its way may be this value, or one before it, sent by the timer or
+      // another flush; either way, what's still pending can only be sent after it.
+      const underWay = this.saving ?? this.exiting.values().next().value;
+      if (underWay) {
+        await underWay;
+        continue;
+      }
+      if (tried || this.latest === null) {
+        throw new Error("Couldn't save; check the connection and try again.");
+      }
+      tried = true;
+      await this.run();
+    }
   }
 
   /** Sends any pending value while the page is being hidden, in a request that outlives it. */
   flushOnExit(): void {
     if (this.latest === null) return;
     clearTimeout(this.timer);
-    const { value } = this.latest;
+    const pending = this.latest;
     this.latest = null;
-    this.save(value, true).catch(() => {
-      this.latest ??= { value };
-      this.wait(this.retryDelay);
-    });
+    const sent: Promise<void> = this.save(pending.value, true)
+      .then(
+        () => this.confirm(pending.count),
+        () => {
+          this.latest ??= pending;
+          this.wait(this.retryDelay);
+        },
+      )
+      .finally(() => this.exiting.delete(sent));
+    this.exiting.add(sent);
+  }
+
+  private confirm(count: number): void {
+    this.landed = Math.max(this.landed, count);
   }
 
   private wait(ms: number): void {
@@ -340,15 +373,16 @@ export class LatestSaver<T> {
   private run(): Promise<void> {
     if (this.saving) return this.saving;
     if (this.latest === null) return Promise.resolve();
-    const { value } = this.latest;
+    const pending = this.latest;
     this.latest = null;
-    this.saving = this.save(value, false)
+    this.saving = this.save(pending.value, false)
       .then(() => {
+        this.confirm(pending.count);
         this.retryDelay = MIN_RETRY_MS;
         if (this.latest !== null) this.wait(this.delayMs);
       })
       .catch((err: unknown) => {
-        this.latest ??= { value };
+        this.latest ??= pending;
         this.onError(err instanceof Error ? err.message : String(err));
         this.wait(this.retryDelay);
         this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);

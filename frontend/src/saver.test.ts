@@ -324,6 +324,30 @@ describe("LatestSaver", () => {
     await expect(saver.flush()).rejects.toThrow("Couldn't save");
   });
 
+  it("flushes only once the latest value has landed, however many flushes wait together", async () => {
+    const landed: string[] = [];
+    const save = vi.fn(
+      (value: string) =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            landed.push(value);
+            resolve(null);
+          }, 100),
+        ),
+    );
+    const saver = new LatestSaver<string>(save, 500, () => {});
+    saver.schedule("a");
+    await vi.advanceTimersByTimeAsync(500);
+    // Both flushes start while "a" is still on its way, and the second after another change.
+    saver.schedule("ab");
+    const first = saver.flush().then(() => [...landed]);
+    saver.schedule("abc");
+    const second = saver.flush().then(() => [...landed]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await first).toEqual(["a", "abc"]);
+    expect(await second).toEqual(["a", "abc"]);
+  });
+
   it("sends a pending value straight away as the page is hidden", async () => {
     const save = vi.fn().mockResolvedValue(null);
     const saver = new LatestSaver<string>(save, 500, () => {});
