@@ -273,3 +273,54 @@
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* Items found too easy and retired, each to bring back. */
+.retired {
+  margin-top: 20px;
+}
+
+.retired-heading {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.retired-hint {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.retired-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.retired-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.retired-name {
+  font-weight: 600;
+}
+
+/* After a right answer to an item with a fixed answer: on, much later, or retired. */
+.learn-choice-after {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.learn-choice-after .pill {
+  min-height: 48px;
+}

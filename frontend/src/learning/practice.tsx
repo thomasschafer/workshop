@@ -8,11 +8,12 @@ import { useMarkdown } from "../hooks/useMarkdown";
 import { HomeButton, TrackTitle } from "../progress/page";
 import type { TrackId } from "../tracks/types";
 import { describeTolerance, displayApproximate, displayNumber, grade } from "./grading";
-import { newId, nextInstance, progress, queue, step, utcOffset } from "./local";
+import { newId, nextInstance, progress, queue, retired, step, utcOffset } from "./local";
 import { sameOutput } from "./output";
 import "./practice.css";
+import { RetiredList } from "./retired";
 import { learning, type SyncStatus } from "./sync";
-import type { Deck, DeckItem, Instance, Rating } from "./types";
+import type { Attempt, Deck, DeckItem, Instance, Rating } from "./types";
 
 /** Re-renders whenever the device's learning changes, such as after a sync. */
 export function useLearning() {
@@ -176,15 +177,43 @@ export function ItemView({
   onDone: (right: boolean | null) => void;
 }) {
   const shown = useRef(Date.now());
+  const attempt = (rating: Rating, extra: { response?: string; seed?: number }): Attempt => ({
+    id: newId(),
+    item: item.key,
+    answered_at: Date.now(),
+    duration_ms: Date.now() - shown.current,
+    rating,
+    ...extra,
+  });
   const record = (rating: Rating, extra: { response?: string; seed?: number } = {}) => {
-    learning().record({
-      id: newId(),
-      item: item.key,
-      answered_at: Date.now(),
-      duration_ms: Date.now() - shown.current,
-      rating,
-      ...extra,
-    });
+    learning().record(attempt(rating, extra));
+  };
+  // A right answer to an item with a fixed answer waits for the learner to say whether to
+  // retire it. Left without saying, such as by going home or closing the app, it's "Got it".
+  const choosing = useRef<Attempt | null>(null);
+  useEffect(() => {
+    const gotIt = () => {
+      if (choosing.current) learning().record(choosing.current);
+      choosing.current = null;
+    };
+    window.addEventListener("pagehide", gotIt);
+    return () => {
+      window.removeEventListener("pagehide", gotIt);
+      gotIt();
+    };
+  }, []);
+  /** Records an answer to an item with a fixed answer, which, right, waits for `choose`. */
+  const answerFixed = (response: string | null, right: boolean) => {
+    const extra = response === null ? {} : { response };
+    if (right) choosing.current = attempt("easy", extra);
+    else record("again", extra);
+  };
+  const choose = (choice: Choice) => {
+    const chosen = choosing.current;
+    choosing.current = null;
+    if (chosen && choice === "retire") learning().retire(chosen);
+    else if (chosen) learning().record(chosen);
+    onDone(true);
   };
   return (
     <article class="learn-item">
@@ -213,13 +242,7 @@ export function ItemView({
           }}
         />
       ) : item.kind === "reading" ? (
-        <ReadingView
-          item={item}
-          onAnswer={(response, right) => {
-            record(right ? "good" : "again", response === null ? {} : { response });
-          }}
-          onNext={onDone}
-        />
+        <ReadingView item={item} onAnswer={answerFixed} onNext={onDone} onChoose={choose} />
       ) : item.kind === "mental-maths" ? (
         <TypedAnswer
           prompt={nextInstance(item.instances, learning().attempts, item.key)}
@@ -244,10 +267,9 @@ export function ItemView({
           }}
           tolerance={item.tolerance}
           markdown
-          onAnswer={(_, response, right) => {
-            record(right ? "good" : "again", response === null ? {} : { response });
-          }}
+          onAnswer={(_, response, right) => answerFixed(response, right)}
           onNext={onDone}
+          onChoose={choose}
         />
       )}
       {item.source ? <p class="learn-source muted">Source: {item.source}</p> : null}
@@ -437,10 +459,13 @@ function ReadingView({
   item,
   onAnswer,
   onNext,
+  onChoose,
 }: {
   item: Extract<DeckItem, { kind: "reading" }>;
   onAnswer: (response: string | null, right: boolean) => void;
   onNext: (right: boolean) => void;
+  /** After a right answer, which only goes on once the learner chooses. */
+  onChoose: (choice: Choice) => void;
 }) {
   const [response, setResponse] = useState("");
   const [right, setRight] = useState<boolean | null>(null);
@@ -525,11 +550,52 @@ function ReadingView({
           </p>
           {!right && item.ask === "prints" ? <pre class="learn-printed">{item.output}</pre> : null}
           <Markdown text={item.explanation} class="muted" />
-          <button type="button" class="pill primary wide" onClick={() => onNext(right)}>
-            Next
-          </button>
+          {right ? (
+            <ChoiceAfterRight onChoose={onChoose} />
+          ) : (
+            <NextButton onNext={onNext} right={false} />
+          )}
         </section>
       ) : null}
+    </>
+  );
+}
+
+/** What to do with an item with a fixed answer once it's answered right. */
+type Choice = "got-it" | "retire";
+
+/** Goes on to the next item, focused, so Enter does it. */
+function NextButton({ right, onNext }: { right: boolean; onNext: (right: boolean) => void }) {
+  const next = useRef<HTMLButtonElement>(null);
+  useEffect(() => next.current?.focus(), []);
+  return (
+    <button ref={next} type="button" class="pill primary wide" onClick={() => onNext(right)}>
+      Next
+    </button>
+  );
+}
+
+/**
+ * After a right answer to an item with a fixed answer: "Got it" sends it much further off, and
+ * "Too easy" retires it, as seen again it would test memory of the answer, not the concept.
+ * "Got it" is focused, so Enter chooses it, and Tab moves to retiring.
+ */
+function ChoiceAfterRight({ onChoose }: { onChoose: (choice: Choice) => void }) {
+  const gotIt = useRef<HTMLButtonElement>(null);
+  useEffect(() => gotIt.current?.focus(), []);
+  return (
+    <>
+      <div class="learn-choice-after">
+        <button ref={gotIt} type="button" class="pill primary" onClick={() => onChoose("got-it")}>
+          Got it
+        </button>
+        <button type="button" class="pill" onClick={() => onChoose("retire")}>
+          Too easy: retire it
+        </button>
+      </div>
+      <p class="learn-question muted">
+        Got it brings it back much later. Retired, it won't come back unless you bring it back.
+      </p>
     </>
   );
 }
@@ -543,6 +609,7 @@ function TypedAnswer({
   numbersOnly = false,
   onAnswer,
   onNext,
+  onChoose,
 }: {
   prompt: Instance;
   tolerance: Extract<DeckItem, { kind: "probability" }>["tolerance"];
@@ -556,6 +623,9 @@ function TypedAnswer({
   numbersOnly?: boolean;
   onAnswer: (instance: Instance, response: string | null, right: boolean) => void;
   onNext: (right: boolean) => void;
+  /** For a question with a fixed answer: once it's answered right, which only goes on once the
+   * learner chooses. Questions made afresh each time go straight on. */
+  onChoose?: (choice: Choice) => void;
 }) {
   // The question stays the one first shown, even once answering it moves the deck on.
   const [instance] = useState(prompt);
@@ -563,11 +633,7 @@ function TypedAnswer({
   const [problem, setProblem] = useState<string | null>(null);
   const [right, setRight] = useState<boolean | null>(null);
   const input = useRef<HTMLInputElement>(null);
-  const next = useRef<HTMLButtonElement>(null);
   useEffect(() => input.current?.focus(), []);
-  useEffect(() => {
-    if (right !== null) next.current?.focus();
-  }, [right]);
 
   const check = (event: Event) => {
     event.preventDefault();
@@ -632,9 +698,11 @@ function TypedAnswer({
                 : `The answer is ${displayNumber(instance.answer)}`}
           </p>
           {instance.method ? <Markdown text={instance.method} class="muted" /> : null}
-          <button ref={next} type="button" class="pill primary wide" onClick={() => onNext(right)}>
-            Next
-          </button>
+          {right && onChoose ? (
+            <ChoiceAfterRight onChoose={onChoose} />
+          ) : (
+            <NextButton onNext={onNext} right={right} />
+          )}
         </section>
       ) : null}
     </>
@@ -699,6 +767,10 @@ function Done({
           </button>
         ) : null}
       </span>
+      <RetiredList
+        items={retired(deck, track, state.retirementChanges)}
+        onBringBack={(key) => state.bringBack(key)}
+      />
       {skills.length > 0 ? (
         <section aria-labelledby="skills-heading">
           <h3 id="skills-heading" class="tracks-heading">

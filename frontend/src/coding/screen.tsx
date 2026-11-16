@@ -6,7 +6,8 @@ import { ItemView, SyncChip, useLearning } from "../learning/practice";
 import "../learning/practice.css";
 import { HomeButton, TrackTitle } from "../progress/page";
 import "./coding.css";
-import { newId } from "../learning/local";
+import { newId, retirements } from "../learning/local";
+import { RetiredList } from "../learning/retired";
 import { codingApi } from "./api";
 import { CodingLink, ProblemView } from "./problem";
 import { STEP_LABELS } from "./steps";
@@ -95,7 +96,11 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    codingApi.overview().then(setOverview, (e: unknown) => setError(errorMessage(e)));
+    // After what the device did reaches the server, such as code to read just retired.
+    void learning
+      .sync()
+      .then(() => codingApi.overview())
+      .then(setOverview, (e: unknown) => setError(errorMessage(e)));
   }, [online]);
 
   const order: Status[] = ["in_progress", "due", "new", "done", "flagged"];
@@ -110,14 +115,23 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
   const bringBack = (key: string) => {
     setBringing(key);
     setBringError(null);
-    codingApi
-      .bringBack(key, newId())
+    // Code to read is in the deck, so it's brought back as it was retired, from the device.
+    let brought: Promise<unknown>;
+    if (retired.some((item) => item.key === key && item.kind === "reading")) {
+      learning.bringBack(key);
+      brought = learning.sync();
+    } else {
+      brought = codingApi.bringBack(key, newId());
+    }
+    brought
       .then(() => codingApi.overview())
       .then(setOverview, (e: unknown) => setBringError(errorMessage(e)))
       .finally(() => setBringing(null));
   };
-  const offlineReading = (learning.deck?.items ?? []).filter(
-    (i) => i.kind === "reading" && i.track === "coding",
+  const deck = learning.deck;
+  const standing = deck ? retirements(deck, learning.retirementChanges) : {};
+  const offlineReading = (deck?.items ?? []).filter(
+    (i) => i.kind === "reading" && i.track === "coding" && standing[i.key]?.state !== "retired",
   );
 
   return (
@@ -144,34 +158,15 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
             ))}
           </ul>
         ) : null}
-        {items && retired.length > 0 ? (
-          <section class="coding-retired" aria-label="Retired">
-            <h2 class="coding-subheading">Retired</h2>
-            <p class="muted coding-hint">
-              Rated easy, so they won't come back. Bring one back to have it reviewed again.
-            </p>
-            <ul class="coding-list">
-              {retired.map((item) => (
-                <li key={item.key} class="coding-retired-item">
-                  <span class="coding-item-name">{item.label}</span>
-                  <button
-                    type="button"
-                    class="pill"
-                    disabled={!online || bringing !== null}
-                    onClick={() => bringBack(item.key)}
-                  >
-                    {bringing === item.key ? "Bringing back…" : "Bring back"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {bringError ? (
-              <p class="error-text" role="alert">
-                {bringError}
-              </p>
-            ) : null}
-          </section>
-        ) : items ? null : error ? (
+        {items ? (
+          <RetiredList
+            items={retired}
+            bringing={bringing}
+            disabled={!online}
+            error={bringError}
+            onBringBack={bringBack}
+          />
+        ) : error ? (
           <>
             <p class="banner offline" role="status">
               Coding problems need the server, which can't be reached. Code to read works offline.
