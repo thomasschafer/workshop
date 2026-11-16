@@ -64,7 +64,15 @@ export function Practice({
 
   const startStep = () => {
     if (!deck) return;
-    const next = queue(deck, track, state.attempts, state.flagChanges, Date.now(), utcOffset());
+    const next = queue(
+      deck,
+      track,
+      state.attempts,
+      state.flagChanges,
+      state.retirementChanges,
+      Date.now(),
+      utcOffset(),
+    );
     setChosen(step(next).map((item) => item.key));
     setResults([]);
   };
@@ -648,7 +656,15 @@ function Done({
 }) {
   const state = learning();
   const now = Date.now();
-  const left = queue(deck, track, state.attempts, state.flagChanges, now, utcOffset());
+  const left = queue(
+    deck,
+    track,
+    state.attempts,
+    state.flagChanges,
+    state.retirementChanges,
+    now,
+    utcOffset(),
+  );
   const more = left.due.length + left.fresh.length;
   const week = progress(deck, state.attempts, now, utcOffset());
   const answered = results.filter((r) => r.right !== null);

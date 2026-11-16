@@ -1,11 +1,11 @@
 // The deck and everything done since it came, kept on the device so practice works offline, and
-// sent to the server whenever it can be reached. Each attempt has its own id, so sending one
-// again after a reply was lost changes nothing.
+// sent to the server whenever it can be reached. Each attempt and change has its own id, so
+// sending one again after a reply was lost changes nothing.
 
 import { ApiError, ConnectionError, connection, request } from "../api";
 import { errorMessage } from "../errors";
-import { utcOffset } from "./local";
-import type { Attempt, Deck, FlagChange } from "./types";
+import { newId, utcOffset } from "./local";
+import type { Attempt, Deck, FlagChange, RetirementChange } from "./types";
 
 const STORAGE_KEY = "workshop:learning";
 
@@ -18,10 +18,13 @@ interface Saved {
   /** Done since the deck came, and not yet known to have reached the server. */
   attempts: Attempt[];
   flags: FlagChange[];
+  /** Missing from what an older Workshop saved on the device. */
+  retirements?: RetirementChange[];
 }
 
 export interface SyncStatus {
-  /** How many attempts and flag changes are waiting to reach the server. */
+  /** How many attempts and changes are waiting to reach the server. A retirement goes with the
+   * attempt that made it, so the two count as one. */
   pending: number;
   syncing: boolean;
   /** Whether the server couldn't be reached the last time it was tried. */
@@ -64,7 +67,9 @@ export class Learning {
   }
 
   private pending(): number {
-    return this.saved.attempts.length + this.saved.flags.length;
+    const attempts = new Set(this.saved.attempts.map((a) => a.id));
+    const changes = this.retirementChanges.filter((change) => !attempts.has(change.id));
+    return this.saved.attempts.length + this.saved.flags.length + changes.length;
   }
 
   get deck(): Deck | null {
@@ -77,6 +82,10 @@ export class Learning {
 
   get flagChanges(): FlagChange[] {
     return this.saved.flags;
+  }
+
+  get retirementChanges(): RetirementChange[] {
+    return this.saved.retirements ?? [];
   }
 
   get syncStatus(): SyncStatus {
@@ -107,6 +116,34 @@ export class Learning {
     void this.sync();
   }
 
+  /** Saves an attempt, rated easy, and the retirement it makes, together, then sends both. */
+  retire(attempt: Attempt): void {
+    if (attempt.rating !== "easy") {
+      throw new Error(`retiring ${attempt.item} needs an attempt rated easy`);
+    }
+    const change: RetirementChange = {
+      id: attempt.id,
+      item: attempt.item,
+      at: attempt.answered_at,
+      retired: true,
+    };
+    this.saved = {
+      ...this.saved,
+      attempts: [...this.saved.attempts, attempt],
+      retirements: [...this.retirementChanges, change],
+    };
+    this.save();
+    void this.sync();
+  }
+
+  /** Brings a retired item back, due from now. */
+  bringBack(item: string, at: number = Date.now()): void {
+    const change: RetirementChange = { id: newId(), item, at, retired: false };
+    this.saved = { ...this.saved, retirements: [...this.retirementChanges, change] };
+    this.save();
+    void this.sync();
+  }
+
   /**
    * Sends what's waiting and takes the deck the server sends back. Resolves once that's done or
    * has failed: failures are kept in the status, and tried again later.
@@ -133,19 +170,23 @@ export class Learning {
     }
     const attempts = this.saved.attempts;
     const flags = this.saved.flags;
+    const retirements = this.retirementChanges;
     this.setStatus({ syncing: true });
     try {
       const deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
         attempts,
         flags,
+        retirements,
       });
       // Anything done while this was on its way is still to send.
       const sentAttempts = new Set(attempts.map((a) => a.id));
       const sentFlags = new Set(flags.map((f) => f.id));
+      const sentRetirements = new Set(retirements.map((r) => r.id));
       this.saved = {
         deck,
         attempts: this.saved.attempts.filter((a) => !sentAttempts.has(a.id)),
         flags: this.saved.flags.filter((f) => !sentFlags.has(f.id)),
+        retirements: this.retirementChanges.filter((r) => !sentRetirements.has(r.id)),
       };
       this.retryMs = RETRY_MS;
       this.save();

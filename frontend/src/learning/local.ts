@@ -4,7 +4,16 @@
 
 import type { TrackId } from "../tracks/types";
 import { DAY_MS, due, review } from "./schedule";
-import type { Attempt, Deck, DeckItem, FlagChange, Instance, ItemSchedule } from "./types";
+import type {
+  Attempt,
+  Deck,
+  DeckItem,
+  FlagChange,
+  Instance,
+  ItemSchedule,
+  Retirement,
+  RetirementChange,
+} from "./types";
 
 /** The longest an attempt counts for towards time spent, as on the server. */
 export const MAX_ATTEMPT_MS = 5 * 60 * 1000;
@@ -58,6 +67,35 @@ export function flagged(deck: Deck, changes: FlagChange[]): Set<string> {
     else result.delete(change.item);
   }
   return result;
+}
+
+/** Where each retired item stands, with the changes not yet synced applied. */
+export function retirements(deck: Deck, changes: RetirementChange[]): Record<string, Retirement> {
+  const result = { ...deck.retirements };
+  const ordered = [...changes].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+  for (const change of ordered) {
+    result[change.item] = { state: change.retired ? "retired" : "brought_back", at: change.at };
+  }
+  return result;
+}
+
+/** A track's retired items, in the deck's order. */
+export function retired(deck: Deck, track: TrackId, changes: RetirementChange[]): DeckItem[] {
+  const standing = retirements(deck, changes);
+  return deck.items.filter(
+    (item) => item.track === track && standing[item.key]?.state === "retired",
+  );
+}
+
+/**
+ * When an item that's been attempted is due: as its schedule says, unless it was brought back
+ * since it was last attempted, which makes it due from then. As in crates/learning/src/plan.rs.
+ */
+function dueAt(schedule: ItemSchedule, retirement: Retirement | undefined, retention: number) {
+  if (retirement?.state === "brought_back" && retirement.at > schedule.last_review) {
+    return retirement.at;
+  }
+  return due(schedule, retention);
 }
 
 export interface Progress {
@@ -115,21 +153,26 @@ export function queue(
   track: TrackId,
   attempts: Attempt[],
   changes: FlagChange[],
+  retirementChanges: RetirementChange[],
   now: number,
   offset: number,
 ): Queue {
   const scheduled = schedules(deck, attempts);
   const wrong = flagged(deck, changes);
+  const standing = retirements(deck, retirementChanges);
+  // Left out, as flagged items are: retired ones are never offered.
+  const offered = (item: DeckItem) =>
+    !wrong.has(item.key) && standing[item.key]?.state !== "retired";
   const { reviewsToday, newToday } = progress(deck, attempts, now, offset);
   const allowed = Math.max(0, deck.limits.daily_reviews - reviewsToday);
   // The daily limit is shared across tracks, as on the server, so it's spent on the most overdue
   // items anywhere.
   const dueEverywhere = deck.items
-    .filter((item) => !wrong.has(item.key))
+    .filter(offered)
     .flatMap((item) => {
       const schedule = scheduled[item.key];
       if (!schedule) return [];
-      const when = due(schedule, deck.limits.retention);
+      const when = dueAt(schedule, standing[item.key], deck.limits.retention);
       return when <= now ? [{ item, when }] : [];
     })
     .sort((a, b) => a.when - b.when || a.item.key.localeCompare(b.item.key));
@@ -137,7 +180,7 @@ export function queue(
   // Also shared across tracks, so each offers up to what's left of it, as on the server.
   const allowedNew = Math.max(0, (deck.limits.daily_new ?? Number.POSITIVE_INFINITY) - newToday);
   const fresh = deck.items
-    .filter((item) => item.track === track && !wrong.has(item.key) && !scheduled[item.key])
+    .filter((item) => item.track === track && offered(item) && !scheduled[item.key])
     // Sorting is stable, so otherwise they keep the deck's order.
     .sort((a, b) => Number(inFocus(deck, b)) - Number(inFocus(deck, a)));
   return {

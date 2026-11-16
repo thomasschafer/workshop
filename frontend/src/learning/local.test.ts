@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { dayStart, flagged, newId, nextInstance, progress, queue, step, weekStart } from "./local";
+import {
+  dayStart,
+  flagged,
+  newId,
+  nextInstance,
+  progress,
+  queue,
+  retired,
+  step,
+  weekStart,
+} from "./local";
 import { DAY_MS, review } from "./schedule";
-import type { Attempt, Deck, DeckItem } from "./types";
+import type { Attempt, Deck, DeckItem, RetirementChange } from "./types";
 
 // 2026-09-21, a Monday, at 23:30 UTC.
 const LATE_MONDAY = 1_790_033_400_000;
@@ -69,7 +79,7 @@ describe("queue", () => {
       limits: { daily_reviews: 3, weekly_minutes: 60, retention: 0.9 },
       progress: { reviews_today: 1, minutes_this_week: 0 },
     });
-    const next = queue(d, "review", [], [], LATE_MONDAY, 0);
+    const next = queue(d, "review", [], [], [], LATE_MONDAY, 0);
     // Two reviews left today, and p/sum in another track is the most overdue.
     expect(next.due.map((item) => item.key)).toEqual(["p/b"]);
     expect(next.waiting).toBe(2);
@@ -79,12 +89,12 @@ describe("queue", () => {
   it("takes what's been done since the deck came into account", () => {
     const d = deck([card("p/a"), card("p/b")]);
     const done = [attempt("p/a", LATE_MONDAY - 60_000, "good")];
-    const next = queue(d, "review", done, [], LATE_MONDAY, 0);
+    const next = queue(d, "review", done, [], [], LATE_MONDAY, 0);
     expect(next.due).toEqual([]);
     expect(next.fresh.map((item) => item.key)).toEqual(["p/b"]);
     // Forgotten, it comes back ten minutes later.
     const forgotten = [attempt("p/a", LATE_MONDAY - 11 * 60_000, "again")];
-    expect(queue(d, "review", forgotten, [], LATE_MONDAY, 0).due.map((i) => i.key)).toEqual([
+    expect(queue(d, "review", forgotten, [], [], LATE_MONDAY, 0).due.map((i) => i.key)).toEqual([
       "p/a",
     ]);
   });
@@ -96,7 +106,7 @@ describe("queue", () => {
       progress: { reviews_today: 0, new_today: 1, minutes_this_week: 0 },
     });
     const fresh = (attempts: Attempt[], track: DeckItem["track"] = "review") =>
-      queue(d, track, attempts, [], LATE_MONDAY, 0);
+      queue(d, track, attempts, [], [], LATE_MONDAY, 0);
     expect(fresh([]).fresh.map((i) => i.key)).toEqual(["p/a", "p/b"]);
     expect(fresh([]).freshWaiting).toBe(1);
     // The limit is shared with other tracks, and an item started twice counts once.
@@ -108,13 +118,13 @@ describe("queue", () => {
       ...d,
       day_start: dayStart(LATE_MONDAY, 0) - DAY_MS,
     });
-    expect(queue(yesterday, "review", [], [], LATE_MONDAY, 0).fresh).toHaveLength(3);
+    expect(queue(yesterday, "review", [], [], [], LATE_MONDAY, 0).fresh).toHaveLength(3);
     // A deck from an older Workshop, with no limit in it, isn't limited.
     const older = deck(items, {
       limits: { daily_reviews: 40, weekly_minutes: 60, retention: 0.9 },
       progress: { reviews_today: 0, minutes_this_week: 0 },
     });
-    expect(queue(older, "review", [], [], LATE_MONDAY, 0).fresh).toHaveLength(3);
+    expect(queue(older, "review", [], [], [], LATE_MONDAY, 0).fresh).toHaveLength(3);
   });
 
   it("puts new items in the skills recent mistakes point to first", () => {
@@ -124,7 +134,7 @@ describe("queue", () => {
       { ...card("p/c"), skills: ["heaps"] },
     ];
     const d = deck(items, { focus: ["graphs"] });
-    expect(queue(d, "review", [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual([
+    expect(queue(d, "review", [], [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual([
       "p/b",
       "p/a",
       "p/c",
@@ -133,7 +143,7 @@ describe("queue", () => {
 
   it("leaves out flagged items until the flag is cleared", () => {
     const d = deck([card("p/a"), card("p/b")], { flags: { "p/a": { at: 1, note: null } } });
-    expect(queue(d, "review", [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual(["p/b"]);
+    expect(queue(d, "review", [], [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual(["p/b"]);
     const cleared = [{ id: newId(), item: "p/a", at: 2, flagged: false }];
     expect(flagged(d, cleared).has("p/a")).toBe(false);
     const again = [...cleared, { id: newId(), item: "p/b", at: 3, flagged: true }];
@@ -201,5 +211,48 @@ describe("newId", () => {
     const id = newId();
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(newId()).not.toBe(id);
+  });
+});
+
+describe("retirements", () => {
+  const change = (item: string, at: number, retired: boolean): RetirementChange => ({
+    id: newId(),
+    item,
+    at,
+    retired,
+  });
+
+  it("leave retired items out, from the deck or retired since it came", () => {
+    const items = [card("p/a"), card("p/b"), card("p/c"), card("p/new"), card("p/gone")];
+    const seen = review(null, LATE_MONDAY - 60 * DAY_MS, "good");
+    const d = deck(items, {
+      schedules: { "p/a": seen, "p/b": seen, "p/c": seen },
+      retirements: { "p/a": { state: "retired", at: LATE_MONDAY - 50 * DAY_MS } },
+    });
+    const since = [change("p/b", LATE_MONDAY - 1000, true), change("p/gone", LATE_MONDAY, true)];
+    const next = queue(d, "review", [], [], since, LATE_MONDAY, 0);
+    expect(next.due.map((item) => item.key)).toEqual(["p/c"]);
+    expect(next.fresh.map((item) => item.key)).toEqual(["p/new"]);
+    expect(retired(d, "review", since).map((item) => item.key)).toEqual(["p/a", "p/b", "p/gone"]);
+    expect(retired(d, "mental-maths", since)).toEqual([]);
+  });
+
+  it("make an item brought back due from then, as the server does", () => {
+    const d = deck([card("p/a"), card("p/b")], {
+      // Answered yesterday, so not due for days.
+      schedules: {
+        "p/a": review(null, LATE_MONDAY - DAY_MS, "easy"),
+        "p/b": review(null, LATE_MONDAY - DAY_MS, "easy"),
+      },
+      retirements: { "p/a": { state: "retired", at: LATE_MONDAY - DAY_MS } },
+    });
+    expect(queue(d, "review", [], [], [], LATE_MONDAY, 0).due).toEqual([]);
+    const back = [change("p/a", LATE_MONDAY - 60_000, false)];
+    const next = queue(d, "review", [], [], back, LATE_MONDAY, 0);
+    expect(next.due.map((item) => item.key)).toEqual(["p/a"]);
+    expect(retired(d, "review", back)).toEqual([]);
+    // Once it's done again, its schedule says when it's due.
+    const again = [attempt("p/a", LATE_MONDAY - 30_000)];
+    expect(queue(d, "review", again, [], back, LATE_MONDAY, 0).due).toEqual([]);
   });
 });

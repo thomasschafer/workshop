@@ -74,7 +74,7 @@ describe("Learning", () => {
     const reloaded = new Learning(storage);
     expect(reloaded.attempts).toEqual([first]);
     await reloaded.sync();
-    expect(sent).toEqual([{ attempts: [first], flags: [] }]);
+    expect(sent).toEqual([{ attempts: [first], flags: [], retirements: [] }]);
     expect(reloaded.attempts).toEqual([]);
     expect(reloaded.deck).toEqual(DECK);
     expect(reloaded.syncStatus).toMatchObject({ pending: 0, offline: false });
@@ -106,6 +106,69 @@ describe("Learning", () => {
     await vi.waitFor(() => expect(learning.syncStatus.pending).toBe(0));
     expect(bodies[0]?.attempts).toEqual([first]);
     expect(bodies[1]?.attempts).toEqual([second]);
+  });
+
+  it("retires an item offline with the attempt that retired it, and sends both once", async () => {
+    const storage = new MemoryStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    const offline = new Learning(storage);
+    const easy: Attempt = { ...attempt(), rating: "easy" };
+    offline.retire(easy);
+    await offline.sync();
+    // The retirement goes with its attempt, so one thing is waiting.
+    expect(offline.syncStatus).toMatchObject({ pending: 1, offline: true });
+    expect(offline.retirementChanges).toEqual([
+      { id: easy.id, item: "p/a", at: easy.answered_at, retired: true },
+    ]);
+    expect(() => offline.retire(attempt())).toThrow("rated easy");
+
+    const sent: { attempts: Attempt[]; retirements: unknown[] }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify(DECK));
+      }),
+    );
+    const reloaded = new Learning(storage);
+    expect(reloaded.syncStatus.pending).toBe(1);
+    await reloaded.sync();
+    expect(sent).toEqual([{ attempts: [easy], flags: [], retirements: offline.retirementChanges }]);
+    expect(reloaded.retirementChanges).toEqual([]);
+    expect(reloaded.syncStatus.pending).toBe(0);
+
+    // Bringing it back is a change of its own.
+    reloaded.bringBack("p/a", 5);
+    await vi.waitFor(() => expect(sent.length).toBe(2));
+    expect(sent[1]?.retirements).toEqual([
+      { id: expect.any(String), item: "p/a", at: 5, retired: false },
+    ]);
+  });
+
+  it("reads what an older Workshop kept on the device, with no retirements", async () => {
+    const storage = new MemoryStorage();
+    const first = attempt();
+    storage.setItem(
+      "workshop:learning",
+      JSON.stringify({ deck: DECK, attempts: [first], flags: [] }),
+    );
+    const sent: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify(DECK));
+      }),
+    );
+    const learning = new Learning(storage);
+    expect(learning.syncStatus.pending).toBe(1);
+    await learning.sync();
+    expect(sent).toEqual([{ attempts: [first], flags: [], retirements: [] }]);
   });
 
   it("keeps attempts the server refuses, saying why", async () => {

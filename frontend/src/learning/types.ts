@@ -79,6 +79,9 @@ export interface Deck {
   items: DeckItem[];
   schedules: Record<string, ItemSchedule>;
   flags: Record<string, { at: number; note: string | null }>;
+  /** Where each item that's ever been retired stands. Decks saved on a device by an older
+   * Workshop don't have it. */
+  retirements?: Record<string, Retirement>;
   skills: { id: string; name: string; mastery: number; items: number; attempted: number }[];
   /** The skills recent mistakes point to, whose new items come first. Decks saved on a device
    * by an older Workshop don't have it. */
@@ -102,4 +105,21 @@ export interface FlagChange {
   at: number;
   flagged: boolean;
   note?: string;
+}
+
+/** Where a retired item stands: still retired, or brought back, which makes it due from then. */
+export interface Retirement {
+  state: "retired" | "brought_back";
+  at: number;
+}
+
+/**
+ * Retiring an item, so it's never offered again, or bringing it back. Retiring one with a fixed
+ * answer has the id of the attempt, rated easy, that retired it.
+ */
+export interface RetirementChange {
+  id: string;
+  item: string;
+  at: number;
+  retired: boolean;
 }
