@@ -126,9 +126,11 @@ function DesignItem({
           <section class="design-intro" aria-label="Design session">
             <p class="muted">
               A design session of about {opened.minutes} minutes, in {opened.stages.length} stages:{" "}
-              {opened.stages.map((s) => s.name.toLowerCase()).join(", ")}. A coach asks follow-up
-              questions at each, and the whole session is marked at the end. Every stage is saved as
-              you go, so you can stop at any of them and carry on later.
+              {opened.stages.map((s) => s.name.toLowerCase()).join(", ")}. Find out what you need by
+              asking the coach, who answers from a brief you'll see at the end, and it asks you
+              follow-up questions about your design. The whole session is marked at the end, and on
+              what you asked. Every stage is saved as you go, so you can stop at any of them and
+              carry on later.
             </p>
             {error ? (
               <p class="error-text" role="alert">

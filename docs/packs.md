@@ -59,8 +59,8 @@ name = "Unit slip"
 description = "Mixed up units, such as seconds and milliseconds"
 
 # Text added to a coach role's instructions, to shape its style for this pack. The tutor gives
-# hints on coding problems, poses the twists their reviews are, and asks the follow-up questions
-# in design sessions; the examiner
+# hints on coding problems, poses the twists their reviews are, and answers the learner's
+# questions and asks them follow-up questions in design sessions; the examiner
 # runs timed rounds; the grader marks written and spoken work and checks cards; the author
 # writes new items (see docs/author.md).
 [prompts]
@@ -343,11 +343,21 @@ Design a service that shortens links.
 - Estimates reads and writes per second
 - Chooses how short codes are made, and handles collisions
 - Says what happens when a store is unavailable
+
+## Brief
+
+- Who uses it: anyone can open a link; making one needs an account.
+- What it must do: make a short link, and send anyone who opens it on. Links can be deleted.
+- Scale: 1 million links made a day, and 100 opens for each, mostly in the first week.
+- Latency and availability: opening a link takes under 20 ms, and keeps working when making links doesn't.
+- Out of scope: previews of where a link goes.
 ```
 
-`## Rubric` is a list, one point per line. `## Notes` is optional: what a good answer looks like, for the examiner and the grader to judge by. The learner sees the rubric once their work is marked, and never the notes.
+`## Rubric` is a list, one point per line. `## Notes` is optional: what a good answer looks like, for the examiner and the grader to judge by.
 
-A design prompt is worked through as a design session of five stages: clarifying the requirements, estimating the scale, outlining the design as a list of components and what each talks to, going into one of them, and its trade-offs and failure modes. Notes are typed or dictated at each, and the tutor asks follow-up questions about what's been written, which can be answered aloud too. Everything's saved as it's written, so a session can be stopped at any stage and carried on later, and earlier stages gone back to. At the end, the grader marks the whole session against the rubric, which counts as an attempt rated from its score. A session takes a while, so Continue only offers one when the learner has said they've got a while.
+`## Brief`, also optional, is what the learner finds out by asking, as they would in a design discussion: who uses the system and for what, what it must do, its rough scale (how much data, how many reads and writes, how fast it grows), the latency, availability and consistency it needs, and what's out of scope. Give definite numbers, so the learner has something to estimate from. The coach answers the learner's questions from it, and the grader marks what they asked against it. Without one, the coach makes one up for each session as it starts, and keeps it with the session, so its answers don't change. The learner sees the rubric and the brief once their work is marked, and never the notes.
+
+A design prompt is worked through as a design session of five stages: clarifying the requirements, estimating the scale, outlining the design as a list of components and what each talks to, going into one of them, and its trade-offs and failure modes. Notes are typed or dictated at each. While clarifying the requirements and estimating the scale, the learner asks the coach questions, typed or dictated, and it answers each from the brief: only what was asked, with the figures asked for, leaving the estimating to the learner. Asked something the brief doesn't cover, it answers as the brief's writer would, and keeps the answer with the brief for the rest of the session. From the outline on, the coach asks follow-up questions about what's been written, which can be answered aloud too, holding the design to the brief. Everything's saved as it's written, so a session can be stopped at any stage and carried on later, and earlier stages gone back to. At the end, the grader marks the whole session against the rubric, and on what the learner asked: which of the brief's key requirements they found out, which they missed, and what they assumed without asking. That counts as an attempt rated from its score, and each requirement missed goes in the mistake log as a `missed-requirement`. A session takes a while, so Continue only offers one when the learner has said they've got a while.
 
 ## Timed rounds
 

@@ -269,9 +269,13 @@ export async function serverToken(home: string, port: number, timeoutMs = 60_000
   }
 }
 
+/** A design prompt in the author's pack whose brief is left out, for the coach to make one up. */
+export const UNBRIEFED_DESIGN = "rate-limiter";
+
 /**
  * A home whose pack is a copy of the sample pack in a git repo of its own, with stand-ins for
- * the author's writer and reviewer, so the author runs without calling any model.
+ * the author's writer and reviewer, so the author runs without calling any model. One of its
+ * design prompts has no brief of its own.
  */
 export function createAuthorHome(): void {
   const pack = join(AUTHOR_HOME, "pack");
@@ -320,6 +324,11 @@ packs = [${JSON.stringify(pack)}]
     JSON.stringify({ last_started_at: Date.now() }),
   );
   cpSync(resolve(import.meta.dirname, "../../packs/sample"), pack, { recursive: true });
+  const unbriefed = join(pack, "items", "design", `${UNBRIEFED_DESIGN}.md`);
+  const text = readFileSync(unbriefed, "utf8");
+  const brief = text.indexOf("\n## Brief\n");
+  if (brief === -1) throw new Error(`${unbriefed} has no brief to leave out`);
+  writeFileSync(unbriefed, `${text.slice(0, brief).trimEnd()}\n`);
   const git = (...args: string[]) =>
     execFileSync("git", args, {
       cwd: pack,

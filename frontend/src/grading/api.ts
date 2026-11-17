@@ -3,6 +3,7 @@ import { utcOffset } from "../learning/local";
 import type {
   DesignEdit,
   DesignListed,
+  DesignMarked,
   DesignOpened,
   DesignSession,
   FlaggedCard,
@@ -28,12 +29,16 @@ export const gradingApi = {
   startDesign: (key: string) => request<DesignOpened>("POST", `/design/${path(key)}/start`),
   saveDesign: (key: string, edit: DesignEdit, keepalive = false) =>
     request<DesignSession>("PUT", `/design/${path(key)}/session`, edit, { keepalive }),
-  /** Has the coach ask follow-up questions at a stage, after the learner's reply, if any. */
+  /**
+   * Talks with the coach at a stage: where the learner asks, `reply` is their question, which it
+   * answers, or null to have it answer the one left unanswered; elsewhere, it asks follow-up
+   * questions, after the learner's reply, if any.
+   */
   coach: (key: string, stage: Stage, reply: string | null) =>
     request<DesignSession>("POST", `/design/${path(key)}/coach`, { stage, reply }),
   /** Has the grader mark the whole session, which ends it; `id` is the attempt's. */
   finishDesign: (key: string, id: string) =>
-    request<MarkedReply>("POST", `/design/${path(key)}/finish`, { id }),
+    request<DesignMarked>("POST", `/design/${path(key)}/finish`, { id }),
   /**
    * Marks work with the grader, written or, if `spoken`, what was heard explaining it aloud;
    * `id` is the attempt's, for work that counts as one.

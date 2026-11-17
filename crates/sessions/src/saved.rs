@@ -83,6 +83,17 @@ impl<T: Serialize + DeserializeOwned> Saved<T> {
         self.write(key, session)
     }
 
+    /// Keeps a new session, unless there's one already, such as one started at the same time
+    /// elsewhere. Returns the session kept.
+    pub fn put_new(&self, key: &str, session: T) -> Result<T> {
+        let _guard = self.guard();
+        if let Some(kept) = self.get(key)? {
+            return Ok(kept);
+        }
+        self.write(key, &session)?;
+        Ok(session)
+    }
+
     fn write(&self, key: &str, session: &T) -> Result<()> {
         let path = self.path(key)?;
         if let Some(dir) = path.parent() {
@@ -158,6 +169,10 @@ mod tests {
         assert!(failed.is_err());
         assert_eq!(saved.get("sample/one").unwrap(), Some(vec![1, 5]));
         assert_eq!(saved.change("sample/none", |_| Ok(())).unwrap(), None);
+        // A new one is kept only if there isn't one already.
+        assert_eq!(saved.put_new("sample/one", vec![9]).unwrap(), vec![1, 5]);
+        assert_eq!(saved.put_new("sample/new", vec![9]).unwrap(), vec![9]);
+        assert_eq!(saved.get("sample/new").unwrap(), Some(vec![9]));
 
         saved.remove("sample/one").unwrap();
         saved.remove("sample/one").unwrap();

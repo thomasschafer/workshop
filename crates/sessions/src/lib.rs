@@ -1,10 +1,12 @@
 //! Long items, done in a sitting rather than a few minutes at a time: guided design sessions,
-//! and timed rounds with the examiner. Each is saved as it goes, so the learner can stop and
+//! and timed rounds with the examiner, with the brief a design prompt's questions are answered
+//! from. Each is saved as it goes, so the learner can stop and
 //! carry on later, on any device.
 //!
 //! This crate keeps where each one is and the rules it follows. Talking to the coach, the
 //! examiner and the grader, and recording the attempt at the end, are up to the app.
 
+pub mod brief;
 pub mod design;
 pub mod round;
 mod saved;

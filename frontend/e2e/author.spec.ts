@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BrowserContext, devices, expect, type Page, test } from "@playwright/test";
-import { AUTHOR_HOME, AUTHOR_PORT } from "./fixture";
+import { AUTHOR_HOME, AUTHOR_PORT, UNBRIEFED_DESIGN } from "./fixture";
 
 // The tests share one phone and run in order, from a server whose pack is a git repo of its
 // own, with stand-ins for the author's two models.
@@ -97,4 +97,43 @@ test("imports a question into the pack as a draft", async () => {
 test("practises the items the author added", async () => {
   await phone.goto("/");
   await expect(phone.locator(".track", { hasText: "Review" })).toContainText("12 new");
+});
+
+test("makes up a brief for a design prompt without one, and keeps it across a reload", async () => {
+  const key = `sample/${UNBRIEFED_DESIGN}`;
+  await phone.goto(`/design/${key}`);
+  await phone.getByRole("button", { name: "Start the session" }).tap();
+  const coach = phone.getByRole("region", { name: "Coach" });
+  const ask = async (question: string, answers: number) => {
+    await coach.getByLabel("Your question").fill(question);
+    await coach.getByRole("button", { name: "Ask the coach" }).tap();
+    await expect(coach.locator(".design-turn.coach")).toHaveCount(answers);
+    return coach.locator(".design-turn.coach").last().innerText();
+  };
+  // The made-up brief's peak is drawn afresh each time one's made.
+  const first = await ask("How many requests at peak?", 1);
+  expect(first).toMatch(/^Peak: \d+ requests a second, from 300 clients\.$/);
+  // What it says beyond what's asked stays hidden, on the page and from the app.
+  await expect(phone.getByText("billing")).toHaveCount(0);
+  const sent = await (await phone.request.get(`/api/design/${key}`)).text();
+  expect(sent).not.toContain("billing");
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+
+  // After a reload, the coach answers from the same brief.
+  await phone.reload();
+  await expect(coach.locator(".design-turn.coach")).toHaveCount(1);
+  expect(await ask("And the requests per second again?", 2)).toBe(first);
+  // Something the brief doesn't cover is settled, and kept with it.
+  await ask("Does each client have quotas?", 3);
+  const saved = JSON.parse(
+    readFileSync(join(AUTHOR_HOME, "data", "design", "sessions", `${key}.json`), "utf8"),
+  ) as { brief: { source: string; text: string; added: string[] } };
+  expect(saved.brief.source).toBe("coach");
+  expect(saved.brief.text).toContain(first);
+  expect(saved.brief.added).toEqual(['It doesn\'t: "Does each client have quotas?"']);
+  await phone.getByRole("button", { name: "Stop here for now" }).tap();
+  await expect(phone).toHaveURL(/\/design$/);
 });

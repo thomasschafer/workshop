@@ -10,6 +10,11 @@ export interface Marked {
   feedback: string;
   /** For work explained aloud, how clearly it was put. */
   clarity: { score: number; feedback: string } | null;
+  /**
+   * For a design whose questions were answered from a brief, the key requirements the learner
+   * found out, those they missed, and what they assumed without asking.
+   */
+  questioning: { found: string[]; missed: string[]; assumed: string[] } | null;
 }
 
 export interface MarkedReply {
@@ -17,6 +22,11 @@ export interface MarkedReply {
   rubric: string[];
   /** When it comes back, for work that counts as an attempt. */
   due: number | null;
+}
+
+/** A design session marked, with the brief its questions were answered from, now it's shown. */
+export interface DesignMarked extends MarkedReply {
+  brief: string | null;
 }
 
 // Design sessions mirror crates/sessions/src/design.rs, and their routes src/server/design.rs.
@@ -74,7 +84,8 @@ export interface DesignOpened {
   skills: string[];
   minutes: number;
   source: string | null;
-  stages: { id: Stage; name: string; task: string }[];
+  /** At the stages where `learner_asks`, the learner asks the coach; at the others, it asks. */
+  stages: { id: Stage; name: string; task: string; learner_asks: boolean }[];
   session: DesignSession | null;
   /** What was done last time, if it's been done before. */
   previous: string | null;

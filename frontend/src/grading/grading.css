@@ -102,6 +102,19 @@ textarea.explain-heard {
   margin-bottom: 4px;
 }
 
+.marked-questioning h4 {
+  margin: 8px 0 4px;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.design-brief {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
 .design-intro p {
   margin: 0;
 }

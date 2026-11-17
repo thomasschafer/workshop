@@ -27,15 +27,72 @@ if (prompt.includes("Find part 1's example.") && prompt.includes("+2, -5, +4")) 
   process.exit(0);
 }
 
+/** The lines of the brief in a prompt, as `- Topic: what it says`. */
+function briefLines(prompt) {
+  const brief = prompt.match(/<brief>\n([\s\S]*?)\n<\/brief>/)?.[1] ?? "";
+  return brief.split("\n").filter((line) => line.startsWith("- "));
+}
+
+/** The words of five letters or more in some text, to match questions with the brief by. */
+function words(text) {
+  return new Set((text.toLowerCase().match(/[a-z]{5,}/g) ?? []).filter((w) => w !== "which"));
+}
+
+/** What the learner has asked, or said, in the prompt's transcript and conversation. */
+function learnerSaid(prompt) {
+  return (prompt.match(/^Learner: .*$/gm) ?? []).map((line) => line.replace(/^Learner: /, ""));
+}
+
+/**
+ * An answer to the learner's last question from the brief: the line of it sharing the most
+ * words with the question, or, if none does, a detail settled for the rest of the session.
+ */
+function answerFromBrief(prompt) {
+  const said = learnerSaid(prompt);
+  const question = said[said.length - 1] ?? "";
+  const asked = words(question);
+  let best = null;
+  let most = 0;
+  for (const line of briefLines(prompt)) {
+    const shared = [...words(line)].filter((w) => asked.has(w)).length;
+    if (shared > most) [best, most] = [line, shared];
+  }
+  if (best) return { answer: best.replace(/^- /, ""), settled: null };
+  return { answer: "No, it doesn't.", settled: `It doesn't: "${question}"` };
+}
+
+// The coach of a design session, making up a brief for a prompt without one. Its peak is drawn
+// afresh each time, so a test can tell whether the brief was kept or made again.
+if (prompt.includes("Write the brief for this design question.")) {
+  const peak = 1000 + Math.floor(Math.random() * 9000);
+  await reply([
+    `- Who uses it: other teams' services, through an API.\n- Peak: ${peak} requests a second, from 300 clients.\n- Latency: a decision within 5 ms.\n- Out of scope: billing.`,
+  ]);
+  process.exit(0);
+}
+
+// The coach of a design session, answering the learner's question from the brief.
+if (prompt.includes("Answer their last question.")) {
+  await reply([JSON.stringify(answerFromBrief(prompt))]);
+  process.exit(0);
+}
+
 // The coach of a design session, asking follow-up questions about the stage the learner's at.
 if (prompt.includes("Ask one or two follow-up questions about this stage.")) {
   const stage = prompt.match(/They're at the stage "([^"]+)"/)?.[1] ?? "?";
-  const answered = prompt.includes("\nLearner: ");
+  const conversation = prompt.match(/<conversation>\n([\s\S]*?)<\/conversation>/)?.[1] ?? "";
+  const answered = conversation.includes("Learner: ");
   await reply([
     answered
       ? "And what happens to that when traffic grows tenfold?"
       : `At ${stage}: what have you assumed here that might not hold?`,
   ]);
+  process.exit(0);
+}
+
+// The examiner of a timed round of a design prompt, answering from its brief.
+if (prompt.includes("Reply to their last message as the examiner.") && prompt.includes("<brief>")) {
+  await reply([JSON.stringify(answerFromBrief(prompt))]);
   process.exit(0);
 }
 
@@ -92,6 +149,18 @@ if (prompt.includes("<twist>")) {
   process.exit(0);
 }
 
+/** What the learner found out of the brief in a prompt, by asking, and what they missed. */
+function questioning(prompt) {
+  const asked = new Set(learnerSaid(prompt).flatMap((said) => [...words(said)]));
+  const found = [];
+  const missed = [];
+  for (const line of briefLines(prompt)) {
+    const topic = line.replace(/^- /, "").split(":")[0] ?? line;
+    ([...words(line)].some((w) => asked.has(w)) ? found : missed).push(topic);
+  }
+  return { found, missed, assumed: [] };
+}
+
 // The grader, marking written work or checking a card.
 if (prompt.includes("<work>")) {
   const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";
@@ -103,6 +172,9 @@ if (prompt.includes("<work>")) {
         { error_type: "missed-edge-case", detail: `Nothing on the unusual cases in "${work}"` },
       ],
       feedback: "Think about **the unusual cases**.",
+      // With a brief, what the learner asked is marked too: each topic of the brief that no
+      // question of theirs shares a word with is missed.
+      ...(prompt.includes("<brief>") ? { questioning: questioning(prompt) } : {}),
       // Explained aloud, it's marked for clarity too.
       ...(prompt.includes("explained this aloud")
         ? { clarity: { score: 0.75, feedback: "Say the cost **before** the details." } }

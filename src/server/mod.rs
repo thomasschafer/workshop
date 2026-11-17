@@ -60,7 +60,7 @@ pub fn router(app: Shared) -> Router {
         .route("/design/{pack}/{item}", get(design::open))
         .route("/design/{pack}/{item}/start", post(design::start))
         .route("/design/{pack}/{item}/session", put(design::save))
-        .route("/design/{pack}/{item}/coach", post(design::coach))
+        .route("/design/{pack}/{item}/coach", post(design::coach_turn))
         .route("/design/{pack}/{item}/finish", post(design::finish))
         .route("/rounds", get(rounds::overview))
         .route("/rounds/{pack}/{item}/open", post(rounds::open))
@@ -281,6 +281,13 @@ mod testing {
         script.push_str(
             "  *) echo 'The fake model has no reply for this prompt' >&2; exit 1 ;;\nesac\n",
         );
+        fake_script_model(dir, &script)
+    }
+
+    /// Config for a stand-in discussion model that's a shell script of a test's own, in `dir`,
+    /// given the prompt on stdin.
+    #[cfg(unix)]
+    pub fn fake_script_model(dir: &std::path::Path, script: &str) -> String {
         let path = dir.join("fake-model.sh");
         std::fs::write(&path, script).unwrap();
         format!(

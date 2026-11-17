@@ -11,9 +11,9 @@ import { MarkedView } from "./marked";
 import type {
   Component,
   DesignEdit,
+  DesignMarked,
   DesignOpened,
   DesignSession,
-  MarkedReply,
   SessionTurn,
   Stage,
 } from "./types";
@@ -117,9 +117,10 @@ function inTurn(edit: DesignEdit, reached: Stage, stages: readonly Stage[]): Des
 /**
  * A design prompt worked through as a session, in stages: clarifying the requirements,
  * estimating the scale, outlining the design, going into one component, and its trade-offs
- * and failure modes. A coach asks follow-up questions at each. Everything's saved as it's
- * written, so the learner can stop at any stage and carry on later, and the grader marks the
- * whole session at the end.
+ * and failure modes. While finding out the requirements and the scale, the learner asks the
+ * coach, which answers from a brief they see only once it's marked; at the later stages, the
+ * coach asks them follow-up questions. Everything's saved as it's written, so the learner can
+ * stop at any stage and carry on later, and the grader marks the whole session at the end.
  */
 export function DesignSessionView({
   opened,
@@ -155,7 +156,7 @@ export function DesignSessionView({
   const [notice, setNotice] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
-  const [result, setResult] = useState<MarkedReply | null>(null);
+  const [result, setResult] = useState<DesignMarked | null>(null);
 
   const saver = useMemo(
     () =>
@@ -259,6 +260,12 @@ export function DesignSessionView({
             ))}
           </ul>
         </details>
+        {result.brief ? (
+          <section class="design-brief" aria-label="The brief">
+            <h3 class="tracks-heading">The brief your questions were answered from</h3>
+            <Markdown text={result.brief} />
+          </section>
+        ) : null}
         <button type="button" class="pill primary wide" onClick={onDone}>
           Done
         </button>
@@ -266,7 +273,12 @@ export function DesignSessionView({
     );
   }
 
-  const lastFromCoach = turns.length > 0 && turns[turns.length - 1]?.speaker === "coach";
+  // Where the learner asks, the coach answers; elsewhere, the coach asks and the learner answers.
+  const asks = stage.learner_asks;
+  const last = turns[turns.length - 1]?.speaker ?? null;
+  const lastFromCoach = last === "coach";
+  // A question the coach couldn't answer, such as when it couldn't be reached, waits for it.
+  const unanswered = asks && last === "learner";
   return (
     <>
       <StepNav
@@ -331,7 +343,9 @@ export function DesignSessionView({
         <h3 class="tracks-heading">Coach</h3>
         {turns.length === 0 ? (
           <p class="muted">
-            When you've written something, the coach asks follow-up questions about it.
+            {asks
+              ? "Ask the coach what you need to know. It answers from a brief, which you'll see once the session's marked."
+              : "When you've written something, the coach asks follow-up questions about it."}
           </p>
         ) : (
           <ol class="design-turns">
@@ -342,10 +356,10 @@ export function DesignSessionView({
             ))}
           </ol>
         )}
-        {lastFromCoach ? (
+        {asks || lastFromCoach ? (
           <>
             <label class="muted" for="design-reply">
-              Your answer to the coach
+              {asks ? "Your question" : "Your answer to the coach"}
             </label>
             <textarea
               id="design-reply"
@@ -371,10 +385,22 @@ export function DesignSessionView({
         <button
           type="button"
           class="pill"
-          disabled={asking || !online || (lastFromCoach && !reply.trim())}
+          disabled={
+            asking ||
+            !online ||
+            (asks ? !reply.trim() && !unanswered : lastFromCoach && !reply.trim())
+          }
           onClick={() => void ask()}
         >
-          {asking ? "The coach is thinking…" : lastFromCoach ? "Answer the coach" : "Ask the coach"}
+          {asking
+            ? "The coach is thinking…"
+            : asks
+              ? unanswered && !reply.trim()
+                ? "Get the coach's answer"
+                : "Ask the coach"
+              : lastFromCoach
+                ? "Answer the coach"
+                : "Ask the coach"}
         </button>
       </section>
       {saveError ? (

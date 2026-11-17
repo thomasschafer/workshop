@@ -170,12 +170,7 @@ pub mod testing {
     /// A copy of the sample pack in `dir`, as a git repo with one commit, for tests that change
     /// a pack.
     pub fn sample_pack_repo(dir: &Path) {
-        copy(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("packs/sample")
-                .as_path(),
-            dir,
-        );
+        sample_pack_copy(dir);
         let git = |args: &[&str]| {
             let status = std::process::Command::new("git")
                 .args(args)
@@ -190,6 +185,16 @@ pub mod testing {
         git(&["config", "user.name", "Tests"]);
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "Start"]);
+    }
+
+    /// A copy of the sample pack in `dir`, for tests that need a pack of their own.
+    pub fn sample_pack_copy(dir: &Path) {
+        copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("packs/sample")
+                .as_path(),
+            dir,
+        );
     }
 
     fn copy(from: &Path, to: &Path) {

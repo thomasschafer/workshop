@@ -28,6 +28,7 @@ export function MarkedView({ marked }: { marked: Marked }) {
           </li>
         ))}
       </ul>
+      {marked.questioning ? <QuestioningView questioning={marked.questioning} /> : null}
       {marked.findings.length > 0 ? (
         <>
           <h3 class="tracks-heading">Mistakes, kept in your log</h3>
@@ -38,6 +39,31 @@ export function MarkedView({ marked }: { marked: Marked }) {
           </ul>
         </>
       ) : null}
+    </section>
+  );
+}
+
+/** What the learner found out about a design's requirements by asking, and what they didn't. */
+function QuestioningView({ questioning }: { questioning: NonNullable<Marked["questioning"]> }) {
+  const parts = [
+    { title: "Found out", items: questioning.found },
+    { title: "Missed, kept in your log", items: questioning.missed },
+    { title: "Assumed without asking", items: questioning.assumed },
+  ].filter((part) => part.items.length > 0);
+  if (parts.length === 0) return null;
+  return (
+    <section class="marked-questioning" aria-label="What you asked">
+      <h3 class="tracks-heading">What you asked</h3>
+      {parts.map((part) => (
+        <section key={part.title} aria-label={part.title}>
+          <h4 class="muted">{part.title}</h4>
+          <ul class="marked-findings">
+            {part.items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </section>
   );
 }

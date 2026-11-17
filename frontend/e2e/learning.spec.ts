@@ -357,7 +357,7 @@ test("offers long items only with a while, which turns itself off once the sitti
   await expect(next).not.toContainText("long");
 });
 
-test("works through a design session in stages, with the coach, stopping and carrying on", async () => {
+test("works through a design session in stages, asking the coach and answering it, stopping and carrying on", async () => {
   await phone.goto("/");
   await phone.getByRole("switch", { name: /I've got a while/ }).tap();
   const next = phone.locator(".continue");
@@ -368,24 +368,43 @@ test("works through a design session in stages, with the coach, stopping and car
 
   const stage = phone.getByRole("region", { name: "Clarify the requirements" });
   await stage.getByLabel("Your notes").fill("Keep values by key, on many machines.");
+  // Finding out the requirements, the learner asks, and the coach answers from the brief.
   const coach = phone.getByRole("region", { name: "Coach" });
-  await coach.getByRole("button", { name: "Ask the coach" }).tap();
+  const ask = coach.getByRole("button", { name: "Ask the coach" });
+  await expect(ask).toBeDisabled();
+  await coach.getByLabel("Your question").fill("How big are the values?");
+  await ask.tap();
+  await expect(coach.locator(".design-turn.learner")).toHaveText("How big are the values?");
   await expect(coach.locator(".design-turn.coach")).toHaveText(
-    "At Clarify the requirements: what have you assumed here that might not hold?",
+    "Data: keys up to 256 bytes, values usually about 1 KB and at most 1 MB. 10 TB in all today, growing by half each year.",
   );
-  // The coach is answered aloud, and follows up.
+  await expect(coach.getByLabel("Your question")).toHaveValue("");
+  // A question can be asked aloud too.
   await holdToTalk(
     phone,
     coach.getByRole("button", { name: "Hold to dictate" }),
-    "values are small",
-    () => expect(coach.locator(".dictate-hearing")).toContainText("small"),
+    "what latency do reads need",
+    () => expect(coach.locator(".dictate-hearing")).toContainText("need"),
   );
-  await expect(coach.getByLabel("Your answer to the coach")).toHaveValue("values are small");
-  await coach.getByRole("button", { name: "Answer the coach" }).tap();
-  await expect(coach.locator(".design-turn")).toHaveCount(3);
-  await expect(coach.locator(".design-turn.learner")).toHaveText("values are small");
+  await expect(coach.getByLabel("Your question")).toHaveValue("what latency do reads need");
+  await ask.tap();
+  await expect(coach.locator(".design-turn")).toHaveCount(4);
+  await expect(coach.locator(".design-turn.coach").last()).toHaveText(
+    "Latency: reads and writes under 10 ms at the 99th percentile, within a data centre.",
+  );
+  // The brief stays hidden, beyond what's been asked: neither the page nor what the app is sent
+  // has the rest of it.
+  const unasked = "acknowledged";
+  await expect(phone.getByText(unasked)).toHaveCount(0);
+  const sent = await (await phone.request.get("/api/design/sample/key-value-store")).text();
+  expect(sent).toContain("10 ms at the 99th percentile");
+  expect(sent).not.toContain(unasked);
 
+  // The coach gives the numbers asked for, and leaves the estimating to the learner.
   await phone.getByRole("button", { name: "Next: estimate the scale" }).tap();
+  await coach.getByLabel("Your question").fill("How many reads a second at peak?");
+  await ask.tap();
+  await expect(coach.locator(".design-turn.coach")).toContainText("200,000 reads");
   await phone
     .getByRole("region", { name: "Estimate the scale" })
     .getByLabel("Your notes")
@@ -461,10 +480,30 @@ test("works through a design session in stages, with the coach, stopping and car
   expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     width,
   );
+  // Later on, the coach asks, and the learner answers.
+  const tradeOffs = phone.getByRole("region", { name: "Coach" });
+  await tradeOffs.getByRole("button", { name: "Ask the coach" }).tap();
+  await expect(tradeOffs.locator(".design-turn.coach")).toHaveText(
+    "At Trade-offs and failure modes: what have you assumed here that might not hold?",
+  );
+  await tradeOffs.getByLabel("Your answer to the coach").fill("that a copy is always up");
+  await tradeOffs.getByRole("button", { name: "Answer the coach" }).tap();
+  await expect(tradeOffs.locator(".design-turn")).toHaveCount(3);
+  await expect(phone.getByText(unasked)).toHaveCount(0);
   await phone.getByRole("button", { name: "Finish and mark it" }).tap();
   const marked = phone.getByRole("region", { name: "Marked" });
   await expect(marked).toContainText("90%");
   await expect(marked).toContainText("Mistakes, kept in your log");
+  // What was asked is marked too: the requirements never found out are noted, and kept in the
+  // log as missed.
+  const missed = marked.getByRole("region", { name: "Missed, kept in your log" });
+  await expect(missed).toContainText("Durability");
+  await expect(marked.getByRole("region", { name: "Found out" })).toContainText("Latency");
+  // Once it's marked, the brief is shown.
+  await expect(phone.getByRole("region", { name: "The brief" })).toContainText(unasked);
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
   await phone.unroute(saves);
   await phone.getByRole("button", { name: "Done" }).tap();
   await expect(phone).toHaveURL(/\/design$/);
@@ -473,10 +512,13 @@ test("works through a design session in stages, with the coach, stopping and car
   const log = (await (await phone.request.get("/api/mistakes")).json()) as {
     mistakes: { item: string; detail: string }[];
   };
-  const found = log.mistakes.find((m) => m.item === "sample/key-value-store");
+  const mine = log.mistakes.filter((m) => m.item === "sample/key-value-store");
+  const found = mine.find((m) => m.detail.startsWith("Nothing on the unusual cases"));
   expect(found?.detail).toContain("- API: Takes reads and writes (talks to Cache, Store)");
-  expect(found?.detail).toContain("Learner: values are small");
+  expect(found?.detail).toContain("Learner: what latency do reads need");
+  expect(found?.detail).toContain("Learner: that a copy is always up");
   expect(found?.detail).toContain("## Deep-dive one component: Store");
+  expect(mine.map((m) => m.detail)).toContain("Didn't find out: Durability");
 });
 
 test("practises offline on a phone, keeping answers across a reload, and syncs them later", async () => {

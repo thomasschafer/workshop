@@ -83,7 +83,7 @@ To try Workshop before logging in, or outside December, open the practice puzzle
 
 ## Design sessions and timed rounds
 
-A design prompt is worked through as a session in stages, from the requirements to the trade-offs, with a coach asking follow-up questions at each, and the grader marking the whole session at the end. Each stage is saved as you write, so you can stop at any of them.
+A design prompt is worked through as a session in stages, from the requirements to the trade-offs. You find out the requirements and the scale by asking the coach, which answers from a brief you see only at the end, then it asks you follow-up questions about your design, and the grader marks the whole session, and what you asked, at the end. Each stage is saved as you write, so you can stop at any of them.
 
 A timed round puts a coding problem, a probability question or a design prompt against a visible clock, with an examiner who answers your questions and asks follow-ups that extend or change the problem, as a live session would. When time's up, the grader marks your working and what was said. The clock only runs while the round is open: close the app and come back within half an hour, and it carries on where it was; leave it longer, and the round ends there and is marked on what you did, without counting as an attempt. A pack can offer styles for the examiner, such as how many hints it gives and how hard it probes, to choose from as a round starts.
 

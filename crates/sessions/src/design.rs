@@ -1,12 +1,15 @@
 //! Design sessions: a design prompt worked through in stages, from the requirements to its
-//! trade-offs, with a coach asking follow-up questions at each. Every stage is saved as it's written, so the
-//! learner can stop at any one and carry on later; at the end the whole session is marked
-//! against the prompt's rubric.
+//! trade-offs. While finding out the requirements and the scale, the learner asks the coach,
+//! which answers from the prompt's brief, which only it sees; at the later stages the coach asks
+//! the learner follow-up questions. Every stage is saved as it's written, so the learner can
+//! stop at any one and carry on later; at the end the whole session is marked against the
+//! prompt's rubric, and on what the learner asked.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::brief::Brief;
 use crate::{Speaker, Turn};
 
 /// One of a design session's stages, in the order they're done.
@@ -43,10 +46,10 @@ impl Stage {
     pub fn task(self) -> &'static str {
         match self {
             Self::Requirements => {
-                "Say what the system must do and what it needn't, who uses it and how, and which qualities matter most, such as latency, consistency or availability."
+                "Ask the coach what you need to know: who uses the system and how, what it must do and what it needn't, and which qualities matter most, such as latency, consistency or availability. Note the requirements you establish."
             }
             Self::Scale => {
-                "Estimate the load: requests per second for reads and writes, how much is stored and how fast it grows, and the bandwidth, from stated assumptions."
+                "Ask the coach for the numbers you need, such as how many users there are and how much each does, then estimate the load yourself: reads and writes per second, how much is stored and how fast it grows, and the bandwidth."
             }
             Self::Outline => {
                 "Sketch the high-level design: the components, what each does and which talk to which, and how a typical request flows through them."
@@ -58,6 +61,12 @@ impl Stage {
                 "Weigh the choices made and their alternatives, and say what happens when parts fail or are overloaded, and how the system recovers."
             }
         }
+    }
+
+    /// Whether the learner asks the coach at this stage, as they find out what the system must
+    /// do and how much it must handle. At the others, the coach asks them follow-up questions.
+    pub fn learner_asks(self) -> bool {
+        matches!(self, Self::Requirements | Self::Scale)
     }
 
     pub fn next(self) -> Option<Self> {
@@ -86,7 +95,8 @@ pub struct StageWork {
     /// The learner's notes, typed or dictated.
     #[serde(default)]
     pub notes: String,
-    /// The coach's follow-up questions, and the learner's replies.
+    /// The learner's questions and the coach's answers, or, at the stages where the coach asks,
+    /// its follow-up questions and the learner's replies.
     #[serde(default)]
     pub turns: Vec<Turn>,
 }
@@ -106,6 +116,11 @@ pub struct Session {
     /// The component chosen to go into, by name.
     #[serde(default)]
     pub deep_dive: Option<String>,
+    /// What the coach answers the learner's questions from, kept as the session started so it
+    /// never changes during it. Never shown to the learner before the session's marked. Only
+    /// sessions started before design prompts had briefs have none.
+    #[serde(default)]
+    pub brief: Option<Brief>,
     /// When it was started, and last changed, in milliseconds since 1970.
     pub started_at: i64,
     pub updated_at: i64,
@@ -137,16 +152,19 @@ pub enum DesignError {
     DuplicateComponent(String),
     #[error("there's nothing in the session to mark yet")]
     Empty,
+    #[error("the session has no brief to answer from")]
+    NoBrief,
 }
 
 impl Session {
-    pub fn new(now: i64) -> Self {
+    pub fn new(brief: Brief, now: i64) -> Self {
         Self {
             stage: Stage::Requirements,
             reached: Stage::Requirements,
             work: BTreeMap::new(),
             components: Vec::new(),
             deep_dive: None,
+            brief: Some(brief),
             started_at: now,
             updated_at: now,
         }
@@ -209,6 +227,25 @@ impl Session {
         });
         self.updated_at = now;
         Ok(())
+    }
+
+    /// Adds the coach's answer to the learner's question at a stage, keeping in the brief any
+    /// detail it settled that the brief didn't cover.
+    pub fn answered(
+        &mut self,
+        stage: Stage,
+        answer: &str,
+        settled: Option<&str>,
+        now: i64,
+    ) -> Result<(), DesignError> {
+        if stage > self.reached {
+            return Err(DesignError::NotReached(stage));
+        }
+        let brief = self.brief.as_mut().ok_or(DesignError::NoBrief)?;
+        if let Some(detail) = settled {
+            brief.add(detail);
+        }
+        self.say(stage, Speaker::Coach, answer, now)
     }
 
     /// The conversation with the coach at a stage.
@@ -283,6 +320,11 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brief::BriefSource;
+
+    fn brief() -> Brief {
+        Brief::new("- Links last a year", BriefSource::Pack).unwrap()
+    }
 
     fn edit(stage: Stage) -> Edit {
         Edit {
@@ -305,7 +347,7 @@ mod tests {
     fn goes_through_the_stages_in_order() {
         assert_eq!(Stage::Requirements.next(), Some(Stage::Scale));
         assert_eq!(Stage::TradeOffs.next(), None);
-        let mut session = Session::new(1);
+        let mut session = Session::new(brief(), 1);
         // A stage can't be skipped.
         assert_eq!(
             session.edit(edit(Stage::Outline), 2),
@@ -325,7 +367,7 @@ mod tests {
         // Notes can't be written ahead of where it's got, either.
         let mut ahead = edit(Stage::Requirements);
         ahead.notes.insert(Stage::TradeOffs, "Later".to_owned());
-        let mut fresh = Session::new(1);
+        let mut fresh = Session::new(brief(), 1);
         assert_eq!(
             fresh.edit(ahead, 2),
             Err(DesignError::NotReached(Stage::TradeOffs))
@@ -334,7 +376,7 @@ mod tests {
 
     #[test]
     fn keeps_the_component_list_sensible() {
-        let mut session = Session::new(1);
+        let mut session = Session::new(brief(), 1);
         let mut change = edit(Stage::Requirements);
         change.components = vec![component("Cache", "", &[]), component(" cache ", "", &[])];
         assert_eq!(
@@ -359,8 +401,65 @@ mod tests {
     }
 
     #[test]
+    fn answers_questions_from_the_brief_and_keeps_what_they_settle() {
+        assert!(Stage::Requirements.learner_asks() && Stage::Scale.learner_asks());
+        assert!(!Stage::Outline.learner_asks() && !Stage::TradeOffs.learner_asks());
+        let mut session = Session::new(brief(), 1);
+        session
+            .say(
+                Stage::Requirements,
+                Speaker::Learner,
+                "Can codes be chosen?",
+                2,
+            )
+            .unwrap();
+        session
+            .answered(
+                Stage::Requirements,
+                "Yes, by anyone with an account.",
+                Some("Account holders can choose their own codes."),
+                3,
+            )
+            .unwrap();
+        session
+            .say(
+                Stage::Requirements,
+                Speaker::Learner,
+                "How long do links last?",
+                4,
+            )
+            .unwrap();
+        session
+            .answered(Stage::Requirements, "A year.", None, 5)
+            .unwrap();
+        let brief = session.brief.as_ref().unwrap();
+        assert_eq!(brief.added, ["Account holders can choose their own codes."]);
+        assert_eq!(
+            session.turns(Stage::Requirements)[1].speaker,
+            Speaker::Coach
+        );
+        // Only at a stage reached.
+        assert_eq!(
+            session.answered(Stage::Scale, "x", Some("y"), 6),
+            Err(DesignError::NotReached(Stage::Scale))
+        );
+        assert_eq!(session.brief.as_ref().unwrap().added.len(), 1);
+        // A session from before briefs has nothing to answer from.
+        session.brief = None;
+        assert_eq!(
+            session.answered(Stage::Requirements, "x", None, 7),
+            Err(DesignError::NoBrief)
+        );
+        // Its saved form, without a brief, still reads.
+        let mut saved = serde_json::to_value(&session).unwrap();
+        saved.as_object_mut().unwrap().remove("brief");
+        let read: Session = serde_json::from_value(saved).unwrap();
+        assert_eq!(read.brief, None);
+    }
+
+    #[test]
     fn writes_out_the_session_for_the_coach_and_grader() {
-        let mut session = Session::new(1);
+        let mut session = Session::new(brief(), 1);
         assert_eq!(session.check_markable(), Err(DesignError::Empty));
         let mut change = edit(Stage::Scale);
         change.notes.insert(
@@ -370,10 +469,10 @@ mod tests {
         session.edit(change, 2).unwrap();
         session.check_markable().unwrap();
         session
-            .say(Stage::Requirements, Speaker::Coach, "Do links expire?", 3)
+            .say(Stage::Requirements, Speaker::Learner, "Do links expire?", 3)
             .unwrap();
         session
-            .say(Stage::Requirements, Speaker::Learner, " After a year. ", 4)
+            .answered(Stage::Requirements, " After a year. ", None, 4)
             .unwrap();
         assert_eq!(
             session.say(Stage::Outline, Speaker::Learner, "x", 5),
@@ -391,7 +490,7 @@ mod tests {
         session.edit(change, 7).unwrap();
         assert_eq!(
             session.transcript(),
-            "## Clarify the requirements\n\nMake short links, and follow them.\n\nCoach: Do links expire?\nLearner: After a year.\n\n## Estimate the scale\n\n(Nothing written.)\n\n## Outline the design\n\nComponents:\n- API: Takes requests (talks to Store)\n- Store\n\n(Nothing written.)\n\n## Deep-dive one component: Store\n\n(Nothing written.)"
+            "## Clarify the requirements\n\nMake short links, and follow them.\n\nLearner: Do links expire?\nCoach: After a year.\n\n## Estimate the scale\n\n(Nothing written.)\n\n## Outline the design\n\nComponents:\n- API: Takes requests (talks to Store)\n- Store\n\n(Nothing written.)\n\n## Deep-dive one component: Store\n\n(Nothing written.)"
         );
         assert_eq!(session.turns(Stage::Requirements).len(), 2);
         assert!(session.turns(Stage::Scale).is_empty());
