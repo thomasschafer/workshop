@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type ThemeChoice, type ThemeSettings, type ThemesState } from "../api";
+import { errorMessage } from "../errors";
 import { applyThemeCss } from "../theme";
 
 function encode(choice: ThemeChoice): string {
@@ -21,7 +22,7 @@ export function ThemeSection() {
     api
       .themes()
       .then(setThemes)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
 
   const choose = async (next: ThemeSettings) => {
@@ -30,7 +31,7 @@ export function ThemeSection() {
       applyThemeCss((await api.setTheme(next)).css);
       setThemes((t) => (t ? { ...t, settings: next } : t));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   };
 

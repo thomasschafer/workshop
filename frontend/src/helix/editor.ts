@@ -15,6 +15,7 @@ import {
   Transaction,
   type TransactionSpec,
 } from "@codemirror/state";
+import { errorMessage } from "../errors";
 import { type Change, mapSelection, normalizeChanges } from "./changes";
 import type { BlockCommentToken } from "./comment";
 import { helixUndoGroup } from "./history";
@@ -730,9 +731,7 @@ export class HelixEditor {
 
   writeClipboard(text: string): void {
     this.host.writeClipboard(text).catch((e: unknown) => {
-      this.setError(
-        `Couldn't copy to the clipboard: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      this.setError(`Couldn't copy to the clipboard: ${errorMessage(e)}`);
     });
   }
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type Check } from "../api";
+import { errorMessage } from "../errors";
 
 /** The results of `workshop doctor`, with a fix for anything that's wrong. */
 export function Checks() {
@@ -12,7 +13,7 @@ export function Checks() {
     api
       .doctor()
       .then(setChecks)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
   };
   useEffect(run, []);
 

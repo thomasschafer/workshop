@@ -38,6 +38,6 @@ api
     root.innerHTML = "";
     const p = document.createElement("p");
     p.className = "pane error-text";
-    p.textContent = `Couldn't start Workshop: ${error instanceof Error ? error.message : String(error)}`;
+    p.textContent = `Couldn't start Workshop: ${errorMessage(error)}`;
     root.append(p);
   });

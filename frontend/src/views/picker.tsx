@@ -9,6 +9,7 @@ import {
   nextUnlock,
   todaysPuzzle,
 } from "../calendar";
+import { errorMessage } from "../errors";
 import { useNow } from "../hooks/useNow";
 import { isPractice, PRACTICE } from "../puzzle";
 
@@ -53,9 +54,7 @@ export function Picker({ current, hasSession, onPick }: Props) {
         if (!cancelled) setLoaded({ year, stars: s });
       })
       .catch(
-        (e: unknown) =>
-          !cancelled &&
-          setError(`Couldn't load your stars: ${e instanceof Error ? e.message : String(e)}`),
+        (e: unknown) => !cancelled && setError(`Couldn't load your stars: ${errorMessage(e)}`),
       );
     return () => {
       cancelled = true;
@@ -88,10 +87,7 @@ export function Picker({ current, hasSession, onPick }: Props) {
       .then((members) => !cancelled && setBoard(members ? { year, members } : null))
       .catch(
         (e: unknown) =>
-          !cancelled &&
-          setBoardError(
-            `Couldn't load the leaderboard: ${e instanceof Error ? e.message : String(e)}`,
-          ),
+          !cancelled && setBoardError(`Couldn't load the leaderboard: ${errorMessage(e)}`),
       );
     return () => {
       cancelled = true;

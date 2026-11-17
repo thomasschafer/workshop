@@ -1,6 +1,12 @@
 import type { Transport } from "@codemirror/lsp-client";
 import { describe, expect, it, vi } from "vitest";
-import { adjustCapabilities, LanguageClient, messageToShow, typedEnoughToComplete } from "./lsp";
+import {
+  adjustCapabilities,
+  LanguageClient,
+  LanguageServerError,
+  messageToShow,
+  typedEnoughToComplete,
+} from "./lsp";
 
 describe("adjustCapabilities", () => {
   it("stops the client offering pull diagnostics, and adds what Workshop does to what it offers", () => {
@@ -158,6 +164,31 @@ describe("LanguageClient", () => {
       "textDocument/didChange",
       "textDocument/hover",
     ]);
+  });
+
+  it("fails a request the server answers with an error with that error's message and code", async () => {
+    let receive: (message: string) => void = () => {};
+    const transport: Transport = {
+      send: (message) => {
+        const { id, method } = JSON.parse(message) as { id?: number; method: string };
+        if (id === undefined) return;
+        const reply =
+          method === "initialize"
+            ? { result: { capabilities: {} } }
+            : { error: { code: -32803, message: "can't rename that" } };
+        queueMicrotask(() => receive(JSON.stringify({ jsonrpc: "2.0", id, ...reply })));
+      },
+      subscribe: (handler) => {
+        receive = handler;
+      },
+      unsubscribe: () => {},
+    };
+    const client = new LanguageClient({ rootUri: "file:///code" });
+    client.connect(transport);
+    await client.initializing;
+    const failure = await client.request("textDocument/rename", {}).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(LanguageServerError);
+    expect(failure).toMatchObject({ message: "can't rename that", code: -32803 });
   });
 
   it("fails requests at once when the server's been given up on", async () => {

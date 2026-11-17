@@ -1,6 +1,7 @@
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
 import { LSPClient, type Transport } from "@codemirror/lsp-client";
 import type { Extension } from "@codemirror/state";
+import { errorMessage } from "./errors";
 import { EXTRA_CAPABILITIES, isRecord } from "./lspActions";
 import { serverCompletionSource } from "./lspCompletion";
 
@@ -99,7 +100,38 @@ export function languageServerCompletion(options: {
 }
 
 /**
- * The language client, with nothing it does left to fail unhandled.
+ * A request to the language server that failed: the server answered with an error, didn't answer
+ * in time, or the connection to it is gone. These are the server's doing, not bugs in Workshop.
+ */
+export class LanguageServerError extends Error {
+  override readonly name = "LanguageServerError";
+
+  constructor(
+    message: string,
+    /** The JSON-RPC error code, when the server answered with an error. */
+    readonly code: number | null = null,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+
+  /**
+   * The error for what a request was rejected with, which the library leaves as the server sent
+   * it when the server answers with an error: an object with a code and a message, not an Error.
+   */
+  static from(reason: unknown): LanguageServerError {
+    if (reason instanceof LanguageServerError) return reason;
+    const code =
+      isRecord(reason) && !(reason instanceof Error) && typeof reason.code === "number"
+        ? reason.code
+        : null;
+    return new LanguageServerError(errorMessage(reason), code, { cause: reason });
+  }
+}
+
+/**
+ * The language client, with nothing it does left to fail unhandled, and requests that only ever
+ * fail with a `LanguageServerError`.
  *
  * The library sends notifications, such as of a file being opened or changed, once the server's
  * greeted, but if the connection closes first, the greeting fails 30 seconds later, and every
@@ -130,8 +162,12 @@ export class LanguageClient extends LSPClient {
 
   override request<Params, Result>(method: string, params: Params): Promise<Result> {
     if (this.unavailable !== null) {
-      return Promise.reject(new Error(`the language server is unavailable: ${this.unavailable}`));
+      return Promise.reject(
+        new LanguageServerError(`the language server is unavailable: ${this.unavailable}`),
+      );
     }
-    return super.request(method, params);
+    return super.request<Params, Result>(method, params).catch((reason: unknown) => {
+      throw LanguageServerError.from(reason);
+    });
   }
 }

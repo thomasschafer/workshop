@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { Turn } from "../api";
+import { errorMessage } from "../errors";
 
 function loadTurns(key: string): Turn[] {
   try {
@@ -73,7 +74,7 @@ export function useConversation(storageKey: string | null, ask: Ask, nothing: st
       if (keyRef.current !== key) return;
       update(key, [...next, { speaker: "coach", text: reply.text }]);
     } catch (e) {
-      if (keyRef.current === key) setError(e instanceof Error ? e.message : String(e));
+      if (keyRef.current === key) setError(errorMessage(e));
     } finally {
       setThinking(false);
       setPartial("");

@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { api, type ModelSettings, type ModelsState, type ProviderOption } from "../api";
+import { errorMessage } from "../errors";
 
 interface Props {
   models: ModelsState;
@@ -23,7 +24,7 @@ export function ModelsSection({ models, onModels, heading = true }: Props) {
     try {
       onModels(await api.setModels(next));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }

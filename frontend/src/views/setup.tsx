@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type ModelsState, type SetupState } from "../api";
+import { errorMessage } from "../errors";
 import type { Packages } from "../hooks/usePackages";
 import { isUpToDate } from "../packages";
 import { Checks } from "./checks";
@@ -38,7 +39,7 @@ export function Setup({
     api
       .setup()
       .then(setState)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
   };
   useEffect(load, []);
 
@@ -136,7 +137,7 @@ function LanguageStep({
       // The editor, syntax highlighting and language server all depend on the language.
       location.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setSaving(false);
     }
   };
@@ -278,7 +279,7 @@ function LoginStep({
       setEditing(false);
       onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }

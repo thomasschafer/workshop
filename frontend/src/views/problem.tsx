@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, type DayMeta, type Problem, type Puzzle } from "../api";
+import { errorMessage } from "../errors";
 import {
   answerCode,
   inheritsPartOne,
@@ -296,7 +297,7 @@ function PuzzleInput({ puzzle }: { puzzle: Puzzle }) {
       const input = await api.input(puzzle);
       setState({ kind: "shown", text: input.text, lines: input.lines });
     } catch (e) {
-      setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+      setState({ kind: "error", message: errorMessage(e) });
     }
   };
 

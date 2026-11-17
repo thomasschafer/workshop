@@ -208,7 +208,7 @@ export interface EditorOptions {
   codeScale: number;
   /** Called with the scale the text was pinched to. */
   onCodeScale: (scale: number) => void;
-  lsp: { client: LSPClient; uri: string; languageId: string } | null;
+  lsp: { client: LanguageClient; uri: string; languageId: string } | null;
   /** The language's own formatter, used instead of the language server's, if it has one. */
   formatter: Formatter | null;
   /** Whether to format before each run, and once Helix has been left in normal mode a moment. */
@@ -780,7 +780,7 @@ class SocketTransport implements Transport {
       reply = { result: handle(message.params) ?? null };
     } catch (error) {
       console.error(error);
-      reply = { error: { code: -32603, message: String(error) } };
+      reply = { error: { code: -32603, message: errorMessage(error) } };
     }
     this.socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, ...reply }));
     return true;

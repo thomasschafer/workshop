@@ -2,6 +2,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, type ModelsState, type Snippet } from "../api";
 import type { DictationMethod, DictationSupport } from "../dictation";
+import { errorMessage } from "../errors";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
 import type { KeyOffsetsState } from "../hooks/useKeyOffsets";
 import type { Packages } from "../hooks/usePackages";
@@ -399,7 +400,7 @@ function RepoPage({ commitMessage, solutionsDir, commitAfterStar, onCommitAfterS
     try {
       setSync((await api.gitSync(commitMessage)).summary);
     } catch (e) {
-      setSync(e instanceof Error ? e.message : String(e));
+      setSync(errorMessage(e));
     } finally {
       setSyncing(false);
     }
@@ -444,7 +445,7 @@ function NotificationsPage() {
       await action();
       if (done) setNote({ tone: "ok", text: done });
     } catch (e) {
-      setNote({ tone: "error", text: e instanceof Error ? e.message : String(e) });
+      setNote({ tone: "error", text: errorMessage(e) });
     } finally {
       setOn(await notificationsOn().catch(() => false));
       setBusy(false);
@@ -509,7 +510,7 @@ function LeaderboardPage({ leaderboard, onLeaderboard }: Props) {
       await onLeaderboard(value);
       if (value === null) setId("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }

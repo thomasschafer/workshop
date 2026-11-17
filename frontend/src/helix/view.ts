@@ -11,7 +11,7 @@ import {
 import { redo, undo } from "@codemirror/commands";
 import { getIndentation, IndentContext } from "@codemirror/language";
 import { forEachDiagnostic } from "@codemirror/lint";
-import { type LSPClient, showSignatureHelp, signatureHelp } from "@codemirror/lsp-client";
+import { showSignatureHelp, signatureHelp } from "@codemirror/lsp-client";
 import {
   EditorSelection,
   EditorState,
@@ -36,7 +36,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { errorMessage } from "../errors";
-import { languageServerCompletion } from "../lsp";
+import { type LanguageClient, LanguageServerError, languageServerCompletion } from "../lsp";
 import {
   type CodeAction,
   codeActions,
@@ -98,7 +98,7 @@ export interface HelixConfig {
   /** Workshop's editor mode for the language, such as `python`. */
   readonly language: string;
   readonly documentName: string;
-  readonly lsp: { readonly client: LSPClient; readonly uri: string } | null;
+  readonly lsp: { readonly client: LanguageClient; readonly uri: string } | null;
   readonly actions: HelixActions;
 }
 
@@ -1059,7 +1059,7 @@ class HelixView implements PluginValue, Host {
     return Math.min(line.from + position.character, line.to);
   }
 
-  private async hover(client: LSPClient, uri: string): Promise<void> {
+  private async hover(client: LanguageClient, uri: string): Promise<void> {
     client.sync();
     const result = await client.request<unknown, { contents: unknown } | null>(
       "textDocument/hover",
@@ -1077,7 +1077,7 @@ class HelixView implements PluginValue, Host {
     this.editor.onChange();
   }
 
-  private async selectReferences(client: LSPClient, uri: string): Promise<void> {
+  private async selectReferences(client: LanguageClient, uri: string): Promise<void> {
     client.sync();
     const result = await client.request<
       unknown,
@@ -1114,7 +1114,7 @@ class HelixView implements PluginValue, Host {
     this.afterKey();
   }
 
-  private async symbolPicker(client: LSPClient, uri: string): Promise<void> {
+  private async symbolPicker(client: LanguageClient, uri: string): Promise<void> {
     client.sync();
     type Symbol = {
       name: string;
@@ -1429,9 +1429,15 @@ function pressKey(helix: HelixView, key: Key): void {
 
 function run(helix: HelixView, work: Promise<void>): void {
   work.catch((e: unknown) => {
+    if (e instanceof LanguageServerError) {
+      // The server refusing, such as to rename something it can't, isn't a bug in Workshop.
+      console.warn(e);
+      helix.editor.setError(`The language server couldn't do that: ${e.message}`);
+      return;
+    }
     // A bug in a command: say so rather than leaving the editor silently stuck.
     console.error(e);
-    helix.editor.setError(`Something went wrong: ${e instanceof Error ? e.message : String(e)}`);
+    helix.editor.setError(`Something went wrong: ${errorMessage(e)}`);
   });
 }
 

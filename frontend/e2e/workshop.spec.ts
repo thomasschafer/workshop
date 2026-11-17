@@ -1755,6 +1755,17 @@ test("asks the language server from Helix's own prompt and lists, on Workshop's 
   await type("u");
   await expect.poll(saved).toBe(original);
 
+  // A rename the server refuses says why, and changes nothing.
+  await key("Space").tap();
+  await type("r");
+  for (const _ of "part1") await key("Backspace").tap();
+  await type("print");
+  await key("Enter").tap();
+  await expect(keyboard.locator(".cm-helix-error")).toHaveText(
+    "The language server couldn't do that: print is already taken",
+  );
+  await expect.poll(saved).toBe(original);
+
   // Documentation shows as it's written, rather than as markdown's marks.
   await key("Space").tap();
   await type("k");

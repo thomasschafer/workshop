@@ -1,7 +1,7 @@
 /**
  * What went wrong, for showing to the user, from anything a promise rejected or code threw,
- * including a language server's error, which the language client rejects with as it came, as an
- * object with a message.
+ * including an object with a message that isn't an Error, such as a language server's JSON-RPC
+ * error as the LSP library rejects with it.
  */
 export function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;

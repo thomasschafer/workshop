@@ -1,5 +1,6 @@
 import { api, ConnectionError, connection } from "./api";
 import { AudioRecorder } from "./audio";
+import { errorMessage } from "./errors";
 import type { Heard, Listener, Listening } from "./voice";
 
 /**
@@ -75,7 +76,7 @@ export class ServerDictation implements Listener {
       return heard(await this.transcribe(wav), null, log);
     } catch (e) {
       if (this.cancelled) return heard("", null, log);
-      return heard("", `Couldn't hear that: ${e instanceof Error ? e.message : String(e)}`, log);
+      return heard("", `Couldn't hear that: ${errorMessage(e)}`, log);
     }
   }
 

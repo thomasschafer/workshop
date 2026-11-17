@@ -1,4 +1,5 @@
 import { ApiError } from "./api";
+import { errorMessage } from "./errors";
 
 export type SaveStatus = "saved" | "pending" | "saving" | "conflict" | "error";
 
@@ -208,7 +209,7 @@ export class VersionedSaver {
         return;
       }
       this.pending ??= this.latest;
-      this.onStatus("error", err instanceof Error ? err.message : String(err));
+      this.onStatus("error", errorMessage(err));
       clearTimeout(this.timer);
       this.timer = setTimeout(() => void this.flush().catch(() => {}), this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
@@ -383,7 +384,7 @@ export class LatestSaver<T> {
       })
       .catch((err: unknown) => {
         this.latest ??= pending;
-        this.onError(err instanceof Error ? err.message : String(err));
+        this.onError(errorMessage(err));
         this.wait(this.retryDelay);
         this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
       })

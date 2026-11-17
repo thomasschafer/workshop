@@ -127,6 +127,8 @@ const handlers = {
     const text = documents.get(uri);
     const word = wordAt(text, offsetOf(text, at));
     if (!word) return null;
+    // A name the server won't take, for refusing a rename as real servers can.
+    if (newName === "print") throw new Error("print is already taken");
     return {
       changes: {
         [uri]: appearances(text, word.word).map((from) => ({

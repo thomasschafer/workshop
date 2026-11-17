@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api";
 import type { HoldMethod } from "../dictation";
+import { errorMessage } from "../errors";
 import { ServerDictation } from "../serverDictation";
 import { type Listener, PushToTalk } from "../voice";
 
@@ -85,7 +86,7 @@ export function usePushToTalk(options: Options) {
     try {
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     } catch (e) {
-      latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+      latest.current.onNotice("error", errorMessage(e));
       return;
     }
     begin();
@@ -103,7 +104,7 @@ export function usePushToTalk(options: Options) {
       listener = latest.current.method() === "server" ? new ServerDictation() : new PushToTalk();
       id = latest.current.onStart();
     } catch (e) {
-      latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+      latest.current.onNotice("error", errorMessage(e));
       return;
     }
     const change = (fields: Partial<Press>) =>
@@ -151,7 +152,7 @@ export function usePushToTalk(options: Options) {
       // Nothing to hear, so the press ends here rather than holding up the ones after it.
       update((presses) => presses.filter((p) => p.id !== id));
       void after.then(() => {
-        latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+        latest.current.onNotice("error", errorMessage(e));
         handedOver();
       });
     }
@@ -183,7 +184,7 @@ export function usePushToTalk(options: Options) {
       }
     } catch (e) {
       await press.after;
-      latest.current.onNotice("error", e instanceof Error ? e.message : String(e));
+      latest.current.onNotice("error", errorMessage(e));
     } finally {
       // In the same render as the utterance's card appears, so the one becomes the other.
       update((presses) => presses.filter((p) => p.id !== press.id));
