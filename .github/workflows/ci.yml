@@ -54,6 +54,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
+      # So the sample pack's Haskell items are checked, by the tests and by pack check, rather
+      # than skipped. Ubuntu's GHC comes with the packages Haskell items can use.
+      - name: Install GHC
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ghc
+
       - name: Test
         run: cargo test --locked
 

@@ -18,7 +18,7 @@ The Rust server is in `src/`, and what it shares between tracks is in crates of 
 
 The app schedules and grades answers given offline itself, until they reach the server, so its scheduling and grading must agree with the server's. Both are tested against the same cases, in `crates/learning/tests/fsrs.json`, `crates/pack/tests/grading.json` and `crates/pack/tests/output.json`; after a deliberate change to scheduling, run `UPDATE_FIXTURES=1 cargo test -p workshop-learning` and check what changed.
 
-The sample pack in `packs/sample` must pass `workshop pack check`, which a test and CI both run. Checking its coding problems and its code to read needs Python and Rust; its C++ items are skipped where there's no C++ compiler, and the test only allows that when there isn't one. Its items are original; never add copyrighted problems. The built frontend is embedded in the binary, so users only ever need the one file.
+The sample pack in `packs/sample` must pass `workshop pack check`, which a test and CI both run. Checking its coding problems and its code to read needs Python and Rust; its C++ and Haskell items are skipped where there's no C++ compiler or no GHC, and the test only allows that when there isn't one. CI installs GHC on Linux, so its Haskell items are checked there. Its items are original; never add copyrighted problems. The built frontend is embedded in the binary, so users only ever need the one file.
 
 Tests must never use real Advent of Code puzzle text or inputs; invent your own.
 

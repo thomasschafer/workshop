@@ -199,12 +199,12 @@ Answers can be typed as fractions, decimals or percentages. `## Solution` (requi
 
 ### Coding
 
-A problem to solve in code, in Python or Rust, as a directory with an `item.md` and its files. In the Coding track by default. Programs read their input on stdin and print their answer; outputs are compared line by line, ignoring whitespace at the ends of lines and blank lines before and after.
+A problem to solve in code, in Python, Rust or Haskell, as a directory with an `item.md` and its files. In the Coding track by default. Programs read their input on stdin and print their answer; outputs are compared line by line, ignoring whitespace at the ends of lines and blank lines before and after.
 
 ```toml
 kind = "coding"
 skills = ["algorithms.hashing"]
-languages = ["python", "rust"]             # what it can be solved in
+languages = ["python", "rust"]             # what it can be solved in: python, rust or haskell
 reference = ["reference.py", "reference.rs"] # a solution known to be right, in each language
 starter = ["starter.py", "starter.rs"]       # what the learner starts with, in each language
 brute_force = "brute.py"                   # slow but obviously right
@@ -213,7 +213,9 @@ tests = "tests.toml"                       # examples, and hidden tests
 random_inputs = 100                        # optional: how many random inputs the check compares on
 ```
 
-Each language needs a reference solution and a starter, told apart by their files' extensions: `.py` for Python, `.rs` for Rust. A starter usually reads the input and leaves a function to fill in, so the learner can get straight to the problem on a phone; it must build, unfinished as it is. The brute force and the inputs program can be in either language.
+Each language needs a reference solution and a starter, told apart by their files' extensions: `.py` for Python, `.rs` for Rust, `.hs` for Haskell. A starter usually reads the input and leaves a function to fill in, so the learner can get straight to the problem on a phone; it must build, unfinished as it is, such as with `todo!()` in Rust or `undefined` in Haskell. The brute force and the inputs program can be in any of them.
+
+Haskell is built with GHC, and can use only the packages that come with it: base, containers, array, mtl, transformers, stm, text, bytestring, deepseq and parsec. Packages you've installed for yourself aren't seen, nor is a package environment of your own, so an item builds the same way everywhere GHC is installed. random isn't one of them, so an inputs program in Haskell makes its own random numbers from its seed, such as with a linear congruential generator.
 
 The inputs program is run with two arguments, a seed and a size from 1 to 10, and prints one input. It must make the same input from the same seed, and should make bigger inputs for bigger sizes. Inputs are tried from the smallest size up, so the input a wrong solution is first found failing on, which the learner is shown, is a small one.
 
@@ -234,7 +236,7 @@ output = "0"
 
 Sections: `## Approach` (required), how it's meant to be solved, shown once it's solved and when it comes back for review; `## Hints`, a list of nudges from gentlest to most telling, which the learner can reveal one at a time; and `## Notes`.
 
-`workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. It needs Python and Rust installed; an item that can't be run for want of one is reported as skipped rather than failed. Everything is built and run in a sandbox, with no network and writing only to a directory of its own, where the system has one ([docs/author.md](author.md#running-what-the-writer-wrote) says which); where it doesn't, the check warns that it's running the pack's programs with all your access.
+`workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. It needs the languages' programs installed: `python3`, `rustc`, and `ghc` for Haskell; an item that can't be run for want of one is reported as skipped rather than failed, with what to install. Everything is built and run in a sandbox, with no network and writing only to a directory of its own, where the system has one ([docs/author.md](author.md#running-what-the-writer-wrote) says which); where it doesn't, the check warns that it's running the pack's programs with all your access.
 
 A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed, dictated or explained aloud; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution, where they can explain their solution aloud for the grader to mark against the approach. When it comes back for review, it's a twist on it, which takes a few minutes rather than solving it again: the tutor poses a follow-up, given the problem, its approach and the learner's solution from last time, such as a new constraint, a far larger scale, a streaming version, a better complexity target or different edge cases, a different sort each time. The learner answers by explaining how they'd change their approach, typed, dictated or aloud, and can change their code too; the grader marks the answer, and its mark is the review's rating, which schedules the problem and feeds mastery, and what it finds goes in the mistake log. Each review's twist is kept once it's posed, so opening it again shows the same one. When there's no model to pose one, or the server or the model can't be reached, the review says so and recalls the approach instead: writing down how to solve it, then comparing that with the item's approach. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
 
@@ -248,7 +250,7 @@ Retiring works offline, saved on the device and sent with its attempt when it sy
 
 ### Reading
 
-Code to read, and a question about it, such as what it prints, what's wrong with it, or what it costs. In the Coding track by default, and short, so it works offline. The prompt shows the code in one code block, whose mark says its language: `python` (or `py`), `rust` (or `rs`), or `cpp` (or `c++`). The code is highlighted for that language, and built and run with its toolchain. C++ is only for reading, not for coding problems.
+Code to read, and a question about it, such as what it prints, what's wrong with it, or what it costs. In the Coding track by default, and short, so it works offline. The prompt shows the code in one code block, whose mark says its language: `python` (or `py`), `rust` (or `rs`), `haskell` (or `hs`), or `cpp` (or `c++`). The code is highlighted for that language, and built and run with its toolchain. C++ is only for reading, not for coding problems.
 
 Either the question is what the code prints, which the learner types:
 
@@ -287,19 +289,19 @@ expect = "sanitizer-error"
 
 The check builds and runs the code, as a program of its own. For what it prints, the code must print exactly that. For a choice, `[check]` says what the code must do, and what makes sense depends on its language:
 
-| `expect` | Python | Rust | C++ |
-| --- | --- | --- | --- |
-| `compiles` | | builds; the default | builds; the default |
-| `compile-error` | | fails to build, such as for a borrow the borrow checker refuses | fails to build |
-| `runs` | runs to the end without an exception; the default | runs to the end without panicking | runs to the end, exiting successfully |
-| `exception` | stops with an exception it doesn't catch | | |
-| `panic` | | panics, such as on an integer overflowing | |
-| `sanitizer-error` | | | stopped by the address and undefined behaviour sanitizers, such as for reading freed memory |
-| `output` | prints the `output` given | prints the `output` given | prints the `output` given |
+| `expect` | Python | Rust | C++ | Haskell |
+| --- | --- | --- | --- | --- |
+| `compiles` | | builds; the default | builds; the default | builds; the default |
+| `compile-error` | | fails to build, such as for a borrow the borrow checker refuses | fails to build | fails to build, such as for a type error, a missing instance or a kind error |
+| `runs` | runs to the end without an exception; the default | runs to the end without panicking | runs to the end, exiting successfully | runs to the end without an exception |
+| `exception` | stops with an exception it doesn't catch | | | stops with an exception it doesn't catch, such as from `error`, `head []` or a pattern that doesn't match |
+| `panic` | | panics, such as on an integer overflowing | | |
+| `sanitizer-error` | | | stopped by the address and undefined behaviour sanitizers, such as for reading freed memory | |
+| `output` | prints the `output` given | prints the `output` given | prints the `output` given | prints the `output` given |
 
-`output` is for code that shows its answer, such as a count of the copies or moves it makes, to show what it costs. A check that doesn't fit the code's language, such as `compile-error` for Python or `sanitizer-error` for Rust, is refused, with what to use instead. Python isn't built ahead of running it, so a syntax error isn't a compile error, nor an exception the code raises.
+`output` is for code that shows its answer, such as a count of the copies or moves it makes, to show what it costs. A check that doesn't fit the code's language, such as `compile-error` for Python or `sanitizer-error` for Rust, is refused, with what to use instead. Python isn't built ahead of running it, so a syntax error isn't a compile error, nor an exception the code raises. Haskell is, so a type error is a compile error, never an exception: an exception is one GHC reports as the program stops, having built. A Haskell program that runs out of time, or of the 1 GB of memory it's allowed, hasn't stopped with an exception either.
 
-Rust code is built as a debug build, as `cargo run` does, so integer overflow panics rather than wrapping around, and `debug_assert!` is checked. C++ is built with optimisations, and with the sanitizers only for `sanitizer-error`, as they change what the code does. Without a C++ compiler (`c++`, `clang++` or `g++`), C++ items are reported as skipped, as are Python and Rust ones without `python3` or `rustc`.
+Rust code is built as a debug build, as `cargo run` does, so integer overflow panics rather than wrapping around, and `debug_assert!` is checked. C++ is built with optimisations, and with the sanitizers only for `sanitizer-error`, as they change what the code does. Haskell is built with optimisations, with the packages that come with GHC, as coding problems are. Without a C++ compiler (`c++`, `clang++` or `g++`), C++ items are reported as skipped, as are Python, Rust and Haskell ones without `python3`, `rustc` or `ghc`.
 
 ````markdown
 +++
@@ -324,6 +326,32 @@ fn main() {
 ## Explanation
 
 A u8 holds 0 to 255, and a debug build checks arithmetic for overflow.
+````
+
+In Haskell, much of what goes wrong is found as the code is built:
+
+````markdown
++++
+kind = "reading"
+skills = ["haskell.types"]
+choices = ["It prints Red", "It doesn't compile, as Colour has no Show instance", "It stops with an exception"]
+answer = 2
+
+[check]
+expect = "compile-error"
++++
+What happens when this is built and run?
+
+```haskell
+data Colour = Red | Green
+
+main :: IO ()
+main = print Red
+```
+
+## Explanation
+
+print needs a Show instance, and a type you define has none until it derives one.
 ````
 
 ### Design
