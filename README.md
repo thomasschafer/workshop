@@ -61,7 +61,7 @@ This gives Workshop an HTTPS address on your tailnet, and prints a link and QR c
 
 The first time you open Workshop, a short setup walks you through choosing your language and model and logging in to Advent of Code. If you'd rather not paste your session cookie into the app, save it to the `aoc-session` file in Workshop's config directory (`workshop doctor` shows where), or set `AOC_SESSION`.
 
-Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on or the cards due for review. Below it are the tracks: Advent of Code, Coding, and tracks of short items from a pack. Everything takes a few minutes at a time unless you turn on "I've got a while", which lets Continue offer long items too: design sessions and timed rounds, taking turns, though one you've left unfinished always comes first. It stays on while you're using the app, and turns itself off once you've been away for half an hour.
+Workshop opens on a home screen, whose Continue button goes straight to the most sensible next step, such as the puzzle you were last working on or the cards due for review. Below it are the tracks: Advent of Code, Coding, and tracks of short items from a pack. A pack's own track can keep to itself, so Continue never offers it and it has limits of its own, for something you only practise when you open it. Everything takes a few minutes at a time unless you turn on "I've got a while", which lets Continue offer long items too: design sessions and timed rounds, taking turns, though one you've left unfinished always comes first. It stays on while you're using the app, and turns itself off once you've been away for half an hour.
 
 ## Packs and practice
 

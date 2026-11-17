@@ -32,6 +32,7 @@ Every Markdown file under `items/` is an item, except that a directory holding a
 id = "my-pack"          # lowercase letters and digits, in words joined by hyphens
 name = "My pack"
 description = "What it's for"
+track = "estimation"    # optional: the pack's own track its items are in when they don't say
 
 [[skills]]
 id = "probability.conditional"   # parts separated by dots
@@ -43,6 +44,7 @@ id = "estimation"
 name = "Estimation"
 summary = "Quick numbers for back-of-the-envelope sums"
 icon = "approximately"           # optional: see below
+continue = false                 # optional: keeps it out of Continue; see below
 
 # Something to work towards: a set of skills, each to reach a mastery from 0 to 1.
 [[goals]]
@@ -80,6 +82,12 @@ prompt = "prompts/examiner-steady.md"
 
 A track's `icon` is shown beside its name. It's one of the icons the built-in tracks use, `star`, `code`, `dice`, `network`, `timer`, `sigma` and `history`, or one of `layers`, `approximately`, `book`, `chart`, `flask`, `languages`, `lightbulb`, `puzzle`, `radical` and `shapes`. Without one, a pack's track has `layers`.
 
+A pack's track can hold cards, mental maths, probability questions, code to read and coding problems. Its short items are practised a few at a time, as in the built-in tracks, and its coding problems are listed below them, each worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
+
+`continue = false` keeps a track to itself, for something to practise only when you choose to, such as a language you're picking up on the side. Its items are only offered when you open the track: Continue never picks them, even when you've got a while, and they aren't made into timed rounds. It has daily limits of its own, the same size as `daily_reviews` and `daily_new` under `[learning]`, so practising it doesn't use up the rest's, and the rest doesn't use up its. Its time doesn't count towards the week's target either. Its items are scheduled, and their mistakes and progress towards goals recorded, as any others are. Without it, a track is in Continue, as the built-in ones are.
+
+`track` at the top of `pack.toml` names one of the pack's own tracks for its items to be in when they don't say, so each item doesn't need a `track` of its own. An item's own `track` still wins, and design prompts stay in the System design track. Like the pack's other fields, it goes before its first `[[skills]]` or other table.
+
 Every item names at least one skill, and every skill it names must be listed here. Mastery of a skill comes from how well you've recalled its items lately, so goals can show progress as you go.
 
 Mistakes are tagged with a kind of mistake. The built-in kinds are `misread`, `arithmetic-slip`, `off-by-one`, `missed-edge-case`, `wrong-approach`, `concept-gap`, `missed-requirement` and `too-slow`; a pack's `[[error_types]]` add to them, each with an id of its own.
@@ -112,7 +120,7 @@ Every item can have:
 | `skills` | The skills it practises, from `pack.toml`. Required. |
 | `id` | Lowercase letters and digits, in words joined by hyphens. Defaults to the file's name, or the directory's for an `item.md`. Your history is kept by id, so changing it starts the item afresh. |
 | `title` | What it's called in lists, if not the start of its prompt. |
-| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults by kind. |
+| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults to the pack's `track`, if it has one, and otherwise by kind. |
 | `source` | Where it came from, in your own words, such as for questions imported from elsewhere. Workshop shows it but doesn't interpret it. |
 | `minutes` | Roughly how long it takes. Defaults by kind. A timed round of it lasts this long, and at least 10 minutes. |
 | `difficulty` | How hard it is, from 1, a warm-up, through 3, typical of its kind, to 5, among the hardest of its kind. Optional, and most useful for coding problems: the author writes new problems at the difficulty each skill has reached (see [docs/author.md](author.md)), and takes a problem without one as 3. |
