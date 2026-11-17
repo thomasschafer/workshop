@@ -584,19 +584,14 @@ function ChoiceAfterRight({ onChoose }: { onChoose: (choice: Choice) => void }) 
   const gotIt = useRef<HTMLButtonElement>(null);
   useEffect(() => gotIt.current?.focus(), []);
   return (
-    <>
-      <div class="learn-choice-after">
-        <button ref={gotIt} type="button" class="pill primary" onClick={() => onChoose("got-it")}>
-          Got it
-        </button>
-        <button type="button" class="pill" onClick={() => onChoose("retire")}>
-          Too easy: retire it
-        </button>
-      </div>
-      <p class="learn-question muted">
-        Got it brings it back much later. Retired, it won't come back unless you bring it back.
-      </p>
-    </>
+    <div class="learn-choice-after">
+      <button ref={gotIt} type="button" class="pill primary" onClick={() => onChoose("got-it")}>
+        Got it
+      </button>
+      <button type="button" class="pill" onClick={() => onChoose("retire")}>
+        Too easy: retire it
+      </button>
+    </div>
   );
 }
 
