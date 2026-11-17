@@ -5,6 +5,7 @@ import { useLayoutEffect, useRef } from "preact/hooks";
 // overlay for another keeps the entry rather than going back and forward.
 const open: { close: () => void }[] = [];
 let pushed = false;
+/** How many times this has gone back itself, whose `popstate` hasn't come yet. */
 let ignoredPops = 0;
 let reconciling = false;
 
@@ -13,6 +14,9 @@ function reconcile(): void {
   reconciling = true;
   queueMicrotask(() => {
     reconciling = false;
+    // Going back finishes later, and an entry pushed before then can be the one gone back from,
+    // leaving the next going back to leave the app. So an overlay opened meanwhile waits for it.
+    if (ignoredPops > 0) return;
     if (open.length > 0 && !pushed) {
       history.pushState({ workshopOverlay: true }, "");
       pushed = true;
@@ -27,6 +31,7 @@ function reconcile(): void {
 window.addEventListener("popstate", () => {
   if (ignoredPops > 0) {
     ignoredPops--;
+    reconcile();
     return;
   }
   if (!pushed) return;

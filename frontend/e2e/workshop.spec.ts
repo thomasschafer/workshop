@@ -356,6 +356,25 @@ test("closes settings when going back, staying in the app", async () => {
   await page.goBack();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
+
+  // The same with another opened straight away, before the browser has finished going back
+  // through the entry the first left.
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.evaluate(async () => {
+    const button = (selector: string) => {
+      const found = document.querySelector<HTMLElement>(selector);
+      if (!found) throw new Error(`nothing matches ${selector}`);
+      return found;
+    };
+    button("[role=dialog] .sheet-header button").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    button("button[aria-label=Help]").click();
+  });
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".puzzle-button")).toContainText("2017 · day 4");
 });
 
 test("offers to log in again when Advent of Code no longer accepts the cookie", async () => {
