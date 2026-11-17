@@ -482,7 +482,10 @@ mod tests {
         )
         .unwrap();
         let drill = TrackId::Pack("drill".parse().unwrap());
-        assert_eq!(manifest.kept_apart().collect::<Vec<_>>(), std::slice::from_ref(&drill));
+        assert_eq!(
+            manifest.kept_apart().collect::<Vec<_>>(),
+            std::slice::from_ref(&drill)
+        );
         for kind in [
             Kind::Card,
             Kind::MentalMaths,
