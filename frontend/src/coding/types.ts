@@ -4,7 +4,7 @@
 import type { InstallStatus, ProgramNeeds, VersionedFile } from "../api";
 import type { MarkedReply } from "../grading/types";
 
-export type Language = "python" | "rust" | "cpp";
+export type Language = "python" | "rust" | "cpp" | "haskell";
 
 export type StepName = "understand" | "plan" | "code" | "test" | "review" | "twist";
 

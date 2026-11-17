@@ -10,6 +10,8 @@ describe("highlightedHtml", () => {
       ["rs", "fn main() { let x = 1; }", "let"],
       ["cpp", "int main() { return 0; }", "return"],
       ["c++", "int main() { return 0; }", "return"],
+      ["haskell", "main = do\n  let x = 1\n  print x", "let"],
+      ["hs", "data Colour = Red | Green", "data"],
     ]) {
       expect(highlightedHtml(code, marked), marked).toContain(
         `<span class="syntax-keyword">${keyword}</span>`,

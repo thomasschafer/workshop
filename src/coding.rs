@@ -394,13 +394,25 @@ impl Problems {
 
     /// The files that make a language's drafts a project, for its language server.
     fn ensure_project(&self, language: Language) -> Result<()> {
-        if language != Language::Rust {
-            return Ok(());
-        }
-        let manifest = self.root(language).join("Cargo.toml");
-        if !manifest.exists() {
-            std::fs::create_dir_all(self.root(language))?;
-            workshop_common::files::write_atomic(&manifest, RUST_PROJECT.as_bytes())?;
+        match language {
+            Language::Rust => {
+                let manifest = self.root(language).join("Cargo.toml");
+                if !manifest.exists() {
+                    std::fs::create_dir_all(self.root(language))?;
+                    workshop_common::files::write_atomic(&manifest, RUST_PROJECT.as_bytes())?;
+                }
+            }
+            Language::Haskell => {
+                // Workshop's own, and made from how drafts are built, so it's written again
+                // whenever that changes.
+                let cradle = self.root(language).join("hie.yaml");
+                let text = haskell_cradle();
+                if std::fs::read_to_string(&cradle).ok().as_deref() != Some(text.as_str()) {
+                    std::fs::create_dir_all(self.root(language))?;
+                    workshop_common::files::write_atomic(&cradle, text.as_bytes())?;
+                }
+            }
+            Language::Python | Language::Cpp => {}
         }
         Ok(())
     }
@@ -667,6 +679,21 @@ dead_code = "allow"
 unused_variables = "allow"
 unused_imports = "allow"
 "#;
+
+/// haskell-language-server's settings for Haskell drafts: GHC's flags as drafts are built with
+/// them, so it sees the same packages, and no package environment of the user's own.
+fn haskell_cradle() -> String {
+    let mut arguments = vec!["-package-env".to_owned(), "-".to_owned()];
+    arguments.extend(workshop_coding::programs::ghc_package_flags());
+    let quoted: Vec<String> = arguments
+        .iter()
+        .map(|argument| serde_json::to_string(argument).expect("strings serialise"))
+        .collect();
+    format!(
+        "# Drafts of coding problems, for the language server. Workshop writes this file.\ncradle:\n  direct:\n    arguments: [{}]\n",
+        quoted.join(", ")
+    )
+}
 
 /// The Coding track's items, from the plan: problems and code to read.
 pub fn overview(
@@ -1010,6 +1037,43 @@ mod tests {
     }
 
     #[test]
+    fn opens_haskell_drafts_in_a_project_for_the_language_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let packs = vec![Pack::sample()];
+        let found = find(&packs, "sample", "lowest-balance").unwrap();
+        let problems = Problems::new(dir.path());
+        let session = problems.start(&found, &[], false, None, NOW).unwrap();
+        assert_eq!(session.language, Language::Haskell);
+        let config = Config::parse("").unwrap();
+        let opened = problems.open(&config, &found, session, &[]).unwrap();
+        let haskell = &opened.languages[0];
+        assert_eq!(haskell.id, Language::Haskell);
+        assert_eq!(haskell.editor_mode, "haskell");
+        assert!(haskell.code.text.contains("undefined"));
+        assert!(haskell.code.path.ends_with("lowest-balance.hs"));
+        let lsp = haskell.lsp.as_ref().unwrap();
+        assert_eq!(lsp.language_id, "haskell");
+        assert!(lsp.root_uri.ends_with("/coding/haskell"));
+        let cradle =
+            std::fs::read_to_string(problems.root(Language::Haskell).join("hie.yaml")).unwrap();
+        assert!(
+            cradle.contains(r#"["-package-env", "-", "-no-user-package-db", "-hide-all-packages", "-package", "base""#),
+            "{cradle}"
+        );
+        // Written again if it's changed, as it's Workshop's own.
+        std::fs::write(
+            problems.root(Language::Haskell).join("hie.yaml"),
+            "cradle: {}",
+        )
+        .unwrap();
+        problems.draft(&found, Language::Haskell).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(problems.root(Language::Haskell).join("hie.yaml")).unwrap(),
+            cradle
+        );
+    }
+
+    #[test]
     fn shows_the_solution_only_once_its_being_reviewed() {
         let dir = tempfile::tempdir().unwrap();
         let packs = vec![Pack::sample()];
@@ -1034,7 +1098,7 @@ mod tests {
         let none = BTreeMap::new();
         let track = track(&planned, &none).unwrap();
         assert_eq!(track.name, "Coding");
-        assert_eq!(track.summary, "17 new");
+        assert_eq!(track.summary, "21 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::New);
         // The quickest first: code to read, rather than a problem.
@@ -1054,7 +1118,7 @@ mod tests {
         problems.save_session(&found, session, NOW).unwrap();
         let sessions = problems.sessions().unwrap();
         let track = super::track(&planned, &sessions).unwrap();
-        assert_eq!(track.summary, "1 in progress · 17 new");
+        assert_eq!(track.summary, "1 in progress · 21 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::Unfinished);
         assert_eq!(next.title, "Count the islands");
@@ -1068,7 +1132,7 @@ mod tests {
             .unwrap();
         assert_eq!(islands.status, Status::InProgress);
         assert_eq!(islands.step, Some(StepName::Code));
-        assert_eq!(overview.items.len(), 17);
+        assert_eq!(overview.items.len(), 21);
         assert!(
             overview
                 .items

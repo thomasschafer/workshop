@@ -22,6 +22,7 @@ const ALIASES: Record<string, string> = {
   py: "python",
   rs: "rust",
   "c++": "cpp",
+  hs: "haskell",
   ts: "typescript",
 };
 

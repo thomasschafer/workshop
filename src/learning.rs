@@ -952,7 +952,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let deck = learning(dir.path()).deck(clock(NOW)).unwrap();
         // Coding problems aren't short, so aren't in it; code to read is.
-        assert_eq!(deck.items.len(), 48);
+        assert_eq!(deck.items.len(), 51);
         assert!(deck.problems.is_empty());
         let names: Vec<&str> = deck.tracks.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
@@ -1002,7 +1002,7 @@ mod tests {
             .filter(|item| item["kind"] == "reading")
             .map(|item| item["language"].as_str().unwrap())
             .collect();
-        assert_eq!(languages, ["cpp", "python", "rust"].into());
+        assert_eq!(languages, ["cpp", "haskell", "python", "rust"].into());
     }
 
     #[test]

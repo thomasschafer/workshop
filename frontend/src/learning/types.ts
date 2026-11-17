@@ -52,7 +52,7 @@ export type DeckItem = ItemBase &
         tolerance: Tolerance;
         solution: string;
       }
-    | ({ kind: "reading"; language: "cpp" | "python" | "rust"; explanation: string } & (
+    | ({ kind: "reading"; language: "cpp" | "haskell" | "python" | "rust"; explanation: string } & (
         | { ask: "prints"; output: string }
         | { ask: "choice"; choices: string[]; answer: number }
       ))

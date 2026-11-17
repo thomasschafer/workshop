@@ -831,7 +831,7 @@ mod tests {
         let item = "/api/coding/items/sample/first-repeat";
         let overview =
             json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await;
-        assert_eq!(overview["items"].as_array().unwrap().len(), 17);
+        assert_eq!(overview["items"].as_array().unwrap().len(), 21);
 
         let opened = send(&router, request("POST", &format!("{item}/open"), None)).await;
         assert_eq!(opened.status(), StatusCode::OK);
