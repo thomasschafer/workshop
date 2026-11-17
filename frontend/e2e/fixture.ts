@@ -50,6 +50,24 @@ plum
 </article>
 </main></body></html>`;
 
+/** A built-in language profile, changed by `replacements`, as config of its own. */
+function profile(id: string, replacements: [RegExp, string][]): string {
+  const builtin = readFileSync(resolve(import.meta.dirname, `../../languages/${id}.toml`), "utf8");
+  let changed = builtin;
+  for (const [pattern, replacement] of [
+    ...replacements,
+    [/^\[(packages|helpers|toolchain)/gm, `[languages.${id}.$1`] as [RegExp, string],
+  ]) {
+    if (!pattern.test(changed)) throw new Error(`${id}.toml no longer matches ${pattern}`);
+    changed = changed.replace(pattern, replacement);
+  }
+  return `[languages.${id}]\n${changed}`;
+}
+
+const fakeLsp = resolve(import.meta.dirname, "fake-lsp.mjs");
+/** A stand-in for the language server, so its errors and answers are the tests' own. */
+const FAKE_LSP: [RegExp, string] = [/^lsp = .*$/m, `lsp = ["node", ${JSON.stringify(fakeLsp)}]`];
+
 /**
  * The built-in Python profile, with packages installed by a stand-in for pip, no lookups on
  * PyPI and a stand-in for the language server, so nothing needs the network or Pyright.
@@ -57,28 +75,26 @@ plum
  * recognised, is as built.
  */
 function pythonProfile(): string {
-  const builtin = readFileSync(resolve(import.meta.dirname, "../../languages/python.toml"), "utf8");
   const fakeInstall = resolve(import.meta.dirname, "fake-install.mjs");
-  const fakeLsp = resolve(import.meta.dirname, "fake-lsp.mjs");
-  const replacements: [RegExp, string][] = [
+  return profile("python", [
     [
       /^install = \[\n[\s\S]*?^\]\n/m,
       `install = [["node", ${JSON.stringify(fakeInstall)}, "{env}", "{packages}"]]\n`,
     ],
     [/^environment = \{ PATH = .*$/m, 'environment = { PYTHONPATH = "{env}/site" }'],
     [/^lookup = .*\n/m, ""],
-    // A stand-in for the language server, so its errors and answers are the tests' own.
-    [/^lsp = .*$/m, `lsp = ["node", ${JSON.stringify(fakeLsp)}]`],
+    FAKE_LSP,
     // Formatting is the stand-in language server's, rather than Ruff's.
     [/^formatter = .*\n/m, ""],
-    [/^\[(packages|helpers|toolchain)/gm, "[languages.python.$1"],
-  ];
-  let profile = builtin;
-  for (const [pattern, replacement] of replacements) {
-    if (!pattern.test(profile)) throw new Error(`python.toml no longer matches ${pattern}`);
-    profile = profile.replace(pattern, replacement);
-  }
-  return `[languages.python]\n${profile}`;
+  ]);
+}
+
+/**
+ * The built-in Haskell profile with a stand-in for its language server, for coding problems in
+ * Haskell, so nothing needs haskell-language-server.
+ */
+function haskellProfile(): string {
+  return profile("haskell", [FAKE_LSP]);
 }
 
 /**
@@ -182,7 +198,8 @@ x = ["yank_to_clipboard", "delete_selection"]
 ${models}
 ${author}
 ${extra}
-${pythonProfile()}`,
+${pythonProfile()}
+${haskellProfile()}`,
   );
   writeFileSync(join(home, "config", "aoc-session"), "not-a-real-session");
   // A newer release, as if just checked for, so the server doesn't ask GitHub during the tests.

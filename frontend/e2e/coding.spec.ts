@@ -61,13 +61,13 @@ test.afterAll(async () => {
 
 test("offers the Coding track at home, starting with something quick", async () => {
   const coding = phone.locator(".track", { hasText: "Coding" });
-  await expect(coding).toContainText("17 new");
+  await expect(coding).toContainText("21 new");
   const next = phone.locator(".continue");
   await expect(next).toContainText("Adding to a global");
   await expect(next).toContainText("Coding · Something new");
   await coding.tap();
   await expect(phone).toHaveURL(/\/coding$/);
-  await expect(phone.locator(".coding-item")).toHaveCount(17);
+  await expect(phone.locator(".coding-item")).toHaveCount(21);
   await expect(phone.locator(".coding-item", { hasText: "Count the islands" })).toContainText(
     "Problem · New",
   );
@@ -603,6 +603,60 @@ test("recalls the approach instead when the server can't be reached for a twist"
   const { items } = (await response.json()) as { items: { key: string; mode: string }[] };
   expect(items.find((item) => item.key === "sample/stair-ways")?.mode).toBe("recall");
   await own.close();
+});
+
+test("reads and solves in Haskell, with its highlighting and language server", async () => {
+  const page = await context.newPage();
+  const sockets: string[] = [];
+  page.on("websocket", (socket) => sockets.push(socket.url()));
+  try {
+    // Code to read, highlighted as Haskell, and checked on the phone.
+    await page.goto("/coding/sample/printing-your-own-type");
+    const prompt = page.locator(".learn-prompt");
+    await expect(prompt.locator(".syntax-keyword").first()).toHaveText("data");
+    await expect(prompt).toContainText("main = print Red");
+    await page.getByRole("button", { name: /Colour has none/ }).tap();
+    await expect(page.locator(".learn-verdict")).toHaveText("Right");
+    await page.getByRole("button", { name: "Got it" }).tap();
+    await expect(page).toHaveURL(/\/coding$/);
+
+    // A problem, solved in Haskell, its first language.
+    await page.locator(".coding-item", { hasText: "Lowest balance" }).tap();
+    await expect(page.locator(".step.current")).toHaveText("Understand");
+    await page.getByLabel("What should it print?").fill("-3");
+    await page.getByRole("button", { name: "Check" }).tap();
+    await expect(page.locator(".learn-verdict")).toHaveText("Right");
+    await page.getByRole("button", { name: "Next: plan" }).tap();
+    await page.getByLabel("How will you solve it?").fill("The smallest of the running totals.");
+    await page.getByRole("button", { name: "Next: code" }).tap();
+    await expect(page.locator(".step.current")).toHaveText("Code");
+    const editor = page.locator(".cm-content");
+    await expect(editor).toContainText("lowestBalance changes = undefined");
+    // In the editor's Haskell mode.
+    await expect(editor.locator(".syntax-keyword", { hasText: "where" })).toBeVisible();
+    // Haskell's language server, started for Haskell's drafts, which it sees as a project of
+    // their own.
+    await expect
+      .poll(() => sockets.some((url) => url.includes("/api/coding/lsp/haskell")))
+      .toBe(true);
+    expect(
+      readFileSync(join(CODING_HOME, "data", "coding", "haskell", "hie.yaml"), "utf8"),
+    ).toContain('"-hide-all-packages"');
+    await page.getByRole("button", { name: "Type" }).tap();
+    const keyboard = page.locator(".keyboard");
+    const key = (name: string) => keyboard.getByRole("button", { name, exact: true });
+    await key("g").tap();
+    await key("g").tap();
+    await key("Shift").tap();
+    await key("O").tap();
+    for (const ch of "oops") await key(ch).tap();
+    await key("Escape").tap();
+    await expect(page.locator(".status-line")).toContainText("1 error", { timeout: 15_000 });
+    await key("u").tap();
+    await expect(page.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  } finally {
+    await page.close();
+  }
 });
 
 test("says clearly that problems need the server, while code to read works offline", async () => {
