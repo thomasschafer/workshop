@@ -95,6 +95,8 @@ export interface Run {
   ending: Ending;
   stdout: string;
   stderr: string;
+  /** The size output is cut off at, in bytes, if it printed more than that, so its output couldn't be compared. */
+  cut_off: number | null;
   duration_ms: number;
 }
 

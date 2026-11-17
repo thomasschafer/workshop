@@ -10,6 +10,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
+use workshop_coding::grade::shortened;
 use workshop_coding::{CaseResult, Graded, Oracle};
 use workshop_learning::{Attempt, Rating};
 use workshop_pack::{Language, Pack};
@@ -216,21 +217,6 @@ pub(super) struct Submitted {
     ran: usize,
     total: usize,
     opened: Opened,
-}
-
-/// The most of a failing case's text that's sent: a hidden test can be far bigger than a phone
-/// can usefully show.
-const SHOWN_CHARS: usize = 4000;
-
-fn shortened(text: &str) -> String {
-    match text.char_indices().nth(SHOWN_CHARS) {
-        Some((end, _)) => format!(
-            "{}\n… and {} more characters",
-            &text[..end],
-            text.chars().count() - SHOWN_CHARS
-        ),
-        None => text.to_owned(),
-    }
 }
 
 /// The problem's brute force and inputs program, built, kept while they don't change.

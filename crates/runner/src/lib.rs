@@ -13,7 +13,7 @@ use workshop_common::process::{self, ProcessGroup};
 use workshop_common::template::{self, Vars};
 
 /// Output beyond this is dropped, so a runaway print loop can't exhaust memory or the phone.
-const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 /// How long to wait for output after the program has ended. Only a process that escaped its
 /// process group could keep the pipes open longer.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -171,6 +171,9 @@ pub struct Output {
     pub ending: Ending,
     pub stdout: String,
     pub stderr: String,
+    /// Whether the program printed more than `MAX_OUTPUT_BYTES` to stdout, so the rest was
+    /// dropped, and `stdout` ends saying so.
+    pub stdout_cut_off: bool,
 }
 
 /// Runs a command in its own process group, with a time limit, keeping the start of its output.
@@ -229,25 +232,32 @@ pub async fn execute(
     if let Some(task) = stdin_task {
         task.abort();
     }
+    let (stdout, stdout_cut_off) = drain(stdout).await?;
+    let (stderr, _) = drain(stderr).await?;
     Ok(Output {
         ending,
-        stdout: drain(stdout).await?,
-        stderr: drain(stderr).await?,
+        stdout,
+        stderr,
+        stdout_cut_off,
     })
 }
 
-async fn drain(task: tokio::task::JoinHandle<Result<String>>) -> Result<String> {
+/// What was read, and whether it was more than `MAX_OUTPUT_BYTES`.
+async fn drain(task: tokio::task::JoinHandle<Result<(String, bool)>>) -> Result<(String, bool)> {
     let abort = task.abort_handle();
     match tokio::time::timeout(DRAIN_TIMEOUT, task).await {
         Ok(output) => output?,
         Err(_) => {
             abort.abort();
-            Ok("… output cut off: a process the program started kept running".to_owned())
+            Ok((
+                "… output cut off: a process the program started kept running".to_owned(),
+                false,
+            ))
         }
     }
 }
 
-async fn read_limited(mut reader: impl AsyncReadExt + Unpin) -> Result<String> {
+async fn read_limited(mut reader: impl AsyncReadExt + Unpin) -> Result<(String, bool)> {
     let mut kept = Vec::new();
     let mut buf = [0u8; 8192];
     let mut truncated = false;
@@ -262,9 +272,24 @@ async fn read_limited(mut reader: impl AsyncReadExt + Unpin) -> Result<String> {
     }
     let mut text = String::from_utf8_lossy(&kept).into_owned();
     if truncated {
-        text.push_str("\n… output truncated");
+        text.push_str(&format!("\n… output cut off at {}", size(MAX_OUTPUT_BYTES)));
     }
-    Ok(text)
+    Ok((text, truncated))
+}
+
+/// A number of bytes, as a person would say it, such as 64 KiB.
+pub fn size(bytes: usize) -> String {
+    const KIB: usize = 1024;
+    const MIB: usize = 1024 * KIB;
+    if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{} KiB", bytes.div_ceil(KIB))
+    } else if bytes == 1 {
+        "1 byte".to_owned()
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 fn elapsed_ms(started: Instant) -> u64 {
@@ -363,10 +388,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn truncates_huge_output() {
-        let outcome = run_script(None, "yes | head -c 200000", Duration::from_secs(10)).await;
-        assert!(outcome.stdout.ends_with("output truncated"));
-        assert!(outcome.stdout.len() < MAX_OUTPUT_BYTES + 100);
+    async fn cuts_off_huge_output_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = |script: &str| {
+            let args = ["sh", "-c", script].map(str::to_owned);
+            let dir = dir.path().to_owned();
+            async move {
+                execute(
+                    &args,
+                    &dir,
+                    &[],
+                    None,
+                    Duration::from_secs(10),
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let huge = run("yes | head -c 200000; yes | head -c 200000 >&2").await;
+        assert!(huge.stdout_cut_off);
+        assert!(
+            huge.stdout.ends_with("output cut off at 64 KiB"),
+            "{}",
+            &huge.stdout[60_000..]
+        );
+        assert!(huge.stdout.len() < MAX_OUTPUT_BYTES + 100);
+        assert!(huge.stderr.ends_with("output cut off at 64 KiB"));
+        let all = run(&format!("yes | head -c {MAX_OUTPUT_BYTES}")).await;
+        assert!(!all.stdout_cut_off);
+        assert_eq!(all.stdout.len(), MAX_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn sizes_read_as_a_person_would_say_them() {
+        assert_eq!(size(MAX_OUTPUT_BYTES), "64 KiB");
+        assert_eq!(size(1), "1 byte");
+        assert_eq!(size(900), "900 bytes");
+        assert_eq!(size(65 * 1024 + 1), "66 KiB");
+        assert_eq!(size(1_258_291), "1.2 MiB");
     }
 
     #[tokio::test]

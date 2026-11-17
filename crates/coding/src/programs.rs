@@ -134,12 +134,20 @@ pub struct Run {
     pub ending: Ending,
     pub stdout: String,
     pub stderr: String,
+    /// The size output is cut off at, if it printed more than that, in bytes. What it printed
+    /// then can't be compared with anything.
+    pub cut_off: Option<usize>,
     pub duration_ms: u64,
 }
 
 impl Run {
     pub fn succeeded(&self) -> bool {
         self.ending == (Ending::Exited { code: Some(0) })
+    }
+
+    /// Whether it ran to the end without an error, and everything it printed was kept.
+    pub fn printed_in_full(&self) -> bool {
+        self.succeeded() && self.cut_off.is_none()
     }
 }
 
@@ -494,6 +502,9 @@ impl Runtime {
             ending: output.ending,
             stdout: output.stdout,
             stderr: shorten_paths(&output.stderr, &program.dir),
+            cut_off: output
+                .stdout_cut_off
+                .then_some(workshop_runner::MAX_OUTPUT_BYTES),
             duration_ms: started.elapsed().as_millis() as u64,
         })
     }

@@ -339,6 +339,18 @@ test("says quietly why the language server can't start, and still runs the code"
 });
 
 test("submits, shows a small input it fails on, then passes and is reviewed", async () => {
+  // Printing more than is kept of a run's output, it's said so, rather than shown as a mismatch.
+  await writeCode("print('a' * 100000)\n");
+  await phone.reload();
+  await phone.getByRole("button", { name: "Submit" }).tap();
+  const cutOff = phone.getByRole("region", { name: "Test results" });
+  await expect(cutOff).toContainText("Example 1: Output cut off", { timeout: 30_000 });
+  await expect(cutOff).toContainText(
+    "It printed more than 64 KiB, where output is cut off, so it couldn't be compared with the expected output.",
+  );
+  await expect(cutOff.getByRole("heading", { name: "Got" })).toHaveCount(0);
+  await expect(cutOff).not.toContainText("aaaa");
+
   // Right on both examples, but it takes the word that first appeared earliest, rather than
   // the first to appear again.
   await writeCode(

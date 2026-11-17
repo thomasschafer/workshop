@@ -231,19 +231,23 @@ pub async fn check_reading(
     let run = runtime.run(&program, &[], "", cancel).await?;
     Ok(match &reading.check {
         ReadingCheck::Prints(expected) => {
-            if !run.succeeded() {
+            if !run.printed_in_full() {
                 Verdict::Failed(format!(
-                    "the code {}:\n{}",
+                    "the code {}{}",
                     describe(&run),
-                    run.stderr.trim_end()
+                    if run.succeeded() {
+                        ", where output is cut off, so it can't be compared with what the answer says it prints".to_owned()
+                    } else {
+                        format!(":\n{}", grade::shortened(run.stderr.trim_end()))
+                    }
                 ))
             } else if output::same(expected, &run.stdout) {
                 Verdict::Passed("the code prints what the answer says".to_owned())
             } else {
                 Verdict::Failed(format!(
                     "the answer says it prints:\n{}\nbut it prints:\n{}",
-                    expected.trim_end(),
-                    run.stdout.trim_end()
+                    grade::shortened(expected.trim_end()),
+                    grade::shortened(run.stdout.trim_end())
                 ))
             }
         }
@@ -304,7 +308,7 @@ fn raised(language: Language, run: &Run) -> bool {
 fn stopped(run: &Run, found: bool, passed: &str, failed: &str) -> Verdict {
     if run.ending == Ending::TimedOut {
         Verdict::Failed(format!(
-            "{}, though the answer says it stops with an error",
+            "the code {}, though the answer says it stops with an error",
             describe(run)
         ))
     } else if !run.succeeded() && found {
@@ -422,6 +426,13 @@ mod tests {
                 prints("4"),
                 false,
                 "but it prints",
+            ),
+            (
+                Language::Python,
+                "print('a' * 100000)\n",
+                prints("a"),
+                false,
+                "printed more than 64 KiB, where output is cut off, so it can't be compared",
             ),
             (
                 Language::Python,

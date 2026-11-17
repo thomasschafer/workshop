@@ -10,7 +10,7 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use workshop_pack::code::MAX_SIZE;
 use workshop_pack::{Case, Coding, Language, output};
-use workshop_runner::Ending;
+use workshop_runner::{Ending, MAX_OUTPUT_BYTES, size};
 
 use crate::programs::{Built, Flavour, Program, Run, Runtime};
 
@@ -85,15 +85,28 @@ impl Graded {
                     }
                 };
                 let what = describe(&failure.run);
+                let input = shortened(failure.input.trim_end());
+                if failure.run.succeeded() && failure.run.cut_off.is_some() {
+                    let expected = if fits(&failure.expected) {
+                        String::new()
+                    } else {
+                        format!(
+                            ", which is longer than that itself, at {}",
+                            size(failure.expected.len())
+                        )
+                    };
+                    return format!(
+                        "it {what} on {on}, where output is cut off, so it couldn't be compared with the expected output{expected}. The input:\n{input}"
+                    );
+                }
                 format!(
-                    "{what} on {on}:\n{}\nexpected:\n{}\ngot:\n{}{}",
-                    failure.input.trim_end(),
-                    failure.expected.trim_end(),
-                    failure.run.stdout.trim_end(),
+                    "it {what} on {on}:\n{input}\nexpected:\n{}\ngot:\n{}{}",
+                    shortened(failure.expected.trim_end()),
+                    shortened(failure.run.stdout.trim_end()),
                     if failure.run.stderr.trim().is_empty() {
                         String::new()
                     } else {
-                        format!("\nstderr:\n{}", failure.run.stderr.trim_end())
+                        format!("\nstderr:\n{}", shortened(failure.run.stderr.trim_end()))
                     }
                 )
             }),
@@ -101,13 +114,38 @@ impl Graded {
     }
 }
 
-/// How a run that didn't print the right answer went wrong.
-pub fn describe(run: &Run) -> &'static str {
-    match run.ending {
-        Ending::TimedOut => "it took too long",
-        Ending::Cancelled => "it was stopped",
-        Ending::Exited { code: Some(0) } => "it printed the wrong answer",
-        Ending::Exited { .. } => "it crashed",
+/// How a run that didn't print the right answer went wrong, such as "crashed".
+pub fn describe(run: &Run) -> String {
+    match (&run.ending, run.cut_off) {
+        (Ending::TimedOut, _) => "took too long".to_owned(),
+        (Ending::Cancelled, _) => "was stopped".to_owned(),
+        (Ending::Exited { code: Some(0) }, Some(limit)) => {
+            format!("printed more than {}", size(limit))
+        }
+        (Ending::Exited { code: Some(0) }, None) => "printed the wrong answer".to_owned(),
+        (Ending::Exited { .. }, _) => "crashed".to_owned(),
+    }
+}
+
+/// Whether a right solution can print `expected` without its output being cut off: whether
+/// its lines, without the whitespace that isn't compared, and a newline at the end, fit.
+pub fn fits(expected: &str) -> bool {
+    output::normalise(expected).len() < MAX_OUTPUT_BYTES
+}
+
+/// The most of a program's input or output that's shown, as a hidden test's can be far bigger
+/// than anyone can usefully read, least of all on a phone.
+const SHOWN_CHARS: usize = 4000;
+
+/// `text`, or its start if it's longer than is worth showing, saying how much more there is.
+pub fn shortened(text: &str) -> String {
+    match text.char_indices().nth(SHOWN_CHARS) {
+        Some((end, _)) => format!(
+            "{}\n… and {} more characters",
+            &text[..end],
+            text.chars().count() - SHOWN_CHARS
+        ),
+        None => text.to_owned(),
     }
 }
 
@@ -138,7 +176,7 @@ async fn run_case(
     cancel: &CancellationToken,
 ) -> Result<CaseResult> {
     let run = runtime.run(program, &[], &known.input, cancel).await?;
-    let passed = run.succeeded() && output::same(&known.output, &run.stdout);
+    let passed = run.printed_in_full() && output::same(&known.output, &run.stdout);
     Ok(CaseResult {
         case,
         input: known.input.clone(),
@@ -232,13 +270,18 @@ impl Oracle {
     ) -> Result<Result<String, String>> {
         let args = [seed.to_string(), size.to_string()];
         let made = runtime.run(&self.inputs, &args, "", cancel).await?;
-        Ok(if made.succeeded() {
+        Ok(if made.printed_in_full() {
             Ok(made.stdout)
+        } else if let (true, Some(limit)) = (made.succeeded(), made.cut_off) {
+            Err(format!(
+                "the inputs program printed more than {} for seed {seed} and size {size}, where output is cut off, so the input it made can't be used; keep inputs smaller than that",
+                workshop_runner::size(limit)
+            ))
         } else {
             Err(format!(
                 "the inputs program {} for seed {seed} and size {size}:\n{}",
                 describe(&made),
-                made.stderr.trim_end()
+                shortened(made.stderr.trim_end())
             ))
         })
     }
@@ -264,8 +307,14 @@ impl Oracle {
             return Ok(Err(format!(
                 "the brute force {} on the input from seed {seed} and size {size}:\n{}\n{}",
                 describe(&answered),
-                input.trim_end(),
-                answered.stderr.trim_end()
+                shortened(input.trim_end()),
+                shortened(answered.stderr.trim_end())
+            )));
+        }
+        if let Some(limit) = answered.cut_off {
+            return Ok(Err(format!(
+                "the brute force printed more than {} on the input from seed {seed} and size {size}, where output is cut off, so its answer can't be compared with; keep inputs small enough for their answers to be shorter than that",
+                workshop_runner::size(limit)
             )));
         }
         let case = Case {
@@ -493,6 +542,130 @@ mod tests {
         let problem = crashed.problem().unwrap();
         assert!(problem.starts_with("it crashed on example 1"), "{problem}");
         assert!(problem.contains("NotImplementedError"), "{problem}");
+    }
+
+    /// A program printing `bytes` of a's, then a newline.
+    fn prints(bytes: usize) -> String {
+        format!("import sys\nsys.stdout.write('a' * {bytes} + '\\n')\n")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn says_output_was_cut_off_rather_than_comparing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(dir.path(), Duration::from_secs(30));
+        let cancel = CancellationToken::new();
+        let mut coding = rising_run();
+        coding.examples.truncate(1);
+        let long = 100 * 1024;
+        for (expected, says) in [
+            ("a".to_owned(), None),
+            (
+                "a".repeat(long),
+                Some(", which is longer than that itself, at 100 KiB"),
+            ),
+        ] {
+            coding.examples[0].output = expected;
+            let graded = run_examples(&runtime, &coding, Language::Python, &prints(long), &cancel)
+                .await
+                .unwrap();
+            let failure = graded.failure().unwrap();
+            assert_eq!(failure.run.cut_off, Some(MAX_OUTPUT_BYTES));
+            assert_eq!(describe(&failure.run), "printed more than 64 KiB");
+            let problem = graded.problem().unwrap();
+            assert!(
+                problem.starts_with(&format!(
+                    "it printed more than 64 KiB on example 1, where output is cut off, so it couldn't be compared with the expected output{}. The input:\n",
+                    says.unwrap_or_default()
+                )),
+                "{problem}"
+            );
+            assert!(problem.len() < 1000, "{problem}");
+        }
+        // Everything a program prints up to the limit is compared.
+        coding.examples[0].output = "a".repeat(MAX_OUTPUT_BYTES - 1);
+        let graded = run_examples(
+            &runtime,
+            &coding,
+            Language::Python,
+            &prints(MAX_OUTPUT_BYTES - 1),
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert!(graded.passed(), "{:?}", graded.problem());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_oracle_that_prints_too_much_is_the_item_s_fault() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(dir.path(), Duration::from_secs(30));
+        let cancel = CancellationToken::new();
+        let right = rising_run();
+        let reference = right.reference_in(Language::Python).unwrap().text.clone();
+        let source = |text: String| workshop_pack::Source {
+            file: "program.py".to_owned(),
+            language: Language::Python,
+            text,
+        };
+        let long = 100 * 1024;
+        for (coding, says) in [
+            (
+                Coding {
+                    brute_force: source(prints(long)),
+                    ..right.clone()
+                },
+                "the brute force printed more than 64 KiB on the input from seed 0 and size 1, where output is cut off",
+            ),
+            (
+                Coding {
+                    inputs: source(prints(long)),
+                    ..right.clone()
+                },
+                "the inputs program printed more than 64 KiB for seed 0 and size 1, where output is cut off",
+            ),
+        ] {
+            let oracle = Oracle::build(&runtime, &coding, &cancel)
+                .await
+                .unwrap()
+                .unwrap();
+            let problem = grade(
+                &runtime,
+                &coding,
+                &oracle,
+                Language::Python,
+                &reference,
+                1,
+                &cancel,
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+            assert!(problem.starts_with(says), "{problem}");
+            assert!(problem.len() < 1000, "{problem}");
+        }
+    }
+
+    #[test]
+    fn shortens_text_too_long_to_read() {
+        assert_eq!(shortened("short"), "short");
+        let long = "é".repeat(SHOWN_CHARS + 10);
+        let shown = shortened(&long);
+        assert!(shown.starts_with(&"é".repeat(SHOWN_CHARS)));
+        assert!(shown.ends_with("\n… and 10 more characters"), "{shown}");
+    }
+
+    #[test]
+    fn expected_output_fits_if_a_right_solution_can_print_it_in_full() {
+        assert!(fits(&"a".repeat(MAX_OUTPUT_BYTES - 1)));
+        // Whitespace that isn't compared doesn't count.
+        assert!(fits(&format!(
+            "{}   \n\n\n",
+            "a".repeat(MAX_OUTPUT_BYTES - 1)
+        )));
+        // With its newline, it's more than is kept.
+        assert!(!fits(&"a".repeat(MAX_OUTPUT_BYTES)));
     }
 
     #[test]

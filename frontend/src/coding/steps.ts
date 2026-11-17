@@ -70,6 +70,27 @@ export function describeRun(run: Run): string {
     case "cancelled":
       return "Stopped";
     case "exited":
-      return run.ending.code === 0 ? "Wrong answer" : "Crashed";
+      if (run.ending.code !== 0) return "Crashed";
+      return printedTooMuch(run) === null ? "Wrong answer" : "Output cut off";
   }
+}
+
+/**
+ * Why a run that finished couldn't be compared with what was expected, if it printed more than
+ * is kept of a run's output.
+ */
+export function printedTooMuch(run: Run): string | null {
+  if (run.cut_off === null || run.ending.status !== "exited" || run.ending.code !== 0) {
+    return null;
+  }
+  return `It printed more than ${formatSize(run.cut_off)}, where output is cut off, so it couldn't be compared with the expected output.`;
+}
+
+/** A number of bytes as a person would say it, such as 64 KiB, as the server says them. */
+export function formatSize(bytes: number): string {
+  const kib = 1024;
+  const mib = 1024 * kib;
+  if (bytes >= mib) return `${(bytes / mib).toFixed(1)} MiB`;
+  if (bytes >= kib) return `${Math.ceil(bytes / kib)} KiB`;
+  return bytes === 1 ? "1 byte" : `${bytes} bytes`;
 }

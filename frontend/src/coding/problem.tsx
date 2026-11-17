@@ -27,6 +27,7 @@ import { EditorPane } from "./editorPane";
 import {
   describeCase,
   describeRun,
+  printedTooMuch,
   reached,
   STEP_LABELS,
   stepAfter,
@@ -863,10 +864,14 @@ function summarise(graded: Graded): string {
       return graded.reason;
     case "ran":
       return graded.results
-        .map(
-          (r) =>
-            `${describeCase(r.case)}: ${r.passed ? "passed" : describeRun(r.run)}\ninput:\n${r.input}\nexpected:\n${r.expected}\ngot:\n${r.run.stdout}${r.run.stderr ? `\nstderr:\n${r.run.stderr}` : ""}`,
-        )
+        .map((r) => {
+          const head = `${describeCase(r.case)}: ${r.passed ? "passed" : describeRun(r.run)}\ninput:\n${r.input}`;
+          const tooMuch = printedTooMuch(r.run);
+          const output = tooMuch
+            ? `\n${tooMuch}`
+            : `\nexpected:\n${r.expected}\ngot:\n${r.run.stdout}`;
+          return `${head}${output}${r.run.stderr ? `\nstderr:\n${r.run.stderr}` : ""}`;
+        })
         .join("\n\n");
   }
 }
@@ -911,6 +916,7 @@ function ExampleResults({
 }
 
 function CaseView({ result }: { result: CaseResult }) {
+  const tooMuch = printedTooMuch(result.run);
   return (
     <article class={`coding-case ${result.passed ? "right" : "wrong"}`}>
       <p class="coding-case-head">
@@ -918,12 +924,17 @@ function CaseView({ result }: { result: CaseResult }) {
       </p>
       {result.passed ? null : (
         <>
+          {tooMuch ? <p class="error-text">{tooMuch}</p> : null}
           <h3 class="coding-subheading">Input</h3>
           <pre class="coding-io">{result.input}</pre>
-          <h3 class="coding-subheading">Expected</h3>
-          <pre class="coding-io">{result.expected}</pre>
-          <h3 class="coding-subheading">Got</h3>
-          <pre class="coding-io">{result.run.stdout || "(nothing)"}</pre>
+          {tooMuch ? null : (
+            <>
+              <h3 class="coding-subheading">Expected</h3>
+              <pre class="coding-io">{result.expected}</pre>
+              <h3 class="coding-subheading">Got</h3>
+              <pre class="coding-io">{result.run.stdout || "(nothing)"}</pre>
+            </>
+          )}
           {result.run.stderr.trim() ? (
             <pre class="coding-io error-text">{result.run.stderr}</pre>
           ) : null}
