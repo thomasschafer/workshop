@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use workshop_learning::{Attempt, Rating, TrackPlan};
 use workshop_pack::{Case, Coding, Content, Item, Kind, Language, Pack};
 use workshop_toolchain::toolchain::Toolchain;
-use workshop_tracks::{Priority, Step, Track, TrackId};
+use workshop_tracks::{Priority, Step, Track, TrackIcon, TrackId};
 
 use crate::config::Config;
 use crate::learning::{Planned, Week};
@@ -263,6 +263,9 @@ pub struct Listed {
 pub struct Opened {
     pub key: String,
     pub label: String,
+    /// The track it's in, for the way back to it: the Coding track, or another, such as a
+    /// pack's own.
+    pub track: OpenedTrack,
     /// In Markdown.
     pub prompt: String,
     pub skills: Vec<String>,
@@ -278,6 +281,21 @@ pub struct Opened {
     pub solution: Option<Solution>,
     /// For a twist, the twist, once it's been posed.
     pub twist: Option<OpenedTwist>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenedTrack {
+    pub id: TrackId,
+    pub name: String,
+    pub icon: TrackIcon,
+}
+
+impl OpenedTrack {
+    fn of(found: &Found<'_>) -> Self {
+        let id = found.item.track.clone();
+        let (name, icon) = crate::learning::track_label(std::slice::from_ref(found.pack), &id);
+        Self { id, name, icon }
+    }
 }
 
 /// A twist as the learner sees it before answering: without what a good answer covers.
@@ -641,6 +659,7 @@ impl Problems {
         Ok(Opened {
             key: found.key(),
             label: item.label(),
+            track: OpenedTrack::of(found),
             prompt: item.prompt.clone(),
             skills: item.skills.clone(),
             source: item.source.clone(),
@@ -695,14 +714,16 @@ fn haskell_cradle() -> String {
     )
 }
 
-/// The Coding track's items, from the plan: problems and code to read.
+/// A track's problems and code to read, from the plan: the Coding track's, or another's, such
+/// as a pack's own.
 pub fn overview(
     planned: &Planned,
     sessions: &BTreeMap<String, Session>,
     flags: &BTreeMap<String, workshop_learning::Flag>,
+    track: &TrackId,
 ) -> Overview {
-    let plan = planned.plans.get(&TrackId::Coding);
-    let items = coding_items(planned)
+    let plan = planned.plans.get(track);
+    let items = coding_items(planned, track)
         .map(|(key, item)| {
             let session = sessions.get(&key);
             let retired = planned.is_retired(&key);
@@ -737,12 +758,16 @@ pub fn overview(
     }
 }
 
-fn coding_items(planned: &Planned) -> impl Iterator<Item = (String, &Item)> {
-    planned.packs.iter().flat_map(|pack| {
+/// A track's problems and code to read, with their keys.
+fn coding_items<'a>(
+    planned: &'a Planned,
+    track: &'a TrackId,
+) -> impl Iterator<Item = (String, &'a Item)> {
+    planned.packs.iter().flat_map(move |pack| {
         pack.items
             .iter()
-            .filter(|item| {
-                item.track == TrackId::Coding && matches!(item.kind, Kind::Coding | Kind::Reading)
+            .filter(move |item| {
+                item.track == *track && matches!(item.kind, Kind::Coding | Kind::Reading)
             })
             .map(move |item| (format!("{}/{}", pack.manifest.id, item.id), item))
     })
@@ -754,9 +779,42 @@ pub fn track(
     sessions: &BTreeMap<String, Session>,
 ) -> Option<Track<Destination>> {
     let plan = planned.plans.get(&TrackId::Coding)?;
-    let labels: BTreeMap<String, &Item> = coding_items(planned).collect();
+    let items: BTreeMap<String, &Item> = coding_items(planned, &TrackId::Coding).collect();
+    Some(Track::built_in(
+        TrackId::Coding,
+        summary(
+            plan,
+            sessions.keys().filter(|k| items.contains_key(*k)).count(),
+        ),
+        Destination::Coding { item: None },
+        next_step(planned, sessions, plan, &items),
+    ))
+}
+
+/// The step a track of short items suggests from the coding problems in it, if it has any,
+/// such as a pack's own track. Its code to read is practised with its other short items.
+pub fn problem_step(
+    planned: &Planned,
+    sessions: &BTreeMap<String, Session>,
+    track: &TrackId,
+) -> Option<Step<Destination>> {
+    let plan = planned.plans.get(track)?;
+    let problems: BTreeMap<String, &Item> = coding_items(planned, track)
+        .filter(|(_, item)| item.kind == Kind::Coding)
+        .collect();
+    next_step(planned, sessions, plan, &problems)
+}
+
+/// The step `items`, of a track with this plan, suggest: the one worked on most recently, then
+/// one that's due, then something new.
+fn next_step(
+    planned: &Planned,
+    sessions: &BTreeMap<String, Session>,
+    plan: &TrackPlan,
+    items: &BTreeMap<String, &Item>,
+) -> Option<Step<Destination>> {
     let label = |key: &str| {
-        labels
+        items
             .get(key)
             .map_or_else(|| key.to_owned(), |item| item.label())
     };
@@ -766,71 +824,64 @@ pub fn track(
     // The problem worked on most recently, of those still in the packs.
     let unfinished = sessions
         .iter()
-        .filter(|(key, _)| labels.contains_key(*key))
+        .filter(|(key, _)| items.contains_key(*key))
         .max_by_key(|(_, session)| session.updated_at);
-    let next = if let Some((key, session)) = unfinished {
-        Some(Step {
+    if let Some((key, session)) = unfinished {
+        return Some(Step {
             title: label(key),
             reason: format!("Where you left off, {}", session.step.describe()),
             priority: Priority::Unfinished,
             destination: open(key),
-        })
-    } else if let Some(key) = plan.due.first() {
-        let recall = labels
-            .get(key)
-            .is_some_and(|item| item.kind == Kind::Coding);
+        });
+    }
+    if let Some(key) = plan.due.iter().find(|key| items.contains_key(*key)) {
+        let recall = items.get(key).is_some_and(|item| item.kind == Kind::Coding);
         let why = if recall {
             "Due for review: a quick follow-up on it"
         } else {
             "Due today"
         };
-        Some(Step {
+        return Some(Step {
             title: label(key),
             reason: why.to_owned(),
             priority: Priority::Due,
             destination: open(key),
-        })
-    } else {
-        // In a skill recent mistakes point to, if any are, and then the quickest, so a spare
-        // few minutes are enough to start.
-        let focus = |key: &str| labels.get(key).and_then(|item| planned.focus_of(item));
-        let quickest = plan.new.iter().min_by_key(|key| {
+        });
+    }
+    // In a skill recent mistakes point to, if any are, and then the quickest, so a spare few
+    // minutes are enough to start.
+    let focus = |key: &str| items.get(key).and_then(|item| planned.focus_of(item));
+    let quickest = plan
+        .new
+        .iter()
+        .filter(|key| items.contains_key(*key))
+        .min_by_key(|key| {
             (
                 focus(key).is_none(),
-                labels
+                items
                     .get(key.as_str())
                     .map_or(u32::MAX, |item| item.minutes),
             )
         });
-        quickest.map(|key| match focus(key) {
-            Some(skill) => Step {
-                title: label(key),
-                reason: format!("Practise {skill}, after recent mistakes"),
-                priority: Priority::Focus,
-                destination: open(key),
+    quickest.map(|key| match focus(key) {
+        Some(skill) => Step {
+            title: label(key),
+            reason: format!("Practise {skill}, after recent mistakes"),
+            priority: Priority::Focus,
+            destination: open(key),
+        },
+        None => Step {
+            title: label(key),
+            reason: "Something new".to_owned(),
+            // Once the week's target is met, new items wait behind anything else to do.
+            priority: if planned.week.minutes >= planned.week.target {
+                Priority::Browse
+            } else {
+                Priority::New
             },
-            None => Step {
-                title: label(key),
-                reason: "Something new".to_owned(),
-                // Once the week's target is met, new items wait behind anything else to do.
-                priority: if planned.week.minutes >= planned.week.target {
-                    Priority::Browse
-                } else {
-                    Priority::New
-                },
-                destination: open(key),
-            },
-        })
-    };
-    Some(Track::built_in(
-        TrackId::Coding,
-        summary(
-            plan,
-            sessions.keys().filter(|k| labels.contains_key(*k)).count(),
-        ),
-        Destination::Coding { item: None },
-        next,
-    ))
+            destination: open(key),
+        },
+    })
 }
 
 fn summary(plan: &TrackPlan, in_progress: usize) -> String {
@@ -1124,7 +1175,7 @@ mod tests {
         assert_eq!(next.title, "Count the islands");
         assert_eq!(next.reason, "Where you left off, coding");
 
-        let overview = overview(&planned, &sessions, &BTreeMap::new());
+        let overview = overview(&planned, &sessions, &BTreeMap::new(), &TrackId::Coding);
         let islands = overview
             .items
             .iter()

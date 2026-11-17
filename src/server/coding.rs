@@ -15,6 +15,7 @@ use workshop_learning::{Attempt, Rating};
 use workshop_pack::{Language, Pack};
 use workshop_provider::Role;
 use workshop_toolchain::toolchain::Toolchain;
+use workshop_tracks::TrackId;
 
 use super::error::{ApiError, ApiResult, bad_request};
 use super::install::InstallStatus;
@@ -45,16 +46,29 @@ fn language(id: &str) -> Result<Language, ApiError> {
     Language::from_id(id).ok_or_else(|| bad_request(format!("there's no language {id:?}")))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct OverviewQuery {
+    utc_offset: Option<i32>,
+    /// The track whose problems and code to read to list: the Coding track's unless it's
+    /// another's, such as a pack's own.
+    track: Option<TrackId>,
+}
+
 pub(super) async fn overview(
     State(app): State<Shared>,
-    Query(at): Query<Where>,
+    Query(query): Query<OverviewQuery>,
 ) -> ApiResult<Overview> {
-    let clock = at.clock()?;
+    let clock = Where {
+        utc_offset: query.utc_offset,
+    }
+    .clock()?;
     let planned = app.learning.planned(clock)?;
     Ok(Json(crate::coding::overview(
         &planned,
         &app.problems.sessions()?,
         &app.learning.store().flags()?,
+        &query.track.unwrap_or(TrackId::Coding),
     )))
 }
 

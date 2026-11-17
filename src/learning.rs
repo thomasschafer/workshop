@@ -7,7 +7,7 @@
 //! answered itself until it can sync. Syncing sends the attempts made since, and gets the deck
 //! back as the server's log now has it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -59,6 +59,11 @@ pub struct DeckTrack {
     pub id: TrackId,
     pub name: String,
     pub icon: TrackIcon,
+    /// Whether it's kept out of Continue, so its items have limits of their own, and don't
+    /// count towards the week's target.
+    pub kept_apart: bool,
+    /// For a track kept apart, what's been done in it today and this week, as the server knows.
+    pub progress: Option<Progress>,
 }
 
 #[derive(Debug, Serialize)]
@@ -136,6 +141,29 @@ pub struct Week {
     pub target: u32,
 }
 
+/// The tracks kept out of Continue, and the items in each, by key.
+struct Apart {
+    tracks: BTreeSet<TrackId>,
+    keys: BTreeMap<String, TrackId>,
+}
+
+impl Apart {
+    /// The packs' tracks kept apart, with these of their items in them. A track two packs share
+    /// is kept apart if either keeps it apart.
+    fn new(packs: &[Pack], items: &[Short<'_>]) -> Self {
+        let tracks: BTreeSet<TrackId> = packs
+            .iter()
+            .flat_map(|pack| pack.manifest.kept_apart())
+            .collect();
+        let keys = items
+            .iter()
+            .filter(|short| tracks.contains(&short.item.track))
+            .map(|short| (short.key.clone(), short.item.track.clone()))
+            .collect();
+        Self { tracks, keys }
+    }
+}
+
 /// An item from a pack, with the key it's known by across packs.
 struct Short<'a> {
     key: String,
@@ -182,14 +210,32 @@ impl Learning {
         }
     }
 
-    fn progress(&self, clock: Clock) -> Result<Progress> {
-        let today = self.store.activity(clock.day_start())?;
-        let week = self.store.activity(clock.week_start())?;
+    /// What's been done today and this week on the items, by key, that `counts` says count.
+    fn progress_of(&self, clock: Clock, counts: impl Fn(&str) -> bool) -> Result<Progress> {
+        let today = self.store.activity_of(clock.day_start(), &counts)?;
+        let week = self.store.activity_of(clock.week_start(), &counts)?;
         Ok(Progress {
             reviews_today: today.reviews,
             new_today: today.new,
             minutes_this_week: (week.ms / 60_000) as u32,
         })
+    }
+
+    /// What's been done today and this week: on everything but the tracks kept apart, which
+    /// counts towards the day's limits and the week's target, and on each track kept apart,
+    /// which counts towards its own limits only.
+    fn progress(
+        &self,
+        clock: Clock,
+        apart: &Apart,
+    ) -> Result<(Progress, BTreeMap<TrackId, Progress>)> {
+        let shared = self.progress_of(clock, |key| !apart.keys.contains_key(key))?;
+        let mut tracks = BTreeMap::new();
+        for track in &apart.tracks {
+            let progress = self.progress_of(clock, |key| apart.keys.get(key) == Some(track))?;
+            tracks.insert(track.clone(), progress);
+        }
+        Ok((shared, tracks))
     }
 
     pub fn deck(&self, clock: Clock) -> Result<Deck> {
@@ -225,15 +271,24 @@ impl Learning {
                 }
             })
             .collect();
-        let tracks = track_names(&packs, &shorts)
+        let practised = practised(&packs);
+        let apart = Apart::new(&packs, &practised);
+        let (progress, mut apart_progress) = self.progress(clock, &apart)?;
+        let tracks = track_names(&packs, &practised)
             .into_iter()
-            .map(|(id, (name, icon))| DeckTrack { id, name, icon })
+            .map(|(id, (name, icon))| DeckTrack {
+                kept_apart: apart.tracks.contains(&id),
+                progress: apart_progress.remove(&id),
+                id,
+                name,
+                icon,
+            })
             .collect();
         let keys: std::collections::BTreeSet<&str> =
             shorts.iter().map(|s| s.key.as_str()).collect();
         Ok(Deck {
             limits: self.limits(),
-            progress: self.progress(clock)?,
+            progress,
             day_start: clock.day_start(),
             week_start: clock.week_start(),
             tracks,
@@ -494,21 +549,40 @@ impl Learning {
         let packs = self.packs()?;
         let items = practised(&packs);
         let refs = item_refs(&items);
-        let progress = self.progress(clock)?;
+        let apart = Apart::new(&packs, &items);
+        let (progress, apart_progress) = self.progress(clock, &apart)?;
         let limits = self.limits();
         let focus = self.focus(&packs, clock.now)?;
         let retirements = self.store.retirements()?;
-        let plans = workshop_learning::plan(
-            &refs,
-            &self.store.schedules()?,
-            &self.store.flags()?,
-            &retirements,
-            progress,
-            limits,
-            &focus,
-            self.store.scheduler(),
-            clock.now,
-        );
+        let schedules = self.store.schedules()?;
+        let flags = self.store.flags()?;
+        let plan = |refs: &[ItemRef<'_>], progress: Progress| {
+            workshop_learning::plan(
+                refs,
+                &schedules,
+                &flags,
+                &retirements,
+                progress,
+                limits,
+                &focus,
+                self.store.scheduler(),
+                clock.now,
+            )
+        };
+        // Everything but the tracks kept apart shares the day's limits; each track kept apart
+        // has limits of its own, the same size, counting only what's done in it.
+        let (kept, shared): (Vec<ItemRef<'_>>, Vec<ItemRef<'_>>) = refs
+            .iter()
+            .partition(|item| apart.tracks.contains(item.track));
+        let mut plans = plan(&shared, progress);
+        for (track, progress) in &apart_progress {
+            let in_track: Vec<ItemRef<'_>> = kept
+                .iter()
+                .filter(|item| item.track == track)
+                .copied()
+                .collect();
+            plans.extend(plan(&in_track, *progress));
+        }
         let names = track_names(&packs, &items);
         let skill_names = packs
             .iter()
@@ -526,18 +600,20 @@ impl Learning {
             plans,
             retirements,
             names,
+            kept_apart: apart.tracks,
             packs,
         })
     }
 
-    /// The tracks of short items, from a plan, and of design prompts, with the design sessions
-    /// in progress. The Coding track, whose problems are worked on over several steps, is the
-    /// coding module's.
+    /// The tracks of short items, from a plan, with any coding problems in them and the
+    /// problems in progress, and of design prompts, with the design sessions in progress. The
+    /// Coding track, whose problems are worked on over several steps, is the coding module's.
     pub fn tracks(
         &self,
         planned: &Planned,
         clock: Clock,
         designs: &BTreeMap<String, workshop_sessions::design::Session>,
+        problems: &BTreeMap<String, crate::coding::Session>,
     ) -> Tracks {
         let tracks = planned
             .names
@@ -548,11 +624,20 @@ impl Learning {
                 if *id == TrackId::SystemDesign {
                     return design_track(plan, planned, designs);
                 }
+                // Short items first, between steps as pressing as each other, as they're quicker.
+                let next = [
+                    next_step(id, plan, planned),
+                    crate::coding::problem_step(planned, problems, id),
+                ]
+                .into_iter()
+                .flatten()
+                .min_by_key(|step| step.priority);
                 Track {
                     summary: summary(plan, clock),
                     destination: Destination::Practice { track: id.clone() },
-                    next: next_step(id, plan, planned),
+                    next,
                     long: None,
+                    in_continue: !planned.kept_apart.contains(id),
                     id: id.clone(),
                     name: name.clone(),
                     icon: *icon,
@@ -583,6 +668,8 @@ pub struct Planned {
     pub retirements: BTreeMap<String, Retirement>,
     /// Each track with items in it, and its name and icon.
     pub names: BTreeMap<TrackId, (String, TrackIcon)>,
+    /// The packs' tracks kept out of Continue, whose items are only offered in them.
+    pub kept_apart: BTreeSet<TrackId>,
     pub week: Week,
     pub problems: Vec<String>,
 }
@@ -635,26 +722,32 @@ fn track_names(packs: &[Pack], shorts: &[Short<'_>]) -> BTreeMap<TrackId, (Strin
         .iter()
         .map(|short| {
             let id = short.item.track.clone();
-            let label = match &id {
-                TrackId::Pack(pack_track) => packs
-                    .iter()
-                    .flat_map(|pack| &pack.manifest.tracks)
-                    .find(|track| track.id == *pack_track)
-                    .map(|track| (track.name.clone(), track.icon))
-                    .expect("an item's pack track is checked to be in its pack"),
-                built_in => (
-                    built_in
-                        .built_in_name()
-                        .expect("every other track is built in")
-                        .to_owned(),
-                    built_in
-                        .built_in_icon()
-                        .expect("every built-in track has an icon"),
-                ),
-            };
+            let label = track_label(packs, &id);
             (id, label)
         })
         .collect()
+}
+
+/// A track's name and icon: a built-in track's own, or as the first of `packs` with the track
+/// names it.
+pub fn track_label(packs: &[Pack], id: &TrackId) -> (String, TrackIcon) {
+    match id {
+        TrackId::Pack(pack_track) => packs
+            .iter()
+            .flat_map(|pack| &pack.manifest.tracks)
+            .find(|track| track.id == *pack_track)
+            .map(|track| (track.name.clone(), track.icon))
+            .expect("an item's pack track is checked to be in its pack"),
+        built_in => (
+            built_in
+                .built_in_name()
+                .expect("every other track is built in")
+                .to_owned(),
+            built_in
+                .built_in_icon()
+                .expect("every built-in track has an icon"),
+        ),
+    }
 }
 
 fn problems(packs: &[Pack]) -> Vec<String> {
@@ -820,6 +913,11 @@ impl Planned {
             })
     }
 
+    /// Whether an item is in a track kept out of Continue, so it's only offered in its track.
+    pub fn is_kept_apart(&self, item: &Item) -> bool {
+        self.kept_apart.contains(&item.track)
+    }
+
     /// Whether an item is retired, so it's never offered.
     pub fn is_retired(&self, key: &str) -> bool {
         self.retirements.get(key).is_some_and(|r| r.is_retired())
@@ -837,6 +935,14 @@ impl Planned {
 /// The step a track suggests, given its plan: due reviews, then something new, sooner if it's
 /// in a skill recent mistakes point to.
 fn next_step(id: &TrackId, plan: &TrackPlan, planned: &Planned) -> Option<Step<Destination>> {
+    // Only the short items, practised a few at a time; the track's problems are the coding
+    // module's.
+    let short = |key: &&String| planned.item(key).is_some_and(|item| item.kind.is_short());
+    let plan = &TrackPlan {
+        due: plan.due.iter().filter(short).cloned().collect(),
+        new: plan.new.iter().filter(short).cloned().collect(),
+        ..TrackPlan::default()
+    };
     let week = planned.week;
     let destination = Destination::Practice { track: id.clone() };
     if !plan.due.is_empty() {
@@ -923,6 +1029,209 @@ mod tests {
         Learning::open(&config, dir).unwrap()
     }
 
+    /// A pack with a track kept out of Continue, which its items are in unless they say
+    /// otherwise: three cards, code to read and a coding problem. Another card is in Review.
+    pub(crate) fn kept_apart_pack(dir: &Path) -> std::path::PathBuf {
+        let pack = dir.join("pack");
+        let files: &[(&str, &str)] = &[
+            (
+                "pack.toml",
+                "id = \"apart\"\nname = \"Apart\"\ntrack = \"drill\"\n\n[[skills]]\nid = \"sums\"\nname = \"Sums\"\n\n[[tracks]]\nid = \"drill\"\nname = \"Drill\"\ncontinue = false\n",
+            ),
+            (
+                "items/one.md",
+                "+++\nkind = \"card\"\nskills = [\"sums\"]\n+++\nOne?\n## Answer\n1\n",
+            ),
+            (
+                "items/two.md",
+                "+++\nkind = \"card\"\nskills = [\"sums\"]\n+++\nTwo?\n## Answer\n2\n",
+            ),
+            (
+                "items/three.md",
+                "+++\nkind = \"card\"\nskills = [\"sums\"]\n+++\nThree?\n## Answer\n3\n",
+            ),
+            (
+                "items/shared.md",
+                "+++\nkind = \"card\"\nskills = [\"sums\"]\ntrack = \"review\"\n+++\nShared?\n## Answer\nYes\n",
+            ),
+            (
+                "items/read.md",
+                "+++\nkind = \"reading\"\nskills = [\"sums\"]\nprints = \"3\"\n+++\nWhat does this print?\n\n```python\nprint(1 + 2)\n```\n\n## Explanation\n\nAddition.\n",
+            ),
+            (
+                "items/add/item.md",
+                "+++\nkind = \"coding\"\ntitle = \"Add them up\"\nskills = [\"sums\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"reference.py\"\ninputs = \"inputs.py\"\ntests = \"tests.toml\"\n+++\nPrint the sum of the numbers.\n\n## Approach\n\nAdd them up.\n",
+            ),
+            (
+                "items/add/reference.py",
+                "print(sum(map(int, input().split())))\n",
+            ),
+            (
+                "items/add/starter.py",
+                "numbers = list(map(int, input().split()))\n",
+            ),
+            (
+                "items/add/inputs.py",
+                "import random, sys\nrng = random.Random(int(sys.argv[1]))\nprint(*[rng.randint(-9, 9) for _ in range(int(sys.argv[2]))])\n",
+            ),
+            (
+                "items/add/tests.toml",
+                "[[example]]\ninput = \"1 2\"\noutput = \"3\"\n[[test]]\ninput = \"4\"\noutput = \"4\"\n",
+            ),
+        ];
+        for (path, text) in files {
+            let path = pack.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        pack
+    }
+
+    #[test]
+    fn keeps_a_track_to_itself_with_limits_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = LearningConfig {
+            packs: vec![kept_apart_pack(dir.path())],
+            sample_pack: false,
+            daily_reviews: 1,
+            daily_new: 2,
+            weekly_minutes: 1,
+            desired_retention: 0.9,
+        };
+        let learning = Learning::open(&config, dir.path()).unwrap();
+        let drill = TrackId::Pack("drill".parse().unwrap());
+        let planned = learning.planned(clock(NOW)).unwrap();
+        assert!(planned.problems.is_empty(), "{:?}", planned.problems);
+        assert_eq!(planned.kept_apart, [drill.clone()].into());
+        // Its own limit of new items, the same size as the rest's.
+        assert_eq!(planned.plans[&drill].new, ["apart/add", "apart/one"]);
+        assert_eq!(
+            planned.plans[&drill].new_waiting,
+            ["apart/read", "apart/three", "apart/two"]
+        );
+        assert_eq!(planned.plans[&TrackId::Review].new, ["apart/shared"]);
+
+        // A long while on two of its cards: neither the week's minutes nor the rest's limit of
+        // new items changes, but the track's own does.
+        let mut long = attempt("1", "apart/one", NOW, Rating::Again);
+        long.duration_ms = 4 * 60_000;
+        learning
+            .record(&[long, attempt("2", "apart/two", NOW, Rating::Again)], NOW)
+            .unwrap();
+        let later = clock(NOW + 20 * 60_000);
+        let planned = learning.planned(later).unwrap();
+        assert_eq!(planned.week.minutes, 0);
+        assert_eq!(planned.plans[&TrackId::Review].new, ["apart/shared"]);
+        assert!(planned.plans[&drill].new.is_empty());
+        // Due again soon, as they were forgotten, and reviewed within the track's own limit.
+        let next_day = clock(NOW + workshop_learning::schedule::DAY_MS);
+        learning
+            .record(&[attempt("3", "apart/shared", NOW, Rating::Again)], NOW)
+            .unwrap();
+        let planned = learning.planned(next_day).unwrap();
+        assert_eq!(planned.plans[&drill].due.len(), 1);
+        assert_eq!(planned.plans[&drill].waiting, 1);
+        assert_eq!(planned.plans[&TrackId::Review].due, ["apart/shared"]);
+        assert_eq!(planned.week.minutes, 0);
+
+        // Offered when it's opened, but never by Continue, nor as a timed round.
+        let tracks = learning.tracks(&planned, next_day, &BTreeMap::new(), &BTreeMap::new());
+        let track = tracks.tracks.iter().find(|t| t.id == drill).unwrap();
+        assert!(!track.in_continue);
+        assert_eq!(track.next.as_ref().unwrap().priority, Priority::Due);
+        let review = tracks
+            .tracks
+            .iter()
+            .find(|t| t.id == TrackId::Review)
+            .unwrap();
+        assert!(review.in_continue);
+        let home = workshop_tracks::Home::new(
+            tracks.tracks.into_iter().map(Some),
+            workshop_tracks::Time::AWhile,
+            None,
+        )
+        .unwrap();
+        assert_eq!(home.next.unwrap().track, TrackId::Review);
+        assert_eq!(crate::rounds::items(&planned).count(), 0);
+
+        // The app is told, with what's been done in it, to plan as the server does offline.
+        let deck = learning.deck(next_day).unwrap();
+        let in_deck = deck.tracks.iter().find(|t| t.id == drill).unwrap();
+        assert!(in_deck.kept_apart);
+        let progress = in_deck.progress.unwrap();
+        assert_eq!(progress.reviews_today, 0);
+        assert_eq!(progress.minutes_this_week, 4);
+        assert_eq!(deck.progress.minutes_this_week, 0);
+        assert!(
+            deck.tracks
+                .iter()
+                .filter(|t| t.id != drill)
+                .all(|t| !t.kept_apart && t.progress.is_none())
+        );
+    }
+
+    #[test]
+    fn offers_a_tracks_coding_problems_from_the_track() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = LearningConfig {
+            packs: vec![kept_apart_pack(dir.path())],
+            sample_pack: false,
+            daily_reviews: 10,
+            daily_new: 10,
+            weekly_minutes: 60,
+            desired_retention: 0.9,
+        };
+        let learning = Learning::open(&config, dir.path()).unwrap();
+        let drill = TrackId::Pack("drill".parse().unwrap());
+        let problems = crate::coding::Problems::new(dir.path());
+        let packs = crate::packs::load(&config).unwrap();
+        let found = crate::coding::find(&packs, "apart", "add").unwrap();
+        // With nothing begun, the short items come first.
+        let planned = learning.planned(clock(NOW)).unwrap();
+        let tracks = learning.tracks(&planned, clock(NOW), &BTreeMap::new(), &BTreeMap::new());
+        let track = tracks.tracks.iter().find(|t| t.id == drill).unwrap();
+        assert_eq!(
+            track.next.as_ref().unwrap().destination,
+            Destination::Practice {
+                track: drill.clone()
+            }
+        );
+        // A problem started is carried on with from the track, and isn't the Coding track's.
+        problems.start(&found, &[], false, None, NOW).unwrap();
+        let sessions = problems.sessions().unwrap();
+        let tracks = learning.tracks(&planned, clock(NOW), &BTreeMap::new(), &sessions);
+        let next = tracks
+            .tracks
+            .iter()
+            .find(|t| t.id == drill)
+            .unwrap()
+            .next
+            .clone()
+            .unwrap();
+        assert_eq!(next.priority, Priority::Unfinished);
+        assert_eq!(
+            next.destination,
+            Destination::Coding {
+                item: Some("apart/add".to_owned())
+            }
+        );
+        assert_eq!(crate::coding::track(&planned, &sessions), None);
+        let listed = crate::coding::overview(&planned, &sessions, &BTreeMap::new(), &drill);
+        let keys: Vec<&str> = listed.items.iter().map(|item| item.key.as_str()).collect();
+        assert_eq!(keys, ["apart/add", "apart/read"]);
+        let config = crate::config::Config::parse("").unwrap();
+        let opened = problems
+            .open(
+                &config,
+                &found,
+                problems.session(&found.key()).unwrap().unwrap(),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(opened.track.id, drill);
+        assert_eq!(opened.track.name, "Drill");
+    }
+
     fn clock(now: i64) -> Clock {
         Clock {
             now,
@@ -932,7 +1241,7 @@ mod tests {
 
     fn tracks_at(learning: &Learning, clock: Clock) -> Tracks {
         let planned = learning.planned(clock).unwrap();
-        learning.tracks(&planned, clock, &BTreeMap::new())
+        learning.tracks(&planned, clock, &BTreeMap::new(), &BTreeMap::new())
     }
 
     fn attempt(id: &str, item: &str, at: i64, rating: Rating) -> Attempt {
@@ -954,12 +1263,14 @@ mod tests {
         // Coding problems aren't short, so aren't in it; code to read is.
         assert_eq!(deck.items.len(), 51);
         assert!(deck.problems.is_empty());
+        // Every track with something to practise, so a track of problems alone has its name.
         let names: Vec<&str> = deck.tracks.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
             names,
             [
                 "Coding",
                 "Probability",
+                "System design",
                 "Mental maths",
                 "Review",
                 "Estimation"
@@ -1145,7 +1456,7 @@ mod tests {
         let probability = &planned.plans[&TrackId::Probability];
         let first = planned.item(&probability.new[0]).unwrap();
         assert!(first.skills.contains(&"probability.conditional".to_owned()));
-        let tracks = learning.tracks(&planned, clock(NOW + 1), &BTreeMap::new());
+        let tracks = learning.tracks(&planned, clock(NOW + 1), &BTreeMap::new(), &BTreeMap::new());
         let next = tracks
             .tracks
             .iter()

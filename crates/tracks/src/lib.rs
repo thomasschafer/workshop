@@ -303,6 +303,9 @@ pub struct Track<D> {
     /// The long item this track suggests for when the learner has a while, such as a design
     /// session or a timed round, if it has one.
     pub long: Option<Step<D>>,
+    /// Whether Continue can take its steps. A pack's track can keep to itself, so it's only
+    /// worked on when the learner opens it.
+    pub in_continue: bool,
 }
 
 impl<D> Track<D> {
@@ -323,6 +326,7 @@ impl<D> Track<D> {
             destination,
             next,
             long: None,
+            in_continue: true,
         }
     }
 
@@ -363,8 +367,8 @@ pub struct Home<D> {
 
 impl<D: Clone> Home<D> {
     /// The home screen for these tracks, where `None` is a track with nothing in it yet, which
-    /// isn't shown. Continue takes the most pressing step any track suggests; between steps as
-    /// pressing as each other, the track listed first.
+    /// isn't shown. Continue takes the most pressing step any track in Continue suggests;
+    /// between steps as pressing as each other, the track listed first.
     ///
     /// Long items are only offered when the learner has a while, and then they come first,
     /// as that's what the learner asked for. One that's unfinished comes first of all. Otherwise
@@ -388,9 +392,9 @@ impl<D: Clone> Home<D> {
             step: step.clone(),
             long,
         };
+        let in_continue = || tracks.iter().filter(|track| track.in_continue);
         let usual = || {
-            tracks
-                .iter()
+            in_continue()
                 .filter_map(|track| track.next.as_ref().map(|step| (track, step)))
                 .min_by_key(|(_, step)| step.priority)
                 .map(|(track, step)| next(track, step, false))
@@ -398,8 +402,7 @@ impl<D: Clone> Home<D> {
         let next = match time {
             Time::Short => usual(),
             Time::AWhile => {
-                let long: Vec<(&Track<D>, &Step<D>)> = tracks
-                    .iter()
+                let long: Vec<(&Track<D>, &Step<D>)> = in_continue()
                     .filter_map(|track| track.long.as_ref().map(|step| (track, step)))
                     .collect();
                 let unfinished = long
@@ -442,6 +445,7 @@ mod tests {
             destination: "the track",
             next,
             long: None,
+            in_continue: true,
         })
     }
 
@@ -567,6 +571,46 @@ mod tests {
         let next = home.next.unwrap();
         assert_eq!(next.track, TrackId::Review);
         assert_eq!(next.step.title, "cards");
+    }
+
+    #[test]
+    fn never_continues_in_a_track_kept_to_itself() {
+        let drill = TrackId::Pack("drill".parse().unwrap());
+        let apart = |track: Option<Track<&'static str>>| {
+            track.map(|track| Track {
+                in_continue: false,
+                ..track
+            })
+        };
+        let tracks = |time| {
+            Home::new(
+                [
+                    track(TrackId::Coding, Some(step("new problem", Priority::New))),
+                    apart(with_long(
+                        track(drill.clone(), Some(step("drill cards", Priority::Due))),
+                        step("drill round", Priority::Unfinished),
+                    )),
+                ],
+                time,
+                None,
+            )
+            .unwrap()
+        };
+        let home = tracks(Time::Short);
+        assert_eq!(home.next.unwrap().step.title, "new problem");
+        // Still on the home screen, to open.
+        assert!(home.tracks.iter().any(|track| track.id == drill));
+        assert_eq!(tracks(Time::AWhile).next.unwrap().step.title, "new problem");
+        let alone = Home::new(
+            [apart(track(
+                drill,
+                Some(step("drill cards", Priority::Due)),
+            ))],
+            Time::Short,
+            None,
+        )
+        .unwrap();
+        assert_eq!(alone.next, None);
     }
 
     #[test]

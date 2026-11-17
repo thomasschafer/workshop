@@ -500,29 +500,60 @@ impl Store {
 
     /// What was done from `since`, in milliseconds since 1970.
     pub fn activity(&self, since: i64) -> Result<Activity> {
+        self.activity_of(since, |_| true)
+    }
+
+    /// What was done from `since` on the items, by key, that `counts` says count, such as
+    /// those of one track.
+    pub fn activity_of(&self, since: i64, counts: impl Fn(&str) -> bool) -> Result<Activity> {
         let connection = self.connection();
-        let (attempts, reviews, new, ms) = connection.query_row(
-            "SELECT COUNT(*),
+        let mut attempts = connection.prepare(
+            "SELECT a.item,
+                    COUNT(*),
                     COALESCE(SUM(EXISTS (
                         SELECT 1 FROM attempts b
                         WHERE b.item = a.item AND b.answered_at < ?1
                     )), 0),
-                    COUNT(DISTINCT CASE WHEN NOT EXISTS (
+                    NOT EXISTS (
                         SELECT 1 FROM attempts b
                         WHERE b.item = a.item AND b.answered_at < ?1
-                    ) THEN a.item END),
+                    ),
                     COALESCE(SUM(MIN(a.duration_ms, ?2)), 0)
-                        + (SELECT COALESCE(SUM(ms), 0) FROM time_spent WHERE at >= ?1)
-             FROM attempts a WHERE a.answered_at >= ?1",
-            params![since, MAX_ATTEMPT_MS],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+             FROM attempts a WHERE a.answered_at >= ?1
+             GROUP BY a.item",
         )?;
-        Ok(Activity {
-            attempts,
-            reviews,
-            new,
-            ms,
-        })
+        let mut activity = Activity::default();
+        let rows = attempts.query_map(params![since, MAX_ATTEMPT_MS], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (item, count, reviews, new, ms) = row?;
+            if counts(&item) {
+                activity.attempts += count;
+                activity.reviews += reviews;
+                activity.new += u32::from(new);
+                activity.ms += ms;
+            }
+        }
+        let mut times = connection.prepare(
+            "SELECT item, COALESCE(SUM(ms), 0) FROM time_spent WHERE at >= ? GROUP BY item",
+        )?;
+        let rows = times.query_map(params![since], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (item, ms) = row?;
+            if counts(&item) {
+                activity.ms += ms;
+            }
+        }
+        Ok(activity)
     }
 
     /// How many attempts there have been at each item.
@@ -900,6 +931,17 @@ mod tests {
         let later = store.activity(NOW - 1000).unwrap();
         assert_eq!(later.attempts, 3);
         assert_eq!(later.ms, 2 * 20_000 + 2 * MAX_ATTEMPT_MS + 90_000);
+
+        // Or only what was done on some items.
+        let islands = store
+            .activity_of(NOW - 1000, |item| item == "sample/islands")
+            .unwrap();
+        assert_eq!(islands.attempts, 0);
+        assert_eq!(islands.ms, MAX_ATTEMPT_MS + 90_000);
+        let others = store
+            .activity_of(NOW - 1000, |item| item != "sample/islands")
+            .unwrap();
+        assert_eq!(others, today);
     }
 
     #[test]

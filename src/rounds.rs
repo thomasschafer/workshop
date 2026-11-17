@@ -17,19 +17,24 @@ use crate::tracks::Destination;
 /// The tracks rounds are made from, in the order their items are suggested.
 const FROM: [TrackId; 3] = [TrackId::Coding, TrackId::Probability, TrackId::SystemDesign];
 
-/// Every item a round can be made of, with its key.
+/// Every item a round can be made of, with its key. Those in a track kept out of Continue are
+/// only offered in their track, so they aren't.
 pub fn items(planned: &Planned) -> impl Iterator<Item = (String, &Item)> {
     planned.packs.iter().flat_map(|pack| {
         pack.items
             .iter()
-            .filter(|item| crate::examiner::can_round(item))
+            .filter(|item| crate::examiner::can_round(item) && !planned.is_kept_apart(item))
             .map(move |item| (format!("{}/{}", pack.manifest.id, item.id), item))
     })
 }
 
 /// What a round's item would be, and why, if anything can be one.
 pub fn suggest(planned: &Planned) -> Option<(String, Priority, String)> {
-    let roundable = |key: &String| planned.item(key).is_some_and(crate::examiner::can_round);
+    let roundable = |key: &String| {
+        planned
+            .item(key)
+            .is_some_and(|item| crate::examiner::can_round(item) && !planned.is_kept_apart(item))
+    };
     let plans: Vec<&TrackPlan> = FROM.iter().filter_map(|id| planned.plans.get(id)).collect();
     if let Some(key) = plans.iter().flat_map(|p| &p.due).find(|k| roundable(k)) {
         return Some((
