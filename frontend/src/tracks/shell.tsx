@@ -127,6 +127,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
           track={route.track}
           serverDictation={boot.server_dictation}
           onHome={goHome}
+          onOpenProblem={(item) => void go({ kind: "coding", item })}
         />
       );
     case "coding":
@@ -136,6 +137,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
           item={route.item}
           onHome={goHome}
           onOpen={(item) => void go({ kind: "coding", item })}
+          onTrack={(track) => void go({ kind: "practice", track })}
         />
       );
     case "advent-of-code":

@@ -107,19 +107,49 @@ export interface Progress {
 }
 
 /**
- * Today's and this week's progress: the deck's, if it was made today and this week, and what's
- * been done since.
+ * The track whose daily limits a track's items count against: its own, if it's kept apart, or
+ * null for the limits every other track shares, as on the server.
  */
-export function progress(deck: Deck, attempts: Attempt[], now: number, offset: number): Progress {
+export function limitsOf(deck: Deck, track: TrackId): TrackId | null {
+  return deck.tracks.find((t) => t.id === track)?.kept_apart === true ? track : null;
+}
+
+/** The limits an item counts against, by its key, as `limitsOf` says. */
+function limitsOfItem(deck: Deck, key: string): TrackId | null {
+  const item = deck.items.find((i) => i.key === key);
+  return item ? limitsOf(deck, item.track) : null;
+}
+
+/**
+ * Today's and this week's progress: the deck's, if it was made today and this week, and what's
+ * been done since. It's what counts towards the limits every track shares and the week's
+ * target, or with `track`, towards that track's own limits, if it's kept apart.
+ */
+export function progress(
+  deck: Deck,
+  attempts: Attempt[],
+  now: number,
+  offset: number,
+  track: TrackId | null = null,
+): Progress {
+  const limits = track === null ? null : limitsOf(deck, track);
+  const known =
+    limits === null
+      ? deck.progress
+      : (deck.tracks.find((t) => t.id === limits)?.progress ?? {
+          reviews_today: 0,
+          new_today: 0,
+          minutes_this_week: 0,
+        });
   const today = dayStart(now, offset);
   const week = weekStart(now, offset);
   const sameDay = deck.day_start === today;
-  let reviewsToday = sameDay ? deck.progress.reviews_today : 0;
-  let msThisWeek = deck.week_start === week ? deck.progress.minutes_this_week * 60_000 : 0;
+  let reviewsToday = sameDay ? known.reviews_today : 0;
+  let msThisWeek = deck.week_start === week ? known.minutes_this_week * 60_000 : 0;
   // Items first attempted today since the deck came; those first attempted before it came are
   // in the deck's count, as they have a schedule in it.
   const started = new Set<string>();
-  for (const attempt of attempts) {
+  for (const attempt of attempts.filter((a) => limitsOfItem(deck, a.item) === limits)) {
     if (attempt.answered_at >= week) msThisWeek += Math.min(attempt.duration_ms, MAX_ATTEMPT_MS);
     if (attempt.answered_at < today) continue;
     const scheduled = deck.schedules[attempt.item];
@@ -129,7 +159,7 @@ export function progress(deck: Deck, attempts: Attempt[], now: number, offset: n
     if (seenBefore) reviewsToday++;
     else if (!scheduled) started.add(attempt.item);
   }
-  const newToday = (sameDay ? (deck.progress.new_today ?? 0) : 0) + started.size;
+  const newToday = (sameDay ? (known.new_today ?? 0) : 0) + started.size;
   return { reviewsToday, newToday, minutesThisWeek: Math.floor(msThisWeek / 60_000) };
 }
 
@@ -163,12 +193,13 @@ export function queue(
   // Left out, as flagged items are: retired ones are never offered.
   const offered = (item: DeckItem) =>
     !wrong.has(item.key) && standing[item.key]?.state !== "retired";
-  const { reviewsToday, newToday } = progress(deck, attempts, now, offset);
+  const { reviewsToday, newToday } = progress(deck, attempts, now, offset, track);
   const allowed = Math.max(0, deck.limits.daily_reviews - reviewsToday);
   // The daily limit is shared across tracks, as on the server, so it's spent on the most overdue
-  // items anywhere.
+  // items anywhere, but in tracks kept apart, which each have a limit of their own.
+  const limits = limitsOf(deck, track);
   const dueEverywhere = deck.items
-    .filter(offered)
+    .filter((item) => offered(item) && limitsOf(deck, item.track) === limits)
     .flatMap((item) => {
       const schedule = scheduled[item.key];
       if (!schedule) return [];
@@ -177,7 +208,8 @@ export function queue(
     })
     .sort((a, b) => a.when - b.when || a.item.key.localeCompare(b.item.key));
   const within = dueEverywhere.slice(0, allowed);
-  // Also shared across tracks, so each offers up to what's left of it, as on the server.
+  // Also shared across tracks but those kept apart, so each offers up to what's left of it, as
+  // on the server.
   const allowedNew = Math.max(0, (deck.limits.daily_new ?? Number.POSITIVE_INFINITY) - newToday);
   const fresh = deck.items
     .filter((item) => item.track === track && offered(item) && !scheduled[item.key])

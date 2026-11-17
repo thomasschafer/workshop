@@ -268,8 +268,15 @@ export function createLearningHome(): void {
   });
 }
 
-/** A home for the Coding track, with the sample pack's problems and code to read. */
+/** The pack of the Coding track's home that keeps its own track, Drills, out of Continue. */
+export const DRILLS_PACK = "drills";
+
+/**
+ * A home for the Coding track, with the sample pack's problems and code to read, and a pack
+ * whose items are all in a track kept out of Continue: cards, code to read and a problem.
+ */
 export function createCodingHome(): void {
+  const drills = join(CODING_HOME, DRILLS_PACK);
   writeHome({
     home: CODING_HOME,
     port: CODING_PORT,
@@ -279,7 +286,49 @@ export function createCodingHome(): void {
     input: "a\n",
     stars: {},
     model: "fake",
+    extra: `[learning]\npacks = [${JSON.stringify(drills)}]\nsample_pack = true\n`,
   });
+  const files: Record<string, string> = {
+    "pack.toml": `id = "drills"
+name = "Drills"
+track = "drills"
+
+[[skills]]
+id = "drills.sums"
+name = "Drilled sums"
+
+[[tracks]]
+id = "drills"
+name = "Drills"
+summary = "Practised only when opened"
+icon = "puzzle"
+continue = false
+
+[[goals]]
+id = "drilled-sums"
+name = "Drilled sums"
+skills = ["drills.sums"]
+`,
+    "items/cards/seven-eights.md":
+      '+++\nkind = "card"\nskills = ["drills.sums"]\n+++\nWhat are seven eights?\n\n## Answer\n\n56\n',
+    "items/cards/nine-sixes.md":
+      '+++\nkind = "card"\nskills = ["drills.sums"]\n+++\nWhat are nine sixes?\n\n## Answer\n\n54\n',
+    "items/reading/doubled.md":
+      '+++\nkind = "reading"\nskills = ["drills.sums"]\nprints = "14"\n+++\nWhat does this print?\n\n```python\nprint(sum(x * 2 for x in [3, 4]))\n```\n\n## Explanation\n\nEach doubled, then added.\n',
+    "items/add-them-up/item.md":
+      '+++\nkind = "coding"\ntitle = "Add them up"\nskills = ["drills.sums"]\nlanguages = ["python"]\nreference = ["reference.py"]\nstarter = ["starter.py"]\nbrute_force = "reference.py"\ninputs = "inputs.py"\ntests = "tests.toml"\n+++\nPrint the sum of the numbers on the line.\n\n## Approach\n\nAdd them up.\n',
+    "items/add-them-up/reference.py": "print(sum(map(int, input().split())))\n",
+    "items/add-them-up/starter.py": "numbers = list(map(int, input().split()))\n",
+    "items/add-them-up/inputs.py":
+      "import random, sys\nrng = random.Random(int(sys.argv[1]))\nprint(*[rng.randint(-9, 9) for _ in range(int(sys.argv[2]))])\n",
+    "items/add-them-up/tests.toml":
+      '[[example]]\ninput = "1 2"\noutput = "3"\n[[test]]\ninput = "4"\noutput = "4"\n',
+  };
+  for (const [path, text] of Object.entries(files)) {
+    const file = join(drills, path);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, text);
+  }
 }
 
 /**

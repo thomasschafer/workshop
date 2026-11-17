@@ -151,6 +151,63 @@ describe("queue", () => {
   });
 });
 
+describe("a track kept apart", () => {
+  const drill = "pack:drill" as const;
+  const kept = (changes: Partial<Deck> = {}) =>
+    deck(
+      [card("p/r1"), card("p/r2"), card("p/d1", drill), card("p/d2", drill), card("p/d3", drill)],
+      {
+        limits: { daily_reviews: 1, daily_new: 2, weekly_minutes: 60, retention: 0.9 },
+        tracks: [
+          { id: "review", name: "Review" },
+          {
+            id: drill,
+            name: "Drill",
+            kept_apart: true,
+            progress: { reviews_today: 0, new_today: 1, minutes_this_week: 7 },
+          },
+        ],
+        ...changes,
+      },
+    );
+
+  it("has limits of its own, which the rest's don't touch, as on the server", () => {
+    const d = kept({ progress: { reviews_today: 0, new_today: 2, minutes_this_week: 30 } });
+    // The rest have used their new items today; the track has one of its own left.
+    expect(queue(d, "review", [], [], [], LATE_MONDAY, 0).fresh).toHaveLength(0);
+    const apart = queue(d, drill, [], [], [], LATE_MONDAY, 0);
+    expect(apart.fresh.map((i) => i.key)).toEqual(["p/d1"]);
+    expect(apart.freshWaiting).toBe(2);
+    // What's done in it counts towards its own limits and time only.
+    const done = [attempt("p/d1", LATE_MONDAY - 1000)];
+    expect(queue(d, drill, done, [], [], LATE_MONDAY, 0).fresh).toHaveLength(0);
+    expect(progress(d, done, LATE_MONDAY, 0)).toEqual({
+      reviewsToday: 0,
+      newToday: 2,
+      minutesThisWeek: 30,
+    });
+    expect(progress(d, done, LATE_MONDAY, 0, drill)).toEqual({
+      reviewsToday: 0,
+      newToday: 2,
+      minutesThisWeek: 7,
+    });
+  });
+
+  it("spends its own limit of reviews on its own due items", () => {
+    const seen = review(null, LATE_MONDAY - 30 * DAY_MS, "good");
+    const d = kept({
+      schedules: { "p/r1": seen, "p/r2": seen, "p/d1": seen, "p/d2": seen },
+    });
+    // One review a day each: the rest's goes on one of theirs, and the track's on one of its own.
+    const rest = queue(d, "review", [], [], [], LATE_MONDAY, 0);
+    expect(rest.due).toHaveLength(1);
+    expect(rest.waiting).toBe(1);
+    const apart = queue(d, drill, [], [], [], LATE_MONDAY, 0);
+    expect(apart.due).toHaveLength(1);
+    expect(apart.waiting).toBe(1);
+  });
+});
+
 describe("progress", () => {
   it("adds what's been done to the deck's, unless the deck is from another day", () => {
     const d = deck([card("p/a"), card("p/b")], {

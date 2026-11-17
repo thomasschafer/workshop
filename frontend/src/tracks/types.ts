@@ -70,6 +70,8 @@ export interface Track {
   next: Step | null;
   /** A long item, for when the learner has a while. */
   long: Step | null;
+  /** Whether Continue can take its steps; a pack's track can keep to itself. */
+  in_continue: boolean;
 }
 
 export interface Home {

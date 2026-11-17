@@ -17,6 +17,7 @@ import type { Rating } from "../learning/types";
 import { HomeButton } from "../progress/page";
 import { LatestSaver, type VersionedSaver } from "../saver";
 import { TrackIcon } from "../tracks/icons";
+import type { TrackId } from "../tracks/types";
 import { DictateButton } from "../views/dictate";
 import { CodeKeyboard, KeyboardToggle } from "../views/keyboard";
 import { StepNav } from "../views/steps";
@@ -39,6 +40,7 @@ import type {
   Finished as FinishedReply,
   Graded,
   Opened,
+  OpenedTrack,
   Session,
   StepName,
   Submitted,
@@ -84,15 +86,19 @@ export function ProblemView({
   boot,
   itemKey,
   onHome,
-  onList,
+  onTrack,
 }: {
   boot: Bootstrap;
   itemKey: string;
   onHome: () => void;
-  onList: () => void;
+  /** Goes back to a track: the Coding track's list, or the track the problem is in. */
+  onTrack: (track: TrackId) => void;
 }) {
   const online = useConnection();
   const [opened, setOpened] = useState<Opened | null>(null);
+  // Until it's open, the way back is to the Coding track, where most problems are.
+  const track = opened?.track ?? CODING_TRACK;
+  const onList = () => onTrack(track.id);
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -252,7 +258,7 @@ export function ProblemView({
     <header class="top">
       <span class="header-start">
         <HomeButton onHome={onHome} />
-        <CodingLink onList={onList} />
+        <CodingLink track={track} onList={onList} />
       </span>
       <span class="header-actions">
         {online ? null : (
@@ -318,11 +324,12 @@ export function ProblemView({
 
   const done = finished !== null || twistMarked !== null;
   const body = twistMarked ? (
-    <TwistResult result={twistMarked} onHome={onHome} onList={onList} />
+    <TwistResult result={twistMarked} track={track} onHome={onHome} onList={onList} />
   ) : finished ? (
     <Finished
       finished={finished}
       mode={session.mode}
+      track={track}
       onHome={onHome}
       onList={onList}
       onSolve={() => void load(true)}
@@ -1257,10 +1264,12 @@ function TwistStep({
 /** How an answer to a twist was marked, which finished the review, and how it stands now. */
 function TwistResult({
   result,
+  track,
   onHome,
   onList,
 }: {
   result: TwistMarked;
+  track: OpenedTrack;
   onHome: () => void;
   onList: () => void;
 }) {
@@ -1268,7 +1277,7 @@ function TwistResult({
     <main class="learn-content">
       <section class="learn-done" aria-label="Done">
         <h2>That's the review done</h2>
-        <p class="muted">{comesBack(result)}</p>
+        <p class="muted">{comesBack(result, track)}</p>
       </section>
       <MarkedView marked={result.marked} />
       <section aria-label="A good answer">
@@ -1284,17 +1293,26 @@ function TwistResult({
           Home
         </button>
         <button type="button" class="pill primary" onClick={onList}>
-          More coding
+          {more(track)}
         </button>
       </span>
     </main>
   );
 }
 
+/** The Coding track, as a problem's own until it's open. */
+const CODING_TRACK: OpenedTrack = { id: "coding", name: "Coding", icon: "code" };
+
+/** What the button that goes back to a problem's track says. */
+function more(track: OpenedTrack): string {
+  return track.id === "coding" ? "More coding" : `More in ${track.name}`;
+}
+
 /** When a problem comes back, or that it won't, once it's finished. */
-function comesBack(finished: FinishedReply): string {
+function comesBack(finished: FinishedReply, track: OpenedTrack): string {
   if (finished.retired) {
-    return "Retired: it won't come back. Bring it back from the Coding list any time.";
+    const list = track.id === "coding" ? "the Coding list" : track.name;
+    return `Retired: it won't come back. Bring it back from ${list} any time.`;
   }
   if (finished.due === null) return "Saved.";
   const days = Math.max(0, Math.round((finished.due - Date.now()) / 86_400_000));
@@ -1306,12 +1324,14 @@ function comesBack(finished: FinishedReply): string {
 function Finished({
   finished,
   mode,
+  track,
   onHome,
   onList,
   onSolve,
 }: {
   finished: FinishedReply;
   mode: Session["mode"];
+  track: OpenedTrack;
   onHome: () => void;
   onList: () => void;
   onSolve: () => void;
@@ -1320,13 +1340,13 @@ function Finished({
     <main class="learn-content">
       <section class="learn-done" aria-label="Done">
         <h2>That's it done</h2>
-        <p class="muted">{comesBack(finished)}</p>
+        <p class="muted">{comesBack(finished, track)}</p>
         <span class="learn-actions">
           <button type="button" class="pill" onClick={onHome}>
             Home
           </button>
           <button type="button" class="pill primary" onClick={onList}>
-            More coding
+            {more(track)}
           </button>
         </span>
         {mode === "recall" ? (
@@ -1340,11 +1360,17 @@ function Finished({
 }
 
 /** Back to the list of the Coding track's items, from one of them. */
-export function CodingLink({ onList }: { onList: () => void }) {
+export function CodingLink({
+  track = CODING_TRACK,
+  onList,
+}: {
+  track?: OpenedTrack;
+  onList: () => void;
+}) {
   return (
     <button type="button" class="text-button track-link" onClick={onList}>
-      <TrackIcon icon="code" size={16} />
-      Coding
+      <TrackIcon icon={track.icon} size={16} />
+      {track.name}
     </button>
   );
 }

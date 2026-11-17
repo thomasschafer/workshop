@@ -1,6 +1,7 @@
 import { request, streamLines, type Turn, type VersionedFile } from "../api";
 import { utcOffset } from "../learning/local";
 import type { Rating } from "../learning/types";
+import type { TrackId } from "../tracks/types";
 import type {
   Finished,
   Graded,
@@ -28,7 +29,12 @@ export const codingApi = {
   installToolchain: (language: Language) => request<Toolchain>("POST", toolchain(language)),
   cancelToolchainInstall: (language: Language) =>
     request<null>("POST", `${toolchain(language)}/cancel`),
-  overview: () => request<Overview>("GET", `/coding?utc_offset=${utcOffset()}`),
+  /** The Coding track's problems and code to read, or another track's with `track`. */
+  overview: (track?: TrackId) =>
+    request<Overview>(
+      "GET",
+      `/coding?utc_offset=${utcOffset()}${track ? `&track=${encodeURIComponent(track)}` : ""}`,
+    ),
   open: (key: string, solve = false) =>
     request<Opened>("POST", `${item(key)}/open${solve ? "?solve=true" : ""}`),
   saveSession: (key: string, session: Session, keepalive = false) =>

@@ -8,6 +8,7 @@ import { HomeButton, TrackTitle } from "../progress/page";
 import "./coding.css";
 import { newId, retirements } from "../learning/local";
 import { RetiredList } from "../learning/retired";
+import type { TrackId } from "../tracks/types";
 import { codingApi } from "./api";
 import { CodingLink, ProblemView } from "./problem";
 import { STEP_LABELS } from "./steps";
@@ -19,12 +20,15 @@ export function CodingScreen({
   item,
   onHome,
   onOpen,
+  onTrack,
 }: {
   boot: Bootstrap;
   item: string | null;
   onHome: () => void;
   /** Opens an item, or the list for null. */
   onOpen: (item: string | null) => void;
+  /** Goes to another track, such as the one a problem is in. */
+  onTrack: (track: TrackId) => void;
 }) {
   const learning = useLearning();
   useEffect(() => {
@@ -54,7 +58,7 @@ export function CodingScreen({
       boot={boot}
       itemKey={item}
       onHome={onHome}
-      onList={() => onOpen(null)}
+      onTrack={(track) => (track === "coding" ? onOpen(null) : onTrack(track))}
     />
   );
 }
@@ -81,6 +85,46 @@ const STATUS: Record<Status, string> = {
   retired: "Retired",
 };
 
+/** A track's problems and code to read, each to open. Problems need the server. */
+export function CodingItems({
+  items,
+  online,
+  onOpen,
+}: {
+  items: Listed[];
+  online: boolean;
+  onOpen: (item: string) => void;
+}) {
+  return (
+    <ul class="coding-list">
+      {items.map((item) => (
+        <li key={item.key}>
+          <button
+            type="button"
+            class={`coding-item ${item.status}`}
+            onClick={() => onOpen(item.key)}
+            disabled={item.kind === "coding" && !online}
+          >
+            <span class="coding-item-name">{item.label}</span>
+            <span class="coding-item-detail muted">
+              {item.kind === "reading" ? "Code to read" : "Problem"} · {statusOf(item)} · ~
+              {item.minutes} min
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** What's in progress, then due, new, done and flagged, leaving out what's retired. */
+export function toDo(items: Listed[]): Listed[] {
+  const order: Status[] = ["in_progress", "due", "new", "done", "flagged"];
+  return items
+    .filter((item) => item.status !== "retired")
+    .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+}
+
 function statusOf(item: Listed): string {
   if (item.status !== "in_progress" || item.step === null) return STATUS[item.status];
   return `${item.mode === "recall" ? "Recalling" : "In progress"} · ${STEP_LABELS[item.step]}`;
@@ -103,12 +147,7 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
       .then(setOverview, (e: unknown) => setError(errorMessage(e)));
   }, [online]);
 
-  const order: Status[] = ["in_progress", "due", "new", "done", "flagged"];
-  const items = overview
-    ? overview.items
-        .filter((item) => item.status !== "retired")
-        .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
-    : null;
+  const items = overview ? toDo(overview.items) : null;
   const retired = overview ? overview.items.filter((item) => item.status === "retired") : [];
   const [bringing, setBringing] = useState<string | null>(null);
   const [bringError, setBringError] = useState<string | null>(null);
@@ -138,26 +177,7 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
     <div class="learn">
       <Header onHome={onHome} />
       <main class="learn-content">
-        {items ? (
-          <ul class="coding-list">
-            {items.map((item) => (
-              <li key={item.key}>
-                <button
-                  type="button"
-                  class={`coding-item ${item.status}`}
-                  onClick={() => onOpen(item.key)}
-                  disabled={item.kind === "coding" && !online}
-                >
-                  <span class="coding-item-name">{item.label}</span>
-                  <span class="coding-item-detail muted">
-                    {item.kind === "reading" ? "Code to read" : "Problem"} · {statusOf(item)} · ~
-                    {item.minutes} min
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        {items ? <CodingItems items={items} online={online} onOpen={onOpen} /> : null}
         {items ? (
           <RetiredList
             items={retired}

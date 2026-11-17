@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { codingApi } from "../coding/api";
+import { CodingItems, toDo } from "../coding/screen";
+import type { Overview } from "../coding/types";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
 import { ExplainAloud } from "../grading/explain";
 import { MarkedView } from "../grading/marked";
 import type { Marked } from "../grading/types";
+import { useConnection } from "../hooks/useConnection";
 import { useMarkdown } from "../hooks/useMarkdown";
 import { HomeButton, TrackTitle } from "../progress/page";
 import type { TrackId } from "../tracks/types";
 import { describeTolerance, displayApproximate, displayNumber, grade } from "./grading";
-import { newId, nextInstance, progress, queue, retired, step, utcOffset } from "./local";
+import { limitsOf, newId, nextInstance, progress, queue, retired, step, utcOffset } from "./local";
 import { sameOutput } from "./output";
 import "./practice.css";
 import { RetiredList } from "./retired";
@@ -46,11 +50,14 @@ export function Practice({
   track,
   serverDictation,
   onHome,
+  onOpenProblem,
 }: {
   track: TrackId;
   /** Whether Whisper is ready on the server, for explaining answers aloud. */
   serverDictation: boolean;
   onHome: () => void;
+  /** Opens one of the track's coding problems, by its key. */
+  onOpenProblem: (item: string) => void;
 }) {
   const state = useLearning();
   const deck = state.deck;
@@ -137,7 +144,10 @@ export function Practice({
             />
           </>
         ) : (
-          <Done deck={deck} track={track} results={results} onAgain={startStep} onHome={onHome} />
+          <>
+            <Done deck={deck} track={track} results={results} onAgain={startStep} onHome={onHome} />
+            <TrackProblems track={track} onOpen={onOpenProblem} />
+          </>
         )}
       </main>
     </div>
@@ -729,7 +739,10 @@ function Done({
     utcOffset(),
   );
   const more = left.due.length + left.fresh.length;
-  const week = progress(deck, state.attempts, now, utcOffset());
+  const keptApart = limitsOf(deck, track) !== null;
+  const week = progress(deck, state.attempts, now, utcOffset(), track);
+  // A track can have only problems, listed below, and nothing to practise a few at a time.
+  const hasShort = deck.items.some((item) => item.track === track);
   const answered = results.filter((r) => r.right !== null);
   const skills = useMemo(() => {
     const ids = new Set(deck.items.filter((i) => i.track === track).flatMap((i) => i.skills));
@@ -738,7 +751,9 @@ function Done({
   return (
     <section class="learn-done" aria-label="Done">
       {results.length === 0 ? (
-        <h2>Nothing to do here for now</h2>
+        hasShort ? (
+          <h2>Nothing to do here for now</h2>
+        ) : null
       ) : (
         <h2>
           That's a step done
@@ -748,7 +763,9 @@ function Done({
         </h2>
       )}
       <p class="muted">
-        {week.minutesThisWeek} of {deck.limits.weekly_minutes} minutes this week
+        {keptApart
+          ? `${week.minutesThisWeek} minutes here this week, kept apart from the week's target`
+          : `${week.minutesThisWeek} of ${deck.limits.weekly_minutes} minutes this week`}
         {left.waiting > 0 ? ` · ${left.waiting} more due tomorrow` : ""}
         {left.freshWaiting > 0 ? ` · ${left.freshWaiting} more new tomorrow` : ""}
       </p>
@@ -787,6 +804,47 @@ function Done({
           </ul>
         </section>
       ) : null}
+    </section>
+  );
+}
+
+/**
+ * The coding problems in a track other than Coding, such as a pack's own, to open one at a
+ * time, and those retired, to bring back. They need the server, so offline there's nothing.
+ */
+function TrackProblems({ track, onOpen }: { track: TrackId; onOpen: (item: string) => void }) {
+  const online = useConnection();
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [bringing, setBringing] = useState<string | null>(null);
+  const [bringError, setBringError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!online) return;
+    codingApi.overview(track).then(setOverview, () => setOverview(null));
+  }, [track, online]);
+  const problems = (overview?.items ?? []).filter((item) => item.kind === "coding");
+  if (problems.length === 0) return null;
+  const bringBack = (key: string) => {
+    setBringing(key);
+    setBringError(null);
+    codingApi
+      .bringBack(key, newId())
+      .then(() => codingApi.overview(track))
+      .then(setOverview, (e: unknown) => setBringError(errorMessage(e)))
+      .finally(() => setBringing(null));
+  };
+  return (
+    <section class="learn-problems" aria-labelledby="problems-heading">
+      <h2 id="problems-heading" class="tracks-heading">
+        Problems
+      </h2>
+      <CodingItems items={toDo(problems)} online={online} onOpen={onOpen} />
+      <RetiredList
+        items={problems.filter((item) => item.status === "retired")}
+        bringing={bringing}
+        disabled={!online}
+        error={bringError}
+        onBringBack={bringBack}
+      />
     </section>
   );
 }

@@ -3,6 +3,7 @@
 
 import type { InstallStatus, ProgramNeeds, VersionedFile } from "../api";
 import type { MarkedReply } from "../grading/types";
+import type { TrackIcon as TrackIconName, TrackId } from "../tracks/types";
 
 export type Language = "python" | "rust" | "cpp" | "haskell";
 
@@ -56,9 +57,17 @@ export interface OpenedLanguage {
   lsp: { root_uri: string; file_uri: string; language_id: string; options: unknown } | null;
 }
 
+/** The track a problem is in: the Coding track, or another, such as a pack's own. */
+export interface OpenedTrack {
+  id: TrackId;
+  name: string;
+  icon: TrackIconName;
+}
+
 export interface Opened {
   key: string;
   label: string;
+  track: OpenedTrack;
   prompt: string;
   skills: string[];
   source: string | null;

@@ -67,15 +67,32 @@ export interface Limits {
   retention: number;
 }
 
+/** What's been done today and this week, as the server knows. */
+export interface DeckProgress {
+  reviews_today: number;
+  /** Missing from decks saved on a device by an older Workshop. */
+  new_today?: number;
+  minutes_this_week: number;
+}
+
 export interface Deck {
   limits: Limits;
-  /** `new_today` is missing from decks saved on a device by an older Workshop. */
-  progress: { reviews_today: number; new_today?: number; minutes_this_week: number };
+  /** What's been done today and this week, but in tracks kept apart. */
+  progress: DeckProgress;
   /** When the learner's day and week began, as the deck was made. */
   day_start: number;
   week_start: number;
-  /** A deck saved by an older version has no icons. */
-  tracks: { id: TrackId; name: string; icon?: TrackIconName }[];
+  /** A deck saved by an older version has no icons, and no tracks kept apart. */
+  tracks: {
+    id: TrackId;
+    name: string;
+    icon?: TrackIconName;
+    /** Kept out of Continue, so its items have daily limits of their own, and don't count
+     * towards the week's target. */
+    kept_apart?: boolean;
+    /** For a track kept apart, what's been done in it today and this week. */
+    progress?: DeckProgress | null;
+  }[];
   items: DeckItem[];
   schedules: Record<string, ItemSchedule>;
   flags: Record<string, { at: number; note: string | null }>;

@@ -274,6 +274,11 @@
   color: var(--warn);
 }
 
+/* A track's coding problems, below its short items. */
+.learn-problems {
+  margin-top: 20px;
+}
+
 /* Items found too easy and retired, each to bring back. */
 .retired {
   margin-top: 20px;
