@@ -1,6 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type BrowserContext, devices, expect, type Page, test } from "@playwright/test";
+import {
+  type BrowserContext,
+  devices,
+  expect,
+  type Page,
+  type Request,
+  test,
+} from "@playwright/test";
 import { LEARNING_HOME, LEARNING_PORT } from "./fixture";
 import { setOffline } from "./offline";
 import { holdToTalk, installSimulatedSpeech } from "./speech";
@@ -784,10 +791,25 @@ test("runs a timed round with the examiner, carrying on after a reload and a bre
   await expect(timer).toHaveText(/^9:\d\d$/);
   await expect(phone.getByText(/Welcome back/)).toHaveCount(0);
 
-  // Paused, and back ten minutes later: the clock stopped while the app was closed.
+  // Paused, and back ten minutes later: the clock stopped while the app was closed. Leaving the
+  // round sends the working once more, and the server would save the round over the change
+  // below if it were still on its way, so every beat is waited for.
+  const isBeat = (request: Request) => request.url().endsWith("/two-dice-seven/beat");
+  const beats = new Set<Request>();
+  const beatSent = (request: Request) => isBeat(request) && beats.add(request);
+  const beatDone = (request: Request) => beats.delete(request);
+  phone.on("request", beatSent);
+  phone.on("requestfinished", beatDone);
+  phone.on("requestfailed", beatDone);
+  const leaving = phone.waitForRequest(isBeat);
   await phone.getByRole("button", { name: "Pause" }).tap();
   await expect(phone).toHaveURL(/\/rounds$/);
   await expect(phone.getByRole("region", { name: "Under way" })).toContainText(/left of 10/);
+  await leaving;
+  await expect.poll(() => beats.size).toBe(0);
+  phone.off("request", beatSent);
+  phone.off("requestfinished", beatDone);
+  phone.off("requestfailed", beatDone);
   const paused = changeRound("two-dice-seven", (round) => {
     round.seen_at -= 10 * 60_000;
   });
