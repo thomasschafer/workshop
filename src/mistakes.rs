@@ -393,6 +393,6 @@ mod tests {
             log.mistakes[0].label.as_deref(),
             Some(packs[0].item("two-dice-seven").unwrap().label().as_str())
         );
-        assert_eq!(log.error_types.len(), 7);
+        assert_eq!(log.error_types.len(), 8);
     }
 }

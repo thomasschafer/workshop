@@ -47,6 +47,11 @@ const BUILT_IN: &[(&str, &str, &str)] = &[
         "Didn't know or misunderstood an idea the question needs",
     ),
     (
+        "missed-requirement",
+        "Missed requirement",
+        "Didn't find out something a design had to do or handle, or assumed it without asking",
+    ),
+    (
         "too-slow",
         "Too slow",
         "Got there, or would have, but took too long, or the solution does",
@@ -82,6 +87,7 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), BUILT_IN.len());
         assert!(is_built_in("off-by-one"));
+        assert!(is_built_in("missed-requirement"));
         assert!(!is_built_in("guessed"));
     }
 }

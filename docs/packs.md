@@ -82,7 +82,7 @@ A track's `icon` is shown beside its name. It's one of the icons the built-in tr
 
 Every item names at least one skill, and every skill it names must be listed here. Mastery of a skill comes from how well you've recalled its items lately, so goals can show progress as you go.
 
-Mistakes are tagged with a kind of mistake. The built-in kinds are `misread`, `arithmetic-slip`, `off-by-one`, `missed-edge-case`, `wrong-approach`, `concept-gap` and `too-slow`; a pack's `[[error_types]]` add to them, each with an id of its own.
+Mistakes are tagged with a kind of mistake. The built-in kinds are `misread`, `arithmetic-slip`, `off-by-one`, `missed-edge-case`, `wrong-approach`, `concept-gap`, `missed-requirement` and `too-slow`; a pack's `[[error_types]]` add to them, each with an id of its own.
 
 ## Items
 
