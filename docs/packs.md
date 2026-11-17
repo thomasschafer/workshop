@@ -242,6 +242,8 @@ input = "1 2\n1\n"
 output = "0"
 ```
 
+Only the first 64 KiB of what a program prints is kept, and output that's cut off there can't be compared with anything, so keep every example's and test's expected output under 64 KiB, as well as the inputs program's inputs and the brute force's answers to them. `workshop pack check` reports an expected output over it as a problem, saying which example or test and how big it is. An input in `tests.toml` can be bigger, such as for a test that a solution is fast enough, as long as its answer is short.
+
 Sections: `## Approach` (required), how it's meant to be solved, shown once it's solved and when it comes back for review; `## Hints`, a list of nudges from gentlest to most telling, which the learner can reveal one at a time; and `## Notes`.
 
 `workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. It needs the languages' programs installed: `python3`, `rustc`, and `ghc` for Haskell; an item that can't be run for want of one is reported as skipped rather than failed, with what to install. Everything is built and run in a sandbox, with no network and writing only to a directory of its own, where the system has one ([docs/author.md](author.md#running-what-the-writer-wrote) says which); where it doesn't, the check warns that it's running the pack's programs with all your access.

@@ -8,7 +8,7 @@ use workshop_pack::{Coding, Content, Item, Language, Reading, ReadingCheck, Verd
 
 use crate::grade::{self, Graded, Oracle, describe};
 use crate::programs::{Built, Flavour, Run, Runtime};
-use workshop_runner::Ending;
+use workshop_runner::{Ending, MAX_OUTPUT_BYTES, size};
 
 /// Checks items' programs by building and running them, for `Pack::check`.
 pub struct Checker {
@@ -31,6 +31,12 @@ impl workshop_pack::Programs for Checker {
         item: &'a Item,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Verdict> + Send + 'a>> {
         Box::pin(async move {
+            // Checked even where its programs can't be run, as it needs nothing run.
+            if let Content::Coding(coding) = &item.content
+                && let Some(problem) = expects_too_much(coding)
+            {
+                return Verdict::Failed(problem);
+            }
             let has_programs = matches!(item.content, Content::Coding(_) | Content::Reading(_));
             if has_programs
                 && !self.runtime.sandbox.confines()
@@ -50,6 +56,40 @@ impl workshop_pack::Programs for Checker {
             checked.unwrap_or_else(|err| Verdict::Failed(format!("{err:#}")))
         })
     }
+}
+
+/// Says which of a coding item's examples and tests expect more output than a program can print
+/// before it's cut off, as no solution could pass them.
+fn expects_too_much(coding: &Coding) -> Option<String> {
+    let examples = coding
+        .examples
+        .iter()
+        .enumerate()
+        .map(|(i, case)| ("example", i, case));
+    let tests = coding
+        .tests
+        .iter()
+        .enumerate()
+        .map(|(i, case)| ("test", i, case));
+    let long: Vec<String> = examples
+        .chain(tests)
+        .filter(|(_, _, case)| !grade::fits(&case.output))
+        .map(|(kind, i, case)| {
+            format!(
+                "{kind} {} expects {} of output",
+                i + 1,
+                size(case.output.len())
+            )
+        })
+        .collect();
+    (!long.is_empty()).then(|| {
+        format!(
+            "{}, more than the {} a program's output is cut off at, so no solution can pass {}; keep every expected output under that",
+            long.join(", and "),
+            size(MAX_OUTPUT_BYTES),
+            if long.len() == 1 { "it" } else { "them" }
+        )
+    })
 }
 
 pub async fn check_coding(
@@ -884,6 +924,46 @@ mod tests {
         }
         assert!(with_programs > 0);
         // Nothing was built.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    /// No solution could print an expected output longer than output is kept, so such an item
+    /// fails its check, even where its programs aren't run.
+    #[tokio::test]
+    async fn fails_coding_items_expecting_more_output_than_is_kept() {
+        use workshop_pack::Programs;
+        let dir = tempfile::tempdir().unwrap();
+        let checker = Checker {
+            runtime: Runtime {
+                scratch: dir.path().to_owned(),
+                environments: Default::default(),
+                build_timeout: Duration::from_secs(60),
+                run_timeout: Duration::from_secs(60),
+                sandbox: Sandbox::Unconfined,
+                tools: Default::default(),
+            },
+            unconfined: Unconfined::Skip,
+        };
+        let pack = Pack::sample();
+        let expecting = |example: String, test: String| {
+            let mut item = pack.item("rising-run").unwrap().clone();
+            let Content::Coding(coding) = &mut item.content else {
+                panic!("not a coding item");
+            };
+            coding.examples[0].output = example;
+            coding.tests[1].output = test;
+            item
+        };
+        let fits = "1\n".repeat(1000);
+        assert!(matches!(
+            checker.check(&expecting(fits.clone(), fits)).await,
+            Verdict::Skipped(why) if why.contains("no sandbox")
+        ));
+        let item = expecting("1\n".repeat(40 * 1024), "a".repeat(2 * 1024 * 1024));
+        assert_eq!(
+            checker.check(&item).await,
+            Verdict::Failed("example 1 expects 80 KiB of output, and test 2 expects 2.0 MiB of output, more than the 64 KiB a program's output is cut off at, so no solution can pass them; keep every expected output under that".to_owned())
+        );
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 }
