@@ -7,7 +7,7 @@ import { LatestSaver } from "../saver";
 import { DictateButton } from "../views/dictate";
 import { StepNav } from "../views/steps";
 import { gradingApi } from "./api";
-import { MarkedView } from "./marked";
+import { BriefView, MarkedView } from "./marked";
 import type {
   Component,
   DesignEdit,
@@ -260,12 +260,7 @@ export function DesignSessionView({
             ))}
           </ul>
         </details>
-        {result.brief ? (
-          <section class="design-brief" aria-label="The brief">
-            <h3 class="tracks-heading">The brief your questions were answered from</h3>
-            <Markdown text={result.brief} />
-          </section>
-        ) : null}
+        {result.brief ? <BriefView brief={result.brief} /> : null}
         <button type="button" class="pill primary wide" onClick={onDone}>
           Done
         </button>

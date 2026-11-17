@@ -1,12 +1,14 @@
 //! Timed rounds with the examiner: starting one, keeping its clock while the app has it open,
 //! talking with the examiner, and the grader marking it when it ends.
 
+use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::{Deserialize, Serialize};
 use workshop_learning::Attempt;
 use workshop_pack::{Case, Content, ExaminerStyle, Item, Kind, Pack};
 use workshop_sessions::Turn;
+use workshop_sessions::brief::Brief;
 use workshop_sessions::round::{Clock, Ending, Round, minutes_for};
 use workshop_tracks::Priority;
 
@@ -243,9 +245,14 @@ pub(super) async fn start(
     let round = match seen(&app, &key, |_, _| Ok(()))? {
         Some(round) => round,
         None => {
-            let round = Round::new(item.minutes, body.style, now_ms());
-            app.rounds.put(&key, &round)?;
-            round
+            // A design prompt's questions are answered from its brief, kept from the start.
+            let brief = match item.kind {
+                Kind::Design => Some(super::design::new_brief(&app, pack, item).await?),
+                _ => None,
+            };
+            let mut round = Round::new(item.minutes, body.style, now_ms());
+            round.brief = brief;
+            app.rounds.put_new(&key, round)?
         }
     };
     Ok(Json(opened(pack, key, item, Some(round))))
@@ -305,6 +312,19 @@ pub(super) async fn say(
     }
     let packs = packs(&app)?;
     let (pack, key, item) = roundable(&packs, &pack, &item)?;
+    if item.kind == Kind::Design
+        && app
+            .rounds
+            .get(&key)?
+            .is_some_and(|round| round.brief.is_none())
+    {
+        // A round started before design prompts had briefs is given one.
+        let brief = super::design::new_brief(&app, pack, item).await?;
+        app.rounds.change(&key, |round| {
+            round.brief.get_or_insert(brief);
+            Ok(())
+        })?;
+    }
     let round = seen(&app, &key, |round, now| {
         round.save_work(&body.work, now)?;
         round.say(&body.text, now)?;
@@ -322,7 +342,14 @@ pub(super) async fn say(
     let (round, ()) = app
         .rounds
         .change(&key, |round| {
-            round.examiner_said(&reply, now_ms());
+            if let Some(settled) = &reply.settled {
+                round
+                    .brief
+                    .as_mut()
+                    .context("the examiner settled a detail of a brief the round doesn't have")?
+                    .add(settled);
+            }
+            round.examiner_said(&reply.text, now_ms());
             Ok(())
         })?
         .ok_or_else(|| bad_request("The round was marked while the examiner was replying."))?;
@@ -347,6 +374,9 @@ pub(super) struct Ended {
     rubric: Vec<String>,
     /// When the item comes back, if the round counted as an attempt.
     due: Option<i64>,
+    /// For a design prompt, the brief the learner's questions were answered from, now it can
+    /// be shown.
+    brief: Option<String>,
 }
 
 /// What the grader is told about how a round went.
@@ -391,12 +421,14 @@ pub(super) async fn end(
     let ending = round.ended.expect("finish always ends the round");
     let transcript = round.transcript();
     let note = note(&round, ending);
+    let brief = round.brief.as_ref().map(Brief::full);
     let marked = if round.has_work() {
         let error_types = crate::mistakes::error_types(&packs);
         let (runner, spec) =
             app.grader_target(pack.prompt_add_ons.get("grader").map(String::as_str))?;
         let answer = Answer {
             note: Some(&note),
+            brief: brief.as_deref(),
             ..Answer::written(&transcript)
         };
         crate::grader::mark(runner, &spec, item, Work::Round, answer, &error_types)
@@ -447,6 +479,7 @@ pub(super) async fn end(
         marked,
         rubric,
         due,
+        brief,
     }))
 }
 
@@ -515,6 +548,80 @@ mod tests {
     async fn scheduled(router: &Router) -> bool {
         let deck = json(send(router, request("GET", "/api/learning/deck", None)).await).await;
         deck["schedules"].get("sample/two-dice-seven").is_some()
+    }
+
+    #[tokio::test]
+    async fn answers_a_design_rounds_questions_from_its_brief_then_marks_what_was_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        for (file, text) in [
+            (
+                "answer.json",
+                r#"{"answer": "After five years, unless made to expire sooner.", "settled": "Expired links show a page saying so."}"#,
+            ),
+            (
+                "mark.json",
+                r#"{"score": 0.6, "points": [], "findings": [], "feedback": "Ask more.", "questioning": {"found": ["How long links last"], "missed": ["Malware links must stop working"], "assumed": ["Codes are 6 characters"]}}"#,
+            ),
+        ] {
+            std::fs::write(dir.path().join(file), text).unwrap();
+        }
+        let model = fake_discussion_model(
+            dir.path(),
+            &[
+                ("answer from the brief.", "answer.json"),
+                ("They never saw it", "mark.json"),
+            ],
+        );
+        let router = test_app_in(dir.path(), &model);
+        let item = "/api/rounds/sample/link-shortener";
+        let started = post(&router, &format!("{item}/start"), serde_json::json!({})).await;
+        // The brief is kept with the round, and never sent to the app while it's on.
+        let saved = || -> Round {
+            let path = dir.path().join("data/rounds/sample/link-shortener.json");
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        assert!(saved().brief.unwrap().text.contains("malware"));
+        assert!(!started.to_string().contains("malware"));
+        let said = post(
+            &router,
+            &format!("{item}/say"),
+            serde_json::json!({ "text": "Do links expire?", "work": "" }),
+        )
+        .await;
+        assert_eq!(
+            said["round"]["turns"][1]["text"],
+            "After five years, unless made to expire sooner."
+        );
+        assert!(!said.to_string().contains("malware"));
+        // What the brief didn't cover is kept with it, for the rest of the round.
+        assert_eq!(
+            saved().brief.unwrap().added,
+            ["Expired links show a page saying so."]
+        );
+
+        let ended = post(
+            &router,
+            &format!("{item}/end"),
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a79", "work": "A store of codes" }),
+        )
+        .await;
+        assert_eq!(
+            ended["marked"]["questioning"]["assumed"][0],
+            "Codes are 6 characters"
+        );
+        // Once it's marked, the brief is shown, with what was settled.
+        let brief = ended["brief"].as_str().unwrap();
+        assert!(
+            brief.contains("malware") && brief.ends_with("- Expired links show a page saying so.")
+        );
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        let missed = log["mistakes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["detail"] == "Didn't find out: Malware links must stop working")
+            .unwrap();
+        assert_eq!(missed["suggested"], "missed-requirement");
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
-import { MarkedView } from "../grading/marked";
+import { BriefView, MarkedView } from "../grading/marked";
 import { useConnection } from "../hooks/useConnection";
 import { newId } from "../learning/local";
 import { Markdown } from "../learning/practice";
@@ -402,6 +402,7 @@ function RoundView({
             </ul>
           </details>
         ) : null}
+        {result.brief ? <BriefView brief={result.brief} /> : null}
         <button type="button" class="pill primary wide" onClick={onDone}>
           Done
         </button>

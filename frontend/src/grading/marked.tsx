@@ -67,3 +67,13 @@ function QuestioningView({ questioning }: { questioning: NonNullable<Marked["que
     </section>
   );
 }
+
+/** A design prompt's brief, which the learner's questions were answered from, once it's marked. */
+export function BriefView({ brief }: { brief: string }) {
+  return (
+    <section class="design-brief" aria-label="The brief">
+      <h3 class="tracks-heading">The brief your questions were answered from</h3>
+      <Markdown text={brief} />
+    </section>
+  );
+}

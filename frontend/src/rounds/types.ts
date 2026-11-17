@@ -74,4 +74,6 @@ export interface Ended {
   rubric: string[];
   /** When the item comes back, if the round counted as an attempt. */
   due: number | null;
+  /** For a design prompt, the brief its questions were answered from, now it's shown. */
+  brief: string | null;
 }

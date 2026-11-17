@@ -1,11 +1,12 @@
 //! The examiner: a coach that runs timed rounds, with follow-up questions that extend or
-//! change the problem as a live session would. A pack's examiner add-on, and the style the
-//! learner chose, shape how it goes. Where each round is, and its clock, are in the sessions
-//! crate.
+//! change the problem as a live session would. In a round of a design prompt, it answers the
+//! learner's questions about the requirements from the prompt's brief, as the design session's
+//! coach does. A pack's examiner add-on, and the style the learner chose, shape how it goes.
+//! Where each round is, and its clock, are in the sessions crate.
 
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use workshop_pack::{Content, ExaminerStyle, Item, Kind};
 use workshop_provider::{CallSpec, ProviderRunner};
 use workshop_sessions::round::Round;
@@ -62,14 +63,23 @@ pub fn clock_text(round: &Round) -> String {
     format!("{used} of {} minutes used, {left} left", round.minutes)
 }
 
-/// The examiner's prompt: the problem, the reference, the clock, the learner's working and the
-/// conversation so far.
+/// The examiner's prompt: the problem, the reference, a design prompt's brief, the clock, the
+/// learner's working and the conversation so far.
 pub fn prompt(item: &Item, round: &Round) -> Result<String> {
     let mut out = format!(
         "<problem>\n{}\n</problem>\n\n<reference>\n{}\n</reference>\n\n",
         item.prompt.trim(),
         reference(item)?
     );
+    let brief = match (item.kind, &round.brief) {
+        (Kind::Design, Some(brief)) => Some(brief),
+        (Kind::Design, None) => bail!("a round of a design prompt needs its brief"),
+        (_, Some(_)) => bail!("only a round of a design prompt has a brief"),
+        (_, None) => None,
+    };
+    if let Some(brief) = brief {
+        out.push_str(&format!("<brief>\n{}\n</brief>\n\n", brief.full()));
+    }
     out.push_str(&format!("The clock: {}.\n", clock_text(round)));
     if round.returned {
         out.push_str("They've just come back to the round after a break; the clock was stopped while they were away.\n");
@@ -83,28 +93,44 @@ pub fn prompt(item: &Item, round: &Round) -> Result<String> {
         "<conversation>\n{}</conversation>\n\nReply to their last message as the examiner.",
         workshop_sessions::conversation(&round.turns)
     ));
+    if brief.is_some() {
+        out.push_str(&format!(
+            " If they asked about the requirements or the numbers, answer from the brief. {}\n\nFor anything else, reply as the examiner, with `settled` null. {}",
+            crate::design::ANSWERING,
+            crate::design::ANSWER_SHAPE
+        ));
+    }
     Ok(out)
 }
 
-/// Asks the examiner for its reply.
+/// Asks the examiner for its reply, with what it settled that a design prompt's brief didn't
+/// cover.
 pub async fn reply(
     runner: &ProviderRunner,
     spec: &CallSpec,
     item: &Item,
     round: &Round,
-) -> Result<String> {
+) -> Result<crate::design::Answer> {
     let prompt = prompt(item, round)?;
     let reply = runner.call_aside(spec, &prompt, TIMEOUT).await?;
+    if round.brief.is_some() {
+        return crate::design::parse_answer(&reply.text, "examiner")
+            .context("reading the examiner's reply");
+    }
     let text = reply.text.trim();
     if text.is_empty() {
         bail!("the examiner's reply was empty");
     }
-    Ok(text.to_owned())
+    Ok(crate::design::Answer {
+        text: text.to_owned(),
+        settled: None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use workshop_pack::Pack;
+    use workshop_sessions::brief::{Brief, BriefSource};
 
     use super::*;
 
@@ -133,11 +159,26 @@ mod tests {
         assert!(prompt.contains("<conversation>\nLearner: Is it 1/6?\n</conversation>"));
         assert!(prompt.ends_with("Reply to their last message as the examiner."));
 
+        assert!(!prompt.contains("<brief>"));
+
         let design = pack.item("link-shortener").unwrap();
         round.examiner_said("Go on.", START + 1_206_000);
+        // A round of a design prompt answers from its brief, which it must have.
+        assert!(super::prompt(design, &round).is_err());
+        let mut brief = Brief::new("- Links last five years", BriefSource::Pack).unwrap();
+        brief.add("Codes are 7 characters.");
+        round.brief = Some(brief);
         let design_prompt = super::prompt(design, &round).unwrap();
         assert!(design_prompt.contains("- Says what happens when the store is unavailable\n"));
+        assert!(design_prompt.contains("<brief>\n- Links last five years\n\nSettled when the learner asked:\n- Codes are 7 characters.\n</brief>"));
+        assert!(
+            design_prompt
+                .contains("answer from the brief. Answer as the person who knows the requirements")
+        );
+        assert!(design_prompt.ends_with(crate::design::ANSWER_SHAPE));
         assert!(!design_prompt.contains("just come back"));
+        // Only a design prompt's round has one.
+        assert!(super::prompt(item, &round).is_err());
         assert!(super::prompt(pack.item("binary-heap-costs").unwrap(), &round).is_err());
         assert!(can_round(design));
         assert!(!can_round(pack.item("negative-division").unwrap()));

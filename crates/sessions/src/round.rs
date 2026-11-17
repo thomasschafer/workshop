@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::brief::Brief;
 use crate::{Speaker, Turn};
 
 /// The longest gap between two signs the round is open that counts against the clock.
@@ -70,6 +71,11 @@ pub struct Round {
     pub turns: Vec<Turn>,
     #[serde(default)]
     pub ended: Option<Ending>,
+    /// For a design prompt, what the examiner answers the learner's questions from, kept as the
+    /// round started so it never changes during it. Never shown to the learner before the
+    /// round's marked.
+    #[serde(default)]
+    pub brief: Option<Brief>,
 }
 
 /// The clock, as the app shows it.
@@ -104,6 +110,7 @@ impl Round {
             work: String::new(),
             turns: Vec::new(),
             ended: None,
+            brief: None,
         }
     }
 
