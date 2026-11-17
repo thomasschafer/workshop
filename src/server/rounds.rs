@@ -411,6 +411,7 @@ pub(super) async fn end(
             feedback: "Nothing was written or said in the round, so there was nothing to mark."
                 .to_owned(),
             clarity: None,
+            questioning: None,
         }
     };
     let now = now_ms();

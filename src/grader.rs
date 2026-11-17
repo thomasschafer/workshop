@@ -70,6 +70,9 @@ pub struct Answer<'a> {
     pub note: Option<&'a str>,
     /// For an answer to a twist, the twist and what a good answer to it covers.
     pub twist: Option<(&'a str, &'a str)>,
+    /// For a design session or a round of a design prompt, the brief the learner's questions
+    /// were answered from, which they never saw: what they asked is marked too.
+    pub brief: Option<&'a str>,
 }
 
 impl<'a> Answer<'a> {
@@ -80,13 +83,39 @@ impl<'a> Answer<'a> {
             code: None,
             note: None,
             twist: None,
+            brief: None,
         }
     }
 }
 
+/// The rubric points for what a learner asked about a design, added to its own when its
+/// questions were answered from a brief.
+pub const QUESTIONING: [&str; 2] = [
+    "Asks the questions that matter, finding out the key requirements before designing",
+    "Asks rather than assumes: takes nothing as given that could have been asked",
+];
+
 /// The rubric for a piece of work on an item, and what a good answer looks like, if the item
 /// has one. Fails for work the item can't have.
-fn rubric(
+fn rubric(item: &Item, work: Work, answer: &Answer<'_>) -> Result<(Vec<String>, Option<String>)> {
+    let (mut rubric, reference) = own_rubric(item, work, answer.twist)?;
+    if answer.brief.is_some() {
+        if !matches!(
+            (work, &item.content),
+            (Work::Design | Work::Round, Content::Design { .. })
+        ) {
+            bail!(
+                "only a design prompt's session or round is marked with a brief, not {}",
+                item.label()
+            );
+        }
+        rubric.extend(QUESTIONING.iter().map(|&point| point.to_owned()));
+    }
+    Ok((rubric, reference))
+}
+
+/// The rubric for the work itself, before what the learner asked.
+fn own_rubric(
     item: &Item,
     work: Work,
     twist: Option<(&str, &str)>,
@@ -107,7 +136,9 @@ fn rubric(
                 )),
             ))
         }
-        (Work::Design, Content::Design { rubric, notes, .. }) => Ok((rubric.clone(), notes.clone())),
+        (Work::Design, Content::Design { rubric, notes, .. }) => {
+            Ok((rubric.clone(), notes.clone()))
+        }
         (Work::Plan, Content::Coding(coding)) => Ok((
             vec![
                 "Chooses a method that solves the problem correctly".to_owned(),
@@ -177,7 +208,7 @@ pub fn mark_prompt(
     answer: Answer<'_>,
     error_types: &[ErrorType],
 ) -> Result<String> {
-    let (rubric, reference) = rubric(item, work, answer.twist)?;
+    let (rubric, reference) = rubric(item, work, &answer)?;
     let mut out = format!("<question>\n{}\n</question>\n\n", item.prompt.trim());
     if let Some((twist, _)) = answer.twist {
         out.push_str(&format!(
@@ -207,6 +238,9 @@ pub fn mark_prompt(
             code.trim_end()
         ));
     }
+    if let Some(brief) = answer.brief {
+        out.push_str(&format!("<brief>\n{}\n</brief>\n\n{BRIEFED}", brief.trim()));
+    }
     out.push_str(&format!("<work>\n{}\n</work>\n\n", answer.text.trim()));
     if let Some(note) = answer.note {
         out.push_str(&format!("{}\n\n", note.trim()));
@@ -218,12 +252,20 @@ pub fn mark_prompt(
     out.push_str(
         "Mark the work. Reply with JSON: {\"score\": number from 0 to 1, \"points\": [{\"point\": the rubric point, \"met\": \"yes\" | \"partly\" | \"no\", \"comment\": string}], \"findings\": [{\"error_type\": one of the kinds' ids, \"detail\": string}], \"feedback\": string",
     );
+    if answer.brief.is_some() {
+        out.push_str(
+            ", \"questioning\": {\"found\": [string], \"missed\": [string], \"assumed\": [string]}",
+        );
+    }
     if answer.spoken {
         out.push_str(", \"clarity\": {\"score\": number from 0 to 1, \"feedback\": string}");
     }
     out.push('}');
     Ok(out)
 }
+
+/// What the grader is told about a design whose questions were answered from a brief.
+const BRIEFED: &str = "The brief is what the learner's questions were answered from. They never saw it, so they only know what they asked, and what the question itself says. Besides the design, judge what they asked: in `questioning`, list the brief's key requirements they found out, by asking or from the question (`found`), those that matter to the design that they never found out (`missed`), and what they took as given without asking that they could have asked (`assumed`), each in a few words. A requirement in `missed` is kept as a mistake already, so don't list it in `findings` too. A design that goes against a requirement they did find out is a finding, as is an assumption that contradicts the brief.\n\n";
 
 /// What the grader is told about work explained aloud.
 const SPOKEN: &str = "The learner explained this aloud, and the work is what speech recognition heard. Mark what they meant where a word is plainly misheard, such as one that sounds like the right term, and don't count the way speech is written down against them. Besides marking it against the rubric, judge how clearly they explained it: whether it's in a sensible order, gets to the point, names things precisely and would be easy to follow if heard. The score is for the rubric alone; clarity has its own score and feedback.\n\n";
@@ -270,7 +312,27 @@ pub struct Marked {
     /// For work explained aloud, how clearly it was put.
     #[serde(default)]
     pub clarity: Option<Clarity>,
+    /// For a design whose questions were answered from a brief, what the learner asked.
+    #[serde(default)]
+    pub questioning: Option<Questioning>,
 }
+
+/// What a learner found out about a design's requirements by asking, and what they didn't.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Questioning {
+    /// The brief's key requirements they found out.
+    #[serde(default)]
+    pub found: Vec<String>,
+    /// Key requirements they never found out, which go in the mistake log.
+    #[serde(default)]
+    pub missed: Vec<String>,
+    /// What they took as given without asking.
+    #[serde(default)]
+    pub assumed: Vec<String>,
+}
+
+/// The kind of mistake a requirement missed in a design is kept as.
+pub const MISSED_REQUIREMENT: &str = "missed-requirement";
 
 /// How clearly something explained aloud was put.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -301,19 +363,34 @@ impl Marked {
         }
     }
 
-    /// The mistakes the grader found, for the mistake log, with ids made from the grading's.
+    /// The mistakes the grader found, for the mistake log, with ids made from the grading's:
+    /// its findings, then the requirements of a design the learner never found out.
     pub fn mistakes(&self, id: &str, item: &str, at: i64) -> Vec<NewMistake> {
-        self.findings
+        let findings = self
+            .findings
             .iter()
+            .map(|finding| (finding.detail.clone(), finding.error_type.clone()));
+        let missed = self
+            .questioning
+            .iter()
+            .flat_map(|questioning| &questioning.missed)
+            .map(|requirement| {
+                (
+                    format!("Didn't find out: {requirement}"),
+                    Some(MISSED_REQUIREMENT.to_owned()),
+                )
+            });
+        findings
+            .chain(missed)
             .enumerate()
-            .map(|(n, finding)| NewMistake {
+            .map(|(n, (detail, suggested))| NewMistake {
                 id: format!("grade-{id}-{n}"),
                 item: item.to_owned(),
                 at,
                 source: MistakeSource::Grader,
                 attempt: None,
-                detail: finding.detail.clone(),
-                suggested: finding.error_type.clone(),
+                detail,
+                suggested,
             })
             .collect()
     }
@@ -334,8 +411,10 @@ pub fn json_in(reply: &str) -> Result<&str> {
 }
 
 /// Reads the grader's marking, checking it's whole, and dropping kinds of mistake that don't
-/// exist rather than trusting them. Work explained aloud must have been marked for clarity.
-pub fn parse_marked(reply: &str, error_types: &[ErrorType], spoken: bool) -> Result<Marked> {
+/// exist rather than trusting them. Work explained aloud must have been marked for clarity, and
+/// work with a brief for what the learner asked.
+pub fn parse_marked(reply: &str, error_types: &[ErrorType], answer: &Answer<'_>) -> Result<Marked> {
+    let spoken = answer.spoken;
     #[derive(Deserialize)]
     struct Raw {
         score: f64,
@@ -344,6 +423,7 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType], spoken: bool) -> Res
         findings: Vec<RawFinding>,
         feedback: String,
         clarity: Option<Clarity>,
+        questioning: Option<Questioning>,
     }
     #[derive(Deserialize)]
     struct RawFinding {
@@ -364,6 +444,11 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType], spoken: bool) -> Res
         (true, clarity) => clarity,
         (false, _) => None,
     };
+    let questioning = match (answer.brief, raw.questioning) {
+        (Some(_), None) => bail!("the grader didn't say what the learner asked about: {reply}"),
+        (Some(_), questioning) => questioning,
+        (None, _) => None,
+    };
     Ok(Marked {
         score: raw.score,
         points: raw.points,
@@ -379,6 +464,7 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType], spoken: bool) -> Res
             .collect(),
         feedback: raw.feedback,
         clarity,
+        questioning,
     })
 }
 
@@ -400,7 +486,7 @@ pub async fn mark(
     }
     let prompt = mark_prompt(item, work, answer, error_types)?;
     let reply = runner.call_aside(spec, &prompt, TIMEOUT).await?;
-    parse_marked(&reply.text, error_types, answer.spoken)
+    parse_marked(&reply.text, error_types, &answer)
 }
 
 /// The grader's review of a card.
@@ -585,7 +671,7 @@ mod tests {
  "findings": [{"error_type": "missed-edge-case", "detail": "An empty grid"}, {"error_type": "guess", "detail": "?"}],
  "feedback": "Think about empty grids."}
 ```"#;
-        let marked = parse_marked(reply, &types, false).unwrap();
+        let marked = parse_marked(reply, &types, &Answer::written("x")).unwrap();
         assert_eq!(marked.clarity, None);
         assert_eq!(marked.score, 0.5);
         assert_eq!(marked.points[0].met, Met::Partly);
@@ -604,11 +690,11 @@ mod tests {
             parse_marked(
                 "{\"score\": 2, \"points\": [], \"feedback\": \"\"}",
                 &types,
-                false
+                &Answer::written("x")
             )
             .is_err()
         );
-        assert!(parse_marked("No idea", &types, false).is_err());
+        assert!(parse_marked("No idea", &types, &Answer::written("x")).is_err());
     }
 
     #[test]
@@ -668,6 +754,7 @@ mod tests {
             findings,
             feedback: String::new(),
             clarity: None,
+            questioning: None,
         };
         // Answered fully, with nothing wrong, it's easy; otherwise as any other work.
         assert_eq!(marked(1.0, Vec::new()).twist_rating(), Rating::Easy);
@@ -692,6 +779,7 @@ mod tests {
             code: Some(("Python", "print(count(grid))\n")),
             note: None,
             twist: None,
+            brief: None,
         };
         let prompt = mark_prompt(problem, Work::Explanation, answer, &types).unwrap();
         assert!(prompt.contains("explained this aloud"));
@@ -708,16 +796,78 @@ mod tests {
         assert!(mark_prompt(card, Work::Explanation, answer, &types).is_err());
 
         let marked = r#"{"score": 0.8, "points": [], "feedback": "Good.", "clarity": {"score": 0.6, "feedback": "Say the cost before the details."}}"#;
-        let marked = parse_marked(marked, &types, true).unwrap();
+        let marked = parse_marked(marked, &types, &answer).unwrap();
         assert_eq!(marked.clarity.unwrap().score, 0.6);
         // Explained aloud, it must be marked for clarity.
         let unclear = r#"{"score": 0.8, "points": [], "feedback": "Good."}"#;
-        assert!(parse_marked(unclear, &types, true).is_err());
+        assert!(parse_marked(unclear, &types, &answer).is_err());
         let out_of_range = r#"{"score": 0.8, "points": [], "feedback": "Good.", "clarity": {"score": 7, "feedback": ""}}"#;
-        assert!(parse_marked(out_of_range, &types, true).is_err());
+        assert!(parse_marked(out_of_range, &types, &answer).is_err());
         // Written, any clarity is ignored rather than shown.
         let written = r#"{"score": 0.8, "points": [], "feedback": "Good.", "clarity": {"score": 0.6, "feedback": "x"}}"#;
-        assert_eq!(parse_marked(written, &types, false).unwrap().clarity, None);
+        assert_eq!(
+            parse_marked(written, &types, &Answer::written("x"))
+                .unwrap()
+                .clarity,
+            None
+        );
+    }
+
+    #[test]
+    fn marks_what_was_asked_about_a_design_against_its_brief() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let design = pack.item("link-shortener").unwrap();
+        let answer = Answer {
+            brief: Some("- Links last five years\n- 2 million made a day"),
+            ..Answer::written("## Clarify the requirements\n\nLearner: How many are made?")
+        };
+        for work in [Work::Design, Work::Round] {
+            let prompt = mark_prompt(design, work, answer, &types).unwrap();
+            assert!(
+                prompt
+                    .contains("<brief>\n- Links last five years\n- 2 million made a day\n</brief>")
+            );
+            assert!(prompt.contains("They never saw it"));
+            assert!(prompt.contains(
+                "- Considers links that expire, or that are made to abuse the service\n"
+            ));
+            assert!(prompt.contains(&format!(
+                "- {}\n- {}\n</rubric>",
+                QUESTIONING[0], QUESTIONING[1]
+            )));
+            assert!(prompt.contains("- missed-requirement: "));
+            assert!(prompt.ends_with("\"questioning\": {\"found\": [string], \"missed\": [string], \"assumed\": [string]}}"));
+        }
+        // Without one, it's marked on the design alone.
+        let bare = mark_prompt(design, Work::Design, Answer::written("x"), &types).unwrap();
+        assert!(
+            !bare.contains("<brief>")
+                && !bare.contains(QUESTIONING[0])
+                && !bare.contains("questioning")
+        );
+        // Only a design is marked with a brief.
+        let problem = pack.item("islands").unwrap();
+        assert!(mark_prompt(problem, Work::Round, answer, &types).is_err());
+
+        let reply = r#"{"score": 0.7, "points": [], "findings": [{"error_type": "wrong-approach", "detail": "Counters in one place"}], "feedback": "Ask about expiry.",
+            "questioning": {"found": ["2 million made a day"], "missed": ["How long links last"], "assumed": ["Codes are 6 characters"]}}"#;
+        let marked = parse_marked(reply, &types, &answer).unwrap();
+        let questioning = marked.questioning.as_ref().unwrap();
+        assert_eq!(questioning.assumed, ["Codes are 6 characters"]);
+        // A missed requirement is kept as a mistake of its own kind, after the findings.
+        let mistakes = marked.mistakes("g2", "sample/link-shortener", 9);
+        assert_eq!(mistakes.len(), 2);
+        assert_eq!(mistakes[1].id, "grade-g2-1");
+        assert_eq!(mistakes[1].detail, "Didn't find out: How long links last");
+        assert_eq!(mistakes[1].suggested.as_deref(), Some(MISSED_REQUIREMENT));
+        assert!(types.iter().any(|t| t.id == MISSED_REQUIREMENT));
+        // With a brief, what was asked must be marked; without one, it's ignored.
+        let unasked = r#"{"score": 0.7, "points": [], "feedback": "Fine."}"#;
+        assert!(parse_marked(unasked, &types, &answer).is_err());
+        let plain = parse_marked(reply, &types, &Answer::written("x")).unwrap();
+        assert_eq!(plain.questioning, None);
+        assert_eq!(plain.mistakes("g3", "sample/link-shortener", 9).len(), 1);
     }
 
     #[test]
