@@ -595,9 +595,22 @@ test("sends an answer again when the reply was lost, without counting it twice",
     await route.fetch();
     await route.abort("connectionreset");
   });
+  // Any other request that's answered meanwhile, such as for the track's problems as the step
+  // ends, says the server can be reached, and the answer's sent again at once. "Offline" may then
+  // be shown for only a moment, so everything the sync chip says is kept, so as not to miss it.
+  await page.evaluate(() => {
+    const said: string[] = [];
+    Object.assign(window, { syncSaid: said });
+    new MutationObserver(() => {
+      const text = document.querySelector(".learn-sync")?.textContent;
+      if (text && text !== said.at(-1)) said.push(text);
+    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
   await answer(await answerShown(page), page);
   await page.getByRole("button", { name: "Got it" }).tap();
-  await expect(page.locator(".learn-sync")).toContainText("Offline");
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { syncSaid: string[] }).syncSaid))
+    .toContainEqual(expect.stringContaining("Offline"));
   // Tried again, it's taken once.
   await expect(page.locator(".learn-sync")).toHaveText("Saved", { timeout: 20_000 });
   expect(syncs.length).toBeGreaterThan(1);
