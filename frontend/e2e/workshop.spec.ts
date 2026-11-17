@@ -12,6 +12,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { GLIDE_MS } from "../src/helix/glide";
 import { charFor, DOUBLE_TAP_MS, LAYOUT } from "../src/keyboard";
 import { FAKE_LSP_FAILS, HOME, PORT } from "./fixture";
 import { installSimulatedSpeech } from "./speech";
@@ -1367,19 +1368,30 @@ test("glides the code when Helix's keys scroll it, ending where it would jump to
   await helix.locator(".cm-line").first().click();
   await expect(helix.locator(".cm-helix-mode")).toHaveText("NOR");
   const scroller = helix.locator(".cm-scroller");
-  const scrollTop = () => scroller.evaluate((s) => s.scrollTop);
-  /** Presses keys, and then where the code is once it's still. */
+  /**
+   * Presses keys, and then where the code is once it's still: once a glide begun by them would
+   * be over, and it hasn't moved in the frames since. Counted in the page's frames, as a slow
+   * page can go longer than the test's checks are apart without drawing one, and so without
+   * moving.
+   */
   const settledAfter = async (...keys: string[]) => {
     for (const key of keys) await helix.keyboard.press(key);
-    let last = -1;
-    await expect
-      .poll(async () => {
-        const [before, now] = [last, await scrollTop()];
-        last = now;
-        return before === now;
-      })
-      .toBe(true);
-    return last;
+    return scroller.evaluate(
+      (s, glideMs) =>
+        new Promise<number>((resolve) => {
+          const pressed = performance.now();
+          let last = s.scrollTop;
+          let stillFor = 0;
+          const frame = () => {
+            stillFor = s.scrollTop === last ? stillFor + 1 : 0;
+            last = s.scrollTop;
+            if (stillFor >= 2 && performance.now() - pressed > glideMs) resolve(last);
+            else requestAnimationFrame(frame);
+          };
+          requestAnimationFrame(frame);
+        }),
+      GLIDE_MS,
+    );
   };
 
   // Where the keys jump to, with motion reduced, as some people choose.

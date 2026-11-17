@@ -1,5 +1,5 @@
 /** How long a glide takes, in milliseconds. */
-const DURATION = 160;
+export const GLIDE_MS = 160;
 
 /** Fast at first and settling gently, as a flicked page does. */
 function easeOut(t: number): number {
@@ -65,7 +65,7 @@ export class ScrollGlide {
     this.el.scrollTop = from;
     const glide: Glide = { from, to, start: performance.now(), frame: 0 };
     const step = (now: number) => {
-      const t = Math.min(1, (now - glide.start) / DURATION);
+      const t = Math.min(1, (now - glide.start) / GLIDE_MS);
       this.el.scrollTop = t < 1 ? glide.from + (glide.to - glide.from) * easeOut(t) : glide.to;
       if (t < 1) glide.frame = requestAnimationFrame(step);
       else this.glide = null;
