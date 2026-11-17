@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use serde::Deserialize;
 use workshop_tracks::{PackTrackId, TrackIcon, TrackId};
 
+use crate::Kind;
 use crate::error_types::{self, ErrorType};
 
 /// The default mastery a goal asks of each of its skills.
@@ -18,6 +19,9 @@ pub struct Manifest {
     pub description: Option<String>,
     pub skills: Vec<Skill>,
     pub tracks: Vec<PackTrack>,
+    /// The track of the pack's own its items are in when they don't say, if it has one. Design
+    /// prompts aren't, as they're only worked through in the System design track.
+    pub default_track: Option<PackTrackId>,
     pub goals: Vec<Goal>,
     /// Kinds of mistake the pack adds to the built-in ones, for its mistake log.
     pub error_types: Vec<ErrorType>,
@@ -56,6 +60,10 @@ pub struct PackTrack {
     pub summary: Option<String>,
     /// One of the icons the app has, chosen by name, or a default for a pack's tracks.
     pub icon: TrackIcon,
+    /// Whether Continue can offer its items, and they share the day's limits and count towards
+    /// the week's target with everything else. Kept apart, its items are only offered when the
+    /// learner opens it, with limits of its own.
+    pub in_continue: bool,
 }
 
 /// Something the learner is working towards: a set of skills, each to be mastered to a level.
@@ -148,6 +156,7 @@ struct RawManifest {
     skills: Vec<Skill>,
     #[serde(default)]
     tracks: Vec<RawTrack>,
+    track: Option<String>,
     #[serde(default)]
     goals: Vec<RawGoal>,
     #[serde(default)]
@@ -165,6 +174,8 @@ struct RawTrack {
     name: String,
     summary: Option<String>,
     icon: Option<String>,
+    #[serde(rename = "continue")]
+    in_continue: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -236,8 +247,21 @@ impl Manifest {
                 name: track.name,
                 summary: track.summary,
                 icon,
+                in_continue: track.in_continue.unwrap_or(true),
             });
         }
+        let default_track = match &raw.track {
+            None => None,
+            Some(name) => Some(
+                tracks
+                    .iter()
+                    .find(|track| track.id.as_str() == name)
+                    .map(|track| track.id.clone())
+                    .ok_or_else(|| {
+                        format!("the pack's track is {name:?}, which isn't one of its [[tracks]]")
+                    })?,
+            ),
+        };
         let mut goals = Vec::new();
         for goal in raw.goals {
             if !is_slug(&goal.id) {
@@ -322,6 +346,7 @@ impl Manifest {
             description: raw.description,
             skills: raw.skills,
             tracks,
+            default_track,
             goals,
             error_types,
             prompts: raw.prompts,
@@ -339,6 +364,23 @@ impl Manifest {
 
     pub fn has_skill(&self, id: &str) -> bool {
         self.skills.iter().any(|skill| skill.id == id)
+    }
+
+    /// The tracks of the pack's own that are kept out of Continue.
+    pub fn kept_apart(&self) -> impl Iterator<Item = TrackId> + '_ {
+        self.tracks
+            .iter()
+            .filter(|track| !track.in_continue)
+            .map(|track| TrackId::Pack(track.id.clone()))
+    }
+
+    /// The track an item of `kind` is in when it doesn't say: the pack's own default, if it has
+    /// one and the item can be in it, and otherwise the kind's.
+    pub fn default_track(&self, kind: Kind) -> TrackId {
+        match &self.default_track {
+            Some(track) if kind.can_be_in_pack_track() => TrackId::Pack(track.clone()),
+            _ => kind.default_track(),
+        }
     }
 
     /// The track an item names in its front matter: a built-in track, or one of the pack's.
@@ -417,6 +459,11 @@ mod tests {
         assert!(manifest.track("chess").is_err());
         assert_eq!(manifest.tracks[0].icon, TrackIcon::Approximately);
         assert_eq!(manifest.tracks[1].icon, TrackIcon::PACK_DEFAULT);
+        // In Continue unless they say otherwise, and items are in their kind's track.
+        assert!(manifest.tracks.iter().all(|track| track.in_continue));
+        assert_eq!(manifest.kept_apart().count(), 0);
+        assert_eq!(manifest.default_track, None);
+        assert_eq!(manifest.default_track(Kind::Card), TrackId::Review);
         assert_eq!(manifest.goals[0].by_day(), None);
         assert_eq!(days_since_1970("1970-01-01"), Some(0));
         assert_eq!(days_since_1970("2026-09-21"), Some(20_717));
@@ -426,6 +473,26 @@ mod tests {
         let types = manifest.all_error_types();
         assert_eq!(types[0].id, "misread");
         assert_eq!(types.last().unwrap().id, "sign-error");
+    }
+
+    #[test]
+    fn keeps_a_track_out_of_continue_and_puts_items_in_it_by_default() {
+        let manifest = Manifest::parse(
+            "id = \"x\"\nname = \"X\"\ntrack = \"drill\"\n[[tracks]]\nid = \"drill\"\nname = \"Drill\"\ncontinue = false\n[[tracks]]\nid = \"other\"\nname = \"Other\"\ncontinue = true\n",
+        )
+        .unwrap();
+        let drill = TrackId::Pack("drill".parse().unwrap());
+        assert_eq!(manifest.kept_apart().collect::<Vec<_>>(), std::slice::from_ref(&drill));
+        for kind in [
+            Kind::Card,
+            Kind::MentalMaths,
+            Kind::Probability,
+            Kind::Coding,
+            Kind::Reading,
+        ] {
+            assert_eq!(manifest.default_track(kind), drill, "{kind:?}");
+        }
+        assert_eq!(manifest.default_track(Kind::Design), TrackId::SystemDesign);
     }
 
     #[test]
@@ -451,6 +518,14 @@ mod tests {
             (
                 "id = \"x\"\nname = \"x\"\n[[tracks]]\nid = \"t\"\nname = \"T\"\nicon = \"rocket\"",
                 "no icon called \"rocket\"",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\ntrack = \"review\"",
+                "isn't one of its [[tracks]]",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[tracks]]\nid = \"t\"\nname = \"T\"\ncontinue = \"no\"",
+                "invalid type",
             ),
             (
                 "id = \"x\"\nname = \"x\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"nope\"]",

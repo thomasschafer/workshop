@@ -42,6 +42,13 @@ impl Kind {
         }
     }
 
+    /// Whether an item of this kind can be in a track of a pack's own, which offers short items
+    /// a few at a time and lists its problems. Design prompts are worked through only in the
+    /// System design track.
+    pub fn can_be_in_pack_track(self) -> bool {
+        self != Self::Design
+    }
+
     /// Roughly how many minutes an item of this kind takes, unless it says.
     fn default_minutes(self) -> u32 {
         match self {
@@ -283,8 +290,14 @@ impl Item {
         }
         let track = match &common.track {
             Some(name) => manifest.track(name)?,
-            None => common.kind.default_track(),
+            None => manifest.default_track(common.kind),
         };
+        if matches!(track, TrackId::Pack(_)) && !common.kind.can_be_in_pack_track() {
+            return Err(
+                "a design prompt is worked through as a design session, in the system-design track, so it can't be in a pack's own"
+                    .to_owned(),
+            );
+        }
         if common.minutes == Some(0) {
             return Err("minutes should be at least 1".to_owned());
         }
@@ -794,6 +807,47 @@ mod tests {
             }
         );
         assert_eq!(item.label(), "What's 7 × 8?");
+    }
+
+    #[test]
+    fn puts_items_in_the_packs_own_track_unless_they_say_otherwise() {
+        let manifest = Manifest::parse(
+            "id = \"example\"\nname = \"Example\"\ntrack = \"drill\"\n[[skills]]\nid = \"dice\"\nname = \"Dice\"\n[[tracks]]\nid = \"drill\"\nname = \"Drill\"\ncontinue = false\n",
+        )
+        .unwrap();
+        let parse = |source: &str| {
+            Item::parse("items/x.md", "x", source, &manifest, |file| {
+                match file {
+                "reference.py" | "starter.py" | "brute.py" | "inputs.py" => Ok(String::new()),
+                "tests.toml" => Ok(
+                    "[[example]]\ninput = \"1\"\noutput = \"1\"\n[[test]]\ninput = \"2\"\noutput = \"2\"\n"
+                        .to_owned(),
+                ),
+                _ => Err(format!("{file:?} isn't in the item's directory")),
+            }
+            })
+        };
+        let drill = TrackId::Pack("drill".parse().unwrap());
+        let card =
+            parse("+++\nkind = \"card\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA\n").unwrap();
+        assert_eq!(card.track, drill);
+        let reading = parse(&reading_in("python", "print(1)", "prints = \"1\"\n")).unwrap();
+        assert_eq!(reading.track, drill);
+        let coding = parse(&coding("python", "\"reference.py\"", "\"starter.py\"")).unwrap();
+        assert_eq!(coding.track, drill);
+        // An item's own track wins.
+        let own = parse(
+            "+++\nkind = \"card\"\nskills = [\"dice\"]\ntrack = \"review\"\n+++\nQ\n## Answer\nA\n",
+        )
+        .unwrap();
+        assert_eq!(own.track, TrackId::Review);
+        // Design prompts stay in the System design track, and can't be in a pack's own.
+        let design = "+++\nkind = \"design\"\nskills = [\"dice\"]\n+++\nDesign a dice roller.\n## Rubric\n- Fair\n";
+        assert_eq!(parse(design).unwrap().track, TrackId::SystemDesign);
+        let err =
+            parse(&design.replace("kind = \"design\"", "kind = \"design\"\ntrack = \"drill\""))
+                .unwrap_err();
+        assert!(err.contains("design session"), "{err}");
     }
 
     #[test]
