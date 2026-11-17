@@ -63,8 +63,11 @@ pub struct LearningConfig {
 pub struct AuthorConfig {
     /// Writes items, with tools confined to a copy of the pack: a strong model.
     pub writer: AuthorModel,
-    /// Solves each item blind and reviews it, with no tools: a model from another provider.
-    pub reviewer: AuthorModel,
+    /// Solves each item blind and reviews it, with no tools. Unset, it's another provider's
+    /// model if one is installed and logged in, and the writer's otherwise; see
+    /// `crate::author::reviewer`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<AuthorModel>,
     /// The most new items a run writes.
     pub max_items: usize,
     /// Rounds of discussion when the writer and reviewer disagree, before an item waits for
@@ -97,10 +100,7 @@ impl Default for AuthorConfig {
                 provider: "claude".into(),
                 model: "opus".into(),
             },
-            reviewer: AuthorModel {
-                provider: "codex".into(),
-                model: "sol".into(),
-            },
+            reviewer: None,
             max_items: 5,
             discussion_rounds: 2,
             fix_rounds: 2,
@@ -465,7 +465,14 @@ impl Config {
         }
 
         let author = raw.author;
-        for (role, choice) in [("writer", &author.writer), ("reviewer", &author.reviewer)] {
+        let roles = [
+            ("writer", Some(&author.writer)),
+            ("reviewer", author.reviewer.as_ref()),
+        ];
+        for (role, choice) in roles
+            .into_iter()
+            .filter_map(|(role, choice)| Some((role, choice?)))
+        {
             if !providers.contains_key(&choice.provider) {
                 bail!(
                     "[author] {role} uses unknown provider {:?}",

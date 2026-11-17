@@ -1,6 +1,6 @@
 # The author
 
-The author writes new items for a pack of your own: for the skills you're weakest in, those in your goals first, and the kinds of mistake you make most. One model writes them, a model from another provider checks each one, and every item must pass its mechanical check, as `workshop pack check` runs it, before it's accepted.
+The author writes new items for a pack of your own: for the skills you're weakest in, those in your goals first, and the kinds of mistake you make most. One model writes them, another run of a model checks each one, and every item must pass its mechanical check, as `workshop pack check` runs it, before it's accepted.
 
 Run it with `workshop author`, or with the Top up button under Packs in the app, or have the server run it by itself on a schedule (see below).
 
@@ -9,7 +9,7 @@ Run it with `workshop author`, or with the Top up button under Packs in the app,
 1. Workshop copies your pack into a directory of its own, leaving out anything hidden, such as `.git`. The writer, by default the newest Opus through Claude Code, works in the copy with tools that can't reach anything else (see below), and writes at most `max_items` new items under `items/`. It's told the pack's format, your weakest skills, your most common kinds of mistake with some examples, the skills whose coding problems, code to read or probability questions you found too easy, with the items you retired and how hard each was, how hard each skill's problems should be, the drafts waiting in `drafts/`, and your answers to its earlier questions. It can make an item from a draft, and delete the draft.
 2. Anything else the writer changed in the copy, such as `pack.toml` or an existing item, is put back, and the run's summary says so. Items over the cap are left out.
 3. Each new item's check runs. The writer gets `fix_rounds` turns to fix those that fail, and those that still fail are left out. An item that can't be checked on this machine, such as C++ without a compiler, is left out too, as it hasn't been shown to be right.
-4. The reviewer, by default the newest Sol through Codex, with no tools, solves each item without seeing its answer, then compares its answer with the item's and says whether the item is right and unambiguous. Where an answer is a number, as for probability and mental maths, Workshop also compares them itself, and a mismatch counts as an objection whatever the reviewer says.
+4. The reviewer (see [Choosing the reviewer](#choosing-the-reviewer)), with no tools, solves each item without seeing its answer, then compares its answer with the item's and says whether the item is right and unambiguous. Where an answer is a number, as for probability and mental maths, Workshop also compares them itself, and a mismatch counts as an objection whatever the reviewer says.
 5. If the reviewer objects, the writer can revise the item, which is checked again, or say why it stands, and the reviewer looks again, for up to `discussion_rounds` rounds.
 6. Items they agree on are written into your pack and committed, if the pack is a git repo, on whatever branch it's on, with a message listing them. Nothing is ever pushed. Items they still disagree on wait under Packs, Waiting for approval, with the item and what each model said; approving one checks it again before adding and committing it.
 
@@ -30,11 +30,31 @@ Under `[author]` in your config:
 ```toml
 [author]
 writer = { provider = "claude", model = "opus" }
-reviewer = { provider = "codex", model = "sol" }
+# reviewer = { provider = "codex", model = "sol" }   # unset, it's chosen as below
 max_items = 5
 discussion_rounds = 2
 fix_rounds = 2
 timeout_minutes = 20
+```
+
+### Choosing the reviewer
+
+A reviewer from another provider than the writer's is best. The reviewer's job is to catch the writer's mistakes, and two runs of the same model share its blind spots: a question it misreads, a case it forgets or an answer it's sure of when it's wrong, it's likely to get wrong the same way twice. A different model, trained differently, fails in different places, so it catches more.
+
+Not everyone has two providers, though, so the reviewer can use the writer's own, such as Opus through Claude Code for both. It's still kept apart from the writer: each review is a call of its own, with no tools, that's never told the writer's working or its conversation, and solves each item before it's shown the item's answer. The mechanical checks, and Workshop's own comparison of numeric answers, don't depend on the reviewer at all. What it can't give is a second opinion with different blind spots, so an item one model is wrong about is more likely to get through.
+
+Which reviewer a run uses:
+
+1. The one set as `reviewer` under `[author]`, if there is one, whatever its provider.
+2. Otherwise, the first of these that isn't the writer's provider, and whose CLI is installed and logged in: the newest Sol through Codex, then the newest Opus through Claude Code.
+3. Otherwise, the writer's own provider and model.
+
+It's chosen as each run starts. Packs, under the author, says which it is and why, and so does `workshop doctor`, which warns when it's the writer's own provider and says what to install for another, as an option. To use Claude Code alone, nothing needs setting, or to say so, set:
+
+```toml
+[author]
+writer = { provider = "claude", model = "opus" }
+reviewer = { provider = "claude", model = "opus" }
 ```
 
 ## Running on a schedule
@@ -51,7 +71,7 @@ A run is due `every` after the last one started, whether that was scheduled, fro
 
 Scheduled runs are like any other: one at a time, waiting while one from the app or the command is going, with the same `max_items` and checks, and the writer's programs run only in the sandbox. Devices that turned on notifications are told how each run went, or why it failed. The sample pack is built in, so it's never run on.
 
-The writer's provider needs an `[agent]` command, which the built-in Claude Code and Codex providers have. The reviewer must use a different provider from the writer, so an item is never checked by the model that wrote it. A pack's `prompts.author` add-on is added to both models' instructions.
+The writer's provider needs an `[agent]` command, which the built-in Claude Code and Codex providers have. A pack's `prompts.author` add-on is added to both models' instructions.
 
 ## What the writer can reach
 

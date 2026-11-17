@@ -10,8 +10,9 @@
 //! 2. Items beyond the run's cap are dropped. Every item must pass its mechanical check, as
 //!    `workshop pack check` runs it; the writer gets a few rounds to fix those that fail, and
 //!    those that still do are dropped.
-//! 3. A model from another provider, with no tools, solves each item blind, then compares its
-//!    answer with the item's and says whether the item is right and unambiguous. Where it can
+//! 3. The reviewer, best a model from another provider, in calls of its own with no tools,
+//!    solves each item blind, then compares its answer with the item's and says whether the
+//!    item is right and unambiguous. Where it can
 //!    be told mechanically, such as a probability's answer, its answer is compared too.
 //! 4. If they disagree, the writer answers the objection, revising the item or saying why it
 //!    stands, and the reviewer looks again, for a few rounds. Items they agree on are accepted;

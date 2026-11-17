@@ -18,6 +18,7 @@ use crate::config::Config;
 use crate::learning::{Learning, now_ms};
 use crate::paths::Paths;
 
+pub mod reviewer;
 pub mod schedule;
 
 /// How far back mistakes count towards what the author writes about.
@@ -232,12 +233,13 @@ fn pack_dir(config: &Config, pack: Option<&str>) -> Result<PathBuf> {
 
 async fn models(config: &Config, pack: &Pack, work_dir: &Path) -> Result<ProviderModels> {
     let settings = &config.author;
-    if settings.writer.provider == settings.reviewer.provider {
-        bail!(
-            "the author's writer and reviewer both use {}; the reviewer should use another provider, so an item isn't checked by the model that wrote it, under [author] in your config",
-            settings.writer.provider
-        );
-    }
+    let chosen = reviewer::chosen(config).await;
+    tracing::info!(
+        "the author's reviewer is {} with {}: {}",
+        chosen.model.model,
+        chosen.model.provider,
+        chosen.reason(config)
+    );
     let writer = &config.providers[&settings.writer.provider];
     let agent = writer.agent.clone().with_context(|| {
         format!(
@@ -255,10 +257,15 @@ async fn models(config: &Config, pack: &Pack, work_dir: &Path) -> Result<Provide
     // A family name, such as "sol", is the newest model in the family.
     let resolver = ProviderRunner::new(writer.clone(), work_dir.join("writer-cwd"))?;
     let writer_spec = resolver.resolved(&writer_spec).await;
-    let reviewer = &config.providers[&settings.reviewer.provider];
+    // Even with the writer's own provider, the reviewer is a call of its own, with no tools
+    // and none of the writer's conversation.
+    let reviewer = config
+        .providers
+        .get(&chosen.model.provider)
+        .with_context(|| format!("there's no provider called {:?}", chosen.model.provider))?;
     let reviewer_spec = reviewer.spec(
         Role::Discuss,
-        &settings.reviewer.model,
+        &chosen.model.model,
         workshop_author::reviewer_system_prompt(add_on("author")),
     );
     Ok(ProviderModels {

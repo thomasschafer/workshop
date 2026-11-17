@@ -32,6 +32,10 @@ pub(super) struct AuthorStatus {
     unavailable: Option<String>,
     writer: String,
     reviewer: String,
+    /// Why the reviewer is the one it is, such as there being no other provider to use.
+    reviewer_reason: String,
+    /// Whether the reviewer uses the writer's own provider.
+    reviewer_shares_provider: bool,
     max_items: usize,
     last: Option<LastRun>,
     queue: Vec<Queued>,
@@ -39,19 +43,11 @@ pub(super) struct AuthorStatus {
     questions: Vec<Question>,
 }
 
-fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
+async fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
+    let reviewer = app.author_reviewer().await;
     let running = app.author_running.load(Ordering::SeqCst) || app.author.try_lock()?.is_none();
     let author = &app.config.author;
-    let named = |choice: &crate::config::AuthorModel| {
-        let provider = app
-            .config
-            .providers
-            .get(&choice.provider)
-            .map_or(choice.provider.as_str(), |p| {
-                p.display_name(&choice.provider)
-            });
-        format!("{} with {provider}", choice.model)
-    };
+    let named = |model| crate::author::reviewer::named(&app.config, model);
     let next = crate::author::schedule::next_scheduled(
         &app.config,
         &app.author,
@@ -69,7 +65,9 @@ fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
             "The author writes for a pack of your own, and the sample pack is built in: list your pack under [learning] in your config.".to_owned()
         }),
         writer: named(&author.writer),
-        reviewer: named(&author.reviewer),
+        reviewer: named(&reviewer.model),
+        reviewer_reason: reviewer.reason(&app.config),
+        reviewer_shares_provider: reviewer.shares_provider(&app.config),
         max_items: author.max_items,
         last: app.author.last_run()?,
         queue: app.author.queue()?,
@@ -83,7 +81,7 @@ fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
 }
 
 pub(super) async fn author(State(app): State<Shared>) -> ApiResult<AuthorStatus> {
-    Ok(Json(status(&app)?))
+    Ok(Json(status(&app).await?))
 }
 
 /// Starts a run, which carries on in the background; the app asks how it's going.
@@ -111,7 +109,7 @@ pub(super) async fn top_up(State(app): State<Shared>) -> ApiResult<AuthorStatus>
         }
         app.author_running.store(false, Ordering::SeqCst);
     });
-    let mut shown = status(&app)?;
+    let mut shown = status(&app).await?;
     shown.running = true;
     Ok(Json(shown))
 }
@@ -161,7 +159,7 @@ pub(super) async fn decide(
     };
     Ok(Json(Decided {
         commit,
-        status: status(&app)?,
+        status: status(&app).await?,
     }))
 }
 
@@ -180,7 +178,7 @@ pub(super) async fn answer(
     app.author
         .answer(&id, &body.answer)
         .map_err(|err| bad_request(format!("{err:#}")))?;
-    Ok(Json(status(&app)?))
+    Ok(Json(status(&app).await?))
 }
 
 #[cfg(test)]
@@ -189,7 +187,7 @@ mod tests {
     use axum::extract::Request;
     use axum::http::{StatusCode, header};
 
-    use crate::server::testing::{send, test_app};
+    use crate::server::testing::{send, test_app_in};
 
     fn request(method: &str, path: &str, body: Option<serde_json::Value>) -> Request {
         Request::builder()
@@ -210,7 +208,12 @@ mod tests {
 
     #[tokio::test]
     async fn says_why_it_cant_top_up_the_sample_pack() {
-        let (_dir, router) = test_app().await;
+        // Codex stands in, logged out, so the reviewer is the writer's own provider's.
+        let dir = tempfile::tempdir().unwrap();
+        let router = test_app_in(
+            dir.path(),
+            "[providers.codex]\nname = \"Codex\"\ncommand = [\"sh\"]\ninput = \"stdin\"\noutput = \"text\"\nauth_check_command = [\"sh\", \"-c\", \"exit 1\"]\n",
+        );
         let status = json(send(&router, request("GET", "/api/author", None)).await).await;
         assert_eq!(status["running"], false);
         assert!(
@@ -220,7 +223,10 @@ mod tests {
                 .contains("pack of your own")
         );
         assert_eq!(status["writer"], "opus with Claude Code");
-        assert_eq!(status["reviewer"], "sol with Codex");
+        assert_eq!(status["reviewer"], "opus with Claude Code");
+        assert_eq!(status["reviewer_shares_provider"], true);
+        let reason = status["reviewer_reason"].as_str().unwrap();
+        assert!(reason.contains("install and log in to Codex"), "{reason}");
         let started = json(send(&router, request("POST", "/api/author/run", None)).await).await;
         assert_eq!(started["running"], true);
         let mut last = serde_json::Value::Null;

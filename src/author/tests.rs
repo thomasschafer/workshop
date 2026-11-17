@@ -64,7 +64,7 @@ fn setup() -> Setup {
     let pack = root.join("pack");
     crate::pack_files::testing::sample_pack_repo(&pack);
     let mut config = Config::parse(&format!(
-        "[learning]\npacks = [{:?}]\n[author]\nmax_items = 3\ndiscussion_rounds = 1\nfix_rounds = 1\n",
+        "[learning]\npacks = [{:?}]\n[author]\nreviewer = {{ provider = \"codex\", model = \"sol\" }}\nmax_items = 3\ndiscussion_rounds = 1\nfix_rounds = 1\n",
         pack.display().to_string()
     ))
     .unwrap();
@@ -253,16 +253,66 @@ async fn adds_what_both_agree_on_and_queues_the_rest() {
 }
 
 #[tokio::test]
-async fn refuses_to_run_without_a_pack_of_ones_own_or_with_one_provider() {
-    let s = setup();
-    let notifier = || Arc::new(workshop_push::Notifier::load(&s.paths.data_dir).unwrap());
-    let mut same = s.config.clone();
-    same.author.reviewer.provider = "claude".to_owned();
-    let last = run(&same, &s.paths, &s.learning, &s.desk, notifier(), None)
+async fn reviews_with_the_writers_own_provider_in_a_call_of_its_own() {
+    let mut s = setup();
+    s.config.author.reviewer = Some(crate::config::AuthorModel {
+        provider: "claude".to_owned(),
+        model: "opus".to_owned(),
+    });
+    // Claude Code's own command, without tools, run by a stand-in of its own, which reads the
+    // prompt as it's given and replies in plain text.
+    let reviewer_cli = fake_cli(&s.root, "claude-reviewer");
+    let claude = s.config.providers.get_mut("claude").unwrap();
+    claude.command[0] = "sh".to_owned();
+    claude.command.insert(1, reviewer_cli);
+    claude.input = workshop_provider::InputMode::Stdin;
+    claude.output = workshop_provider::OutputMode::Text;
+    claude.prespawn = false;
+    let writer = s.root.join("claude");
+    write(
+        &writer.join("write-0/items/author/pips.md"),
+        &card("How many pips on a standard die?"),
+    );
+    write(
+        &writer.join("reply-0"),
+        &claude_result("{\"items\": [{\"path\": \"items/author/pips.md\"}]}"),
+    );
+    let reviewer = s.root.join("claude-reviewer");
+    write(
+        &reviewer.join("solved"),
+        "{\"answer\": \"21\", \"working\": \"1+2+...+6\"}",
+    );
+    write(
+        &reviewer.join("reply"),
+        "{\"agree\": true, \"ambiguous\": false, \"objection\": \"\"}",
+    );
+
+    let notifier = Arc::new(workshop_push::Notifier::load(&s.paths.data_dir).unwrap());
+    let last = run(&s.config, &s.paths, &s.learning, &s.desk, notifier, None)
         .await
         .unwrap();
-    assert!(last.error.unwrap().contains("another provider"));
+    assert_eq!(last.error, None, "{last:#?}");
+    assert_eq!(last.report.as_ref().unwrap().accepted.len(), 1);
+    // The reviewer ran apart from the writer, with no tools, and solved the item blind.
+    let args = std::fs::read_to_string(reviewer.join("args-0")).unwrap();
+    let args: Vec<&str> = args.lines().collect();
+    assert!(args.windows(2).any(|w| w == ["--tools", ""]), "{args:?}");
+    assert!(args.windows(2).any(|w| w == ["--model", "opus"]));
+    assert!(!args.contains(&"--restricted"));
+    let ran_in = std::fs::read_to_string(reviewer.join("ran-in")).unwrap();
+    assert!(
+        ran_in.lines().all(|dir| !dir.ends_with("copy/pack")),
+        "{ran_in}"
+    );
+    let blind = std::fs::read_to_string(reviewer.join("prompt-0")).unwrap();
+    assert!(blind.starts_with("Solve this"));
+    assert!(!blind.contains("## Answer"));
+}
 
+#[tokio::test]
+async fn refuses_to_run_without_a_pack_of_ones_own() {
+    let s = setup();
+    let notifier = || Arc::new(workshop_push::Notifier::load(&s.paths.data_dir).unwrap());
     let mut sample = s.config.clone();
     sample.learning.packs.clear();
     let last = run(&sample, &s.paths, &s.learning, &s.desk, notifier(), None)

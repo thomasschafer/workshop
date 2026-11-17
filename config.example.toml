@@ -97,9 +97,10 @@ desired_retention = 0.9
 [author]
 # Writes items, with its tools kept to a copy of your pack. "opus" is always the newest Opus.
 writer = { provider = "claude", model = "opus" }
-# Solves each item blind and reviews it, with no tools. It must use another provider; for Codex, a
-# family such as "sol" means the newest model in it.
-reviewer = { provider = "codex", model = "sol" }
+# Solves each item blind and reviews it, with no tools. Unset, it's the newest Sol through Codex
+# if Codex is installed and logged in, and the writer's own provider and model otherwise. Another
+# provider is better, as two runs of one model share its blind spots; see docs/author.md.
+# reviewer = { provider = "codex", model = "sol" }
 # The most new items a run writes.
 max_items = 5
 # Rounds of discussion when the two disagree, before an item waits for your approval in the app.

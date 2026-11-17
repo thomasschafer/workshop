@@ -69,6 +69,10 @@ pub struct App {
     pub(super) author: crate::author::Desk,
     /// Whether the author is running from the app.
     pub(super) author_running: std::sync::atomic::AtomicBool,
+    /// The author's reviewer as last chosen, and when, as choosing it can mean checking which
+    /// providers are installed and logged in.
+    pub(super) author_reviewer:
+        tokio::sync::Mutex<Option<(std::time::Instant, crate::author::reviewer::Reviewer)>>,
     /// Each coding problem's brute force and inputs program, built, with the random cases made
     /// with them so far, by item and what's in them.
     pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
@@ -144,12 +148,27 @@ impl App {
             card_fixes: crate::grader::Fixes::new(&paths.data_dir),
             author: crate::author::Desk::new(&paths.data_dir),
             author_running: std::sync::atomic::AtomicBool::new(false),
+            author_reviewer: tokio::sync::Mutex::default(),
             oracles: tokio::sync::Mutex::default(),
             posing_twist: tokio::sync::Mutex::default(),
             config,
             paths,
             gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),
         })
+    }
+
+    /// The author's reviewer, chosen again once what was checked is a few minutes old.
+    pub(super) async fn author_reviewer(&self) -> crate::author::reviewer::Reviewer {
+        const FRESH_FOR: Duration = Duration::from_secs(5 * 60);
+        let mut kept = self.author_reviewer.lock().await;
+        if let Some((at, reviewer)) = kept.as_ref()
+            && at.elapsed() < FRESH_FOR
+        {
+            return reviewer.clone();
+        }
+        let reviewer = crate::author::reviewer::chosen(&self.config).await;
+        *kept = Some((std::time::Instant::now(), reviewer.clone()));
+        reviewer
     }
 
     pub(super) fn settings(&self) -> AppSettings {
