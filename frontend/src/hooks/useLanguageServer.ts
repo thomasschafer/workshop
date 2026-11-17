@@ -17,6 +17,12 @@ export interface LanguageServerSetup {
   path: string;
 }
 
+/** What a connection said, and which connection said it. */
+interface Said<T> {
+  by: LanguageServerConnection;
+  value: T;
+}
+
 /**
  * The connection to a language server, if there's one, shared by every editor of its files. A
  * new setup, told apart by `key`, starts a new connection. `lspError` is the last error the
@@ -29,31 +35,29 @@ export function useLanguageServer(
   editor: RefObject<CodeEditor | null>,
 ) {
   const [lspStatus, setLspStatus] = useState<LanguageServerStatus>("connecting");
-  const [lspError, setLspError] = useState<string | null>(null);
-  const [lspUnavailable, setLspUnavailable] = useState<LanguageServerUnavailable | null>(null);
-  const lsp = useMemo(
-    () =>
-      setup
-        ? new LanguageServerConnection(
-            setup.rootUri,
-            setup.options,
-            setLspStatus,
-            setLspError,
-            setLspUnavailable,
-            setup.path,
-          )
-        : null,
-    [key],
-  );
-  useEffect(() => {
-    setLspError(null);
-    setLspUnavailable(null);
-    return () => lsp?.close();
-  }, [lsp]);
+  // Kept with the connection that said them, so a new connection starts with neither. Clearing
+  // them once it's made would be too late: it may have given up by then.
+  const [error, setError] = useState<Said<string> | null>(null);
+  const [unavailable, setUnavailable] = useState<Said<LanguageServerUnavailable> | null>(null);
+  const lsp = useMemo(() => {
+    if (!setup) return null;
+    const connection: LanguageServerConnection = new LanguageServerConnection(
+      setup.rootUri,
+      setup.options,
+      setLspStatus,
+      (message) => setError({ by: connection, value: message }),
+      (why) => setUnavailable(why && { by: connection, value: why }),
+      setup.path,
+    );
+    return connection;
+  }, [key]);
+  useEffect(() => () => lsp?.close(), [lsp]);
+  const lspError = error?.by === lsp ? error.value : null;
+  const lspUnavailable = unavailable?.by === lsp ? unavailable.value : null;
   useEffect(() => {
     if (lspStatus === "reconnecting" || lspStatus === "unavailable") {
       editor.current?.clearDiagnostics();
-      setLspError(null);
+      setError(null);
     }
   }, [lspStatus]);
   return {
@@ -61,7 +65,7 @@ export function useLanguageServer(
     lspStatus,
     lspError,
     lspUnavailable,
-    dismissLspError: () => setLspError(null),
+    dismissLspError: () => setError(null),
     restartLsp: () => api.restartLanguageServers(),
     retryLsp: () => lsp?.retry(),
   };
