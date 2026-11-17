@@ -275,7 +275,7 @@ pub async fn check_reading(
         ),
         ReadingCheck::Raises => stopped(
             &run,
-            run.stderr.contains("Traceback (most recent call last)"),
+            raised(reading.language, &run),
             "the code stops with an exception",
             "the code ran without stopping with an exception",
         ),
@@ -283,6 +283,21 @@ pub async fn check_reading(
             unreachable!("decided once it's built")
         }
     })
+}
+
+/// Whether a run stopped with an exception the code didn't catch, as its language reports one.
+fn raised(language: Language, run: &Run) -> bool {
+    match language {
+        Language::Python => run.stderr.contains("Traceback (most recent call last)"),
+        // GHC's runtime reports an uncaught exception, such as from `error` or a failed pattern
+        // match, as the program's name and the exception, and exits with 1. Running out of heap
+        // or stack exits otherwise, with 251 or 2, and isn't an exception the code raised.
+        Language::Haskell => {
+            run.ending == (Ending::Exited { code: Some(1) })
+                && run.stderr.lines().any(|line| line.starts_with("main: "))
+        }
+        Language::Rust | Language::Cpp => false,
+    }
 }
 
 /// Whether a run stopped with the error the answer says it should, which `found` says was seen.
@@ -335,19 +350,30 @@ mod tests {
         let failures: Vec<String> = report.failures().iter().map(ToString::to_string).collect();
         assert!(failures.is_empty(), "{failures:#?}");
         let has_cpp = has_cpp(&checker.runtime);
+        let has_ghc = checker.runtime.find(Language::Haskell, "ghc").is_some();
         for checked in &report.items {
             match &checked.verdict {
                 Verdict::Passed(_) => {}
-                // Only C++ can be missing where the tests run, as Python and Rust are needed for
-                // Workshop's own.
+                // Only C++ and Haskell can be missing where the tests run, as Python and Rust
+                // are needed for Workshop's own.
                 Verdict::Skipped(reason) => {
                     let item = pack.items.iter().find(|i| i.path == checked.path).unwrap();
-                    let in_cpp = matches!(
-                        &item.content,
-                        Content::Reading(reading) if reading.language == Language::Cpp
-                    );
-                    assert!(!has_cpp && in_cpp, "{}: {reason}", checked.path);
-                    assert!(reason.contains("no C++ compiler"), "{reason}");
+                    let languages: Vec<Language> = match &item.content {
+                        Content::Reading(reading) => vec![reading.language],
+                        Content::Coding(coding) => coding.languages.clone(),
+                        _ => Vec::new(),
+                    };
+                    if languages.contains(&Language::Cpp) {
+                        assert!(!has_cpp, "{}: {reason}", checked.path);
+                        assert!(reason.contains("no C++ compiler"), "{reason}");
+                    } else {
+                        assert!(
+                            !has_ghc && languages.contains(&Language::Haskell),
+                            "{}: {reason}",
+                            checked.path
+                        );
+                        assert!(reason.contains("GHC isn't installed"), "{reason}");
+                    }
                 }
                 Verdict::Failed(_) => unreachable!("listed above"),
             }
@@ -376,6 +402,10 @@ mod tests {
         // black_box keeps the compiler from seeing the overflow coming, and refusing to build it.
         let overflows = "fn main() {\n    let x: u8 = 255;\n    println!(\"{}\", x + std::hint::black_box(1));\n}\n";
         let use_after_free = "#include <iostream>\n#include <vector>\nint main() {\n    std::vector<int> v = {1};\n    int& first = v[0];\n    v.push_back(2);\n    std::cout << first << \"\\n\";\n}\n";
+        let no_show = "data Colour = Red | Green\n\nmain :: IO ()\nmain = print Red\n";
+        let empty_head = "main :: IO ()\nmain = print (head ([] :: [Int]))\n";
+        let missing_case =
+            "f :: Int -> String\nf 0 = \"zero\"\n\nmain :: IO ()\nmain = putStrLn (f 1)\n";
         let cases: &[(Language, &str, ReadingCheck, bool, &str)] = &[
             (
                 Language::Python,
@@ -553,8 +583,102 @@ mod tests {
                 false,
                 "doesn't fit",
             ),
+            (
+                Language::Haskell,
+                no_show,
+                ReadingCheck::CompileError,
+                true,
+                "fails to build",
+            ),
+            (
+                Language::Haskell,
+                no_show,
+                ReadingCheck::Compiles,
+                false,
+                "No instance for",
+            ),
+            // A type error is a compile error, never an exception.
+            (
+                Language::Haskell,
+                no_show,
+                ReadingCheck::Raises,
+                false,
+                "doesn't build",
+            ),
+            (
+                Language::Haskell,
+                empty_head,
+                ReadingCheck::Raises,
+                true,
+                "exception",
+            ),
+            (
+                Language::Haskell,
+                empty_head,
+                ReadingCheck::CompileError,
+                false,
+                "builds, though",
+            ),
+            (
+                Language::Haskell,
+                empty_head,
+                ReadingCheck::Runs,
+                false,
+                "empty list",
+            ),
+            (
+                Language::Haskell,
+                missing_case,
+                ReadingCheck::Raises,
+                true,
+                "exception",
+            ),
+            (
+                Language::Haskell,
+                "main :: IO ()\nmain = error \"no answer\"\n",
+                ReadingCheck::Raises,
+                true,
+                "exception",
+            ),
+            // Exiting with a failure on purpose isn't an exception it didn't catch.
+            (
+                Language::Haskell,
+                "import System.Exit\n\nmain :: IO ()\nmain = exitWith (ExitFailure 1)\n",
+                ReadingCheck::Raises,
+                false,
+                "without stopping",
+            ),
+            (
+                Language::Haskell,
+                "main :: IO ()\nmain = print (take 5 (filter odd (map (* 3) [1 ..])))\n",
+                prints("[3,9,15,21,27]"),
+                true,
+                "prints what",
+            ),
+            (
+                Language::Haskell,
+                "main :: IO ()\nmain = pure ()\n",
+                ReadingCheck::Runs,
+                true,
+                "runs",
+            ),
+            (
+                Language::Haskell,
+                empty_head,
+                ReadingCheck::Panics,
+                false,
+                "doesn't fit",
+            ),
+            (
+                Language::Haskell,
+                empty_head,
+                ReadingCheck::SanitizerError,
+                false,
+                "doesn't fit",
+            ),
         ];
         let has_cpp = has_cpp(&runtime);
+        let has_ghc = runtime.find(Language::Haskell, "ghc").is_some();
         for (language, code, check, passes, says) in cases {
             let reading = Reading {
                 language: *language,
@@ -579,11 +703,138 @@ mod tests {
                     assert!(!*passes, "{case}");
                     assert!(why.contains(says), "{case}");
                 }
-                Verdict::Skipped(why) => {
-                    assert!(*language == Language::Cpp && !has_cpp, "{case}");
-                    assert!(why.contains("no C++ compiler"), "{case}");
-                }
+                Verdict::Skipped(why) => match language {
+                    Language::Cpp => {
+                        assert!(!has_cpp, "{case}");
+                        assert!(why.contains("no C++ compiler"), "{case}");
+                    }
+                    Language::Haskell => {
+                        assert!(!has_ghc, "{case}");
+                        assert!(why.contains("GHC isn't installed"), "{case}");
+                    }
+                    _ => panic!("{case}"),
+                },
             }
+        }
+    }
+
+    /// Every program of a problem can be in Haskell: the brute force and the inputs program as
+    /// well as the reference and the starter, which builds with `undefined` left in it.
+    #[tokio::test]
+    async fn checks_problems_written_wholly_in_haskell() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime {
+            scratch: dir.path().to_owned(),
+            environments: Default::default(),
+            build_timeout: Duration::from_secs(120),
+            run_timeout: Duration::from_secs(30),
+            sandbox: Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
+        };
+        if runtime.find(Language::Haskell, "ghc").is_none() {
+            return;
+        }
+        let item = "+++\nkind = \"coding\"\nskills = [\"sums\"]\nlanguages = [\"haskell\"]\nreference = [\"Reference.hs\"]\nstarter = [\"Starter.hs\"]\nbrute_force = \"Brute.hs\"\ninputs = \"Inputs.hs\"\ntests = \"tests.toml\"\nrandom_inputs = 20\n+++\nAdd up the numbers.\n## Approach\nsum.\n";
+        let tests = "[[example]]\ninput = \"3\\n1 2 3\\n\"\noutput = \"6\"\n[[test]]\ninput = \"1\\n-4\\n\"\noutput = \"-4\"\n";
+        let main = "main :: IO ()\nmain = do\n  n : xs <- map read . words <$> getContents\n  print (total (take n xs))\n";
+        let reference = format!(
+            "import qualified Data.Map.Strict as M\n\ntotal :: [Int] -> Int\ntotal = sum . M.elems . M.fromListWith (+) . zip [0 :: Int ..]\n\n{main}"
+        );
+        let brute = format!("total :: [Int] -> Int\ntotal = foldr (+) 0\n\n{main}");
+        let starter = format!("total :: [Int] -> Int\ntotal xs = undefined\n\n{main}");
+        // A small generator of its own, as the random package doesn't come with GHC.
+        let inputs = "import System.Environment (getArgs)\n\nmain :: IO ()\nmain = do\n  [seed, size] <- map read <$> getArgs\n  let draws = tail (iterate (\\x -> (x * 1103515245 + 12345) `mod` 2147483648) (seed + 1))\n      n = 1 + head draws `mod` (3 * size)\n  print n\n  putStrLn (unwords [show (d `mod` 201 - 100) | d <- take n (drop 1 draws)])\n";
+        let files = |starter: &str| {
+            [
+                ("pack.toml", "id = \"example\"\nname = \"Example\"\n[[skills]]\nid = \"sums\"\nname = \"Sums\"\n"),
+                ("items/total/item.md", item),
+                ("items/total/tests.toml", tests),
+                ("items/total/Reference.hs", &reference),
+                ("items/total/Brute.hs", &brute),
+                ("items/total/Starter.hs", starter),
+                ("items/total/Inputs.hs", inputs),
+            ]
+            .into_iter()
+            .map(|(path, text)| (path.to_owned(), text.as_bytes().to_vec()))
+            .collect()
+        };
+        let check = |starter: String| {
+            let runtime = &runtime;
+            async move {
+                let pack = Pack::from_files(files(&starter)).unwrap();
+                assert!(pack.problems.is_empty(), "{:?}", pack.problems);
+                let Content::Coding(coding) = &pack.item("total").unwrap().content else {
+                    panic!("not a coding item");
+                };
+                check_coding(runtime, coding, &CancellationToken::new())
+                    .await
+                    .unwrap()
+            }
+        };
+        let verdict = check(starter).await;
+        assert!(
+            matches!(&verdict, Verdict::Passed(why) if why.contains("Haskell")),
+            "{verdict:?}"
+        );
+        let verdict = check(format!(
+            "total :: [Int] -> Int\ntotal xs = \"no\"\n\n{main}"
+        ))
+        .await;
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.contains("the starter Starter.hs doesn't build")),
+            "{verdict:?}"
+        );
+    }
+
+    /// Running out of time or memory stops a Haskell program too, but isn't an exception the
+    /// code raised.
+    #[tokio::test]
+    async fn haskell_running_out_of_time_or_memory_is_no_exception() {
+        use workshop_pack::Question;
+        let dir = tempfile::tempdir().unwrap();
+        let sandbox = Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined);
+        let runtime = |run_timeout| Runtime {
+            scratch: dir.path().to_owned(),
+            environments: Default::default(),
+            build_timeout: Duration::from_secs(60),
+            run_timeout,
+            sandbox: sandbox.clone(),
+        };
+        if runtime(Duration::ZERO)
+            .find(Language::Haskell, "ghc")
+            .is_none()
+        {
+            return;
+        }
+        for (code, run_timeout, says) in [
+            (
+                "main :: IO ()\nmain = mapM_ (\\_ -> pure ()) [1 :: Integer ..]\n",
+                Duration::from_secs(2),
+                "took too long",
+            ),
+            // Keeping every number to count and then add them up, so the heap fills.
+            (
+                "main :: IO ()\nmain = do\n  let xs = [1 :: Int .. 400000000]\n  print (length xs + sum xs)\n",
+                Duration::from_secs(60),
+                "Heap exhausted",
+            ),
+        ] {
+            let reading = Reading {
+                language: Language::Haskell,
+                code: code.to_owned(),
+                question: Question::Choice {
+                    choices: vec!["a".to_owned(), "b".to_owned()],
+                    answer: 0,
+                },
+                check: ReadingCheck::Raises,
+                explanation: String::new(),
+            };
+            let verdict = check_reading(&runtime(run_timeout), &reading, &CancellationToken::new())
+                .await
+                .unwrap();
+            assert!(
+                matches!(&verdict, Verdict::Failed(why) if why.contains(says)),
+                "{code}: {verdict:?}"
+            );
         }
     }
 

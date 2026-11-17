@@ -5,18 +5,19 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A language a pack's programs are written in. Learners write code in Python and Rust, and
-/// read code in any of them; C++ is only for reading.
+/// A language a pack's programs are written in. Learners write code in Python, Rust and
+/// Haskell, and read code in any of them; C++ is only for reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     Python,
     Rust,
     Cpp,
+    Haskell,
 }
 
 impl Language {
-    pub const ALL: [Self; 3] = [Self::Python, Self::Rust, Self::Cpp];
+    pub const ALL: [Self; 4] = [Self::Python, Self::Rust, Self::Cpp, Self::Haskell];
 
     /// As written in a pack and in Workshop's config, such as `python`.
     pub fn id(self) -> &'static str {
@@ -24,6 +25,7 @@ impl Language {
             Self::Python => "python",
             Self::Rust => "rust",
             Self::Cpp => "cpp",
+            Self::Haskell => "haskell",
         }
     }
 
@@ -32,6 +34,7 @@ impl Language {
             Self::Python => "Python",
             Self::Rust => "Rust",
             Self::Cpp => "C++",
+            Self::Haskell => "Haskell",
         }
     }
 
@@ -40,6 +43,7 @@ impl Language {
             Self::Python => "py",
             Self::Rust => "rs",
             Self::Cpp => "cpp",
+            Self::Haskell => "hs",
         }
     }
 
@@ -61,13 +65,14 @@ impl Language {
             "python" | "py" => Some(Self::Python),
             "rust" | "rs" => Some(Self::Rust),
             "cpp" | "c++" => Some(Self::Cpp),
+            "haskell" | "hs" => Some(Self::Haskell),
             _ => None,
         }
     }
 
     /// Whether learners can write code in it, which needs an editor and a language server.
     pub fn is_writable(self) -> bool {
-        matches!(self, Self::Python | Self::Rust)
+        matches!(self, Self::Python | Self::Rust | Self::Haskell)
     }
 }
 
@@ -154,9 +159,9 @@ pub enum Question {
 pub enum ReadingCheck {
     /// It builds and runs, printing this.
     Prints(String),
-    /// It builds without errors. For Rust and C++.
+    /// It builds without errors. For Rust, C++ and Haskell.
     Compiles,
-    /// It fails to build. For Rust and C++.
+    /// It fails to build. For Rust, C++ and Haskell.
     CompileError,
     /// It builds and runs to the end without an error.
     Runs,
@@ -165,7 +170,7 @@ pub enum ReadingCheck {
     SanitizerError,
     /// It panics as it runs, such as on an integer overflowing in a debug build. For Rust.
     Panics,
-    /// It stops with an exception it doesn't catch. For Python.
+    /// It stops with an exception it doesn't catch. For Python and Haskell.
     Raises,
 }
 
@@ -175,7 +180,7 @@ impl ReadingCheck {
     pub fn default_for(language: Language) -> Self {
         match language {
             Language::Python => Self::Runs,
-            Language::Rust | Language::Cpp => Self::Compiles,
+            Language::Rust | Language::Cpp | Language::Haskell => Self::Compiles,
         }
     }
 
@@ -196,16 +201,19 @@ impl ReadingCheck {
     pub fn fits(&self, language: Language) -> Result<(), String> {
         // How each language stops at a mistake it finds as the code runs.
         let failure = match language {
-            Language::Python => "exception",
+            Language::Python | Language::Haskell => "exception",
             Language::Rust => "panic",
             Language::Cpp => "sanitizer-error",
         };
         let instead = match (self, language) {
             (Self::Prints(_) | Self::Runs, _)
-            | (Self::Compiles | Self::CompileError, Language::Rust | Language::Cpp)
+            | (
+                Self::Compiles | Self::CompileError,
+                Language::Rust | Language::Cpp | Language::Haskell,
+            )
             | (Self::SanitizerError, Language::Cpp)
             | (Self::Panics, Language::Rust)
-            | (Self::Raises, Language::Python) => return Ok(()),
+            | (Self::Raises, Language::Python | Language::Haskell) => return Ok(()),
             (Self::Compiles, _) => {
                 "Python isn't built ahead of running it, so nothing is compiled; use expect = \"runs\" for code that runs without an error".to_owned()
             }
@@ -221,7 +229,7 @@ impl ReadingCheck {
                 language.name()
             ),
             (Self::Raises, _) => format!(
-                "expect = \"exception\" is for Python; for {}, use expect = \"{failure}\"",
+                "expect = \"exception\" is for Python and Haskell; for {}, use expect = \"{failure}\"",
                 language.name()
             ),
         };
@@ -277,7 +285,7 @@ pub(crate) type ReadFile<'a> = &'a dyn Fn(&str) -> Result<String, String>;
 
 fn source(file: &str, read: ReadFile<'_>) -> Result<Source, String> {
     let language = Language::of_file(file).ok_or_else(|| {
-        format!("{file:?} isn't a program Workshop can run: name it .py, .rs or .cpp")
+        format!("{file:?} isn't a program Workshop can run: name it .py, .rs, .hs or .cpp")
     })?;
     Ok(Source {
         file: file.to_owned(),
@@ -320,7 +328,7 @@ impl Coding {
         let mut languages = Vec::new();
         for id in &fields.languages {
             let language = Language::from_id(id).ok_or_else(|| {
-                format!("{id:?} isn't a language Workshop runs: use python or rust")
+                format!("{id:?} isn't a language Workshop runs: use python, rust or haskell")
             })?;
             if !language.is_writable() {
                 return Err(format!(
@@ -514,7 +522,9 @@ fn only_code_block(prompt: &str) -> Result<(Language, String), String> {
     match blocks.as_slice() {
         [(info, code)] => {
             let language = Language::of_block(info).ok_or_else(|| {
-                format!("the code block should be marked as cpp, python or rust, not {info:?}")
+                format!(
+                    "the code block should be marked as cpp, haskell, python or rust, not {info:?}"
+                )
             })?;
             Ok((language, code.clone()))
         }
@@ -534,11 +544,15 @@ mod tests {
         assert_eq!(Language::of_file("brute.py"), Some(Language::Python));
         assert_eq!(Language::of_file("dir/main.rs"), Some(Language::Rust));
         assert_eq!(Language::of_file("main.cpp"), Some(Language::Cpp));
+        assert_eq!(Language::of_file("Main.hs"), Some(Language::Haskell));
         assert_eq!(Language::of_file("main.go"), None);
         assert_eq!(Language::of_file("Makefile"), None);
         assert_eq!(Language::of_block("c++"), Some(Language::Cpp));
+        assert_eq!(Language::of_block("haskell"), Some(Language::Haskell));
+        assert_eq!(Language::of_block("hs"), Some(Language::Haskell));
         assert_eq!(Language::from_id("rust"), Some(Language::Rust));
         assert!(!Language::Cpp.is_writable());
+        assert!(Language::Haskell.is_writable());
     }
 
     #[test]

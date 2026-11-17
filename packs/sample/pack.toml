@@ -112,6 +112,14 @@ name = "Ownership and borrowing in Rust"
 id = "rust.semantics"
 name = "How Rust behaves"
 
+[[skills]]
+id = "haskell.types"
+name = "Types and classes in Haskell"
+
+[[skills]]
+id = "haskell.laziness"
+name = "Laziness in Haskell"
+
 # A track of the pack's own, beside the built-in ones.
 [[tracks]]
 id = "estimation"

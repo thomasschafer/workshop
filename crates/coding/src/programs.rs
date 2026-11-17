@@ -43,8 +43,42 @@ pub fn needs(language: Language) -> &'static str {
         Language::Python => "python3",
         Language::Rust => "rustc",
         Language::Cpp => CPP_COMPILERS[0],
+        Language::Haskell => "ghc",
     }
 }
+
+/// The packages Haskell programs can use: those that come with GHC, so an item builds wherever
+/// GHC is installed, whatever else is.
+pub const HASKELL_PACKAGES: &[&str] = &[
+    "base",
+    "containers",
+    "array",
+    "mtl",
+    "transformers",
+    "stm",
+    "text",
+    "bytestring",
+    "deepseq",
+    "parsec",
+];
+
+/// The flags that keep GHC to `HASKELL_PACKAGES`, for building and for the language server:
+/// packages the user installed for themselves, in their own package database or a package
+/// environment, aren't seen.
+pub fn ghc_package_flags() -> Vec<String> {
+    let mut flags = vec![
+        "-no-user-package-db".to_owned(),
+        "-hide-all-packages".to_owned(),
+    ];
+    for package in HASKELL_PACKAGES {
+        flags.extend(["-package".to_owned(), (*package).to_owned()]);
+    }
+    flags
+}
+
+/// The most memory a Haskell program may use. Beyond it, the program stops, saying the heap is
+/// exhausted, rather than taking all the machine has until its time is up.
+const HASKELL_HEAP: &str = "1g";
 
 /// How a program is built: plainly, or with the checks a language can add for mistakes found
 /// as it runs.
@@ -175,7 +209,34 @@ impl Runtime {
                 }
                 Ok(Some(args))
             }
+            Language::Haskell => {
+                if self.find(language, needs(language)).is_none() {
+                    return Err("GHC isn't installed: install ghc, such as with GHCup from https://www.haskell.org/ghcup/".to_owned());
+                }
+                // Built in a directory of the build's own, which is moved into place with the
+                // program once it's built.
+                let mut args = owned(&["ghc", "-O1", "-v0", "-outputdir", "build"]);
+                args.extend(ghc_package_flags());
+                args.extend([
+                    format!("-with-rtsopts=-M{HASKELL_HEAP}"),
+                    "-o".to_owned(),
+                    binary(),
+                ]);
+                Ok(Some(args))
+            }
         }
+    }
+
+    /// The environment variables for building in `language`: its toolchain's, and for Haskell,
+    /// `GHC_ENVIRONMENT=-`, so GHC reads no package environment file, such as one in the user's
+    /// own `~/.ghc`, and builds the same way everywhere.
+    fn build_environment(&self, language: Language) -> Vec<(String, String)> {
+        let mut environment = self.environment(language).to_vec();
+        if language == Language::Haskell {
+            environment.retain(|(name, _)| name != "GHC_ENVIRONMENT");
+            environment.push(("GHC_ENVIRONMENT".to_owned(), "-".to_owned()));
+        }
+        environment
     }
 
     /// Builds a program from its source, or finds it built already.
@@ -195,7 +256,7 @@ impl Runtime {
         let dir = self.scratch.join(&key);
         let command = match language {
             Language::Python => vec!["python3".to_owned(), file.clone()],
-            Language::Rust | Language::Cpp => {
+            Language::Rust | Language::Cpp | Language::Haskell => {
                 vec![dir.join(binary()).to_string_lossy().into_owned()]
             }
         };
@@ -222,7 +283,7 @@ impl Runtime {
             args.push(file.clone());
             let confined = self
                 .sandbox
-                .confine(&args, &[], &staging, self.environment(language))
+                .confine(&args, &[], &staging, &self.build_environment(language))
                 .with_context(|| format!("sandboxing the build in {}", staging.display()))?;
             let output = workshop_runner::execute(
                 &confined.command,
@@ -449,10 +510,55 @@ mod tests {
             panic!("found a compiler where there's none");
         };
         assert!(why.contains("no C++ compiler"), "{why}");
+        let Built::Unavailable(why) = built(&runtime, Language::Haskell, "main = pure ()").await
+        else {
+            panic!("found GHC where there's none");
+        };
+        assert!(why.contains("GHC isn't installed"), "{why}");
         assert!(matches!(
             built(&runtime, Language::Python, "").await,
             Built::Unavailable(_)
         ));
+    }
+
+    /// A package environment, such as one in the user's own `~/.ghc`, would change which
+    /// packages there are, so builds never read one.
+    #[tokio::test]
+    async fn haskell_builds_read_no_package_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = runtime(dir.path());
+        if runtime.find(Language::Haskell, "ghc").is_none() {
+            return;
+        }
+        let environment = dir.path().join("environment");
+        std::fs::write(&environment, "not a package environment\n").unwrap();
+        runtime.environments.insert(
+            Language::Haskell,
+            vec![(
+                "GHC_ENVIRONMENT".to_owned(),
+                environment.display().to_string(),
+            )],
+        );
+        let source = "import qualified Data.Map as M\n\nmain :: IO ()\nmain = print (M.size (M.fromList [(1 :: Int, 'a')]))\n";
+        let Built::Ready(program) = built(&runtime, Language::Haskell, source).await else {
+            panic!("didn't build");
+        };
+        let run = runtime
+            .run(&program, &[], "", &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(run.stdout, "1\n");
+        // Only the packages that come with GHC.
+        let Built::Failed { errors, .. } = built(
+            &runtime,
+            Language::Haskell,
+            "import GHC.Driver.Session ()\n\nmain :: IO ()\nmain = pure ()\n",
+        )
+        .await
+        else {
+            panic!("built with GHC's own library");
+        };
+        assert!(errors.contains("GHC.Driver.Session"), "{errors}");
     }
 
     #[test]

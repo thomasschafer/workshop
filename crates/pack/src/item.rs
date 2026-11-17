@@ -938,6 +938,8 @@ mod tests {
             ("rs", Language::Rust, ReadingCheck::Compiles),
             ("cpp", Language::Cpp, ReadingCheck::Compiles),
             ("c++", Language::Cpp, ReadingCheck::Compiles),
+            ("haskell", Language::Haskell, ReadingCheck::Compiles),
+            ("hs", Language::Haskell, ReadingCheck::Compiles),
         ] {
             let item = parse(&reading_in(
                 fence,
@@ -986,6 +988,11 @@ mod tests {
             reading_check("python", "exception"),
             Ok(ReadingCheck::Raises)
         );
+        assert_eq!(
+            reading_check("haskell", "compile-error"),
+            Ok(ReadingCheck::CompileError)
+        );
+        assert_eq!(reading_check("hs", "exception"), Ok(ReadingCheck::Raises));
     }
 
     #[test]
@@ -1010,6 +1017,16 @@ mod tests {
                 "cpp",
                 "exception",
                 "for C++, use expect = \"sanitizer-error\"",
+            ),
+            (
+                "haskell",
+                "panic",
+                "for Haskell, use expect = \"exception\"",
+            ),
+            (
+                "haskell",
+                "sanitizer-error",
+                "for Haskell, use expect = \"exception\"",
             ),
         ] {
             let err = reading_check(fence, expect).unwrap_err();

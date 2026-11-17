@@ -57,7 +57,7 @@ const XCRUN_SHIMS: &[&str] = &["cc", "c++", "clang", "clang++", "gcc", "g++"];
 
 /// The programs whose installations are read, for finding where they keep the rest of
 /// themselves, such as Python's standard library.
-const TOOLCHAIN_PROGRAMS: &[&str] = &["python3", "rustc", "cc", "c++", "clang++", "g++"];
+const TOOLCHAIN_PROGRAMS: &[&str] = &["python3", "rustc", "cc", "c++", "clang++", "g++", "ghc"];
 
 /// Allows what building and running a program needs, and denies everything else, including
 /// all network access, talking to other processes and services, and sending Apple events.
@@ -678,6 +678,41 @@ fn main() {{
         );
         let printed = build_and_run(&runtime, Language::Rust, &source).await;
         assert_eq!(printed, "false false false\n");
+        outside.untouched();
+    }
+
+    /// GHC builds and its programs run inside, and without the network package, which doesn't
+    /// come with GHC, Haskell programs can only reach files.
+    #[tokio::test]
+    async fn haskell_can_only_write_to_its_own_directory() {
+        let scratch = tempfile::tempdir().unwrap();
+        let Some(runtime) = runtime(scratch.path()).await else {
+            return;
+        };
+        if runtime.find(Language::Haskell, "ghc").is_none() {
+            return;
+        }
+        let outside = Outside::new();
+        let source = format!(
+            r#"import Control.Exception (IOException, try)
+import System.Environment (getEnv)
+
+attempt :: String -> IO () -> IO ()
+attempt name action = do
+  result <- try action :: IO (Either IOException ())
+  putStrLn (name ++ either (const " refused") (const " allowed") result)
+
+main :: IO ()
+main = do
+  attempt "write" (writeFile {escaped:?} "out")
+  attempt "read" (readFile {secret:?} >>= putStr . take 0)
+  attempt "temporary" (getEnv "TMPDIR" >>= \dir -> writeFile (dir ++ "/fine") "fine")
+"#,
+            escaped = outside.path("escaped"),
+            secret = outside.path("secret"),
+        );
+        let printed = build_and_run(&runtime, Language::Haskell, &source).await;
+        assert_eq!(printed, "write refused\nread refused\ntemporary allowed\n");
         outside.untouched();
     }
 
