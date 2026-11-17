@@ -43,7 +43,7 @@ fn reference(item: &Item) -> Result<String> {
             probability.answer_text,
             probability.solution.trim()
         ),
-        Content::Design { rubric, notes } => {
+        Content::Design { rubric, notes, .. } => {
             let mut out: String = rubric.iter().map(|point| format!("- {point}\n")).collect();
             if let Some(notes) = notes {
                 out.push_str(&format!("\n{}", notes.trim()));

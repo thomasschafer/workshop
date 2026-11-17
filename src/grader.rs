@@ -107,7 +107,7 @@ fn rubric(
                 )),
             ))
         }
-        (Work::Design, Content::Design { rubric, notes }) => Ok((rubric.clone(), notes.clone())),
+        (Work::Design, Content::Design { rubric, notes, .. }) => Ok((rubric.clone(), notes.clone())),
         (Work::Plan, Content::Coding(coding)) => Ok((
             vec![
                 "Chooses a method that solves the problem correctly".to_owned(),
@@ -145,7 +145,7 @@ fn rubric(
                 probability.answer_text, probability.solution
             )),
         )),
-        (Work::Round, Content::Design { rubric, notes }) => {
+        (Work::Round, Content::Design { rubric, notes, .. }) => {
             let mut points = rubric.clone();
             points.push("Answers the examiner's follow-up questions well".to_owned());
             Ok((points, notes.clone()))

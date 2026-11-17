@@ -86,7 +86,7 @@ impl Kind {
             Self::Probability => &[("Solution", true), ("Simulation", true)],
             Self::Coding => &[("Approach", true), ("Hints", false), ("Notes", false)],
             Self::Reading => &[("Explanation", true)],
-            Self::Design => &[("Rubric", true), ("Notes", false)],
+            Self::Design => &[("Rubric", true), ("Notes", false), ("Brief", false)],
         }
     }
 }
@@ -125,6 +125,10 @@ pub enum Content {
         /// What a good answer covers, one point each.
         rubric: Vec<String>,
         notes: Option<String>,
+        /// What the coach answers the learner's questions from: who uses the system, what it
+        /// must do, its scale and the qualities it needs. Never shown before the session's
+        /// marked. Without one, the coach makes one up as a session starts.
+        brief: Option<String>,
     },
 }
 
@@ -355,6 +359,7 @@ impl Item {
                 Content::Design {
                     rubric,
                     notes: section("Notes"),
+                    brief: section("Brief"),
                 }
             }
         };
@@ -880,8 +885,20 @@ mod tests {
             design.content,
             Content::Design {
                 rubric: vec!["Handles precision".to_owned(), "Scales reads".to_owned()],
-                notes: None
+                notes: None,
+                brief: None,
             }
+        );
+        let briefed = parse(
+            "+++\nkind = \"design\"\nskills = [\"arithmetic\"]\n+++\nDesign a calculator service.\n\n## Rubric\n\n- Scales reads\n\n## Brief\n\n- Used by schools\n- 50 sums a second\n",
+        )
+        .unwrap();
+        let Content::Design { brief, .. } = &briefed.content else {
+            panic!("not design");
+        };
+        assert_eq!(
+            brief.as_deref(),
+            Some("- Used by schools\n- 50 sums a second")
         );
     }
 

@@ -432,7 +432,15 @@ fn check_without_programs(item: &Item) -> Result<String, String> {
         Content::Coding(_) | Content::Reading(_) => {
             unreachable!("checked by running their programs")
         }
-        Content::Design { rubric, .. } => Ok(format!("a rubric of {} points", rubric.len())),
+        Content::Design { rubric, brief, .. } => Ok(format!(
+            "a rubric of {} points, {}",
+            rubric.len(),
+            if brief.is_some() {
+                "and a brief"
+            } else {
+                "with a brief made up as each session starts"
+            }
+        )),
     }
 }
 
