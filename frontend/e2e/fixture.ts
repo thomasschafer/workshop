@@ -101,11 +101,27 @@ export interface HomeOptions {
   model: "fake" | "default";
   /** More config, appended. */
   extra?: string;
+  /**
+   * The author's settings. Its reviewer is set, so the server never checks whether a real
+   * model CLI is installed and logged in to choose one.
+   */
+  author?: string;
 }
 
 /** Writes a Workshop home for Python, with the puzzle and input already in the cache. */
 export function writeHome(options: HomeOptions): void {
-  const { home, port, year, day, puzzle, input, stars, model, extra = "" } = options;
+  const {
+    home,
+    port,
+    year,
+    day,
+    puzzle,
+    input,
+    stars,
+    model,
+    extra = "",
+    author = model === "fake" ? '[author]\nreviewer = { provider = "fake", model = "fake" }\n' : "",
+  } = options;
   rmSync(home, { recursive: true, force: true });
   mkdirSync(join(home, "config"), { recursive: true });
   const fakeModel = resolve(import.meta.dirname, "fake-model.mjs");
@@ -164,6 +180,7 @@ A-up = [
 [editor.helix.keys.normal.space]
 x = ["yank_to_clipboard", "delete_selection"]
 ${models}
+${author}
 ${extra}
 ${pythonProfile()}`,
   );
@@ -291,6 +308,12 @@ export function createAuthorHome(): void {
     input: "a\n",
     stars: {},
     model: "fake",
+    author: `[author]
+writer = { provider = "fakewriter", model = "writer" }
+reviewer = { provider = "fakereviewer", model = "reviewer" }
+max_items = 3
+every = "7d"
+`,
     extra: `
 [providers.fakewriter]
 command = ["node", ${JSON.stringify(fakeModel)}]
@@ -306,11 +329,6 @@ command = ["node", ${JSON.stringify(reviewer)}]
 input = "stdin"
 output = "text"
 
-[author]
-writer = { provider = "fakewriter", model = "writer" }
-reviewer = { provider = "fakereviewer", model = "reviewer" }
-max_items = 3
-every = "7d"
 
 [learning]
 packs = [${JSON.stringify(pack)}]

@@ -37,6 +37,10 @@ test.afterAll(async () => {
 test("tops up the pack, adding what both models agree on and queueing the rest", async () => {
   const author = phone.getByRole("region", { name: "Author" });
   await expect(author).toContainText("writer with fakewriter writes up to 3 items");
+  // Why the reviewer is the one it is.
+  await expect(author).toContainText(
+    "The reviewer is set under [author] in your config, and uses another provider than the writer's.",
+  );
   // It's scheduled to run by itself weekly, and has just run, so it's next due in a week.
   const due = await phone.evaluate(() =>
     new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleString(undefined, {

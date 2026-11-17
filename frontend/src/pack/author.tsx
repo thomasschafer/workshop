@@ -55,6 +55,7 @@ export function Author({ onChanged }: { onChanged: () => void }) {
         {status.writer} writes up to {status.max_items} items for what you're weakest in, and{" "}
         {status.reviewer} solves each blind and reviews it. Each must pass its check.
       </p>
+      <p class="muted">{status.reviewer_reason}</p>
       {status.schedule ? <ScheduleLine schedule={status.schedule} /> : null}
       {status.unavailable ? (
         <p class="muted">{status.unavailable}</p>

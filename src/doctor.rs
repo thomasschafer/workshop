@@ -87,6 +87,8 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
         checks.extend(check_provider(config, id).await);
     }
 
+    checks.push(check_author_reviewer(config).await);
+
     let (toolchain, toolchain_check) = check_toolchain(&config.solutions_dir, "Toolchain").await;
     checks.extend(toolchain_check);
     let solutions = Solutions {
@@ -172,6 +174,25 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
     checks.push(check_network(&config.aoc).await);
     checks.push(check_https(config).await);
     checks
+}
+
+/// Which model reviews the author's items, and why. A reviewer from the writer's own provider
+/// works, so another provider, such as Codex alongside Claude Code, is only a suggestion.
+async fn check_author_reviewer(config: &Config) -> Check {
+    let reviewer = crate::author::reviewer::chosen(config).await;
+    let name = "Author's reviewer";
+    let detail = crate::author::reviewer::named(config, &reviewer.model);
+    let reason = reviewer.reason(config);
+    if reviewer.shares_provider(config) {
+        Check::problem(
+            Status::Warn,
+            name,
+            format!("{detail}, the writer's own provider"),
+            format!("Optional: {reason}"),
+        )
+    } else {
+        Check::ok(name, format!("{detail}. {reason}"))
+    }
 }
 
 /// Whisper on the server, which hears dictation more accurately than phones. Optional.
@@ -500,5 +521,50 @@ pub fn print(checks: &[Check]) {
         if let Some(fix) = &check.fix {
             println!("    {fix}");
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// Config with Codex standing in, logged in or not, so no model CLI is run.
+    fn config(author: &str, codex_logged_in: bool) -> Config {
+        let exit = if codex_logged_in { 0 } else { 1 };
+        Config::parse(&format!(
+            "[author]\n{author}\n[providers.codex]\nname = \"Codex\"\ncommand = [\"sh\"]\ninput = \"stdin\"\noutput = \"text\"\nauth_check_command = [\"sh\", \"-c\", \"exit {exit}\"]\n"
+        ))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn reports_another_provider_for_the_reviewer_as_optional() {
+        let other = check_author_reviewer(&config("", true)).await;
+        assert_eq!(other.status, Status::Ok);
+        assert!(
+            other.detail.starts_with("sol with Codex. "),
+            "{}",
+            other.detail
+        );
+
+        // Without Codex, the writer's own provider reviews, and Codex is only suggested.
+        let same = check_author_reviewer(&config("", false)).await;
+        assert_eq!(same.status, Status::Warn);
+        assert_eq!(
+            same.detail,
+            "opus with Claude Code, the writer's own provider"
+        );
+        let fix = same.fix.unwrap();
+        assert!(fix.starts_with("Optional: "), "{fix}");
+        assert!(fix.contains("install and log in to Codex"), "{fix}");
+
+        // Set under [author], it's used whatever's installed.
+        let set = check_author_reviewer(&config(
+            "reviewer = { provider = \"claude\", model = \"opus\" }",
+            true,
+        ))
+        .await;
+        assert_eq!(set.status, Status::Warn);
+        assert!(set.fix.unwrap().contains("set under [author]"));
     }
 }

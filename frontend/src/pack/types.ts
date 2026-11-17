@@ -59,6 +59,10 @@ export interface AuthorStatus {
   unavailable: string | null;
   writer: string;
   reviewer: string;
+  /** Why the reviewer is the one it is, such as there being no other provider to use. */
+  reviewer_reason: string;
+  /** Whether the reviewer uses the writer's own provider. */
+  reviewer_shares_provider: boolean;
   max_items: number;
   last: {
     started_at: number;
