@@ -342,6 +342,7 @@ mod tests {
                 build_timeout: Duration::from_secs(60),
                 run_timeout: Duration::from_secs(60),
                 sandbox: sandbox.unwrap_or(Sandbox::Unconfined),
+                tools: Default::default(),
             },
             unconfined: Unconfined::Run,
         };
@@ -396,6 +397,7 @@ mod tests {
             build_timeout: Duration::from_secs(60),
             run_timeout: Duration::from_secs(20),
             sandbox: Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
+            tools: Default::default(),
         };
         let prints = |output: &str| ReadingCheck::Prints(output.to_owned());
         let borrowed_after_move = "fn main() {\n    let a = String::from(\"x\");\n    let b = a;\n    println!(\"{a} {b}\");\n}\n";
@@ -729,6 +731,7 @@ mod tests {
             build_timeout: Duration::from_secs(120),
             run_timeout: Duration::from_secs(30),
             sandbox: Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
+            tools: Default::default(),
         };
         if runtime.find(Language::Haskell, "ghc").is_none() {
             return;
@@ -798,6 +801,7 @@ mod tests {
             build_timeout: Duration::from_secs(60),
             run_timeout,
             sandbox: sandbox.clone(),
+            tools: Default::default(),
         };
         if runtime(Duration::ZERO)
             .find(Language::Haskell, "ghc")
@@ -848,6 +852,7 @@ mod tests {
                 build_timeout: Duration::from_secs(60),
                 run_timeout: Duration::from_secs(60),
                 sandbox: Sandbox::Unconfined,
+                tools: Default::default(),
             },
             unconfined: Unconfined::Skip,
         };

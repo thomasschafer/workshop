@@ -388,6 +388,7 @@ mod tests {
             build_timeout: Duration::from_secs(60),
             run_timeout: timeout,
             sandbox: crate::Sandbox::Unconfined,
+            tools: Default::default(),
         }
     }
 

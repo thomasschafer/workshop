@@ -187,6 +187,7 @@ mod tests {
             build_timeout: std::time::Duration::from_secs(60),
             run_timeout: std::time::Duration::from_secs(60),
             sandbox: workshop_coding::Sandbox::Unconfined,
+            tools: Default::default(),
         }
     }
 

@@ -94,6 +94,8 @@ Checking an item runs its programs: for a coding problem, the reference solution
 - can only write to a directory of its own, which Workshop makes for that build or run and is also its temporary directory, and to `/dev/null`;
 - can read the system's own files, its own directory and the toolchains it needs, such as rustup's, mise's and Xcode's, but not the rest of your home directory, shared temporary directories or other volumes.
 
+A version manager's shim, such as mise's, asdf's or pyenv's `python3`, chooses what to start from files above the directory it's run in, such as a `mise.toml`, which the sandbox may hide. So Python, and Rust's compiler where it may be a shim, are asked outside the sandbox, in the directory builds and runs happen in, which interpreter or compiler they are, and that's what's started inside, able to read the installation it's in.
+
 What it can't stop: a program can still see which files exist, and how big they are, anywhere, as compilers need to look at the directories above theirs; it can read anything outside home and temporary directories that your user can, such as `/etc`; and it can use as much CPU and memory as it likes until its time is up. On Linux, the system's files are mounted read-only rather than limited rule by rule, and home, temporary and runtime directories, such as `/run`, where local services keep their sockets, are replaced with empty ones.
 
 Where there's no sandbox, such as on Windows or on Linux without bubblewrap, the author doesn't run the writer's programs at all: its coding and reading items are left out, as they can't be checked, and approving one waiting under Packs says why it can't be added.

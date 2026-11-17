@@ -166,6 +166,53 @@ impl Sandbox {
         }
     }
 
+    fn hidden(&self) -> &[PathBuf] {
+        match self {
+            Self::Seatbelt(seatbelt) => &seatbelt.hidden,
+            Self::Bubblewrap(bubblewrap) => &bubblewrap.hidden,
+            Self::Unconfined => &[],
+        }
+    }
+
+    /// Whether `found`, a program found on the `PATH`, may be a version manager's shim, which
+    /// decides what to start from files above the directory it's run in, such as a `mise.toml`
+    /// or a `rust-toolchain.toml`, which the sandbox may hide. Such a program is asked outside
+    /// the sandbox what it really starts, and that's run inside instead.
+    ///
+    /// It may be one if it's kept in a hidden directory, as mise's, asdf's and pyenv's shims and
+    /// rustup's proxies are, or if it's a link to a program of another name, as mise's shims
+    /// are to mise itself, wherever mise is installed. A link of the program's own name to
+    /// somewhere not hidden, such as in a Nix profile, leads to the program itself, or to a
+    /// wrapper meant to be run as it is.
+    pub fn may_be_shim(&self, found: &Path) -> bool {
+        if !self.confines() {
+            return false;
+        }
+        let Ok(real) = found.canonicalize() else {
+            return false;
+        };
+        self.hidden().iter().any(|hidden| real.starts_with(hidden))
+            || real.file_name() != found.file_name()
+    }
+
+    /// The directories programs may read for running `program`, besides those found with the
+    /// sandbox, such as the installation of an interpreter that a shim led to: the one it's
+    /// in, and the one it's a link to, as a Python virtual environment's interpreter is to its
+    /// base installation.
+    pub fn installation(&self, program: &Path) -> Vec<PathBuf> {
+        if !self.confines() {
+            return Vec::new();
+        }
+        let real = program.canonicalize().ok();
+        let candidates = [Some(program), real.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter_map(installation)
+            .map(Path::to_owned)
+            .collect();
+        readable(candidates, self.hidden())
+    }
+
     /// `command`, run with `environment`, made to run in the sandbox, able to read `reads` and
     /// to read and write `writes`, which is also its temporary directory.
     pub fn confine(
@@ -309,14 +356,25 @@ fn toolchains(environment: &[(String, String)], hidden: &[PathBuf]) -> Vec<PathB
         let Some(real) = found.and_then(|found| found.canonicalize().ok()) else {
             continue;
         };
-        // An installation's prefix, such as `python3.13` for `python3.13/bin/python3`.
-        let dir = real.parent();
-        let prefix = match dir {
-            Some(dir) if dir.file_name() == Some(OsStr::new("bin")) => dir.parent(),
-            _ => dir,
-        };
-        candidates.extend(prefix.map(Path::to_owned));
+        candidates.extend(installation(&real).map(Path::to_owned));
     }
+    readable(candidates, hidden)
+}
+
+/// An installation's prefix, for a program in it: such as `python3.13` for
+/// `python3.13/bin/python3`.
+fn installation(program: &Path) -> Option<&Path> {
+    let dir = program.parent();
+    match dir {
+        Some(dir) if dir.file_name() == Some(OsStr::new("bin")) => dir.parent(),
+        _ => dir,
+    }
+}
+
+/// The directories among `candidates` that are inside the `hidden` ones, and so need allowing,
+/// leaving out any that would let programs read much more than a toolchain.
+fn readable(candidates: Vec<PathBuf>, hidden: &[PathBuf]) -> Vec<PathBuf> {
+    let home = dirs::home_dir();
     let mut toolchains = Vec::new();
     for candidate in candidates {
         let Ok(real) = candidate.canonicalize() else {
@@ -532,6 +590,78 @@ mod tests {
             }
         }
     }
+
+    /// A sandbox hiding a directory of a new temporary one, which it returns too.
+    #[cfg(unix)]
+    fn hiding_one() -> (tempfile::TempDir, PathBuf, Sandbox) {
+        let root = tempfile::tempdir().unwrap();
+        let hidden = root.path().canonicalize().unwrap().join("hidden");
+        std::fs::create_dir(&hidden).unwrap();
+        let sandbox = Sandbox::Seatbelt(Seatbelt {
+            hidden: vec![hidden.clone()],
+            toolchains: Vec::new(),
+            sdk: None,
+            shims: Vec::new(),
+        });
+        (root, hidden, sandbox)
+    }
+
+    #[cfg(unix)]
+    fn file(path: &Path) -> PathBuf {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+        path.to_owned()
+    }
+
+    #[cfg(unix)]
+    fn link(link: &Path, to: &Path) -> PathBuf {
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(to, link).unwrap();
+        link.to_owned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn programs_in_hidden_directories_or_linked_to_another_name_may_be_shims() {
+        let (root, hidden, sandbox) = hiding_one();
+        let outside = root.path().canonicalize().unwrap().join("outside");
+        let rustc = file(&outside.join("bin/rustc"));
+        let mise = file(&outside.join("bin/mise"));
+        assert!(!sandbox.may_be_shim(&rustc));
+        // Such as a Nix profile's, leading to the program itself.
+        assert!(!sandbox.may_be_shim(&link(&hidden.join("profile/bin/rustc"), &rustc)));
+        // Such as mise's shims, which are links to mise.
+        assert!(sandbox.may_be_shim(&link(&hidden.join("mise/shims/rustc"), &mise)));
+        assert!(sandbox.may_be_shim(&link(&outside.join("shims/rustc"), &mise)));
+        // Such as pyenv's shims, which are scripts, and rustup's proxies.
+        assert!(sandbox.may_be_shim(&file(&hidden.join("pyenv/shims/python3"))));
+        assert!(sandbox.may_be_shim(&file(&hidden.join("cargo/bin/rustc"))));
+        assert!(!Sandbox::Unconfined.may_be_shim(&file(&hidden.join("cargo/bin/rustc"))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_interpreter_s_installation_is_readable_with_the_one_it_links_to() {
+        let (root, hidden, sandbox) = hiding_one();
+        let base = file(&hidden.join("versions/3.13/bin/python3.13"));
+        let venv = link(&hidden.join("project/venv/bin/python3"), &base);
+        assert_eq!(
+            sandbox.installation(&venv),
+            [hidden.join("project/venv"), hidden.join("versions/3.13")]
+        );
+        // What isn't hidden is readable already.
+        let outside = file(&root.path().canonicalize().unwrap().join("usr/bin/python3"));
+        assert_eq!(sandbox.installation(&outside), Vec::<PathBuf>::new());
+        // Never the whole hidden directory, for a program kept directly in it.
+        assert_eq!(
+            sandbox.installation(&file(&hidden.join("bin/python3"))),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(
+            Sandbox::Unconfined.installation(&venv),
+            Vec::<PathBuf>::new()
+        );
+    }
 }
 
 /// Programs that try to get out, built and run in the real sandbox with the real toolchains.
@@ -550,16 +680,26 @@ mod confinement {
     /// A runtime with this machine's sandbox, or `None` where there isn't one. macOS always has
     /// one.
     async fn runtime(scratch: &Path) -> Option<Runtime> {
-        let sandbox = Sandbox::detect(&[]).await;
+        runtime_with(scratch, Default::default()).await
+    }
+
+    /// A runtime with this machine's sandbox, building and running with `environments`.
+    async fn runtime_with(
+        scratch: &Path,
+        environments: std::collections::BTreeMap<Language, Vec<(String, String)>>,
+    ) -> Option<Runtime> {
+        let all: Vec<_> = environments.values().cloned().collect();
+        let sandbox = Sandbox::detect(&all).await;
         if cfg!(target_os = "macos") {
             assert!(sandbox.is_some(), "macOS always has sandbox-exec");
         }
         Some(Runtime {
             scratch: scratch.to_owned(),
-            environments: Default::default(),
+            environments,
             build_timeout: Duration::from_secs(120),
             run_timeout: Duration::from_secs(30),
             sandbox: sandbox?,
+            tools: Default::default(),
         })
     }
 
@@ -786,5 +926,118 @@ int main() {{
         let printed = build_and_run(&runtime, Language::Cpp, &source).await;
         assert_eq!(printed, "0 0 0\n");
         outside.untouched();
+    }
+
+    /// Where a version manager's shims would be, ahead of everything else on the `PATH`, with
+    /// one for `program`, which starts the program named in a file above the directory it's run
+    /// in, as mise's, asdf's and pyenv's do. The file is somewhere the sandbox hides.
+    struct Shimmed {
+        root: tempfile::TempDir,
+    }
+
+    impl Shimmed {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(root.path().join("project/build")).unwrap();
+            Self { root }
+        }
+
+        /// Where programs are built and run, below the files the shims read.
+        fn scratch(&self) -> PathBuf {
+            self.root.path().join("project/build")
+        }
+
+        fn config(&self, program: &str) -> PathBuf {
+            self.root.path().join(format!("project/.{program}-version"))
+        }
+
+        /// Adds a shim for `program` that starts `real`.
+        fn shim(&self, program: &str, real: &Path) {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(self.config(program), real.display().to_string()).unwrap();
+            let shims = self.root.path().join("shims");
+            std::fs::create_dir_all(&shims).unwrap();
+            let shim = shims.join(program);
+            std::fs::write(
+                &shim,
+                format!(
+                    r#"#!/bin/sh
+dir=$PWD
+while [ "$dir" != / ]; do
+  if [ -e "$dir/.{program}-version" ]; then
+    real=$(cat "$dir/.{program}-version") || exit 1
+    exec "$real" "$@"
+  fi
+  dir=$(dirname "$dir")
+done
+echo "no version of {program} is set here" >&2
+exit 1
+"#
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        /// An environment with the shims first on the `PATH`.
+        fn environment(&self) -> Vec<(String, String)> {
+            let path = std::env::var_os("PATH").unwrap();
+            let shims = std::iter::once(self.root.path().join("shims"));
+            let path = std::env::join_paths(shims.chain(std::env::split_paths(&path))).unwrap();
+            vec![("PATH".to_owned(), path.to_string_lossy().into_owned())]
+        }
+    }
+
+    /// What a program on Workshop's own `PATH` prints, run outside the sandbox.
+    fn ask(program: &str, args: &[&str]) -> String {
+        let output = std::process::Command::new(program)
+            .args(args)
+            .current_dir(std::env::temp_dir())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
+
+    #[tokio::test]
+    async fn python_through_a_shim_that_reads_hidden_files_runs_without_reading_them() {
+        let shimmed = Shimmed::new();
+        let real = ask(
+            "python3",
+            &["-I", "-c", "import sys; print(sys.executable)"],
+        );
+        shimmed.shim("python3", Path::new(&real));
+        let environments = [(Language::Python, shimmed.environment())].into();
+        let Some(runtime) = runtime_with(&shimmed.scratch(), environments).await else {
+            return;
+        };
+        let source = format!(
+            r#"try:
+    open({config:?}).read()
+    print("read the shim's file")
+except OSError:
+    print("ran without reading the shim's file")
+"#,
+            config = shimmed.config("python3").display().to_string(),
+        );
+        let printed = build_and_run(&runtime, Language::Python, &source).await;
+        assert_eq!(printed, "ran without reading the shim's file\n");
+    }
+
+    #[tokio::test]
+    async fn rust_through_a_shim_that_reads_hidden_files_builds_without_reading_them() {
+        let shimmed = Shimmed::new();
+        let sysroot = ask("rustc", &["--print", "sysroot"]);
+        shimmed.shim("rustc", &Path::new(&sysroot).join("bin/rustc"));
+        let environments = [(Language::Rust, shimmed.environment())].into();
+        let Some(runtime) = runtime_with(&shimmed.scratch(), environments).await else {
+            return;
+        };
+        let source = format!(
+            "fn main() {{ println!(\"{{}}\", std::fs::read_to_string({:?}).is_ok()); }}\n",
+            shimmed.config("rustc").display().to_string(),
+        );
+        let printed = build_and_run(&runtime, Language::Rust, &source).await;
+        assert_eq!(printed, "false\n");
     }
 }

@@ -78,6 +78,7 @@ pub async fn runtime(config: &Config, paths: &Paths) -> Result<workshop_coding::
         build_timeout,
         run_timeout: RUN_TIMEOUT.min(build_timeout),
         sandbox,
+        tools: Default::default(),
     })
 }
 
