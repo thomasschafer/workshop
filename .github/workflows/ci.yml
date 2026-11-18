@@ -87,6 +87,22 @@ jobs:
         working-directory: frontend
         run: npm run e2e:webkit
 
+      # What a failed browser test leaves: a screenshot and page snapshot for each, and the test
+      # servers' logs.
+      - name: Keep what the end-to-end tests left
+        if: failure()
+        working-directory: frontend
+        run: node scripts/collect-e2e-logs.ts
+
+      - name: Store what the end-to-end tests left
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results-linux
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
       # Installs the latest release as the README says to.
       - name: Install script
         run: |
@@ -142,6 +158,22 @@ jobs:
         working-directory: frontend
         run: npm run e2e:webkit
 
+      # What a failed browser test leaves: a screenshot and page snapshot for each, and the test
+      # servers' logs.
+      - name: Keep what the end-to-end tests left
+        if: failure()
+        working-directory: frontend
+        run: node scripts/collect-e2e-logs.ts
+
+      - name: Store what the end-to-end tests left
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results-macos
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Install script
         run: |
           WORKSHOP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
@@ -192,6 +224,22 @@ jobs:
       - name: End-to-end tests
         working-directory: frontend
         run: npm run e2e
+
+      # What a failed browser test leaves: a screenshot and page snapshot for each, and the test
+      # servers' logs.
+      - name: Keep what the end-to-end tests left
+        if: failure()
+        working-directory: frontend
+        run: node scripts/collect-e2e-logs.ts
+
+      - name: Store what the end-to-end tests left
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results-windows
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
   frontend:
     name: Frontend

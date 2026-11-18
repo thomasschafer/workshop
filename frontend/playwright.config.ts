@@ -32,8 +32,12 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: process.env.CI ? "github" : "list",
+  // On CI, the list too, so each test's output, and the servers' with it, is in the job's log.
+  reporter: process.env.CI ? [["github"], ["list"]] : "list",
   use: {
+    // Kept in `test-results`, which CI uploads when a test fails. Traces would show more, but
+    // recording them for every test slows the run enough to change the timing of what's tested.
+    screenshot: "only-on-failure",
     baseURL: `http://127.0.0.1:${PORT}`,
     ...devices["Pixel 7"],
     // A desktop pointer shows the box for typing what you'd say, which stands in for speech.
