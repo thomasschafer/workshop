@@ -103,7 +103,7 @@ function saveProgress(progress: Progress | null): void {
   }
 }
 
-const newSession = () =>
+export const newSession = () =>
   new Date()
     .toISOString()
     .replace(/[^0-9]/g, "")

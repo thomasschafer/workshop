@@ -28,6 +28,19 @@ export interface KeyTouch {
   readonly column: number;
   /** Whether a finger made it, rather than a mouse or pen. */
   readonly finger: boolean;
+  /** The pointer, which a lift of the same finger names. */
+  readonly pointer: number;
+  /** When it came down, in the event's milliseconds. */
+  readonly time: number;
+  /** The size of the finger's contact, in pixels, and its pressure, as the browser reports. */
+  readonly contact: { readonly width: number; readonly height: number; readonly pressure: number };
+}
+
+/** A finger lifting off the keyboard, after a touch that pressed a key. */
+export interface KeyLift {
+  readonly pointer: number;
+  readonly point: Point;
+  readonly time: number;
 }
 
 interface Props {
@@ -38,6 +51,8 @@ interface Props {
   offsets: KeyOffsets;
   /** Called with each touch that presses a key, before the key is. */
   onTouch?: (touch: KeyTouch) => void;
+  /** Called with each finger that lifts after pressing a key. */
+  onLift?: (lift: KeyLift) => void;
   /** Marks on each key where its user touches it. */
   showOffsets?: boolean;
   /** Takes the element beneath the keys, where the editor's status line shows. */
@@ -89,7 +104,15 @@ function measureKeys(root: HTMLElement): {
  * a finger comes down, and repeat while held. A touch anywhere among the keys presses the nearest
  * one, so the gaps between them press keys too. Pressing keeps the focus where it is.
  */
-export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, statusHost }: Props) {
+export function Keyboard({
+  onKey,
+  onLower,
+  offsets,
+  onTouch,
+  onLift,
+  showOffsets,
+  statusHost,
+}: Props) {
   const modifiers = useRef(new ModifierState());
   const [mods, setMods] = useState(modifiers.current.current);
   const [locks, setLocks] = useState(modifiers.current.locks);
@@ -100,8 +123,8 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
   const releases = useRef(new Map<number, () => void>());
   const latestOnKey = useRef(onKey);
   latestOnKey.current = onKey;
-  const latest = useRef({ offsets, onTouch });
-  latest.current = { offsets, onTouch };
+  const latest = useRef({ offsets, onTouch, onLift });
+  latest.current = { offsets, onTouch, onLift };
 
   // The marks are placed in columns, whose width the keyboard's own width decides.
   useLayoutEffect(() => {
@@ -148,7 +171,16 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
     const def = box ? DEFS.get(box.id) : undefined;
     const el = box ? elements.get(box.id) : undefined;
     if (!box || !def || !el) throw new Error("a touch on the keyboard found no key to press");
-    latest.current.onTouch?.({ box, point, boxes, column, finger: event.pointerType === "touch" });
+    latest.current.onTouch?.({
+      box,
+      point,
+      boxes,
+      column,
+      finger: event.pointerType === "touch",
+      pointer: event.pointerId,
+      time: event.timeStamp,
+      contact: { width: event.width, height: event.height, pressure: event.pressure },
+    });
     keyboard.setPointerCapture(event.pointerId);
     releases.current.get(event.pointerId)?.();
     const id = keyId(def);
@@ -191,6 +223,16 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
   };
 
   const release = (event: PointerEvent) => releases.current.get(event.pointerId)?.();
+  const lift = (event: PointerEvent) => {
+    if (releases.current.has(event.pointerId)) {
+      latest.current.onLift?.({
+        pointer: event.pointerId,
+        point: { x: event.clientX, y: event.clientY },
+        time: event.timeStamp,
+      });
+    }
+    release(event);
+  };
 
   return (
     <section
@@ -198,7 +240,7 @@ export function Keyboard({ onKey, onLower, offsets, onTouch, showOffsets, status
       class="keyboard"
       aria-label="Keyboard"
       onPointerDown={press}
-      onPointerUp={release}
+      onPointerUp={lift}
       onPointerCancel={release}
       onLostPointerCapture={release}
       // A long press is a held key, not a menu.

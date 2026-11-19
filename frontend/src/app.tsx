@@ -59,6 +59,7 @@ import { Setup } from "./views/setup";
 import { ShortcutsModal } from "./views/shortcuts";
 import { Stack } from "./views/stack";
 import { StatusLine } from "./views/status";
+import { TypingBench } from "./views/typingBench";
 import { useZen, ZenExit, ZenKeyboardButton, ZenTabs } from "./views/zen";
 import { speechUnavailableReason } from "./voice";
 import { ScreenWakeLock, wakeLockSupported } from "./wakelock";
@@ -70,6 +71,7 @@ type Sheet =
   | "setup"
   | "bench"
   | "calibrate"
+  | "typing-bench"
   | "problems"
   | "shortcuts"
   | null;
@@ -916,6 +918,9 @@ export function App({
         {sheet === "calibrate" ? (
           <Calibrate onUse={keyOffsets.replace} onClose={() => setSheet(null)} />
         ) : null}
+        {sheet === "typing-bench" ? (
+          <TypingBench offsets={keyOffsets.offsets} onClose={() => setSheet(null)} />
+        ) : null}
         {sheet === "problems" ? (
           <ProblemsSheet
             problems={editor.current?.problems() ?? []}
@@ -967,6 +972,7 @@ export function App({
             onBench={() => setSheet("bench")}
             ownKeyboard={ownKeyboard ? keyOffsets : null}
             onCalibrate={() => setSheet("calibrate")}
+            onTypingBench={() => setSheet("typing-bench")}
             commitAfterStar={commitAfterStar}
             onCommitAfterStar={(enabled) => {
               setCommitAfterStar(enabled);

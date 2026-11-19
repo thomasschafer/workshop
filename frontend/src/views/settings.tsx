@@ -59,6 +59,7 @@ interface Props {
   /** Where the keys of Workshop's own keyboard are touched, where this device types on it. */
   ownKeyboard: KeyOffsetsState | null;
   onCalibrate: () => void;
+  onTypingBench: () => void;
   /** What's wrong with the Helix keys in the config, if anything. */
   helixProblems: string | null;
   onHelix: (enabled: boolean) => void;
@@ -306,9 +307,11 @@ function CodeSizeSection({ scale, onScale }: { scale: number; onScale: (scale: n
 function OwnKeyboardSection({
   keyboard,
   onCalibrate,
+  onTypingBench,
 }: {
   keyboard: KeyOffsetsState;
   onCalibrate: () => void;
+  onTypingBench: () => void;
 }) {
   const learnt = Object.keys(keyboard.offsets).length > 0;
   return (
@@ -334,6 +337,9 @@ function OwnKeyboardSection({
           Forget what's been learnt
         </button>
       ) : null}
+      <button type="button" class="text-button" onClick={onTypingBench}>
+        Compare Workshop's keyboard with the phone's
+      </button>
     </>
   );
 }
@@ -350,6 +356,7 @@ function DisplayPage({
   onHelix,
   ownKeyboard,
   onCalibrate,
+  onTypingBench,
 }: Props) {
   return (
     <>
@@ -375,7 +382,13 @@ function DisplayPage({
         Edit with Helix's modal keys, and your own from the config file. Kept on this device only.
       </p>
       {helixOn && helixProblems ? <p class="error-text small">{helixProblems}</p> : null}
-      {ownKeyboard ? <OwnKeyboardSection keyboard={ownKeyboard} onCalibrate={onCalibrate} /> : null}
+      {ownKeyboard ? (
+        <OwnKeyboardSection
+          keyboard={ownKeyboard}
+          onCalibrate={onCalibrate}
+          onTypingBench={onTypingBench}
+        />
+      ) : null}
       {keepScreenOn === null ? (
         <p class="muted">This browser can't keep the screen on.</p>
       ) : (

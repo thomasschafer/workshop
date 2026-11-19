@@ -2533,3 +2533,22 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
 .home-button {
   margin-left: -8px;
 }
+
+/* Comparing keyboards: what's been typed, beneath the phrase to type. */
+.typing-bench-typed {
+  min-height: 1.5em;
+  border-bottom: 1px solid var(--border);
+}
+
+.typing-bench-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  vertical-align: text-bottom;
+  background: var(--accent);
+}
+
+.typing-bench-field {
+  font-family: var(--mono);
+  font-size: 20px;
+}

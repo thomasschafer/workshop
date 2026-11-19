@@ -1,5 +1,5 @@
 import { createECDH, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import {
 } from "@playwright/test";
 import { GLIDE_MS } from "../src/helix/glide";
 import { charFor, DOUBLE_TAP_MS, LAYOUT } from "../src/keyboard";
+import { TYPING_PHRASES } from "../src/typingBench";
 import { FAKE_LSP_FAILS, HOME, PORT } from "./fixture";
 import { installSimulatedSpeech } from "./speech";
 
@@ -1748,6 +1749,64 @@ test("presses the nearest key to a touch on Workshop's keyboard, and measures wh
   await key("Escape").tap();
   await key("u").tap();
   await expect.poll(saved).toBe(original);
+  await context.close();
+});
+
+test("compares typing on Workshop's keyboard, keeping every touch on the server", async ({
+  browser,
+}) => {
+  test.setTimeout(60_000);
+  const { context, phone } = await openOnPhone(browser);
+  await phone.getByRole("button", { name: "Settings" }).tap();
+  await phone.getByRole("button", { name: /Display/ }).tap();
+  await phone.getByRole("button", { name: "Compare Workshop's keyboard with the phone's" }).tap();
+  const bench = phone.getByRole("dialog", { name: "Compare keyboards" });
+  await bench.getByRole("button", { name: "Workshop's keyboard" }).tap();
+  const key = (name: string) =>
+    bench.locator(".keyboard").getByRole("button", { name, exact: true });
+
+  // The first phrase typed with a slip, a touch on the gap past the key a letter wants.
+  const first = TYPING_PHRASES[0]?.text ?? "";
+  const slip = first.indexOf("w");
+  for (const [i, char] of [...first].entries()) {
+    const box = await key(char === " " ? "Space" : char).boundingBox();
+    if (box === null) throw new Error(`no key for '${char}'`);
+    const x = i === slip ? box.x + box.width * 1.5 + 2 : box.x + box.width / 2;
+    await phone.touchscreen.tap(x, box.y + box.height / 2);
+  }
+  const typed = `${first.slice(0, slip)}e${first.slice(slip + 1)}`;
+  await expect(bench.locator(".typing-bench-typed")).toHaveText(typed);
+  await key("Enter").tap();
+  // The rest left untyped.
+  for (let i = 1; i < TYPING_PHRASES.length; i++) {
+    await bench.getByRole("button", { name: "Next phrase" }).tap();
+  }
+  await expect(bench).toContainText("Done. Workshop's keyboard:");
+  await expect(bench.locator(".bench-results")).toContainText("Prose");
+  await expect(bench.locator(".keyboard")).toBeHidden();
+
+  const benchDir = join(HOME, "data", "bench");
+  const saved = () =>
+    readdirSync(benchDir)
+      .flatMap((session) => {
+        try {
+          return readFileSync(join(benchDir, session, "results.jsonl"), "utf8").split("\n");
+        } catch {
+          return [];
+        }
+      })
+      .filter((line) => line !== "")
+      .map((line) => JSON.parse(line))
+      .filter((result) => result.bench === "typing");
+  await expect.poll(() => saved().length).toBe(TYPING_PHRASES.length);
+  const phrase = saved().find((result) => result.phrase === 0);
+  expect(phrase).toMatchObject({ keyboard: "workshop", target: first, typed });
+  expect(phrase.workshop.presses).toHaveLength(first.length + 1);
+  expect(phrase.workshop.presses[slip]).toMatchObject({ key: "e", typed: ["e"] });
+  // Every finger's lift, but the Enter's, which saved the phrase as it came down.
+  for (const press of phrase.workshop.presses.slice(0, -1)) expect(press.up).not.toBeNull();
+  expect(phrase.workshop.boxes.length).toBeGreaterThan(40);
+  expect(phrase.workshop.column).toBeGreaterThan(0);
   await context.close();
 });
 

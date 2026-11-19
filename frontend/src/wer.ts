@@ -1,4 +1,5 @@
-// Scoring speech recognition against what was meant to be said, for the benchmark.
+// Scoring speech recognition against what was meant to be said, for the benchmark, and the
+// edit distance it and the typing benchmark share.
 
 /** Symbols as the words someone would say for them, so either form scores the same. */
 const SYMBOL_WORDS: [RegExp, string][] = [
@@ -75,12 +76,8 @@ export function spokenWords(text: string): string[] {
   return spoken.split(/\s+/).filter((w) => w !== "");
 }
 
-/** The share of the expected words that were wrong, missing or added: 0 is perfect. */
-export function wordErrorRate(expected: string, heard: string): number {
-  const want = spokenWords(expected);
-  const got = spokenWords(heard);
-  if (want.length === 0) return got.length === 0 ? 0 : 1;
-  // Edit distance over words.
+/** How many items must be changed, removed or added to turn one list into the other. */
+export function editDistance<T>(want: readonly T[], got: readonly T[]): number {
   let previous = Array.from({ length: got.length + 1 }, (_, j) => j);
   for (let i = 1; i <= want.length; i++) {
     const current = [i];
@@ -90,5 +87,13 @@ export function wordErrorRate(expected: string, heard: string): number {
     }
     previous = current;
   }
-  return (previous[got.length] ?? 0) / want.length;
+  return previous[got.length] ?? 0;
+}
+
+/** The share of the expected words that were wrong, missing or added: 0 is perfect. */
+export function wordErrorRate(expected: string, heard: string): number {
+  const want = spokenWords(expected);
+  const got = spokenWords(heard);
+  if (want.length === 0) return got.length === 0 ? 0 : 1;
+  return editDistance(want, got) / want.length;
 }
