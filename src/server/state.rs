@@ -93,6 +93,8 @@ pub struct App {
     pub(super) posing_twist: tokio::sync::Mutex<()>,
     /// Background prefetch jobs for saving a year's AoC puzzles offline.
     pub(super) year_cache: std::sync::Mutex<BTreeMap<u16, YearCacheState>>,
+    /// Whether background pre-computation of coding oracle cases for offline bundles is running.
+    pub(super) oracle_precompute_running: std::sync::atomic::AtomicBool,
 }
 
 pub(super) type Shared = Arc<App>;
@@ -167,6 +169,7 @@ impl App {
             oracles: tokio::sync::Mutex::default(),
             posing_twist: tokio::sync::Mutex::default(),
             year_cache: std::sync::Mutex::new(BTreeMap::new()),
+            oracle_precompute_running: std::sync::atomic::AtomicBool::new(false),
             config,
             paths,
             gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),

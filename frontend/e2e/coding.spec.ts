@@ -696,3 +696,42 @@ test("says clearly that problems need the server, while code to read works offli
   await expect(phone.locator(".step.current")).toHaveText("Understand");
   await expect(phone.locator(".learn-sync")).toHaveCount(0);
 });
+
+test("saves coding problems for offline use, works through one offline, and syncs back", async () => {
+  await phone.goto("/coding");
+  await phone.getByRole("button", { name: "Save problems for offline" }).tap();
+  await expect(phone.getByRole("button", { name: "Refresh offline copy" })).toBeVisible({
+    timeout: 15_000,
+  });
+
+  await setOffline(context, true);
+  await phone.reload();
+  await expect(phone.locator(".banner.offline")).toContainText("Saved coding problems open");
+
+  // Open a cached problem offline and work through Understand -> Plan -> Review -> Finish.
+  await phone.locator(".coding-item", { hasText: "Count the islands" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Understand");
+  await phone.getByRole("button", { name: "Skip" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Plan");
+  await phone.getByLabel(/How will you solve it/).fill("BFS over the grid cells.");
+  await phone.getByRole("button", { name: "Next: code" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Code");
+  await phone.getByRole("button", { name: "Submit" }).tap();
+  await phone.getByRole("button", { name: "Give up and see how it's solved" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Review");
+  await expect(phone.getByRole("region", { name: "Approach" })).toBeVisible();
+  await phone.getByRole("button", { name: "Good" }).tap();
+  await expect(phone.getByRole("button", { name: "Back to Coding" })).toBeVisible();
+
+  await setOffline(context, false);
+  await expect
+    .poll(
+      async () => {
+        const res = await phone.request.get("/api/coding?utc_offset=0");
+        const data = (await res.json()) as { items: { key: string; status: string }[] };
+        return data.items.find((i) => i.key === "sample/islands")?.status;
+      },
+      { timeout: 15_000 },
+    )
+    .toBe("done");
+});

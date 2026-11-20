@@ -4,6 +4,7 @@
 
 import { ApiError, ConnectionError, connection, request, TimeoutError } from "../api";
 import { errorMessage } from "../errors";
+import { outbox, type UnifiedSyncResponse } from "../offline/outbox";
 import { newId, utcOffset } from "./local";
 import type { Attempt, Deck, FlagChange, RetirementChange } from "./types";
 
@@ -172,13 +173,34 @@ export class Learning {
     const attempts = this.saved.attempts;
     const flags = this.saved.flags;
     const retirements = this.retirementChanges;
+    const pendingOutbox =
+      typeof localStorage !== "undefined" && this.storage === localStorage ? outbox() : null;
+    const outboxBatch =
+      pendingOutbox && pendingOutbox.pending > 0 ? pendingOutbox.snapshotBatch() : null;
     this.setStatus({ syncing: true });
     try {
-      const deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
-        attempts,
-        flags,
-        retirements,
-      });
+      let deck: Deck;
+      if (outboxBatch && pendingOutbox) {
+        const unified = await request<UnifiedSyncResponse>(
+          "POST",
+          `/sync?utc_offset=${utcOffset()}`,
+          {
+            attempts,
+            flags,
+            retirements,
+            coding_events: outboxBatch.coding_events,
+            mistake_tags: outboxBatch.mistake_tags,
+          },
+        );
+        pendingOutbox.applySyncResults(outboxBatch, unified);
+        deck = unified.deck;
+      } else {
+        deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
+          attempts,
+          flags,
+          retirements,
+        });
+      }
       // Anything done while this was on its way is still to send.
       const sentAttempts = new Set(attempts.map((a) => a.id));
       const sentFlags = new Set(flags.map((f) => f.id));

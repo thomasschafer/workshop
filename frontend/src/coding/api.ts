@@ -6,6 +6,7 @@ import type {
   Finished,
   Graded,
   Language,
+  OfflineBundle,
   Opened,
   Overview,
   Session,
@@ -36,6 +37,8 @@ export const codingApi = {
       "GET",
       `/coding?utc_offset=${utcOffset()}${track ? `&track=${encodeURIComponent(track)}` : ""}`,
     ),
+  offlineBundle: () =>
+    request<OfflineBundle>("GET", "/coding/offline-bundle", undefined, { timeoutMs: 15_000 }),
   open: (key: string, solve = false) =>
     request<Opened>("POST", `${item(key)}/open${solve ? "?solve=true" : ""}`),
   saveSession: (key: string, session: Session, keepalive = false) =>

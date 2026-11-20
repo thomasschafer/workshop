@@ -1,15 +1,23 @@
-import { useEffect, useState } from "preact/hooks";
-import type { Bootstrap } from "../api";
+import { useCallback, useEffect, useState } from "preact/hooks";
+import { type Bootstrap, ConnectionError, TimeoutError } from "../api";
 import { errorMessage } from "../errors";
 import { useConnection } from "../hooks/useConnection";
 import { ItemView, SyncChip, useLearning } from "../learning/practice";
 import "../learning/practice.css";
-import { HomeButton, TrackTitle } from "../progress/page";
-import "./coding.css";
 import { newId, retirements } from "../learning/local";
 import { RetiredList } from "../learning/retired";
+import { getSnapshot, putSnapshot } from "../offline/db";
+import { HomeButton, TrackTitle } from "../progress/page";
 import type { TrackId } from "../tracks/types";
+import "./coding.css";
 import { codingApi } from "./api";
+import {
+  type BundleSyncSummary,
+  type CachedCodingProblem,
+  listCachedCodingProblems,
+  offlineCapability,
+  syncCodingBundle,
+} from "./offline";
 import { CodingLink, ProblemView } from "./problem";
 import { STEP_LABELS } from "./steps";
 import type { Listed, Overview, Status } from "./types";
@@ -85,34 +93,47 @@ const STATUS: Record<Status, string> = {
   retired: "Retired",
 };
 
-/** A track's problems and code to read, each to open. Problems need the server. */
+/** A track's problems and code to read, each to open. Cached problems also open offline. */
 export function CodingItems({
   items,
   online,
+  cached,
   onOpen,
 }: {
   items: Listed[];
   online: boolean;
+  /** Problems saved on this device for offline use, by key. */
+  cached?: ReadonlyMap<string, CachedCodingProblem>;
   onOpen: (item: string) => void;
 }) {
   return (
     <ul class="coding-list">
-      {items.map((item) => (
-        <li key={item.key}>
-          <button
-            type="button"
-            class={`coding-item ${item.status}`}
-            onClick={() => onOpen(item.key)}
-            disabled={item.kind === "coding" && !online}
-          >
-            <span class="coding-item-name">{item.label}</span>
-            <span class="coding-item-detail muted">
-              {item.kind === "reading" ? "Code to read" : "Problem"} · {statusOf(item)} · ~
-              {item.minutes} min
-            </span>
-          </button>
-        </li>
-      ))}
+      {items.map((item) => {
+        const cachedProblem = item.kind === "coding" ? cached?.get(item.key) : undefined;
+        const canOpenOffline = item.kind === "reading" || cachedProblem !== undefined;
+        const capabilityLabel =
+          cachedProblem !== undefined
+            ? offlineCapability(cachedProblem) === "runnable"
+              ? " · runnable offline"
+              : " · saved offline (edit & review)"
+            : "";
+        return (
+          <li key={item.key}>
+            <button
+              type="button"
+              class={`coding-item ${item.status}`}
+              onClick={() => onOpen(item.key)}
+              disabled={!online && !canOpenOffline}
+            >
+              <span class="coding-item-name">{item.label}</span>
+              <span class="coding-item-detail muted">
+                {item.kind === "reading" ? "Code to read" : "Problem"} · {statusOf(item)} · ~
+                {item.minutes} min{!online ? capabilityLabel : ""}
+              </span>
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -139,13 +160,78 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
   const learning = useLearning();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cachedProblems, setCachedProblems] = useState<Map<string, CachedCodingProblem>>(
+    () => new Map(),
+  );
+  const [savingBundle, setSavingBundle] = useState(false);
+  const [bundleSummary, setBundleSummary] = useState<BundleSyncSummary | null>(null);
+  const [bundleError, setBundleError] = useState<string | null>(null);
+
+  const loadCached = useCallback(async () => {
+    const list = await listCachedCodingProblems();
+    const map = new Map<string, CachedCodingProblem>();
+    for (const p of list) map.set(p.key, p);
+    setCachedProblems(map);
+    return map;
+  }, []);
+
   useEffect(() => {
+    let cancelled = false;
+    let fetchedFresh = false;
+    let hasCachedOverview = false;
+    const cachedReady = Promise.all([
+      loadCached(),
+      getSnapshot<Overview>("coding:overview").then((snap) => {
+        if (!cancelled && snap && !fetchedFresh) {
+          hasCachedOverview = true;
+          setOverview(snap.value);
+        }
+      }),
+    ]);
     // After what the device did reaches the server, such as code to read just retired.
     void learning
       .sync()
       .then(() => codingApi.overview())
-      .then(setOverview, (e: unknown) => setError(errorMessage(e)));
-  }, [online]);
+      .then(
+        (fresh) => {
+          fetchedFresh = true;
+          void putSnapshot("coding:overview", fresh);
+          if (!cancelled) {
+            setOverview(fresh);
+            setError(null);
+          }
+        },
+        async (e: unknown) => {
+          const [loadedCached] = await cachedReady;
+          if (cancelled) return;
+          if (
+            (e instanceof ConnectionError || e instanceof TimeoutError) &&
+            hasCachedOverview &&
+            loadedCached.size > 0
+          ) {
+            return;
+          }
+          setError(errorMessage(e));
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [online, loadCached]);
+
+  const saveForOffline = async () => {
+    setSavingBundle(true);
+    setBundleError(null);
+    try {
+      const summary = await syncCodingBundle();
+      setBundleSummary(summary);
+      await loadCached();
+    } catch (e) {
+      setBundleError(errorMessage(e));
+    } finally {
+      setSavingBundle(false);
+    }
+  };
 
   const items = overview ? toDo(overview.items) : null;
   const retired = overview ? overview.items.filter((item) => item.status === "retired") : [];
@@ -164,7 +250,13 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
     }
     brought
       .then(() => codingApi.overview())
-      .then(setOverview, (e: unknown) => setBringError(errorMessage(e)))
+      .then(
+        (fresh) => {
+          void putSnapshot("coding:overview", fresh);
+          setOverview(fresh);
+        },
+        (e: unknown) => setBringError(errorMessage(e)),
+      )
       .finally(() => setBringing(null));
   };
   const deck = learning.deck;
@@ -172,13 +264,46 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
   const offlineReading = (deck?.items ?? []).filter(
     (i) => i.kind === "reading" && i.track === "coding" && standing[i.key]?.state !== "retired",
   );
+  const showCachedOffline = !online && cachedProblems.size > 0;
 
   return (
     <div class="learn">
       <Header onHome={onHome} />
       <main class="learn-content">
-        {items ? <CodingItems items={items} online={online} onOpen={onOpen} /> : null}
-        {items ? (
+        {online ? (
+          <div class="picker-status">
+            <span class="muted small">
+              {cachedProblems.size > 0
+                ? `${cachedProblems.size} problems saved offline${bundleSummary?.oraclesComputing ? " · preparing random tests…" : ""}`
+                : "Not saved for offline yet"}
+            </span>
+            <button
+              type="button"
+              class="text-button"
+              disabled={savingBundle}
+              onClick={() => void saveForOffline()}
+            >
+              {savingBundle
+                ? "Saving for offline…"
+                : cachedProblems.size > 0
+                  ? "Refresh offline copy"
+                  : "Save problems for offline"}
+            </button>
+          </div>
+        ) : null}
+        {bundleError ? <p class="error-text small">{bundleError}</p> : null}
+        {items && (online || showCachedOffline) ? (
+          <>
+            {showCachedOffline ? (
+              <p class="banner offline" role="status">
+                Offline. Saved coding problems open for editing and review; running code needs the
+                server.
+              </p>
+            ) : null}
+            <CodingItems items={items} online={online} cached={cachedProblems} onOpen={onOpen} />
+          </>
+        ) : null}
+        {items && online ? (
           <RetiredList
             items={retired}
             bringing={bringing}
@@ -186,7 +311,7 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
             error={bringError}
             onBringBack={bringBack}
           />
-        ) : error ? (
+        ) : !showCachedOffline && error ? (
           <>
             <p class="banner offline" role="status">
               Coding problems need the server, which can't be reached. Code to read works offline.
@@ -208,9 +333,9 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
               </p>
             )}
           </>
-        ) : (
+        ) : !items ? (
           <p class="muted">Loading…</p>
-        )}
+        ) : null}
       </main>
     </div>
   );

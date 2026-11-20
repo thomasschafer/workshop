@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { type Bootstrap, ConnectionError } from "../api";
+import { ApiError, type Bootstrap, ConnectionError, TimeoutError } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
@@ -14,6 +14,7 @@ import { newId } from "../learning/local";
 import { sameOutput } from "../learning/output";
 import { Markdown } from "../learning/practice";
 import type { Rating } from "../learning/types";
+import { outbox } from "../offline/outbox";
 import { HomeButton } from "../progress/page";
 import { LatestSaver, type VersionedSaver } from "../saver";
 import { TrackIcon } from "../tracks/icons";
@@ -24,6 +25,12 @@ import { StepNav } from "../views/steps";
 import { useZen, ZenButton, ZenExit, ZenKeyboardButton } from "../views/zen";
 import { codingApi } from "./api";
 import { EditorPane } from "./editorPane";
+import {
+  getCachedCodingProblem,
+  openCodingFromCache,
+  updateCachedCodingDraft,
+  updateCachedCodingSession,
+} from "./offline";
 import {
   describeCase,
   describeRun,
@@ -108,17 +115,64 @@ export function ProblemView({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [finished, setFinished] = useState<FinishedReply | null>(null);
   const [twistMarked, setTwistMarked] = useState<TwistMarked | null>(null);
+  const [sessionConflict, setSessionConflict] = useState<Session | null>(() =>
+    outbox().conflictFor(itemKey),
+  );
+  const confirmedVersion = useRef<number>(0);
+
+  useEffect(
+    () =>
+      outbox().subscribe(() => {
+        const conflict = outbox().conflictFor(itemKey);
+        if (conflict) setSessionConflict(conflict);
+      }),
+    [itemKey],
+  );
 
   const saver = useMemo(
     () =>
       new LatestSaver<Session>(
         async (next, keepalive) => {
-          const saved = await codingApi.saveSession(itemKey, next, keepalive);
-          // Only what's still unsaved is forgotten: a later change waits its turn.
-          if (JSON.stringify(readUnsaved(itemKey)?.session) === JSON.stringify(next)) {
-            writeUnsaved(itemKey, null);
+          const toSend: Session =
+            confirmedVersion.current > 0 ? { ...next, version: confirmedVersion.current } : next;
+          try {
+            const saved = await codingApi.saveSession(itemKey, toSend, keepalive);
+            confirmedVersion.current = saved.session.version ?? confirmedVersion.current;
+            // Only what's still unsaved is forgotten: a later change waits its turn.
+            if (JSON.stringify(readUnsaved(itemKey)?.session) === JSON.stringify(next)) {
+              writeUnsaved(itemKey, null);
+            }
+            void updateCachedCodingSession(itemKey, saved.session);
+            if (sessionRef.current && saved.session.version !== undefined) {
+              const bumped = { ...sessionRef.current, version: saved.session.version };
+              sessionRef.current = bumped;
+              setSession(bumped);
+            }
+            setOpened((current) => (current ? { ...current, solution: saved.solution } : saved));
+          } catch (err) {
+            if (err instanceof ApiError && err.status === 409) {
+              const current = (err.body as { current?: Session } | null)?.current;
+              if (current) {
+                setSessionConflict(current);
+                return;
+              }
+            }
+            if (err instanceof ConnectionError || err instanceof TimeoutError) {
+              outbox().enqueueCodingEvent(
+                {
+                  kind: "session_updated",
+                  id: newId(),
+                  item: itemKey,
+                  base_version: confirmedVersion.current || (next.version ?? 1),
+                  session: toSend,
+                  at: Date.now(),
+                },
+                false,
+              );
+              return;
+            }
+            throw err;
           }
-          setOpened((current) => (current ? { ...current, solution: saved.solution } : saved));
         },
         SAVE_DELAY_MS,
         () => {},
@@ -143,6 +197,7 @@ export function ProblemView({
       sessionRef.current = next;
       setSession(next);
       writeUnsaved(itemKey, { session: next, at: Date.now() });
+      void updateCachedCodingSession(itemKey, next);
       saver.schedule(next);
       return now ? saver.flush().catch(() => {}) : Promise.resolve();
     },
@@ -153,22 +208,60 @@ export function ProblemView({
     async (solve = false) => {
       setError(null);
       setFinished(null);
+      setSessionConflict(null);
       try {
         const fresh = await codingApi.open(itemKey, solve);
+        confirmedVersion.current = fresh.session.version ?? 0;
         // What was done here while the server couldn't hear of it wins over what it has.
         const unsaved = solve ? null : readUnsaved(itemKey);
         const adopted =
           unsaved &&
           unsaved.at > fresh.session.updated_at &&
           unsaved.session.mode === fresh.session.mode
-            ? unsaved.session
+            ? { ...unsaved.session, version: fresh.session.version ?? unsaved.session.version }
             : fresh.session;
         if (adopted !== fresh.session) saver.schedule(adopted);
         else writeUnsaved(itemKey, null);
+        void updateCachedCodingSession(itemKey, adopted);
+        for (const lang of fresh.languages) {
+          void updateCachedCodingDraft(itemKey, lang.id, lang.code);
+        }
         setOpened(fresh);
         sessionRef.current = adopted;
         setSession(adopted);
       } catch (e) {
+        if (e instanceof ConnectionError || e instanceof TimeoutError) {
+          const cached = await openCodingFromCache(itemKey, solve);
+          if (cached) {
+            const { opened: offlineOpened, createdSession } = cached;
+            if (createdSession) {
+              outbox().enqueueCodingEvent(
+                {
+                  kind: "session_opened",
+                  id: newId(),
+                  item: itemKey,
+                  mode: createdSession.mode,
+                  language: createdSession.language,
+                  no_twist: createdSession.no_twist,
+                  started_at: createdSession.started_at,
+                },
+                false,
+              );
+            }
+            confirmedVersion.current = offlineOpened.session.version ?? 1;
+            const unsaved = solve ? null : readUnsaved(itemKey);
+            const adopted =
+              unsaved &&
+              unsaved.at > offlineOpened.session.updated_at &&
+              unsaved.session.mode === offlineOpened.session.mode
+                ? unsaved.session
+                : offlineOpened.session;
+            setOpened(offlineOpened);
+            sessionRef.current = adopted;
+            setSession(adopted);
+            return;
+          }
+        }
         setError(errorMessage(e));
       }
     },
@@ -188,6 +281,8 @@ export function ProblemView({
       .twist(itemKey)
       .then(
         (fresh) => {
+          confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
+          void updateCachedCodingSession(itemKey, fresh.session);
           setOpened(fresh);
           sessionRef.current = fresh.session;
           setSession(fresh.session);
@@ -206,12 +301,24 @@ export function ProblemView({
       });
   }, [session?.mode, opened, itemKey, change]);
 
-  // Once it's being reviewed, the solution comes with the session's save.
+  // Once it's being reviewed, the solution comes with the session's save online, or from the
+  // on-device cache offline (strictly gated behind step === "review").
   useEffect(() => {
-    if (session?.step === "review" && opened && opened.solution === null && online) {
+    if (session?.step !== "review" || !opened || opened.solution !== null) return;
+    if (online) {
       void saver.flush().catch(() => {});
+      return;
     }
-  }, [session?.step, opened?.solution, online]);
+    let cancelled = false;
+    void getCachedCodingProblem(itemKey).then((cached) => {
+      if (!cancelled && cached) {
+        setOpened((current) => (current ? { ...current, solution: cached.solution } : current));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.step, opened?.solution, online, itemKey, saver]);
 
   const models = boot.models.discuss_models;
   const [model, setModel] = useState(
@@ -372,6 +479,8 @@ export function ProblemView({
         lastRun.current = summary;
       }}
       onReloaded={(fresh) => {
+        confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
+        void updateCachedCodingSession(itemKey, fresh.session);
         setOpened(fresh);
         sessionRef.current = fresh.session;
         setSession(fresh.session);
@@ -384,10 +493,34 @@ export function ProblemView({
       {...shared}
       serverDictation={boot.server_dictation}
       onFinish={async (rating) => {
-        await saver.flush();
-        const done = await codingApi.finish(itemKey, newId(), rating);
+        const id = newId();
+        const now = Date.now();
+        const duration = Math.max(0, now - session.updated_at);
+        if (online) {
+          try {
+            await saver.flush();
+            const done = await codingApi.finish(itemKey, id, rating);
+            writeUnsaved(itemKey, null);
+            void updateCachedCodingSession(itemKey, null);
+            setFinished(done);
+            return;
+          } catch (e) {
+            if (!(e instanceof ConnectionError || e instanceof TimeoutError)) throw e;
+          }
+        }
+        outbox().enqueueCodingEvent({
+          kind: "finished",
+          id,
+          item: itemKey,
+          base_version: confirmedVersion.current || null,
+          rating,
+          plan: session.plan,
+          duration_ms: duration,
+          answered_at: now,
+        });
         writeUnsaved(itemKey, null);
-        setFinished(done);
+        void updateCachedCodingSession(itemKey, null);
+        setFinished({ due: null, retired: rating === "easy" });
       }}
     />
   );
@@ -406,6 +539,47 @@ export function ProblemView({
         onGo={goTo}
       />
       {offlineBanner}
+      {sessionConflict ? (
+        <div class="banner" role="alert">
+          <span>This problem was edited on another device.</span>
+          <button
+            type="button"
+            class="text-button"
+            onClick={() => {
+              confirmedVersion.current = sessionConflict.version ?? confirmedVersion.current;
+              outbox().clearConflict(itemKey);
+              setSessionConflict(null);
+              if (sessionRef.current) {
+                const next = {
+                  ...sessionRef.current,
+                  version: sessionConflict.version ?? sessionRef.current.version,
+                };
+                sessionRef.current = next;
+                setSession(next);
+                saver.schedule(next);
+                void saver.flush().catch(() => {});
+              }
+            }}
+          >
+            Keep mine
+          </button>
+          <button
+            type="button"
+            class="text-button"
+            onClick={() => {
+              confirmedVersion.current = sessionConflict.version ?? confirmedVersion.current;
+              outbox().clearConflict(itemKey);
+              writeUnsaved(itemKey, null);
+              void updateCachedCodingSession(itemKey, sessionConflict);
+              sessionRef.current = sessionConflict;
+              setSession(sessionConflict);
+              setSessionConflict(null);
+            }}
+          >
+            Load theirs
+          </button>
+        </div>
+      ) : null}
       {notice ? (
         <div class="banner" role="status">
           <span>{notice}</span>
@@ -1081,7 +1255,7 @@ function ReviewStep({
             key={rating}
             type="button"
             class={`pill rating ${rating} ${rating === suggested ? "suggested" : ""}`}
-            disabled={saving || !online}
+            disabled={saving}
             onClick={() => {
               setSaving(true);
               setProblem(null);
@@ -1100,7 +1274,9 @@ function ReviewStep({
         </p>
       ) : null}
       <p class="muted coding-hint">Easy retires it: it won't come back unless you bring it back.</p>
-      {online ? null : <p class="muted">Saying how it went needs the server.</p>}
+      {online ? null : (
+        <p class="muted">Offline: your rating will be saved on this device and synced later.</p>
+      )}
       {problem ? <p class="error-text">{problem}</p> : null}
     </main>
   );

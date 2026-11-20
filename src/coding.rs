@@ -13,7 +13,7 @@
 //! A problem the learner couldn't solve last time is solved again instead, and they can always
 //! choose to.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -175,6 +175,9 @@ pub struct Session {
     /// When it was started, and last saved, in milliseconds since 1970.
     pub started_at: i64,
     pub updated_at: i64,
+    /// Monotonic version bumped on every write, shared by online and offline sync paths.
+    #[serde(default)]
+    pub version: u64,
 }
 
 impl Session {
@@ -192,7 +195,22 @@ impl Session {
             no_twist: None,
             started_at: now,
             updated_at: now,
+            version: 1,
         }
+    }
+
+    /// Whether two sessions have the same user-visible fields, ignoring timestamps and version.
+    pub fn same_content(&self, other: &Self) -> bool {
+        self.mode == other.mode
+            && self.step == other.step
+            && self.language == other.language
+            && self.prediction == other.prediction
+            && self.plan == other.plan
+            && self.passed == other.passed
+            && self.runs == other.runs
+            && self.submissions == other.submissions
+            && self.hints == other.hints
+            && self.no_twist == other.no_twist
     }
 
     /// The same review as a recall instead of a twist, saying why.
@@ -292,7 +310,7 @@ pub struct OpenedTrack {
 }
 
 impl OpenedTrack {
-    fn of(found: &Found<'_>) -> Self {
+    pub fn of(found: &Found<'_>) -> Self {
         let id = found.item.track.clone();
         let (name, icon) = crate::learning::track_label(std::slice::from_ref(found.pack), &id);
         Self { id, name, icon }
@@ -339,6 +357,105 @@ pub struct Reference {
     pub text: String,
 }
 
+/// An idempotent coding session event synced from a client (offline or online).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CodingEvent {
+    SessionOpened {
+        id: String,
+        item: String,
+        mode: Mode,
+        language: Language,
+        #[serde(default)]
+        no_twist: Option<String>,
+        started_at: i64,
+    },
+    SessionUpdated {
+        id: String,
+        item: String,
+        base_version: u64,
+        session: Session,
+        at: i64,
+    },
+    Submitted {
+        id: String,
+        item: String,
+        base_version: u64,
+        passed: bool,
+        #[serde(default)]
+        graded: Option<workshop_coding::Graded>,
+        at: i64,
+    },
+    Finished {
+        id: String,
+        item: String,
+        #[serde(default)]
+        base_version: Option<u64>,
+        rating: Rating,
+        #[serde(default)]
+        plan: Option<String>,
+        #[serde(default)]
+        duration_ms: i64,
+        answered_at: i64,
+    },
+}
+
+impl CodingEvent {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::SessionOpened { id, .. }
+            | Self::SessionUpdated { id, .. }
+            | Self::Submitted { id, .. }
+            | Self::Finished { id, .. } => id,
+        }
+    }
+
+    pub fn item(&self) -> &str {
+        match self {
+            Self::SessionOpened { item, .. }
+            | Self::SessionUpdated { item, .. }
+            | Self::Submitted { item, .. }
+            | Self::Finished { item, .. } => item,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CodingEventStatus {
+    Applied {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session: Option<Session>,
+    },
+    Duplicate,
+    Conflict {
+        current: Box<Session>,
+    },
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct CodingEventOutcome {
+    pub id: String,
+    pub item: String,
+    #[serde(flatten)]
+    pub status: CodingEventStatus,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SessionWriteError {
+    #[error("this coding session changed on another device")]
+    Conflict { current: Box<Session> },
+    #[error("the problem hasn't been started, or it's been finished")]
+    NotStarted,
+    #[error("{0}")]
+    Invalid(String),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 /// The problems' sessions and code drafts, kept in Workshop's data directory.
 pub struct Problems {
     data_dir: PathBuf,
@@ -347,6 +464,8 @@ pub struct Problems {
     twists: workshop_sessions::Saved<crate::twist::Posed>,
     /// Held while saving a draft, so two saves from the same version can't both succeed.
     save_lock: std::sync::Mutex<()>,
+    /// Held while mutating a session or checking applied event IDs (single writer).
+    session_lock: std::sync::Mutex<()>,
 }
 
 /// A problem found in the packs.
@@ -385,7 +504,29 @@ impl Problems {
             twists: workshop_sessions::Saved::new(dir.join("twists")),
             data_dir: data_dir.to_owned(),
             save_lock: std::sync::Mutex::new(()),
+            session_lock: std::sync::Mutex::new(()),
         }
+    }
+
+    fn applied_events_path(&self) -> PathBuf {
+        coding_dir(&self.data_dir).join("applied_events.json")
+    }
+
+    fn load_applied_events(&self) -> Result<BTreeSet<String>> {
+        let path = self.applied_events_path();
+        match std::fs::read_to_string(&path) {
+            Ok(text) => serde_json::from_str(&text).context("reading applied coding events"),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(BTreeSet::new()),
+            Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
+        }
+    }
+
+    fn save_applied_events(&self, applied: &BTreeSet<String>) -> Result<()> {
+        let path = self.applied_events_path();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        workshop_common::files::write_atomic(&path, &serde_json::to_vec(applied)?)
     }
 
     /// Where a language's drafts are, which its language server is started in.
@@ -449,33 +590,102 @@ impl Problems {
         self.saved.put(key, session)
     }
 
+    /// Saves where the learner is with a problem, checking monotonic version if `base_version` is
+    /// given. Both online `PUT /session` and offline `SessionUpdated` events go through here.
+    pub fn save_session_checked(
+        &self,
+        found: &Found<'_>,
+        mut session: Session,
+        base_version: Option<u64>,
+        now: i64,
+    ) -> Result<(Session, i64), SessionWriteError> {
+        session
+            .check(found.coding)
+            .map_err(SessionWriteError::Invalid)?;
+        let _guard = self
+            .session_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = found.key();
+        let before = self.session(&key)?.ok_or(SessionWriteError::NotStarted)?;
+        if let Some(expected) = base_version
+            && before.version != expected
+        {
+            if session.same_content(&before) {
+                return Ok((before, 0));
+            }
+            return Err(SessionWriteError::Conflict {
+                current: Box::new(before),
+            });
+        }
+        session.started_at = before.started_at;
+        session.updated_at = now.max(before.updated_at);
+        session.version = before.version + 1;
+        self.write_session(&key, &session)?;
+        Ok((session, spent(&before, now)))
+    }
+
     /// Saves where the learner is with a problem, as long as it's somewhere the problem has.
     /// Returns it as saved, and the time spent on it since it was last saved.
     pub fn save_session(
         &self,
         found: &Found<'_>,
-        mut session: Session,
+        session: Session,
         now: i64,
     ) -> Result<(Session, i64)> {
-        session.check(found.coding).map_err(anyhow::Error::msg)?;
+        let base = (session.version > 0).then_some(session.version);
+        self.save_session_checked(found, session, base, now)
+            .map_err(anyhow::Error::from)
+    }
+
+    /// Records a submission outcome (from either a live server submit or an offline `Submitted`
+    /// event) through the same versioned session writer.
+    pub fn record_submission(
+        &self,
+        found: &Found<'_>,
+        base_version: Option<u64>,
+        passed: bool,
+        now: i64,
+    ) -> Result<(Session, i64), SessionWriteError> {
+        let _guard = self
+            .session_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let key = found.key();
-        let before = self
-            .session(&key)?
-            .context("the problem hasn't been started, or it's been finished")?;
-        session.started_at = before.started_at;
-        session.updated_at = now;
-        self.write_session(&key, &session)?;
-        Ok((session, spent(&before, now)))
+        let before = self.session(&key)?.ok_or(SessionWriteError::NotStarted)?;
+        if let Some(expected) = base_version
+            && before.version != expected
+        {
+            return Err(SessionWriteError::Conflict {
+                current: Box::new(before),
+            });
+        }
+        let mut next = before.clone();
+        next.submissions += 1;
+        next.passed = passed;
+        next.step = if passed {
+            StepName::Review
+        } else {
+            StepName::Test
+        };
+        next.updated_at = now.max(before.updated_at);
+        next.version = before.version + 1;
+        self.write_session(&key, &next)?;
+        Ok((next, spent(&before, now)))
     }
 
     /// Notes that the learner is working on a problem, such as by typing its code. Returns the
     /// time spent on it since it was last saved.
     pub fn touch(&self, key: &str, now: i64) -> Result<i64> {
+        let _guard = self
+            .session_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(mut session) = self.session(key)? else {
             return Ok(0);
         };
         let spent = spent(&session, now);
-        session.updated_at = now;
+        session.updated_at = now.max(session.updated_at);
         self.write_session(key, &session)?;
         Ok(spent)
     }
@@ -491,6 +701,10 @@ impl Problems {
         no_twist: Option<String>,
         now: i64,
     ) -> Result<Session> {
+        let _guard = self
+            .session_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let key = found.key();
         if let Some(session) = self.session(&key)?
             && !(solve && session.mode != Mode::Solve)
@@ -516,6 +730,292 @@ impl Problems {
         };
         self.write_session(&key, &session)?;
         Ok(session)
+    }
+
+    /// Applies an idempotent offline/online [`CodingEvent`] through the single session writer.
+    pub fn apply_event(
+        &self,
+        packs: &[Pack],
+        learning: &crate::learning::Learning,
+        event: CodingEvent,
+    ) -> CodingEventOutcome {
+        let id = event.id().to_owned();
+        let item_key = event.item().to_owned();
+        let Some((pack, item)) = item_key.split_once('/') else {
+            return CodingEventOutcome {
+                id,
+                item: item_key,
+                status: CodingEventStatus::Error {
+                    message: "item key must be pack/item".to_owned(),
+                },
+            };
+        };
+        let found = match find(packs, pack, item) {
+            Ok(f) => f,
+            Err(err) => {
+                return CodingEventOutcome {
+                    id,
+                    item: item_key,
+                    status: CodingEventStatus::Error {
+                        message: format!("{err:#}"),
+                    },
+                };
+            }
+        };
+
+        // Check idempotency before mutating.
+        {
+            let _guard = self
+                .session_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match self.load_applied_events() {
+                Ok(applied) if applied.contains(&id) => {
+                    return CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Duplicate,
+                    };
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    return CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Error {
+                            message: format!("{err:#}"),
+                        },
+                    };
+                }
+            }
+        }
+
+        let mark_applied = || -> Result<()> {
+            let _guard = self
+                .session_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut applied = self.load_applied_events()?;
+            applied.insert(id.clone());
+            self.save_applied_events(&applied)
+        };
+
+        match event {
+            CodingEvent::SessionOpened {
+                mode,
+                language,
+                no_twist,
+                started_at,
+                ..
+            } => {
+                let result = (|| -> Result<Session, SessionWriteError> {
+                    let _guard = self
+                        .session_lock
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(existing) = self.session(&item_key)? {
+                        return Ok(existing);
+                    }
+                    let mut session = Session::new(mode, language, started_at);
+                    session.no_twist = no_twist;
+                    session
+                        .check(found.coding)
+                        .map_err(SessionWriteError::Invalid)?;
+                    self.write_session(&item_key, &session)?;
+                    Ok(session)
+                })();
+                match result {
+                    Ok(session) => {
+                        let _ = mark_applied();
+                        CodingEventOutcome {
+                            id,
+                            item: item_key,
+                            status: CodingEventStatus::Applied {
+                                session: Some(session),
+                            },
+                        }
+                    }
+                    Err(SessionWriteError::Conflict { current }) => CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Conflict { current },
+                    },
+                    Err(err) => CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Error {
+                            message: format!("{err:#}"),
+                        },
+                    },
+                }
+            }
+            CodingEvent::SessionUpdated {
+                base_version,
+                session,
+                at,
+                ..
+            } => match self.save_session_checked(&found, session, Some(base_version), at) {
+                Ok((saved, spent_ms)) => {
+                    let _ = learning.store().record_time(&item_key, at, spent_ms);
+                    let _ = mark_applied();
+                    CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Applied {
+                            session: Some(saved),
+                        },
+                    }
+                }
+                Err(SessionWriteError::Conflict { current }) => CodingEventOutcome {
+                    id,
+                    item: item_key,
+                    status: CodingEventStatus::Conflict { current },
+                },
+                Err(err) => CodingEventOutcome {
+                    id,
+                    item: item_key,
+                    status: CodingEventStatus::Error {
+                        message: format!("{err:#}"),
+                    },
+                },
+            },
+            CodingEvent::Submitted {
+                base_version,
+                passed,
+                graded,
+                at,
+                ..
+            } => match self.record_submission(&found, Some(base_version), passed, at) {
+                Ok((saved, spent_ms)) => {
+                    let _ = learning.store().record_time(&item_key, at, spent_ms);
+                    if let Some(graded) = &graded {
+                        let mistake_id = format!(
+                            "submission-{}-{}-{}",
+                            item_key, saved.started_at, saved.submissions
+                        );
+                        if let Some(mistake) =
+                            crate::mistakes::from_submission(&item_key, mistake_id, at, graded)
+                        {
+                            let _ = learning.store().record_mistakes(&[mistake]);
+                        }
+                    }
+                    let _ = mark_applied();
+                    CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Applied {
+                            session: Some(saved),
+                        },
+                    }
+                }
+                Err(SessionWriteError::Conflict { current }) => CodingEventOutcome {
+                    id,
+                    item: item_key,
+                    status: CodingEventStatus::Conflict { current },
+                },
+                Err(err) => CodingEventOutcome {
+                    id,
+                    item: item_key,
+                    status: CodingEventStatus::Error {
+                        message: format!("{err:#}"),
+                    },
+                },
+            },
+            CodingEvent::Finished {
+                base_version,
+                rating,
+                plan,
+                duration_ms,
+                answered_at,
+                ..
+            } => {
+                let store = learning.store();
+                let already = store
+                    .attempts(&item_key)
+                    .map(|attempts| attempts.iter().any(|a| a.id == id))
+                    .unwrap_or(false);
+                if already {
+                    let _ = mark_applied();
+                    return CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Duplicate,
+                    };
+                }
+                let session_res = {
+                    let _guard = self
+                        .session_lock
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    match self.session(&item_key) {
+                        Ok(Some(current)) => {
+                            if let Some(expected) = base_version
+                                && current.version != expected
+                            {
+                                Err(SessionWriteError::Conflict {
+                                    current: Box::new(current),
+                                })
+                            } else {
+                                Ok(Some(current))
+                            }
+                        }
+                        Ok(None) => Ok(None),
+                        Err(err) => Err(SessionWriteError::Other(err)),
+                    }
+                };
+                match session_res {
+                    Err(SessionWriteError::Conflict { current }) => CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Conflict { current },
+                    },
+                    Err(err) => CodingEventOutcome {
+                        id,
+                        item: item_key,
+                        status: CodingEventStatus::Error {
+                            message: format!("{err:#}"),
+                        },
+                    },
+                    Ok(session_opt) => {
+                        let response =
+                            plan.or_else(|| session_opt.as_ref().map(|s| s.plan.clone()));
+                        let spent_ms = if duration_ms > 0 {
+                            duration_ms
+                        } else {
+                            session_opt.as_ref().map_or(0, |s| spent(s, answered_at))
+                        };
+                        if let Err(err) = learning.record_problem(
+                            Attempt {
+                                id: id.clone(),
+                                item: item_key.clone(),
+                                answered_at,
+                                duration_ms: spent_ms,
+                                rating,
+                                response,
+                                seed: None,
+                            },
+                            &[],
+                            answered_at,
+                        ) {
+                            return CodingEventOutcome {
+                                id,
+                                item: item_key,
+                                status: CodingEventStatus::Error {
+                                    message: format!("{err:#}"),
+                                },
+                            };
+                        }
+                        let _ = self.finish(&item_key);
+                        let _ = mark_applied();
+                        CodingEventOutcome {
+                            id,
+                            item: item_key,
+                            status: CodingEventStatus::Applied { session: None },
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// The draft written in most recently, in any of the problem's languages, and its text.
@@ -561,7 +1061,30 @@ impl Problems {
 
     /// Ends a problem's session, once its attempt is recorded.
     pub fn finish(&self, key: &str) -> Result<()> {
+        let _guard = self
+            .session_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.saved.remove(key)
+    }
+
+    /// A problem's draft in a language if it already exists on disk, without creating one from
+    /// the starter.
+    pub fn existing_draft(
+        &self,
+        found: &Found<'_>,
+        language: Language,
+    ) -> Result<Option<VersionedFile>> {
+        let path = self.draft_path(&found.key(), language);
+        if !path.exists() {
+            return Ok(None);
+        }
+        read_versioned(&path).map(Some)
+    }
+
+    /// The path a problem's draft lives at, whether or not it exists yet.
+    pub fn draft_file_path(&self, found: &Found<'_>, language: Language) -> PathBuf {
+        self.draft_path(&found.key(), language)
     }
 
     /// A problem's draft in a language, starting from the item's starter the first time.
@@ -1191,5 +1714,147 @@ mod tests {
                 .iter()
                 .any(|item| item.kind == Kind::Reading && item.status == Status::New)
         );
+    }
+
+    #[test]
+    fn event_sourced_writer_bumps_versions_detects_conflicts_and_derives_mistakes() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let packs = vec![Pack::sample()];
+        let found = find(&packs, "sample", "islands").unwrap();
+        let problems = Problems::new(dir.path());
+
+        // Start offline via SessionOpened.
+        let open_outcome = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::SessionOpened {
+                id: "ev-open-1".into(),
+                item: found.key(),
+                mode: Mode::Solve,
+                language: Language::Python,
+                no_twist: None,
+                started_at: NOW,
+            },
+        );
+        let opened = match open_outcome.status {
+            CodingEventStatus::Applied { session: Some(s) } => s,
+            other => panic!("expected applied open, got {other:?}"),
+        };
+        assert_eq!(opened.version, 1);
+
+        // Replaying the same event ID is a no-op duplicate.
+        let dup = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::SessionOpened {
+                id: "ev-open-1".into(),
+                item: found.key(),
+                mode: Mode::Solve,
+                language: Language::Python,
+                no_twist: None,
+                started_at: NOW,
+            },
+        );
+        assert!(matches!(dup.status, CodingEventStatus::Duplicate));
+
+        // Update bumps version to 2.
+        let mut planned = opened.clone();
+        planned.step = StepName::Code;
+        planned.plan = "BFS over the grid".into();
+        let update_outcome = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::SessionUpdated {
+                id: "ev-upd-1".into(),
+                item: found.key(),
+                base_version: 1,
+                session: planned.clone(),
+                at: NOW + 5_000,
+            },
+        );
+        let updated = match update_outcome.status {
+            CodingEventStatus::Applied { session: Some(s) } => s,
+            other => panic!("expected applied update, got {other:?}"),
+        };
+        assert_eq!(updated.version, 2);
+
+        // A stale update against version 1 with different content reports Conflict.
+        let mut stale = opened;
+        stale.plan = "Conflicting edit from another device".into();
+        let conflict = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::SessionUpdated {
+                id: "ev-upd-conflict".into(),
+                item: found.key(),
+                base_version: 1,
+                session: stale,
+                at: NOW + 6_000,
+            },
+        );
+        assert!(matches!(
+            conflict.status,
+            CodingEventStatus::Conflict { current } if current.version == 2
+        ));
+
+        // A failed local submission derives a mistake via Rust's mistakes::from_submission.
+        let graded = workshop_coding::Graded::Ran {
+            total: 3,
+            results: vec![workshop_coding::CaseResult {
+                case: workshop_coding::CaseRef::Test { index: 0 },
+                input: "1 1\n0\n".into(),
+                expected: "0\n".into(),
+                run: workshop_coding::Run {
+                    ending: workshop_runner::Ending::Exited { code: Some(0) },
+                    stdout: "1\n".into(),
+                    stderr: String::new(),
+                    cut_off: None,
+                    duration_ms: 12,
+                },
+                passed: false,
+            }],
+        };
+        let sub_outcome = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::Submitted {
+                id: "ev-sub-1".into(),
+                item: found.key(),
+                base_version: 2,
+                passed: false,
+                graded: Some(graded),
+                at: NOW + 10_000,
+            },
+        );
+        let after_sub = match sub_outcome.status {
+            CodingEventStatus::Applied { session: Some(s) } => s,
+            other => panic!("expected applied submit, got {other:?}"),
+        };
+        assert_eq!(after_sub.version, 3);
+        assert_eq!(after_sub.submissions, 1);
+        assert_eq!(after_sub.step, StepName::Test);
+        assert_eq!(learning.store().mistakes(0).unwrap().len(), 1);
+
+        // Finishing records the attempt and removes the session.
+        let fin_outcome = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::Finished {
+                id: "ev-fin-1".into(),
+                item: found.key(),
+                base_version: Some(3),
+                rating: Rating::Good,
+                plan: Some("BFS over the grid".into()),
+                duration_ms: 15_000,
+                answered_at: NOW + 20_000,
+            },
+        );
+        assert!(matches!(
+            fin_outcome.status,
+            CodingEventStatus::Applied { session: None }
+        ));
+        assert!(problems.session(&found.key()).unwrap().is_none());
+        assert_eq!(learning.store().attempts(&found.key()).unwrap().len(), 1);
     }
 }

@@ -1,9 +1,10 @@
 //! The Coding track: its problems, their steps and code, running them, and the tutor.
 
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
@@ -11,9 +12,10 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use workshop_coding::grade::shortened;
-use workshop_coding::{CaseResult, Graded, Oracle};
+use workshop_coding::{CaseResult, Graded, Oracle, OracleCase};
+use workshop_common::files::version_of;
 use workshop_learning::{Attempt, Rating};
-use workshop_pack::{Language, Pack};
+use workshop_pack::{Case, Content, Language, Pack};
 use workshop_provider::Role;
 use workshop_toolchain::toolchain::Toolchain;
 use workshop_tracks::TrackId;
@@ -24,7 +26,10 @@ use super::learning::Where;
 use super::puzzles::{SaveText, saved};
 use super::setup::{Needs, install_programs};
 use super::state::{ActiveRun, Shared, lock};
-use crate::coding::{Found, Mode, Opened, Overview, SUBMIT_RANDOM_INPUTS, Session, StepName, find};
+use crate::coding::{
+    Found, Mode, Opened, OpenedLsp, OpenedTrack, Overview, Reference, SUBMIT_RANDOM_INPUTS,
+    Session, SessionWriteError, Solution, find,
+};
 use crate::discuss::{self, Turn};
 use crate::language::LanguageProfile;
 use crate::learning::now_ms;
@@ -113,10 +118,26 @@ pub(super) async fn save_session(
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
     let now = now_ms();
-    let (session, spent) = app
+    let base = (session.version > 0).then_some(session.version);
+    let (session, spent) = match app
         .problems
-        .save_session(&found, session, now)
-        .map_err(|err| bad_request(format!("{err:#}")))?;
+        .save_session_checked(&found, session, base, now)
+    {
+        Ok(res) => res,
+        Err(SessionWriteError::Conflict { current }) => {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                serde_json::json!({
+                    "error": "This coding session changed on another device.",
+                    "current": current,
+                }),
+            ));
+        }
+        Err(err @ (SessionWriteError::NotStarted | SessionWriteError::Invalid(_))) => {
+            return Err(bad_request(format!("{err:#}")));
+        }
+        Err(SessionWriteError::Other(err)) => return Err(err.into()),
+    };
     app.learning.store().record_time(&found.key(), now, spent)?;
     let attempts = app.learning.store().attempts(&found.key())?;
     Ok(Json(app.problems.open(
@@ -265,7 +286,7 @@ pub(super) async fn submit(
 ) -> ApiResult<Submitted> {
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
-    let (mut session, code) = current(&app, &found)?;
+    let (session, code) = current(&app, &found)?;
     let body: RunIdBody = optional_json(body)?;
     let running = start_running(&app, body.run_id)?;
     let runtime = crate::coding::runtime(&app.config, &app.paths).await?;
@@ -284,27 +305,21 @@ pub(super) async fn submit(
     drop(running);
     let passed = graded.passed();
     let now = now_ms();
+    let (session, spent) = app
+        .problems
+        .record_submission(&found, None, passed, now)
+        .map_err(|err| anyhow::anyhow!("{err:#}"))?;
+    app.learning.store().record_time(&found.key(), now, spent)?;
     // One per submission: the session's start and its count of submissions say which.
     let id = format!(
         "submission-{}-{}-{}",
         found.key(),
         session.started_at,
-        session.submissions + 1
+        session.submissions
     );
     if let Some(mistake) = crate::mistakes::from_submission(&found.key(), id, now, &graded) {
         app.learning.store().record_mistakes(&[mistake])?;
     }
-    session.submissions += 1;
-    session.passed = passed;
-    session.step = if passed {
-        StepName::Review
-    } else {
-        StepName::Test
-    };
-    let (session, _) = app
-        .problems
-        .save_session(&found, session, now)
-        .context("saving the session")?;
     let (ran, total) = match &graded {
         Graded::Ran { results, total } => (
             results.iter().filter(|result| result.passed).count(),
@@ -810,6 +825,226 @@ pub(super) async fn cancel_toolchain_install(
     let (language, _) = writable(&app, &id)?;
     app.coding_toolchain_installs[&language].cancel();
     Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct OfflineBundleQuery {
+    /// Whether to start background oracle pre-computation for uncached items.
+    #[serde(default = "default_true")]
+    precompute: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize)]
+pub(super) struct OfflineLanguage {
+    id: Language,
+    name: &'static str,
+    editor_mode: String,
+    starter: String,
+    code: Option<VersionedFile>,
+    file_path: String,
+    lsp: Option<OpenedLsp>,
+}
+
+#[derive(Serialize)]
+pub(super) struct OfflineItem {
+    key: String,
+    label: String,
+    track: OpenedTrack,
+    prompt: String,
+    skills: Vec<String>,
+    source: Option<String>,
+    minutes: u32,
+    examples: Vec<Case>,
+    hints: Vec<String>,
+    languages: Vec<OfflineLanguage>,
+    session: Option<Session>,
+    previous_plan: Option<String>,
+    solution: Solution,
+    tests: Vec<Case>,
+    oracle_cases: Vec<OracleCase>,
+    oracle_ready: bool,
+}
+
+#[derive(Serialize)]
+pub(super) struct OfflineBundle {
+    items: Vec<OfflineItem>,
+    empty_version: String,
+    oracles_computing: bool,
+}
+
+fn oracle_cache_path(app: &Shared, found: &Found<'_>, count: u32) -> PathBuf {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (
+        found.key(),
+        &found.coding.brute_force.text,
+        &found.coding.inputs.text,
+        count,
+    )
+        .hash(&mut hasher);
+    let safe = found.key().replace('/', "-");
+    app.paths
+        .cache_dir
+        .join("coding-oracles")
+        .join(format!("{safe}-{:x}.json", hasher.finish()))
+}
+
+fn read_cached_oracle_cases(path: &std::path::Path) -> Option<Vec<OracleCase>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Opt-in offline coding bundle. Never blocks on compiling or running brute-force oracles:
+/// returns any already-cached oracle cases immediately and spawns background pre-computation
+/// for the rest. Leaves `POST /open` untouched.
+pub(super) async fn offline_bundle(
+    State(app): State<Shared>,
+    Query(query): Query<OfflineBundleQuery>,
+) -> ApiResult<OfflineBundle> {
+    let packs = packs(&app)?;
+    let sessions = app.problems.sessions()?;
+    let mut items = Vec::new();
+    let mut missing_oracles: Vec<(String, String, u32, PathBuf)> = Vec::new();
+
+    for pack in &packs {
+        for item in &pack.items {
+            let Content::Coding(coding) = &item.content else {
+                continue;
+            };
+            let found = Found { pack, item, coding };
+            let key = found.key();
+            let attempts = app.learning.store().attempts(&key)?;
+            let languages = coding
+                .languages
+                .iter()
+                .map(|&lang| {
+                    let starter = coding
+                        .starter_in(lang)
+                        .map(|s| s.text.clone())
+                        .unwrap_or_default();
+                    let code = app.problems.existing_draft(&found, lang)?;
+                    let draft_path = app.problems.draft_file_path(&found, lang);
+                    let profile = app.config.languages.get(lang.id());
+                    let lsp = profile
+                        .filter(|p| p.lsp.is_some())
+                        .map(|profile| OpenedLsp {
+                            root_uri: crate::server::file_uri(&app.problems.root(lang)),
+                            file_uri: crate::server::file_uri(&draft_path),
+                            language_id: profile.lsp_language_id.clone(),
+                            options: profile.lsp_options.clone(),
+                        });
+                    Ok(OfflineLanguage {
+                        id: lang,
+                        name: lang.name(),
+                        editor_mode: profile.map_or_else(
+                            || lang.id().to_owned(),
+                            |profile| profile.editor_mode.clone(),
+                        ),
+                        starter,
+                        code,
+                        file_path: draft_path.display().to_string(),
+                        lsp,
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+
+            let random_count = SUBMIT_RANDOM_INPUTS.min(coding.random_inputs);
+            let (oracle_cases, oracle_ready) = if random_count == 0 {
+                (Vec::new(), true)
+            } else {
+                let path = oracle_cache_path(&app, &found, random_count);
+                match read_cached_oracle_cases(&path) {
+                    Some(cases) => (cases, true),
+                    None => {
+                        missing_oracles.push((
+                            pack.manifest.id.clone(),
+                            item.id.clone(),
+                            random_count,
+                            path,
+                        ));
+                        (Vec::new(), false)
+                    }
+                }
+            };
+
+            items.push(OfflineItem {
+                key: key.clone(),
+                label: item.label(),
+                track: OpenedTrack::of(&found),
+                prompt: item.prompt.clone(),
+                skills: item.skills.clone(),
+                source: item.source.clone(),
+                minutes: item.minutes,
+                examples: coding.examples.clone(),
+                hints: coding.hints.clone(),
+                languages,
+                session: sessions.get(&key).cloned(),
+                previous_plan: attempts
+                    .iter()
+                    .rev()
+                    .find_map(|attempt| attempt.response.clone()),
+                solution: Solution {
+                    approach: coding.approach.clone(),
+                    notes: coding.notes.clone(),
+                    reference: coding
+                        .reference
+                        .iter()
+                        .map(|source| Reference {
+                            language: source.language,
+                            text: source.text.clone(),
+                        })
+                        .collect(),
+                },
+                tests: coding.tests.clone(),
+                oracle_cases,
+                oracle_ready,
+            });
+        }
+    }
+
+    if query.precompute
+        && !missing_oracles.is_empty()
+        && !app.oracle_precompute_running.swap(true, Ordering::SeqCst)
+    {
+        let bg = Arc::clone(&app);
+        tokio::spawn(async move {
+            let cancel = CancellationToken::new();
+            if let Ok(packs) = crate::packs::load(&bg.config.learning)
+                && let Ok(runtime) = crate::coding::runtime(&bg.config, &bg.paths).await
+            {
+                for (pack_id, item_id, count, cache_path) in missing_oracles {
+                    if cache_path.exists() {
+                        continue;
+                    }
+                    let Ok(found) = find(&packs, &pack_id, &item_id) else {
+                        continue;
+                    };
+                    let Ok(built) = oracle(&bg, &found, &runtime, &cancel).await else {
+                        continue;
+                    };
+                    if let Ok(Ok(cases)) = built.generate_cases(&runtime, count, &cancel).await
+                        && let Ok(json) = serde_json::to_vec(&cases)
+                    {
+                        if let Some(dir) = cache_path.parent() {
+                            let _ = std::fs::create_dir_all(dir);
+                        }
+                        let _ = workshop_common::files::write_atomic(&cache_path, &json);
+                    }
+                }
+            }
+            bg.oracle_precompute_running.store(false, Ordering::SeqCst);
+        });
+    }
+
+    Ok(Json(OfflineBundle {
+        items,
+        empty_version: version_of(""),
+        oracles_computing: app.oracle_precompute_running.load(Ordering::SeqCst),
+    }))
 }
 
 #[cfg(test)]

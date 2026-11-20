@@ -6,7 +6,7 @@
 //! it's shown failing on is as small as could be found, which makes it easier to work through.
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use workshop_pack::code::MAX_SIZE;
 use workshop_pack::{Case, Coding, Language, output};
@@ -20,7 +20,7 @@ fn at_once() -> usize {
 }
 
 /// Which of an item's cases something ran on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CaseRef {
     /// One of the examples the learner sees, counting from 0.
@@ -32,7 +32,7 @@ pub enum CaseRef {
 }
 
 /// How a run on one case went.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CaseResult {
     pub case: CaseRef,
     pub input: String,
@@ -43,7 +43,7 @@ pub struct CaseResult {
 }
 
 /// How a solution did, on whatever it was run on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum Graded {
     /// It didn't build.
@@ -324,6 +324,38 @@ impl Oracle {
         self.made().insert((seed, size), case.clone());
         Ok(Ok(case))
     }
+
+    /// Generates `count` deterministic random `(input, expected)` cases from this oracle.
+    pub async fn generate_cases(
+        &self,
+        runtime: &Runtime,
+        count: u32,
+        cancel: &CancellationToken,
+    ) -> Result<Result<Vec<OracleCase>, String>> {
+        let mut out = Vec::with_capacity(count as usize);
+        for (seed, size) in random_inputs(count) {
+            let case = match self.case(runtime, seed, size, cancel).await? {
+                Ok(case) => case,
+                Err(problem) => return Ok(Err(problem)),
+            };
+            out.push(OracleCase {
+                seed,
+                size,
+                input: case.input,
+                output: case.output,
+            });
+        }
+        Ok(Ok(out))
+    }
+}
+
+/// A precomputed deterministic random test case from an item's inputs + brute-force oracle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OracleCase {
+    pub seed: u64,
+    pub size: u32,
+    pub input: String,
+    pub output: String,
 }
 
 /// The seeds and sizes of `count` random inputs, from the smallest up.

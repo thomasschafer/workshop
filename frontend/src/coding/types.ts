@@ -33,6 +33,54 @@ export interface Session {
   no_twist: string | null;
   started_at: number;
   updated_at: number;
+  /** Monotonic version bumped on every write, shared by online and offline sync paths. */
+  version?: number | undefined;
+}
+
+export interface OracleCase {
+  seed: number;
+  size: number;
+  input: string;
+  output: string;
+}
+
+export interface OfflineLanguage {
+  id: Language;
+  name: string;
+  editor_mode: string;
+  starter: string;
+  code: VersionedFile | null;
+  file_path: string;
+  lsp: { root_uri: string; file_uri: string; language_id: string; options: unknown } | null;
+}
+
+export interface OfflineItem {
+  key: string;
+  label: string;
+  track: OpenedTrack;
+  prompt: string;
+  skills: string[];
+  source: string | null;
+  minutes: number;
+  examples: Case[];
+  hints: string[];
+  languages: OfflineLanguage[];
+  session: Session | null;
+  previous_plan: string | null;
+  solution: {
+    approach: string;
+    notes: string | null;
+    reference: { language: Language; text: string }[];
+  };
+  tests: Case[];
+  oracle_cases: OracleCase[];
+  oracle_ready: boolean;
+}
+
+export interface OfflineBundle {
+  items: OfflineItem[];
+  empty_version: string;
+  oracles_computing: boolean;
 }
 
 export interface Case {
