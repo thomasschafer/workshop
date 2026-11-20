@@ -27,6 +27,13 @@ pub(super) struct ActiveRun {
     pub(super) cancel: CancellationToken,
 }
 
+/// Status of a background Advent of Code prefetch for a year.
+#[derive(Debug, Clone, Default)]
+pub(super) struct YearCacheState {
+    pub(super) caching: bool,
+    pub(super) error: Option<String>,
+}
+
 pub struct App {
     pub(super) config: Config,
     pub(super) paths: Paths,
@@ -84,6 +91,8 @@ pub struct App {
     pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
     /// Held while the tutor poses a twist, so a review asked for twice gets only the one.
     pub(super) posing_twist: tokio::sync::Mutex<()>,
+    /// Background prefetch jobs for saving a year's AoC puzzles offline.
+    pub(super) year_cache: std::sync::Mutex<BTreeMap<u16, YearCacheState>>,
 }
 
 pub(super) type Shared = Arc<App>;
@@ -157,6 +166,7 @@ impl App {
             author_reviewer: tokio::sync::Mutex::default(),
             oracles: tokio::sync::Mutex::default(),
             posing_twist: tokio::sync::Mutex::default(),
+            year_cache: std::sync::Mutex::new(BTreeMap::new()),
             config,
             paths,
             gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),

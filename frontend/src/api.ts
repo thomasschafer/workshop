@@ -265,6 +265,42 @@ export interface DayMeta {
   sample_inputs: [string | null, string | null];
   sample_answers: [string | null, string | null];
   cursor: number | null;
+  version: number;
+}
+
+export interface HelpersFile {
+  language_id: string;
+  file: string;
+  text: string;
+}
+
+export interface OfflinePuzzle {
+  day: number;
+  problem: Problem | null;
+  input: string | null;
+  code: VersionedFile | null;
+  notes: VersionedFile | null;
+  file_uri: string;
+  meta: DayMeta;
+}
+
+export interface OfflineYear {
+  year: number;
+  caching: boolean;
+  cached_days: number;
+  total_unlocked: number;
+  error: string | null;
+  template: string;
+  empty_version: string;
+  puzzles: OfflinePuzzle[];
+}
+
+export interface YearCacheStatus {
+  year: number;
+  caching: boolean;
+  cached_days: number;
+  total_unlocked: number;
+  error: string | null;
 }
 
 export interface OpenPuzzle {
@@ -650,13 +686,18 @@ export const api = {
     request<Record<string, number>>("GET", `/years/${year}/stars?refresh=${refresh}`, undefined, {
       timeoutMs: AOC_TIMEOUT_MS,
     }),
+  offlineYear: (year: number) =>
+    request<OfflineYear>("GET", `/years/${year}/offline`, undefined, { timeoutMs: 15_000 }),
+  cacheYear: (year: number) =>
+    request<YearCacheStatus>("POST", `/years/${year}/cache`, undefined, { timeoutMs: 10_000 }),
+  helpers: () => request<HelpersFile | null>("GET", "/helpers"),
   open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),
   saveCode: (p: Puzzle, text: string, version: string, keepalive = false) =>
     request<VersionedFile>("PUT", `${day(p)}/code`, { text, version }, { keepalive }),
   saveNotes: (p: Puzzle, text: string, version: string, keepalive = false) =>
     request<VersionedFile>("PUT", `${day(p)}/notes`, { text, version }, { keepalive }),
   saveMeta: (p: Puzzle, meta: DayMeta, keepalive = false) =>
-    request<null>("PUT", `${day(p)}/meta`, meta, { keepalive }),
+    request<DayMeta>("PUT", `${day(p)}/meta`, meta, { keepalive }),
   problem: (p: Puzzle, refresh = false) =>
     request<Problem>("GET", `${day(p)}/problem?refresh=${refresh}`, undefined, {
       timeoutMs: AOC_TIMEOUT_MS,

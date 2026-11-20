@@ -1,6 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { api, type DayMeta, type Problem, type Puzzle } from "../api";
+import {
+  api,
+  ConnectionError,
+  type DayMeta,
+  type Problem,
+  type Puzzle,
+  TimeoutError,
+} from "../api";
 import { errorMessage } from "../errors";
+import { getAocPuzzle, mergeAocPuzzle } from "../offline/db";
 import {
   answerCode,
   inheritsPartOne,
@@ -15,6 +23,8 @@ import {
 interface Props {
   puzzle: Puzzle;
   problem: Problem | null;
+  /** Whether the shown problem was loaded from on-device cache while offline. */
+  fromCache?: boolean;
   error: string | null;
   loading: boolean;
   meta: DayMeta;
@@ -50,6 +60,7 @@ function describeSample(meta: DayMeta, part: PartIndex, finding: boolean): strin
 export function ProblemView({
   puzzle,
   problem,
+  fromCache = false,
   error,
   loading,
   meta,
@@ -161,6 +172,11 @@ export function ProblemView({
 
   return (
     <div {...pane}>
+      {fromCache ? (
+        <p class="muted small" role="status">
+          Cached copy · {problem.parts_html.length >= 2 ? "Parts 1 & 2" : "Part 1 only"}
+        </p>
+      ) : null}
       <div class="sample-summary">
         {problem.parts_html.slice(0, 2).map((_, i) => {
           const part: PartIndex = i === 0 ? 0 : 1;
@@ -295,8 +311,17 @@ function PuzzleInput({ puzzle }: { puzzle: Puzzle }) {
     setState({ kind: "loading" });
     try {
       const input = await api.input(puzzle);
+      void mergeAocPuzzle(puzzle.year, puzzle.day, { input: input.text });
       setState({ kind: "shown", text: input.text, lines: input.lines });
     } catch (e) {
+      if (e instanceof ConnectionError || e instanceof TimeoutError) {
+        const cached = await getAocPuzzle(puzzle.year, puzzle.day);
+        if (cached?.input !== undefined) {
+          const lines = cached.input.length === 0 ? 0 : cached.input.trimEnd().split("\n").length;
+          setState({ kind: "shown", text: cached.input, lines });
+          return;
+        }
+      }
       setState({ kind: "error", message: errorMessage(e) });
     }
   };

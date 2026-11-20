@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, connection } from "../api";
+import { api, type ConnectionSnapshot, connection } from "../api";
 
 /** How often to try the server again while it can't be reached. */
 const RETRY_MS = 3000;
@@ -17,4 +17,11 @@ export function useConnection(): boolean {
     return () => clearInterval(timer);
   }, [online]);
   return online;
+}
+
+/** Detailed connection state (online, slow, last RTT), for diagnostics UI. */
+export function useConnectionStatus(): ConnectionSnapshot {
+  const [status, setStatus] = useState<ConnectionSnapshot>(() => connection.snapshot());
+  useEffect(() => connection.subscribeStatus(setStatus), []);
+  return status;
 }

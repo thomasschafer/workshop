@@ -21,6 +21,7 @@ export function describeCounts({ errors, warnings, others }: Diagnostics): strin
  */
 export function StatusLine({
   checks,
+  backend,
   unavailable,
   onRetry,
   serverError,
@@ -32,6 +33,8 @@ export function StatusLine({
 }: {
   /** The language server's status, or null if the language has none. */
   checks: LanguageServerStatus | null;
+  /** Where the active language server is running, when known. */
+  backend?: "server" | "local" | undefined;
   /** Why the language server's been given up on, if it has. */
   unavailable: LanguageServerUnavailable | null;
   /** Tries the language server again, once it's been given up on. */
@@ -69,6 +72,7 @@ export function StatusLine({
           ) : (
             describeCounts(diagnostics)
           )}
+          {checks === "ready" && backend === "local" ? " · on device" : null}
           {checks === "ready" && serverError ? (
             <>
               {" · "}

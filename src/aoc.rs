@@ -319,6 +319,35 @@ impl AocClient {
         Ok(input)
     }
 
+    /// The puzzle input if it's already cached, without making any request.
+    pub fn cached_input(&self, puzzle: Puzzle) -> Result<Option<String>> {
+        if puzzle.is_practice() {
+            return Ok(Some(crate::practice::INPUT.clone()));
+        }
+        read_cache(&self.day_dir(puzzle).join("input.txt"), false, None)
+    }
+
+    /// Fetches a puzzle's page and input into the cache at background priority if missing.
+    /// Respects Advent of Code's request spacing and yields to any interactive request.
+    pub async fn prefetch_puzzle_background(&self, puzzle: Puzzle) -> Result<()> {
+        if puzzle.is_practice() {
+            return Ok(());
+        }
+        let problem_path = self.day_dir(puzzle).join("problem.html");
+        if read_cache(&problem_path, false, None)?.is_none() {
+            let url = format!("{}/{}/day/{}", self.base_url, puzzle.year, puzzle.day);
+            let html = self.get(&url, Priority::Background).await?;
+            files::write_atomic(&problem_path, html.as_bytes())?;
+        }
+        let input_path = self.day_dir(puzzle).join("input.txt");
+        if read_cache(&input_path, false, None)?.is_none() {
+            let url = format!("{}/{}/day/{}/input", self.base_url, puzzle.year, puzzle.day);
+            let input = self.get(&url, Priority::Background).await?;
+            files::write_atomic(&input_path, input.as_bytes())?;
+        }
+        Ok(())
+    }
+
     /// Stars per day, from the year's calendar page.
     pub async fn stars(&self, year: u16, refresh: bool) -> Result<BTreeMap<u8, u8>> {
         let path = self.cache_dir.join(year.to_string()).join("calendar.html");
@@ -1378,5 +1407,49 @@ Day       Time    Rank  Score       Time   Rank  Score
             .unwrap_err()
             .to_string();
         assert!(err.contains("session cookie"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cached_input_and_background_prefetch() {
+        let app = axum::Router::new()
+            .route(
+                "/2017/day/4",
+                axum::routing::get(|| async {
+                    "<main><article class=\"day-desc\"><h2>--- Day 4: Test ---</h2><p>Hi</p></article></main>"
+                }),
+            )
+            .route(
+                "/2017/day/4/input",
+                axum::routing::get(|| async { "1\n2\n3\n" }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let client = AocClient::with_base_url(
+            Some("good".into()),
+            "test",
+            dir.path().to_owned(),
+            format!("http://{address}"),
+        )
+        .unwrap();
+        let puzzle = Puzzle::new(2017, 4).unwrap();
+        assert!(client.cached_problem(puzzle).unwrap().is_none());
+        assert!(client.cached_input(puzzle).unwrap().is_none());
+
+        client.prefetch_puzzle_background(puzzle).await.unwrap();
+        assert_eq!(
+            client
+                .cached_problem(puzzle)
+                .unwrap()
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("Day 4: Test")
+        );
+        assert_eq!(
+            client.cached_input(puzzle).unwrap().as_deref(),
+            Some("1\n2\n3\n")
+        );
     }
 }

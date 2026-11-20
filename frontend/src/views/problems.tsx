@@ -21,6 +21,7 @@ export function ProblemsSheet({
   problems,
   current,
   server,
+  backend,
   onGoto,
   onClose,
 }: {
@@ -28,6 +29,8 @@ export function ProblemsSheet({
   /** The problem the cursor is on, which the list starts at. */
   current: Problem | null;
   server: ServerHelp | null;
+  /** Where the language server is running, shown quietly for diagnostics. */
+  backend?: "server" | "local" | undefined;
   onGoto: (problem: Problem) => void;
   onClose: () => void;
 }) {
@@ -61,6 +64,11 @@ export function ProblemsSheet({
       <button type="button" class="text-button" onClick={() => setExpanded(!expanded)}>
         {expanded ? "Show less of the screen" : "Use the whole screen"}
       </button>
+      {backend ? (
+        <p class="muted small">
+          Language server: {backend === "local" ? "on device" : "on server"}
+        </p>
+      ) : null}
       {server?.error ? (
         <div class="problem-row server-error">
           <span class="problem-where severity-error">the language server</span>
