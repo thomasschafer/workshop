@@ -2,7 +2,7 @@
 // sent to the server whenever it can be reached. Each attempt and change has its own id, so
 // sending one again after a reply was lost changes nothing.
 
-import { ApiError, ConnectionError, connection, request } from "../api";
+import { ApiError, ConnectionError, connection, request, TimeoutError } from "../api";
 import { errorMessage } from "../errors";
 import { newId, utcOffset } from "./local";
 import type { Attempt, Deck, FlagChange, RetirementChange } from "./types";
@@ -194,13 +194,14 @@ export class Learning {
       this.setStatus({ syncing: false, offline: false, error: null });
     } catch (e) {
       const offline = e instanceof ConnectionError;
+      const slow = e instanceof TimeoutError;
       this.setStatus({
         syncing: false,
-        offline,
+        offline: offline || slow,
         // What was sent is kept, so nothing done is lost, and the problem is shown until fixed.
-        error: offline ? null : e instanceof ApiError ? e.message : errorMessage(e),
+        error: offline || slow ? null : e instanceof ApiError ? e.message : errorMessage(e),
       });
-      if (offline) {
+      if (offline || slow) {
         this.retry = setTimeout(() => void this.sync(), this.retryMs);
         this.retryMs = Math.min(MAX_RETRY_MS, this.retryMs * 2);
       }

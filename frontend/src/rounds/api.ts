@@ -20,8 +20,8 @@ export const roundsApi = {
     request<Beat>("POST", `${round(key)}/beat`, { work }, { keepalive }),
   /** Says something to the examiner, and gets its reply. */
   say: (key: string, text: string, work: string) =>
-    request<Opened>("POST", `${round(key)}/say`, { text, work }),
+    request<Opened>("POST", `${round(key)}/say`, { text, work }, { timeoutMs: 0 }),
   /** Ends the round, if it's still on, and has the grader mark it; `id` is the attempt's. */
   end: (key: string, id: string, work: string | null) =>
-    request<Ended>("POST", `${round(key)}/end`, { id, work }),
+    request<Ended>("POST", `${round(key)}/end`, { id, work }, { timeoutMs: 0 }),
 };

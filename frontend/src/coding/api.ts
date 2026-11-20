@@ -26,7 +26,8 @@ export const codingApi = {
   /** Whether the Coding track has a language's programs, from mise or Workshop's own PATH. */
   toolchain: (language: Language) => request<Toolchain>("GET", toolchain(language)),
   /** Installs a language's programs with mise, for the Coding track only. */
-  installToolchain: (language: Language) => request<Toolchain>("POST", toolchain(language)),
+  installToolchain: (language: Language) =>
+    request<Toolchain>("POST", toolchain(language), undefined, { timeoutMs: 0 }),
   cancelToolchainInstall: (language: Language) =>
     request<null>("POST", `${toolchain(language)}/cancel`),
   /** The Coding track's problems and code to read, or another track's with `track`. */
@@ -46,22 +47,34 @@ export const codingApi = {
       { text, version },
       { keepalive },
     ),
-  run: (key: string) => request<Graded>("POST", `${item(key)}/run`),
-  submit: (key: string) => request<Submitted>("POST", `${item(key)}/submit`),
+  run: (key: string, runId?: string) =>
+    request<Graded>("POST", `${item(key)}/run`, runId ? { run_id: runId } : undefined, {
+      timeoutMs: 0,
+    }),
+  submit: (key: string, runId?: string) =>
+    request<Submitted>("POST", `${item(key)}/submit`, runId ? { run_id: runId } : undefined, {
+      timeoutMs: 0,
+    }),
   finish: (key: string, id: string, rating: Rating) =>
     request<Finished>("POST", `${item(key)}/finish`, { id, rating }),
   /** Has the tutor pose the review's twist, or gives the one posed; the review is a recall
    * instead if it can't. */
-  twist: (key: string) => request<Opened>("POST", `${item(key)}/twist`),
+  twist: (key: string) =>
+    request<Opened>("POST", `${item(key)}/twist`, undefined, { timeoutMs: 0 }),
   /** Has the grader mark an answer to the twist, which finishes the review; `id` is the
    * attempt's. With `withCode`, the code is part of the answer. */
   answerTwist: (key: string, id: string, text: string, spoken: boolean, withCode: boolean) =>
-    request<TwistMarked>("POST", `${item(key)}/twist/answer`, {
-      id,
-      text,
-      spoken,
-      with_code: withCode,
-    }),
+    request<TwistMarked>(
+      "POST",
+      `${item(key)}/twist/answer`,
+      {
+        id,
+        text,
+        spoken,
+        with_code: withCode,
+      },
+      { timeoutMs: 0 },
+    ),
   /** Brings a retired problem back, due straight away; `id` is the change's. */
   bringBack: (key: string, id: string) =>
     request<Finished>("POST", `${item(key)}/bring-back`, { id }),

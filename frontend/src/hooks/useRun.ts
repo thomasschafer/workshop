@@ -1,7 +1,8 @@
 import type { RefObject } from "preact";
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { api, type DayMeta, type Problem, type Puzzle } from "../api";
 import { errorMessage } from "../errors";
+import { newId } from "../learning/local";
 import { sampleInput, withSuggestions } from "../samples";
 import type { LatestSaver, VersionedSaver } from "../saver";
 import { type InputKind, initialRunState, type RunState } from "../views/run";
@@ -43,6 +44,7 @@ export function useRun({
   formatBeforeRun,
 }: Options) {
   const [run, setRun] = useState<RunState>(initialRunState);
+  const activeRun = useRef<{ id: string; controller: AbortController } | null>(null);
 
   /**
    * Runs the solution. From the Run sheet it first waits for edits still being made from
@@ -61,6 +63,9 @@ export function useRun({
       return;
     }
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
+    const runId = newId();
+    const controller = new AbortController();
+    activeRun.current = { id: runId, controller };
     try {
       if (waitForEdits) await queue.idle();
       await formatBeforeRun();
@@ -72,10 +77,28 @@ export function useRun({
         setRun((r) => ({ ...r, running: null, error: `Not run: ${errorMessage(e)}` }));
         return;
       }
-      const result = await api.run(p, input, runPart);
+      const result = await api.run(p, input, runPart, runId, controller.signal);
       setRun((r) => ({ ...r, running: null, last: { input, result } }));
     } catch (e) {
-      setRun((r) => ({ ...r, running: null, error: errorMessage(e) }));
+      if (controller.signal.aborted) {
+        // Best-effort server cancel scoped by runId so run_lock is released without killing a
+        // newer run if this cancel arrives late.
+        api.cancelRun(runId).catch(() => {});
+        setRun((r) => ({ ...r, running: null }));
+      } else {
+        setRun((r) => ({ ...r, running: null, error: errorMessage(e) }));
+      }
+    } finally {
+      if (activeRun.current?.id === runId) activeRun.current = null;
+    }
+  };
+
+  const cancelRun = () => {
+    const current = activeRun.current;
+    if (current) {
+      api.cancelRun(current.id).catch(() => {});
+    } else {
+      api.cancelRun().catch(() => {});
     }
   };
 
@@ -97,5 +120,5 @@ export function useRun({
     }
   };
 
-  return { run, setRun, doRun, doSubmit };
+  return { run, setRun, doRun, cancelRun, doSubmit };
 }

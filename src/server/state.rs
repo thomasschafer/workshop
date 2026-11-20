@@ -21,6 +21,12 @@ use crate::settings::AppSettings;
 use crate::solutions::Solutions;
 use crate::workspace::Workspace;
 
+/// The run in progress, if there is one, and its client-supplied ID for safe cancellation.
+pub(super) struct ActiveRun {
+    pub(super) id: Option<String>,
+    pub(super) cancel: CancellationToken,
+}
+
 pub struct App {
     pub(super) config: Config,
     pub(super) paths: Paths,
@@ -33,7 +39,7 @@ pub struct App {
     settings: std::sync::RwLock<AppSettings>,
     pub(super) run_lock: Mutex<()>,
     /// Cancels the run in progress, if there is one.
-    pub(super) current_run: std::sync::Mutex<Option<CancellationToken>>,
+    pub(super) current_run: std::sync::Mutex<Option<ActiveRun>>,
     /// Held while anything is being installed, as packages need the toolchain.
     pub(super) install_lock: Arc<Mutex<()>>,
     pub(super) packages_install: Installs,

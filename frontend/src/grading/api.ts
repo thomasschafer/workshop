@@ -26,7 +26,8 @@ export const gradingApi = {
     ),
   design: (key: string) => request<DesignOpened>("GET", `/design/${path(key)}`),
   /** Starts a design session, or carries on with the one started. */
-  startDesign: (key: string) => request<DesignOpened>("POST", `/design/${path(key)}/start`),
+  startDesign: (key: string) =>
+    request<DesignOpened>("POST", `/design/${path(key)}/start`, undefined, { timeoutMs: 0 }),
   saveDesign: (key: string, edit: DesignEdit, keepalive = false) =>
     request<DesignSession>("PUT", `/design/${path(key)}/session`, edit, { keepalive }),
   /**
@@ -35,19 +36,36 @@ export const gradingApi = {
    * questions, after the learner's reply, if any.
    */
   coach: (key: string, stage: Stage, reply: string | null) =>
-    request<DesignSession>("POST", `/design/${path(key)}/coach`, { stage, reply }),
+    request<DesignSession>(
+      "POST",
+      `/design/${path(key)}/coach`,
+      { stage, reply },
+      { timeoutMs: 0 },
+    ),
   /** Has the grader mark the whole session, which ends it; `id` is the attempt's. */
   finishDesign: (key: string, id: string) =>
-    request<DesignMarked>("POST", `/design/${path(key)}/finish`, { id }),
+    request<DesignMarked>("POST", `/design/${path(key)}/finish`, { id }, { timeoutMs: 0 }),
   /**
    * Marks work with the grader, written or, if `spoken`, what was heard explaining it aloud;
    * `id` is the attempt's, for work that counts as one.
    */
   mark: (key: string, id: string, work: Work, text: string, spoken = false) =>
-    request<MarkedReply>("POST", `/items/${path(key)}/mark`, { id, work, text, spoken }),
+    request<MarkedReply>(
+      "POST",
+      `/items/${path(key)}/mark`,
+      { id, work, text, spoken },
+      { timeoutMs: 0 },
+    ),
   flagged: () => request<{ cards: FlaggedCard[] }>("GET", "/cards/flagged").then((r) => r.cards),
   review: (key: string) =>
-    request<{ review: Review; cleared: boolean }>("POST", `/cards/${path(key)}/review`),
+    request<{ review: Review; cleared: boolean }>("POST", `/cards/${path(key)}/review`, undefined, {
+      timeoutMs: 0,
+    }),
   fix: (key: string, approve: boolean) =>
-    request<{ commit: string | null }>("POST", `/cards/${path(key)}/fix`, { approve }),
+    request<{ commit: string | null }>(
+      "POST",
+      `/cards/${path(key)}/fix`,
+      { approve },
+      { timeoutMs: 0 },
+    ),
 };

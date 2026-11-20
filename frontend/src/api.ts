@@ -376,16 +376,47 @@ export const loginNeeded = new LoginNeeded();
 /** The server couldn't be reached at all, as opposed to answering with an error. */
 export class ConnectionError extends Error {}
 
+/** The server didn't answer within the request's timeout budget; the link may be slow rather than
+ * completely offline. */
+export class TimeoutError extends Error {}
+
 /** Answers a proxy such as `tailscale serve` gives when the server behind it isn't running. */
 const UNREACHABLE = new Set([502, 503, 504]);
 
-/** Whether the server can be reached, as last seen by any request. */
+/** Default client timeout for ordinary API calls, so flaky links don't hang for a minute. */
+export const DEFAULT_TIMEOUT_MS = 8_000;
+
+export interface ConnectionSnapshot {
+  online: boolean;
+  slow: boolean;
+  lastRttMs: number | null;
+  lastOnlineAt: number | null;
+}
+
+/** Whether the server can be reached, as last seen by any request, plus recent responsiveness. */
 export class Connection {
   private online = true;
+  private slow = false;
+  private lastRttMs: number | null = null;
+  private lastOnlineAt: number | null = null;
   private readonly listeners = new Set<(online: boolean) => void>();
+  private readonly statusListeners = new Set<(snapshot: ConnectionSnapshot) => void>();
 
   get isOnline(): boolean {
     return this.online;
+  }
+
+  get isSlow(): boolean {
+    return this.slow;
+  }
+
+  snapshot(): ConnectionSnapshot {
+    return {
+      online: this.online,
+      slow: this.slow,
+      lastRttMs: this.lastRttMs,
+      lastOnlineAt: this.lastOnlineAt,
+    };
   }
 
   /** Calls `listener` whenever the server is lost or found again, returning how to stop. */
@@ -394,10 +425,44 @@ export class Connection {
     return () => this.listeners.delete(listener);
   }
 
+  /** Calls `listener` whenever reachability, slowness or RTT updates. */
+  subscribeStatus(listener: (snapshot: ConnectionSnapshot) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
   set(online: boolean): void {
-    if (online === this.online) return;
+    const changed = online !== this.online;
+    if (!online && this.slow) this.slow = false;
     this.online = online;
-    for (const listener of this.listeners) listener(online);
+    if (changed) {
+      for (const listener of this.listeners) listener(online);
+      this.notifyStatus();
+    }
+  }
+
+  /** Marks the link slow after a timeout without flipping the app offline. */
+  setSlow(slow: boolean): void {
+    if (slow === this.slow) return;
+    this.slow = slow;
+    this.notifyStatus();
+  }
+
+  recordSuccess(rttMs: number): void {
+    const wasOnline = this.online;
+    this.online = true;
+    this.slow = false;
+    this.lastRttMs = Math.max(0, Math.round(rttMs));
+    this.lastOnlineAt = Date.now();
+    if (!wasOnline) {
+      for (const listener of this.listeners) listener(true);
+    }
+    this.notifyStatus();
+  }
+
+  private notifyStatus(): void {
+    const snap = this.snapshot();
+    for (const listener of this.statusListeners) listener(snap);
   }
 
   /** Resolves once the server can be reached, or rejects if `signal` aborts first. */
@@ -419,11 +484,13 @@ export class Connection {
 
 export const connection = new Connection();
 
-interface RequestOptions {
+export interface RequestOptions {
   /** Lets a request finish after the page is hidden or closed, which is when the phone is put down. */
   keepalive?: boolean;
   /** Abandons the request, such as when the user cancels what it was for. */
   signal?: AbortSignal;
+  /** Client timeout in ms; 0 disables the client timeout (for long runs, installs and streams). */
+  timeoutMs?: number;
 }
 
 /** Sends a request, rejecting with an `ApiError` if the server says it failed. */
@@ -431,10 +498,30 @@ async function send(
   method: string,
   path: string,
   body?: unknown,
-  { keepalive = false, signal }: RequestOptions = {},
+  { keepalive = false, signal, timeoutMs = DEFAULT_TIMEOUT_MS }: RequestOptions = {},
 ): Promise<Response> {
   const init: RequestInit = { method, headers: {}, keepalive };
-  if (signal) init.signal = signal;
+  let controller: AbortController | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const onCallerAbort = () => controller?.abort(signal?.reason);
+
+  if (timeoutMs > 0) {
+    controller = new AbortController();
+    if (signal?.aborted) {
+      controller.abort(signal.reason);
+    } else if (signal) {
+      signal.addEventListener("abort", onCallerAbort, { once: true });
+    }
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller?.abort();
+    }, timeoutMs);
+    init.signal = controller.signal;
+  } else if (signal) {
+    init.signal = signal;
+  }
+
   if (body instanceof ArrayBuffer) {
     init.headers = { "content-type": "audio/wav" };
     init.body = body;
@@ -442,19 +529,27 @@ async function send(
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);
   }
+  const started = performance.now();
   let response: Response;
   try {
     response = await fetch(`/api${path}`, init);
   } catch (e) {
+    if (timedOut) {
+      connection.setSlow(true);
+      throw new TimeoutError("The server took too long to respond.");
+    }
     if (signal?.aborted) throw e;
     connection.set(false);
     throw new ConnectionError("Can't reach the server.");
+  } finally {
+    clearTimeout(timer);
+    if (signal && controller) signal.removeEventListener("abort", onCallerAbort);
   }
   if (UNREACHABLE.has(response.status)) {
     connection.set(false);
     throw new ConnectionError("Can't reach the server.");
   }
-  connection.set(true);
+  connection.recordSuccess(performance.now() - started);
   if (!response.ok) {
     const text = await response.text();
     const json: unknown = text ? JSON.parse(text) : null;
@@ -487,7 +582,7 @@ export async function streamLines(
   body: unknown,
   onLine: (value: unknown) => void,
 ): Promise<void> {
-  const response = await send(method, path, body);
+  const response = await send(method, path, body, { timeoutMs: 0 });
   if (!response.body) throw new Error("The server's reply couldn't be read as it arrived.");
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffered = "";
@@ -511,19 +606,23 @@ type DiscussEvent =
 
 const day = (p: Puzzle) => `/puzzles/${p.year}/${p.day}`;
 
+/** Budget for requests that may wait on Advent of Code's polite spacing. */
+const AOC_TIMEOUT_MS = 25_000;
+
 export const api = {
   /** Checks the server can be reached; any answer from it will do. */
-  ping: () => request<null>("GET", "/ping"),
-  bootstrap: () => request<Bootstrap>("GET", "/bootstrap"),
+  ping: () => request<null>("GET", "/ping", undefined, { timeoutMs: 3_000 }),
+  bootstrap: () => request<Bootstrap>("GET", "/bootstrap", undefined, { timeoutMs: 4_000 }),
   saveState: (state: UiState, keepalive = false) =>
     request<null>("PUT", "/state", state, { keepalive }),
-  doctor: () => request<Check[]>("GET", "/doctor"),
+  doctor: () => request<Check[]>("GET", "/doctor", undefined, { timeoutMs: 15_000 }),
   setModels: (settings: ModelSettings) => request<ModelsState>("PUT", "/models", settings),
   setup: () => request<SetupState>("GET", "/setup"),
   themes: () => request<ThemesState>("GET", "/themes"),
   setTheme: (settings: ThemeSettings) => request<{ css: string | null }>("PUT", "/theme", settings),
   setLanguage: (language: string) => request<null>("PUT", "/setup/language", { language }),
-  setAocSession: (session: string) => request<null>("POST", "/setup/aoc-session", { session }),
+  setAocSession: (session: string) =>
+    request<null>("POST", "/setup/aoc-session", { session }, { timeoutMs: AOC_TIMEOUT_MS }),
   notifications: () => request<{ public_key: string }>("GET", "/notifications"),
   notificationsSubscribed: (endpoint: string) =>
     request<boolean>("POST", "/notifications/subscribed", { endpoint }),
@@ -534,12 +633,23 @@ export const api = {
   testNotification: (subscription: PushSubscriptionJSON) =>
     request<null>("POST", "/notifications/test", subscription),
   leaderboard: (year: number) =>
-    request<LeaderboardMember[] | null>("GET", `/years/${year}/leaderboard`),
+    request<LeaderboardMember[] | null>("GET", `/years/${year}/leaderboard`, undefined, {
+      timeoutMs: AOC_TIMEOUT_MS,
+    }),
   setLeaderboard: (id: string | null) => request<null>("PUT", "/leaderboard", { id }),
   times: (year: number, refresh = false) =>
-    request<Record<string, StarTimes>>("GET", `/years/${year}/times?refresh=${refresh}`),
+    request<Record<string, StarTimes>>(
+      "GET",
+      `/years/${year}/times?refresh=${refresh}`,
+      undefined,
+      {
+        timeoutMs: AOC_TIMEOUT_MS,
+      },
+    ),
   stars: (year: number, refresh = false) =>
-    request<Record<string, number>>("GET", `/years/${year}/stars?refresh=${refresh}`),
+    request<Record<string, number>>("GET", `/years/${year}/stars?refresh=${refresh}`, undefined, {
+      timeoutMs: AOC_TIMEOUT_MS,
+    }),
   open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),
   saveCode: (p: Puzzle, text: string, version: string, keepalive = false) =>
     request<VersionedFile>("PUT", `${day(p)}/code`, { text, version }, { keepalive }),
@@ -548,15 +658,30 @@ export const api = {
   saveMeta: (p: Puzzle, meta: DayMeta, keepalive = false) =>
     request<null>("PUT", `${day(p)}/meta`, meta, { keepalive }),
   problem: (p: Puzzle, refresh = false) =>
-    request<Problem>("GET", `${day(p)}/problem?refresh=${refresh}`),
-  input: (p: Puzzle) => request<{ text: string; lines: number }>("GET", `${day(p)}/input`),
+    request<Problem>("GET", `${day(p)}/problem?refresh=${refresh}`, undefined, {
+      timeoutMs: AOC_TIMEOUT_MS,
+    }),
+  input: (p: Puzzle) =>
+    request<{ text: string; lines: number }>("GET", `${day(p)}/input`, undefined, {
+      timeoutMs: AOC_TIMEOUT_MS,
+    }),
   findSample: (p: Puzzle, part: number) =>
-    request<FoundSample | null>("POST", `${day(p)}/sample/${part}`),
-  run: (p: Puzzle, input: "sample" | "real", part: number) =>
-    request<RunResult>("POST", `${day(p)}/run`, { input, part }),
+    request<FoundSample | null>("POST", `${day(p)}/sample/${part}`, undefined, { timeoutMs: 0 }),
+  run: (p: Puzzle, input: "sample" | "real", part: number, runId?: string, signal?: AbortSignal) =>
+    request<RunResult>(
+      "POST",
+      `${day(p)}/run`,
+      runId ? { input, part, run_id: runId } : { input, part },
+      { timeoutMs: 0, ...(signal ? { signal } : {}) },
+    ),
   format: (p: Puzzle, code: string) =>
-    request<{ code: string }>("POST", `${day(p)}/format`, { code }).then((r) => r.code),
-  cancelRun: () => request<null>("POST", "/run/cancel"),
+    request<{ code: string }>("POST", `${day(p)}/format`, { code }, { timeoutMs: 0 }).then(
+      (r) => r.code,
+    ),
+  cancelRun: (runId?: string) =>
+    request<null>("POST", "/run/cancel", runId ? { run_id: runId } : undefined, {
+      timeoutMs: 3_000,
+    }),
   /** Restarts every language server, which editors reconnect to. */
   restartLanguageServers: () => request<null>("POST", "/lsp/restart"),
   submit: (p: Puzzle, part: number, answer: string) =>
@@ -564,10 +689,15 @@ export const api = {
       outcome: SubmitOutcome;
       problem: Problem | null;
       committed: { succeeded: boolean; summary: string } | null;
-    }>("POST", `${day(p)}/submit`, {
-      part,
-      answer,
-    }),
+    }>(
+      "POST",
+      `${day(p)}/submit`,
+      {
+        part,
+        answer,
+      },
+      { timeoutMs: 0 },
+    ),
   edit: (
     doc: string,
     utterance: string,
@@ -580,7 +710,7 @@ export const api = {
       "POST",
       "/edit",
       { doc, utterance, pieces, recent, earlier },
-      signal ? { signal } : {},
+      { timeoutMs: 0, ...(signal ? { signal } : {}) },
     ),
   discuss: async (
     body: {
@@ -606,33 +736,43 @@ export const api = {
   },
   /** Fire-and-forget: records phone-side events in the server's log file. */
   log: (kind: "error" | "command" | "speech", message: string) => {
-    request<null>("POST", "/log", { kind, message }).catch(() => {});
+    request<null>("POST", "/log", { kind, message }, { timeoutMs: 3_000 }).catch(() => {});
   },
   packages: () => request<PackagesResponse>("GET", "/packages"),
   savePackages: (text: string) => request<PackagesResponse>("PUT", "/packages", { text }),
-  installPackages: () => request<PackagesResponse>("POST", "/packages/install"),
-  addPackage: (pkg: string) => request<PackagesResponse>("POST", "/packages/add", { package: pkg }),
+  installPackages: () =>
+    request<PackagesResponse>("POST", "/packages/install", undefined, { timeoutMs: 0 }),
+  addPackage: (pkg: string) =>
+    request<PackagesResponse>("POST", "/packages/add", { package: pkg }, { timeoutMs: 0 }),
   removePackage: (pkg: string) =>
-    request<PackagesResponse>("POST", "/packages/remove", { package: pkg }),
+    request<PackagesResponse>("POST", "/packages/remove", { package: pkg }, { timeoutMs: 0 }),
   cancelInstall: () => request<null>("POST", "/packages/cancel"),
-  resolvePackage: (module: string) => request<Resolution>("POST", "/packages/resolve", { module }),
+  resolvePackage: (module: string) =>
+    request<Resolution>("POST", "/packages/resolve", { module }, { timeoutMs: 15_000 }),
   speech: () => request<SpeechState>("GET", "/speech"),
-  downloadSpeechModel: () => request<SpeechState>("POST", "/speech/download"),
+  downloadSpeechModel: () =>
+    request<SpeechState>("POST", "/speech/download", undefined, { timeoutMs: 0 }),
   cancelSpeechDownload: () => request<null>("POST", "/speech/download/cancel"),
   transcribe: (wav: ArrayBuffer, signal?: AbortSignal) =>
-    request<{ text: string }>("POST", "/speech/transcribe", wav, signal ? { signal } : {}),
+    request<{ text: string }>("POST", "/speech/transcribe", wav, {
+      timeoutMs: 0,
+      ...(signal ? { signal } : {}),
+    }),
   bench: () => request<BenchInfo>("GET", "/bench"),
   benchTranscribe: (session: string, phrase: number, prompt: string, wav: ArrayBuffer) =>
     request<WhisperTranscript[]>(
       "POST",
       `/bench/transcribe?${new URLSearchParams({ session, phrase: String(phrase), prompt })}`,
       wav,
+      { timeoutMs: 0 },
     ),
   benchResult: (result: Record<string, unknown>) => request<null>("POST", "/bench/result", result),
-  installToolchain: () => request<SetupState>("POST", "/setup/toolchain"),
+  installToolchain: () =>
+    request<SetupState>("POST", "/setup/toolchain", undefined, { timeoutMs: 0 }),
   cancelToolchainInstall: () => request<null>("POST", "/setup/toolchain/cancel"),
   resetPractice: () => request<Problem>("POST", "/practice/reset"),
   setSolutionsRepo: (commitAfterStar: boolean) =>
     request<null>("PUT", "/solutions-repo", { commit_after_star: commitAfterStar }),
-  gitSync: (message: string) => request<{ summary: string }>("POST", "/git/sync", { message }),
+  gitSync: (message: string) =>
+    request<{ summary: string }>("POST", "/git/sync", { message }, { timeoutMs: 0 }),
 };

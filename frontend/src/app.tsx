@@ -188,7 +188,7 @@ export function App({
   // The part being worked on: the next one to solve, or for a solved puzzle being worked through
   // again, the one the code has got to.
   const workingPart = part ?? (part2Started === true ? 2 : 1);
-  const { run, setRun, doRun, doSubmit } = useRun({
+  const { run, setRun, doRun, cancelRun, doSubmit } = useRun({
     puzzleRef,
     part,
     workingPart,
@@ -952,7 +952,7 @@ export function App({
               expected={expected}
               accepted={problem?.answers ?? []}
               onRun={(input) => void doRun(input, true)}
-              onCancel={() => void api.cancelRun()}
+              onCancel={cancelRun}
               onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}
               onSubmit={(answer) => void doSubmit(answer)}
               onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}

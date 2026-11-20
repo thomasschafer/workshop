@@ -1,8 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
+import { getSnapshot, putSnapshot } from "../offline/db";
 import { progressApi } from "./api";
 import { Loading, Page } from "./page";
 import type { GoalProgress } from "./types";
+
+const GOALS_SNAPSHOT_KEY = "goals";
 
 const percent = (share: number) => `${Math.round(share * 100)}%`;
 
@@ -18,11 +21,37 @@ export function GoalsScreen({
   onOpen: (goal: string | null) => void;
 }) {
   const [goals, setGoals] = useState<GoalProgress[] | null>(null);
+  const [stale, setStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    let cancelled = false;
+    let fetchedFresh = false;
     setError(null);
-    progressApi.goals().then(setGoals, (e: unknown) => setError(errorMessage(e)));
+    setStale(false);
+    const cacheReady = getSnapshot<GoalProgress[]>(GOALS_SNAPSHOT_KEY).then((cached) => {
+      if (cancelled || !cached || fetchedFresh) return Boolean(cached);
+      setGoals(cached.value);
+      return true;
+    });
+    progressApi.goals().then(
+      (loaded) => {
+        if (cancelled) return;
+        fetchedFresh = true;
+        setGoals(loaded);
+        setStale(false);
+        void putSnapshot(GOALS_SNAPSHOT_KEY, loaded);
+      },
+      async (e: unknown) => {
+        const hasCached = await cacheReady;
+        if (cancelled) return;
+        if (hasCached) setStale(true);
+        else setError(errorMessage(e));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
   }, [attempt]);
 
   if (goals === null) {
@@ -36,6 +65,11 @@ export function GoalsScreen({
   if (shown) {
     return (
       <Page title={shown.name} onHome={onHome}>
+        {stale ? (
+          <p class="muted" role="status">
+            Showing the last goals saved on this device.
+          </p>
+        ) : null}
         <GoalView goal={shown} />
         <button type="button" class="pill" onClick={() => onOpen(null)}>
           Every goal
@@ -45,6 +79,11 @@ export function GoalsScreen({
   }
   return (
     <Page title="Goals" onHome={onHome}>
+      {stale ? (
+        <p class="muted" role="status">
+          Showing the last goals saved on this device.
+        </p>
+      ) : null}
       {goal !== null ? <p class="muted">There's no goal called {goal} in your packs.</p> : null}
       {goals.length === 0 ? (
         <p class="empty">

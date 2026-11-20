@@ -18,12 +18,12 @@ use workshop_provider::Role;
 use workshop_toolchain::toolchain::Toolchain;
 use workshop_tracks::TrackId;
 
-use super::error::{ApiError, ApiResult, bad_request};
+use super::error::{ApiError, ApiResult, bad_request, optional_json};
 use super::install::InstallStatus;
 use super::learning::Where;
 use super::puzzles::{SaveText, saved};
 use super::setup::{Needs, install_programs};
-use super::state::{Shared, lock};
+use super::state::{ActiveRun, Shared, lock};
 use crate::coding::{Found, Mode, Opened, Overview, SUBMIT_RANDOM_INPUTS, Session, StepName, find};
 use crate::discuss::{self, Turn};
 use crate::language::LanguageProfile;
@@ -158,7 +158,14 @@ impl Drop for Running<'_> {
     }
 }
 
-fn start_running(app: &Shared) -> Result<Running<'_>, ApiError> {
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RunIdBody {
+    #[serde(default)]
+    run_id: Option<String>,
+}
+
+fn start_running(app: &Shared, run_id: Option<String>) -> Result<Running<'_>, ApiError> {
     let Ok(guard) = app.run_lock.try_lock() else {
         return Err(ApiError(
             StatusCode::CONFLICT,
@@ -166,7 +173,10 @@ fn start_running(app: &Shared) -> Result<Running<'_>, ApiError> {
         ));
     };
     let cancel = CancellationToken::new();
-    *lock(&app.current_run) = Some(cancel.clone());
+    *lock(&app.current_run) = Some(ActiveRun {
+        id: run_id,
+        cancel: cancel.clone(),
+    });
     Ok(Running {
         app,
         _guard: guard,
@@ -188,11 +198,13 @@ fn current(app: &Shared, found: &Found<'_>) -> Result<(Session, VersionedFile), 
 pub(super) async fn run(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
+    body: axum::body::Bytes,
 ) -> ApiResult<Graded> {
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
     let (session, code) = current(&app, &found)?;
-    let running = start_running(&app)?;
+    let body: RunIdBody = optional_json(body)?;
+    let running = start_running(&app, body.run_id)?;
     let runtime = crate::coding::runtime(&app.config, &app.paths).await?;
     let graded = workshop_coding::run_examples(
         &runtime,
@@ -249,11 +261,13 @@ async fn oracle(
 pub(super) async fn submit(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
+    body: axum::body::Bytes,
 ) -> ApiResult<Submitted> {
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
     let (mut session, code) = current(&app, &found)?;
-    let running = start_running(&app)?;
+    let body: RunIdBody = optional_json(body)?;
+    let running = start_running(&app, body.run_id)?;
     let runtime = crate::coding::runtime(&app.config, &app.paths).await?;
     let oracle = oracle(&app, &found, &runtime, &running.cancel).await?;
     let graded = workshop_coding::grade(

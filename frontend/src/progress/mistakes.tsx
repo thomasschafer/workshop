@@ -1,8 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
+import { ConnectionError, TimeoutError } from "../api";
 import { errorMessage } from "../errors";
+import { getSnapshot, putSnapshot } from "../offline/db";
+import { outbox } from "../offline/outbox";
 import { progressApi } from "./api";
 import { Loading, Page } from "./page";
 import type { ErrorType, Mistake, MistakeLog } from "./types";
+
+const MISTAKES_SNAPSHOT_KEY = "mistakes";
 
 const SOURCES: Record<Mistake["source"], string> = {
   answer: "Answer",
@@ -10,25 +15,98 @@ const SOURCES: Record<Mistake["source"], string> = {
   grader: "Grader",
 };
 
+/** Applies queued offline mistake tags onto a cached log snapshot so the UI reflects them immediately. */
+function applyPendingTags(log: MistakeLog): MistakeLog {
+  const pending = outbox().list();
+  if (pending.length === 0) return log;
+  const overrides = new Map<string, string | null>();
+  for (const event of pending) {
+    if (event.kind === "mistake_tag") overrides.set(event.mistakeId, event.errorType);
+  }
+  if (overrides.size === 0) return log;
+  const mistakes = log.mistakes.map((m) =>
+    overrides.has(m.id) ? { ...m, confirmed: overrides.get(m.id) ?? null } : m,
+  );
+  const counts = new Map<string, number>();
+  for (const m of mistakes) {
+    const kind = m.confirmed ?? m.suggested;
+    if (kind !== null) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const common = [...counts.entries()]
+    .map(([error_type, count]) => ({ error_type, count }))
+    .sort((a, b) => b.count - a.count || a.error_type.localeCompare(b.error_type));
+  return { ...log, mistakes, common };
+}
+
 /**
  * The mistake log: what's gone wrong, most recent first, each tagged with the kind of mistake it
  * looks like, which the learner can confirm or change.
  */
 export function MistakesScreen({ onHome }: { onHome: () => void }) {
   const [log, setLog] = useState<MistakeLog | null>(null);
+  const [stale, setStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [kind, setKind] = useState<string>("");
   const [tagError, setTagError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    let fetchedFresh = false;
     setError(null);
-    progressApi.mistakes().then(setLog, (e: unknown) => setError(errorMessage(e)));
+    setStale(false);
+    const cacheReady = getSnapshot<MistakeLog>(MISTAKES_SNAPSHOT_KEY).then((cached) => {
+      if (cancelled || !cached || fetchedFresh) return Boolean(cached);
+      setLog(applyPendingTags(cached.value));
+      return true;
+    });
+    outbox()
+      .flush()
+      .then(() => progressApi.mistakes())
+      .then(
+        (loaded) => {
+          if (cancelled) return;
+          fetchedFresh = true;
+          const patched = applyPendingTags(loaded);
+          setLog(patched);
+          setStale(false);
+          void putSnapshot(MISTAKES_SNAPSHOT_KEY, loaded);
+        },
+        async (e: unknown) => {
+          const hasCached = await cacheReady;
+          if (cancelled) return;
+          if (hasCached) setStale(true);
+          else setError(errorMessage(e));
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
   }, [attempt]);
 
   const tag = (id: string, errorType: string | null) => {
     setTagError(null);
-    progressApi.tag(id, errorType).then(setLog, (e: unknown) => setTagError(errorMessage(e)));
+    progressApi.tag(id, errorType).then(
+      (updated) => {
+        setLog(updated);
+        setStale(false);
+        void putSnapshot(MISTAKES_SNAPSHOT_KEY, updated);
+      },
+      (e: unknown) => {
+        if (e instanceof ConnectionError || e instanceof TimeoutError) {
+          outbox().enqueueMistakeTag(id, errorType);
+          setStale(true);
+          setLog((current) => {
+            if (!current) return current;
+            const updated = applyPendingTags(current);
+            void putSnapshot(MISTAKES_SNAPSHOT_KEY, updated);
+            return updated;
+          });
+          return;
+        }
+        setTagError(errorMessage(e));
+      },
+    );
   };
 
   if (log === null) {
@@ -45,6 +123,12 @@ export function MistakesScreen({ onHome }: { onHome: () => void }) {
   );
   return (
     <Page title="Mistakes" onHome={onHome}>
+      {stale ? (
+        <p class="muted" role="status">
+          Showing the last mistakes saved on this device; tag changes will sync when the server can
+          be reached.
+        </p>
+      ) : null}
       {log.mistakes.length === 0 ? (
         <p class="empty">
           No mistakes yet. Wrong answers, failed submissions and what the grader finds are kept

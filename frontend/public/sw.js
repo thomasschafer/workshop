@@ -1,63 +1,173 @@
-// Workshop's service worker: it keeps the app on the device so short items can be practised
-// offline, shows notifications when puzzles unlock, and opens the puzzle a notification is about
-// when it's tapped.
+// Workshop's service worker: keeps the app shell on the device so it starts quickly on flaky
+// connections and works offline, isolates optional on-device bundles into per-version caches,
+// shows notifications when puzzles unlock, and opens the puzzle a notification is about.
 
-const CACHE = "workshop-app";
+const APP_CACHE = "workshop-app";
+const ON_DEVICE_PREFIX = "/on-device/";
+const ON_DEVICE_CACHE_PREFIX = "workshop-on-device-";
 
-/** The most built files to keep, which is a few releases' worth. */
-const MAX_ASSETS = 60;
+/** Injected at build time by Vite. */
+const RELEASE = /*__RELEASE__*/ "dev";
+const PRECACHE_ASSETS = /*__PRECACHE_ASSETS__*/ [];
 
-/** What the app needs to start, kept as last fetched for when the server can't be reached. */
-const STARTUP = new Set(["/api/bootstrap", "/api/home"]);
+/** Extra built asset slots kept beyond the current release, so open tabs on an earlier release can
+ * still load their lazy chunks offline until reloaded. */
+const MAX_EXTRA_ASSETS = 60;
 
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+/** How long navigation and bootstrap wait on the network when a cached copy is already ready. */
+const NETWORK_TIMEOUT_MS = 1500;
+
+/** Answers from a reverse proxy (such as `tailscale serve`) when Workshop itself isn't reachable. */
+const UNREACHABLE = new Set([502, 503, 504]);
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(APP_CACHE);
+      // Precache every built chunk of this release without evicting the previous release's chunks.
+      await Promise.allSettled(
+        ["/", ...PRECACHE_ASSETS].map(async (path) => {
+          const existing = path.startsWith("/assets/") ? await cache.match(path) : null;
+          if (existing) return;
+          const response = await fetch(path, { cache: "reload" });
+          if (response.ok && response.type === "basic") {
+            await cache.put(path, response);
+          }
+        }),
+      );
+      await self.skipWaiting();
+    })(),
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      await self.clients.claim();
+      await pruneAssets();
+    })(),
+  );
+});
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  if (url.pathname.startsWith(ON_DEVICE_PREFIX)) {
+    const bundle = bundleId(url.pathname);
+    if (bundle) {
+      event.respondWith(cacheFirstIn(`${ON_DEVICE_CACHE_PREFIX}${bundle}`, request));
+    }
+    return;
+  }
+
   if (request.mode === "navigate") {
     // Every address is the same page, which reads the address itself.
-    event.respondWith(networkFirst(request, "/"));
+    event.respondWith(networkFirstWithTimeout(request, "/", NETWORK_TIMEOUT_MS));
   } else if (url.pathname.startsWith("/assets/")) {
-    event.respondWith(cacheFirst(request));
-  } else if (STARTUP.has(url.pathname)) {
-    event.respondWith(networkFirst(request, url.pathname));
+    event.respondWith(cacheFirstAsset(request));
+  } else if (url.pathname === "/api/bootstrap") {
+    // Never stale-while-revalidate: wait briefly for fresh UI state, falling back to cache when
+    // offline or on a stalled link.
+    event.respondWith(networkFirstWithTimeout(request, "/api/bootstrap", NETWORK_TIMEOUT_MS));
   }
 });
 
-/** The server's answer, kept for later; or, when it can't be reached, the one kept last time. */
-async function networkFirst(request, key) {
-  const cache = await caches.open(CACHE);
+/** Extracts `<bundle>@<version>` from `/on-device/<bundle>@<version>/...`. */
+function bundleId(pathname) {
+  const rest = pathname.slice(ON_DEVICE_PREFIX.length);
+  const slash = rest.indexOf("/");
+  const segment = slash === -1 ? rest : rest.slice(0, slash);
+  return segment.includes("@") ? segment : null;
+}
+
+/**
+ * Races the network against `timeoutMs` when a cached copy exists, so flaky connections don't
+ * stall startup. When no cache exists yet, waits for the network.
+ */
+async function networkFirstWithTimeout(request, key, timeoutMs) {
+  const cache = await caches.open(APP_CACHE);
+  const kept = await cache.match(key);
+
+  const network = fetch(request).then(
+    async (response) => {
+      if (UNREACHABLE.has(response.status)) {
+        throw new Error(`unreachable (${response.status})`);
+      }
+      if (response.ok && response.type === "basic") {
+        await cache.put(key, response.clone());
+      }
+      return response;
+    },
+    (error) => {
+      throw error;
+    },
+  );
+
+  if (!kept) return network;
+
+  let timer;
+  const timedOut = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(kept), timeoutMs);
+  });
+
+  // Prevent unhandled rejections if the timeout wins and the background fetch later fails.
+  network.catch(() => {});
+
   try {
-    const response = await fetch(request);
-    if (response.ok && response.type === "basic") await cache.put(key, response.clone());
-    return response;
-  } catch (error) {
-    const kept = await cache.match(key);
-    if (kept) return kept;
-    throw error;
+    return await Promise.race([
+      network.catch(() => kept),
+      timedOut,
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-/** Built files never change, as their names say what's in them, so a kept one is always right. */
-async function cacheFirst(request) {
-  const cache = await caches.open(CACHE);
+/** Built files are content-hashed, so a cached copy is always valid. */
+async function cacheFirstAsset(request) {
+  const cache = await caches.open(APP_CACHE);
   const kept = await cache.match(request);
   if (kept) return kept;
   const response = await fetch(request);
   if (response.ok) {
     await cache.put(request, response.clone());
-    const assets = (await cache.keys()).filter((r) =>
-      new URL(r.url).pathname.startsWith("/assets/"),
-    );
-    // The oldest go first: they're from earlier releases.
-    await Promise.all(assets.slice(0, -MAX_ASSETS).map((r) => cache.delete(r)));
+    void pruneAssets();
   }
   return response;
 }
+
+/** Serves versioned on-device runtime bundles from their own dedicated cache, never pruned with
+ * app assets. */
+async function cacheFirstIn(cacheName, request) {
+  const cache = await caches.open(cacheName);
+  const kept = await cache.match(request);
+  if (kept) return kept;
+  const response = await fetch(request);
+  if (response.ok) {
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
+/** Removes only old `/assets/` entries beyond the current release plus `MAX_EXTRA_ASSETS`. */
+async function pruneAssets() {
+  const cache = await caches.open(APP_CACHE);
+  const current = new Set(PRECACHE_ASSETS);
+  const extras = (await cache.keys()).filter((req) => {
+    const pathname = new URL(req.url).pathname;
+    return pathname.startsWith("/assets/") && !current.has(pathname);
+  });
+  await Promise.all(extras.slice(0, -MAX_EXTRA_ASSETS).map((req) => cache.delete(req)));
+}
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "workshop:release") {
+    event.ports[0]?.postMessage({ release: RELEASE, assets: PRECACHE_ASSETS.length });
+  }
+});
 
 self.addEventListener("push", (event) => {
   const message = event.data ? event.data.json() : { title: "Workshop", body: "", url: "/" };

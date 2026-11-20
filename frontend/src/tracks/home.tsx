@@ -1,9 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
 import { loadMarkdown } from "../hooks/useMarkdown";
+import { utcOffset } from "../learning/local";
 import { learning } from "../learning/sync";
+import { getSnapshot, putSnapshot } from "../offline/db";
+import { outbox } from "../offline/outbox";
 import { tracksApi } from "./api";
 import "./home.css";
+import { homeSnapshotKey, patchHome } from "./homeLocal";
 import { TrackIcon } from "./icons";
 import type { Route } from "./routes";
 import { aWhile as hasAWhile, setAWhile } from "./sitting";
@@ -11,7 +15,8 @@ import type { Destination, Home as HomeState, Track } from "./types";
 
 /**
  * The home screen: one button that continues with the next best step, the tracks, and the
- * screens about how it's going.
+ * screens about how it's going. Renders immediately from the cached IndexedDB snapshot patched
+ * with local offline state, then refreshes quietly from the server.
  */
 export function Home({
   onGo,
@@ -20,22 +25,52 @@ export function Home({
   onGo: (destination: Destination) => void;
   onOpen: (route: Route) => void;
 }) {
-  const [home, setHome] = useState<HomeState | null>(null);
+  const [snapshot, setSnapshot] = useState<HomeState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
-  const [pending, setPending] = useState(() => learning().syncStatus.pending);
+  const [learningVersion, setLearningVersion] = useState(0);
+  const [outboxPending, setOutboxPending] = useState(() => outbox().pending);
   const [aWhile, setAWhileShown] = useState(() => hasAWhile());
+
+  const state = learning();
+  const pending = state.syncStatus.pending + outboxPending;
 
   useEffect(() => {
     let cancelled = false;
+    let fetchedFresh = false;
     setError(null);
+    setStale(false);
+    const key = homeSnapshotKey(aWhile, utcOffset());
+
+    const cacheReady = getSnapshot<HomeState>(key).then((cached) => {
+      if (cancelled || !cached || fetchedFresh) return Boolean(cached);
+      setSnapshot(cached.value);
+      return true;
+    });
+
     // What was done offline is sent first, so what's suggested takes it into account.
-    learning()
-      .sync()
+    Promise.allSettled([learning().sync(), outbox().flush()])
       .then(() => tracksApi.home(aWhile))
-      .then((loaded) => !cancelled && setHome(loaded))
-      .catch((e: unknown) => !cancelled && setError(errorMessage(e)));
+      .then((loaded) => {
+        if (cancelled) return;
+        fetchedFresh = true;
+        setSnapshot(loaded);
+        setStale(false);
+        setError(null);
+        void putSnapshot(key, loaded);
+      })
+      .catch(async (e: unknown) => {
+        const hasCached = await cacheReady;
+        if (cancelled) return;
+        if (hasCached) {
+          setStale(true);
+        } else {
+          setError(errorMessage(e));
+        }
+      });
+
     return () => {
       cancelled = true;
     };
@@ -55,12 +90,33 @@ export function Home({
     };
   }, [aWhile]);
 
-  useEffect(() => learning().subscribe(() => setPending(learning().syncStatus.pending)), []);
+  useEffect(() => {
+    const unsubLearning = learning().subscribe(() => setLearningVersion((v) => v + 1));
+    const unsubOutbox = outbox().subscribe(() => setOutboxPending(outbox().pending));
+    return () => {
+      unsubLearning();
+      unsubOutbox();
+    };
+  }, []);
 
   // So formatted items can be shown offline later, the renderer is fetched while online.
   useEffect(() => {
     loadMarkdown().catch(() => {});
   }, []);
+
+  // Re-patch whenever local learning state changes (e.g. offline attempts just recorded).
+  void learningVersion;
+  const home = snapshot
+    ? patchHome(
+        snapshot,
+        state.deck,
+        state.attempts,
+        state.flagChanges,
+        state.retirementChanges,
+        Date.now(),
+        utcOffset(),
+      )
+    : null;
 
   const next = home?.continue ?? null;
   return (
@@ -71,11 +127,18 @@ export function Home({
       <main class="home-content">
         {pending > 0 ? (
           <p class="home-pending muted" role="status">
-            {pending === 1 ? "1 answer" : `${pending} answers`} saved on this device, to sync when
+            {pending === 1 ? "1 change" : `${pending} changes`} saved on this device, to sync when
             the server can be reached
           </p>
+        ) : stale ? (
+          <p class="home-pending muted" role="status">
+            Showing what this device last saw; couldn't reach the server just now.{" "}
+            <button type="button" class="text-button" onClick={() => setAttempt((n) => n + 1)}>
+              Try again
+            </button>
+          </p>
         ) : null}
-        {error ? (
+        {error && home === null ? (
           <div class="home-error">
             <p class="error-text">Couldn't load your tracks: {error}</p>
             <button type="button" onClick={() => setAttempt((n) => n + 1)}>
