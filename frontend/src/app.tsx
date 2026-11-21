@@ -87,6 +87,9 @@ type Sheet =
   | "shortcuts"
   | null;
 
+/** FNV-1a version of an empty file, matching `workshop_common::files::version_of("")`. */
+const EMPTY_FILE_VERSION = "cbf29ce484222325";
+
 /** The space kept clear below the code for the cards floating over it. */
 const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
 
@@ -409,7 +412,7 @@ export function App({
           fromOfflineCache = true;
           opened = {
             code: cached.code,
-            notes: cached.notes ?? { text: "", version: "", path: "" },
+            notes: cached.notes ?? { text: "", version: EMPTY_FILE_VERSION, path: "" },
             meta: cached.meta ?? EMPTY_META,
             file_uri: cached.fileUri ?? "",
           };

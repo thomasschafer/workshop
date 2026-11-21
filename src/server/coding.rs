@@ -3,7 +3,6 @@
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use axum::Json;
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
@@ -827,18 +826,6 @@ pub(super) async fn cancel_toolchain_install(
     Ok(Json(()))
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct OfflineBundleQuery {
-    /// Whether to start background oracle pre-computation for uncached items.
-    #[serde(default = "default_true")]
-    precompute: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Serialize)]
 pub(super) struct OfflineLanguage {
     id: Language,
@@ -899,16 +886,11 @@ fn read_cached_oracle_cases(path: &std::path::Path) -> Option<Vec<OracleCase>> {
 }
 
 /// Opt-in offline coding bundle. Never blocks on compiling or running brute-force oracles:
-/// returns any already-cached oracle cases immediately and spawns background pre-computation
-/// for the rest. Leaves `POST /open` untouched.
-pub(super) async fn offline_bundle(
-    State(app): State<Shared>,
-    Query(query): Query<OfflineBundleQuery>,
-) -> ApiResult<OfflineBundle> {
+/// returns any already-cached oracle cases immediately. Leaves `POST /open` untouched.
+pub(super) async fn offline_bundle(State(app): State<Shared>) -> ApiResult<OfflineBundle> {
     let packs = packs(&app)?;
     let sessions = app.problems.sessions()?;
     let mut items = Vec::new();
-    let mut missing_oracles: Vec<(String, String, u32, PathBuf)> = Vec::new();
 
     for pack in &packs {
         for item in &pack.items {
@@ -959,15 +941,7 @@ pub(super) async fn offline_bundle(
                 let path = oracle_cache_path(&app, &found, random_count);
                 match read_cached_oracle_cases(&path) {
                     Some(cases) => (cases, true),
-                    None => {
-                        missing_oracles.push((
-                            pack.manifest.id.clone(),
-                            item.id.clone(),
-                            random_count,
-                            path,
-                        ));
-                        (Vec::new(), false)
-                    }
+                    None => (Vec::new(), false),
                 }
             };
 
@@ -1006,44 +980,10 @@ pub(super) async fn offline_bundle(
         }
     }
 
-    if query.precompute
-        && !missing_oracles.is_empty()
-        && !app.oracle_precompute_running.swap(true, Ordering::SeqCst)
-    {
-        let bg = Arc::clone(&app);
-        tokio::spawn(async move {
-            let cancel = CancellationToken::new();
-            if let Ok(packs) = crate::packs::load(&bg.config.learning)
-                && let Ok(runtime) = crate::coding::runtime(&bg.config, &bg.paths).await
-            {
-                for (pack_id, item_id, count, cache_path) in missing_oracles {
-                    if cache_path.exists() {
-                        continue;
-                    }
-                    let Ok(found) = find(&packs, &pack_id, &item_id) else {
-                        continue;
-                    };
-                    let Ok(built) = oracle(&bg, &found, &runtime, &cancel).await else {
-                        continue;
-                    };
-                    if let Ok(Ok(cases)) = built.generate_cases(&runtime, count, &cancel).await
-                        && let Ok(json) = serde_json::to_vec(&cases)
-                    {
-                        if let Some(dir) = cache_path.parent() {
-                            let _ = std::fs::create_dir_all(dir);
-                        }
-                        let _ = workshop_common::files::write_atomic(&cache_path, &json);
-                    }
-                }
-            }
-            bg.oracle_precompute_running.store(false, Ordering::SeqCst);
-        });
-    }
-
     Ok(Json(OfflineBundle {
         items,
         empty_version: version_of(""),
-        oracles_computing: app.oracle_precompute_running.load(Ordering::SeqCst),
+        oracles_computing: false,
     }))
 }
 

@@ -63,6 +63,7 @@ export function useRun({
       return;
     }
     setRun((r) => ({ ...r, running: input, error: null, submitted: null, confirmSubmit: false }));
+    activeRun.current?.controller.abort();
     const runId = newId();
     const controller = new AbortController();
     activeRun.current = { id: runId, controller };
@@ -96,6 +97,7 @@ export function useRun({
   const cancelRun = () => {
     const current = activeRun.current;
     if (current) {
+      current.controller.abort();
       api.cancelRun(current.id).catch(() => {});
     } else {
       api.cancelRun().catch(() => {});

@@ -158,6 +158,28 @@ pub(super) async fn offline(
     }))
 }
 
+/// Lightweight status of a year's offline cache prefetch, for polling without re-sending puzzle
+/// bodies and inputs.
+pub(super) async fn cache_status(
+    State(app): State<Shared>,
+    Path(year): Path<u16>,
+) -> ApiResult<YearCacheStatus> {
+    puzzle(year, 1)?;
+    let unlocked = unlocked_days(year);
+    let cached_days = count_cached_days(&app, year, &unlocked)?;
+    let state = lock(&app.year_cache)
+        .get(&year)
+        .cloned()
+        .unwrap_or_default();
+    Ok(Json(YearCacheStatus {
+        year,
+        caching: state.caching,
+        cached_days,
+        total_unlocked: unlocked.len(),
+        error: state.error,
+    }))
+}
+
 /// Starts a background prefetch of a year's unlocked puzzles and inputs through the throttled
 /// Advent of Code client. Returns immediately with the current cache status.
 pub(super) async fn cache(

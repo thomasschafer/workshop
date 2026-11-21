@@ -108,9 +108,19 @@ async function networkFirstWithTimeout(request, key, timeoutMs) {
 
   if (!kept) return network;
 
+  const staleResponse = () => {
+    const headers = new Headers(kept.headers);
+    headers.set("X-Workshop-Cache", "stale");
+    return new Response(kept.body, {
+      status: kept.status,
+      statusText: kept.statusText,
+      headers,
+    });
+  };
+
   let timer;
   const timedOut = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(kept), timeoutMs);
+    timer = setTimeout(() => resolve(staleResponse()), timeoutMs);
   });
 
   // Prevent unhandled rejections if the timeout wins and the background fetch later fails.
@@ -118,7 +128,7 @@ async function networkFirstWithTimeout(request, key, timeoutMs) {
 
   try {
     return await Promise.race([
-      network.catch(() => kept),
+      network.catch(() => staleResponse()),
       timedOut,
     ]);
   } finally {

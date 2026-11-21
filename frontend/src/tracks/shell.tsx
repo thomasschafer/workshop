@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { api, type Bootstrap } from "../api";
+import { api, type Bootstrap, bootstrapWasStale, connection, onNetworkOnline } from "../api";
 import { App } from "../app";
 import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
@@ -32,6 +32,76 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
 
   // Doing anything in the app keeps "I've got a while" on for the sitting.
   useEffect(() => watchActivity(), []);
+
+  // If the app started from a service-worker-cached bootstrap (offline or slow-link 1.5s fallback),
+  // refresh it quietly with backoff and whenever connectivity returns. Pauses while inside Advent
+  // of Code (which would reset its active state) and resumes once leaving it.
+  const needsBootstrapRefresh = useRef(bootstrapWasStale);
+  useEffect(() => {
+    if (!needsBootstrapRefresh.current || route.screen === "advent-of-code") return;
+    let cancelled = false;
+    let inFlight = false;
+    let delayMs = 2_000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = () => {
+      if (cancelled || !needsBootstrapRefresh.current || timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        refresh();
+      }, delayMs);
+      delayMs = Math.min(30_000, delayMs * 2);
+    };
+
+    const refresh = () => {
+      if (cancelled || inFlight || !needsBootstrapRefresh.current) return;
+      if (routeRef.current.screen === "advent-of-code") return;
+      inFlight = true;
+      api
+        .bootstrap()
+        .then(
+          (fresh) => {
+            if (cancelled) return;
+            if (!bootstrapWasStale) {
+              needsBootstrapRefresh.current = false;
+              if (routeRef.current.screen !== "advent-of-code") setBoot(fresh);
+            } else {
+              schedule();
+            }
+          },
+          () => {
+            if (!cancelled) schedule();
+          },
+        )
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+
+    schedule();
+    const unsub = connection.subscribe((online) => {
+      if (online) {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        refresh();
+      }
+    });
+    const unsubOnline = onNetworkOnline(() => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      refresh();
+    });
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+      unsub();
+      unsubOnline();
+    };
+  }, [route.screen]);
 
   useEffect(() => {
     // An old address for a screen, such as a notification's, becomes the screen's own, keeping

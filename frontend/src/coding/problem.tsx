@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiError, type Bootstrap, ConnectionError, TimeoutError } from "../api";
+import { ApiError, type Bootstrap, ConnectionError, connection, TimeoutError } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
@@ -119,25 +119,96 @@ export function ProblemView({
     outbox().conflictFor(itemKey),
   );
   const confirmedVersion = useRef<number>(0);
+  const localExpectedVersion = useRef<number>(0);
+  const staleAfterTimeout = useRef<boolean>(false);
 
-  useEffect(
-    () =>
-      outbox().subscribe(() => {
-        const conflict = outbox().conflictFor(itemKey);
-        if (conflict) setSessionConflict(conflict);
-      }),
-    [itemKey],
-  );
+  useEffect(() => {
+    const unsubConflict = outbox().subscribe(() => {
+      const conflict = outbox().conflictFor(itemKey);
+      if (conflict) setSessionConflict(conflict);
+    });
+    const unsubApplied = outbox().onSessionApplied(itemKey, (applied) => {
+      const nextVer = applied.version ?? 0;
+      if (nextVer > confirmedVersion.current) {
+        confirmedVersion.current = nextVer;
+      }
+      if (!outbox().hasPendingCodingEvents(itemKey)) {
+        localExpectedVersion.current = confirmedVersion.current;
+        staleAfterTimeout.current = false;
+      }
+      void updateCachedCodingSession(itemKey, applied);
+      if (
+        sessionRef.current &&
+        applied.version !== undefined &&
+        (sessionRef.current.version ?? 0) < applied.version
+      ) {
+        const bumped = { ...sessionRef.current, version: applied.version };
+        sessionRef.current = bumped;
+        setSession(bumped);
+      }
+    });
+    return () => {
+      unsubConflict();
+      unsubApplied();
+    };
+  }, [itemKey]);
 
   const saver = useMemo(
     () =>
       new LatestSaver<Session>(
         async (next, keepalive) => {
+          const queueOfflineUpdate = () => {
+            const base =
+              localExpectedVersion.current || confirmedVersion.current || (next.version ?? 1);
+            const { coalesced } = outbox().enqueueCodingEvent(
+              {
+                kind: "session_updated",
+                id: newId(),
+                item: itemKey,
+                base_version: base,
+                session: { ...next, version: base },
+                at: Date.now(),
+              },
+              false,
+            );
+            if (!coalesced) {
+              localExpectedVersion.current = base + 1;
+            }
+          };
+
+          // Single owner per item: if the outbox still has pending events for this item, flush
+          // them first so versions stay monotonic, or queue there rather than racing a parallel PUT.
+          if (outbox().hasPendingCodingEvents(itemKey)) {
+            if (connection.isOnline && !keepalive) {
+              await outbox().flush();
+            }
+            if (outbox().hasPendingCodingEvents(itemKey)) {
+              queueOfflineUpdate();
+              return;
+            }
+          }
+
+          if (staleAfterTimeout.current) {
+            try {
+              const refreshed = await codingApi.open(itemKey);
+              confirmedVersion.current = refreshed.session.version ?? confirmedVersion.current;
+              localExpectedVersion.current = confirmedVersion.current;
+              staleAfterTimeout.current = false;
+            } catch {
+              // Still unreachable; fall through to normal offline queueing below.
+            }
+          }
           const toSend: Session =
             confirmedVersion.current > 0 ? { ...next, version: confirmedVersion.current } : next;
           try {
             const saved = await codingApi.saveSession(itemKey, toSend, keepalive);
-            confirmedVersion.current = saved.session.version ?? confirmedVersion.current;
+            const nextVer = saved.session.version ?? confirmedVersion.current;
+            confirmedVersion.current = nextVer;
+            localExpectedVersion.current = nextVer;
+            staleAfterTimeout.current = false;
+            // This online PUT persisted the full latest session, so any unsent queued updates for
+            // this item are superseded.
+            outbox().dropUnsentSessionUpdates(itemKey);
             // Only what's still unsaved is forgotten: a later change waits its turn.
             if (JSON.stringify(readUnsaved(itemKey)?.session) === JSON.stringify(next)) {
               writeUnsaved(itemKey, null);
@@ -158,17 +229,8 @@ export function ProblemView({
               }
             }
             if (err instanceof ConnectionError || err instanceof TimeoutError) {
-              outbox().enqueueCodingEvent(
-                {
-                  kind: "session_updated",
-                  id: newId(),
-                  item: itemKey,
-                  base_version: confirmedVersion.current || (next.version ?? 1),
-                  session: toSend,
-                  at: Date.now(),
-                },
-                false,
-              );
+              if (err instanceof TimeoutError) staleAfterTimeout.current = true;
+              queueOfflineUpdate();
               return;
             }
             throw err;
@@ -212,6 +274,8 @@ export function ProblemView({
       try {
         const fresh = await codingApi.open(itemKey, solve);
         confirmedVersion.current = fresh.session.version ?? 0;
+        localExpectedVersion.current = confirmedVersion.current;
+        staleAfterTimeout.current = false;
         // What was done here while the server couldn't hear of it wins over what it has.
         const unsaved = solve ? null : readUnsaved(itemKey);
         const adopted =
@@ -249,6 +313,7 @@ export function ProblemView({
               );
             }
             confirmedVersion.current = offlineOpened.session.version ?? 1;
+            localExpectedVersion.current = confirmedVersion.current;
             const unsaved = solve ? null : readUnsaved(itemKey);
             const adopted =
               unsaved &&
@@ -495,9 +560,11 @@ export function ProblemView({
       onFinish={async (rating) => {
         const id = newId();
         const now = Date.now();
-        const duration = Math.max(0, now - session.updated_at);
         if (online) {
           try {
+            if (outbox().hasPendingCodingEvents(itemKey)) {
+              await outbox().flush();
+            }
             await saver.flush();
             const done = await codingApi.finish(itemKey, id, rating);
             writeUnsaved(itemKey, null);
@@ -512,10 +579,11 @@ export function ProblemView({
           kind: "finished",
           id,
           item: itemKey,
-          base_version: confirmedVersion.current || null,
+          base_version: null,
+          started_at: session.started_at,
           rating,
           plan: session.plan,
-          duration_ms: duration,
+          duration_ms: 0,
           answered_at: now,
         });
         writeUnsaved(itemKey, null);
@@ -855,7 +923,7 @@ function CodeStep({
     setRunError(null);
     try {
       await draftSaver.current?.flush();
-      const graded = await codingApi.run(itemKey);
+      const graded = await codingApi.run(itemKey, newId());
       setRan(graded);
       onRan(summarise(graded));
       change((s) => ({ ...s, runs: s.runs + 1 }), true);
@@ -877,7 +945,7 @@ function CodeStep({
         change((s) => ({ ...s, step: "test" }), true),
         draftSaver.current?.flush(),
       ]);
-      const result = await codingApi.submit(itemKey);
+      const result = await codingApi.submit(itemKey, newId());
       setSubmitted(result);
       onRan(result.problem ?? "Passed every test.");
       // The server moves a passing solution on to being reviewed.
@@ -1008,14 +1076,20 @@ function CodeStep({
                     ? "Run examples"
                     : "Running needs the server"}
               </button>
-              <button
-                type="button"
-                class="pill primary"
-                disabled={!online || busy !== null}
-                onClick={() => void submit()}
-              >
-                Submit
-              </button>
+              {online ? (
+                <button
+                  type="button"
+                  class="pill primary"
+                  disabled={busy !== null}
+                  onClick={() => void submit()}
+                >
+                  Submit
+                </button>
+              ) : (
+                <button type="button" class="pill primary" onClick={onGiveUp}>
+                  Review approach
+                </button>
+              )}
               <KeyboardToggle
                 // Workshop's own keyboard takes the footer's place, so here it's only ever down.
                 shown={!settings.ownKeyboard && keyboard.wanted}

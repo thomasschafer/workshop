@@ -281,17 +281,28 @@ impl AocClient {
         if puzzle.is_practice() {
             return parse_problem(&self.practice()?.page()?);
         }
+        let html = self
+            .fetch_or_cache_problem(puzzle, refresh, Priority::Now)
+            .await?;
+        parse_problem(&html)
+    }
+
+    async fn fetch_or_cache_problem(
+        &self,
+        puzzle: Puzzle,
+        refresh: bool,
+        priority: Priority,
+    ) -> Result<String> {
         let path = self.day_dir(puzzle).join("problem.html");
-        let html = match read_cache(&path, refresh, None)? {
-            Some(html) => html,
+        match read_cache(&path, refresh, None)? {
+            Some(html) => Ok(html),
             None => {
                 let url = format!("{}/{}/day/{}", self.base_url, puzzle.year, puzzle.day);
-                let html = self.get(&url, Priority::Now).await?;
+                let html = self.get(&url, priority).await?;
                 files::write_atomic(&path, html.as_bytes())?;
-                html
+                Ok(html)
             }
-        };
-        parse_problem(&html)
+        }
     }
 
     /// The puzzle if it's already cached, without making any request.
@@ -309,12 +320,16 @@ impl AocClient {
         if puzzle.is_practice() {
             return Ok(crate::practice::INPUT.clone());
         }
+        self.fetch_or_cache_input(puzzle, Priority::Now).await
+    }
+
+    async fn fetch_or_cache_input(&self, puzzle: Puzzle, priority: Priority) -> Result<String> {
         let path = self.day_dir(puzzle).join("input.txt");
         if let Some(input) = read_cache(&path, false, None)? {
             return Ok(input);
         }
         let url = format!("{}/{}/day/{}/input", self.base_url, puzzle.year, puzzle.day);
-        let input = self.get(&url, Priority::Now).await?;
+        let input = self.get(&url, priority).await?;
         files::write_atomic(&path, input.as_bytes())?;
         Ok(input)
     }
@@ -333,18 +348,10 @@ impl AocClient {
         if puzzle.is_practice() {
             return Ok(());
         }
-        let problem_path = self.day_dir(puzzle).join("problem.html");
-        if read_cache(&problem_path, false, None)?.is_none() {
-            let url = format!("{}/{}/day/{}", self.base_url, puzzle.year, puzzle.day);
-            let html = self.get(&url, Priority::Background).await?;
-            files::write_atomic(&problem_path, html.as_bytes())?;
-        }
-        let input_path = self.day_dir(puzzle).join("input.txt");
-        if read_cache(&input_path, false, None)?.is_none() {
-            let url = format!("{}/{}/day/{}/input", self.base_url, puzzle.year, puzzle.day);
-            let input = self.get(&url, Priority::Background).await?;
-            files::write_atomic(&input_path, input.as_bytes())?;
-        }
+        self.fetch_or_cache_problem(puzzle, false, Priority::Background)
+            .await?;
+        self.fetch_or_cache_input(puzzle, Priority::Background)
+            .await?;
         Ok(())
     }
 

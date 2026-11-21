@@ -178,7 +178,10 @@ pub fn router(app: Shared) -> Router {
         .route("/years/{year}/times", get(years::times))
         .route("/years/{year}/leaderboard", get(years::leaderboard))
         .route("/years/{year}/offline", get(years::offline))
-        .route("/years/{year}/cache", post(years::cache))
+        .route(
+            "/years/{year}/cache",
+            get(years::cache_status).post(years::cache),
+        )
         .route("/helpers", get(puzzles::helpers))
         .route("/leaderboard", put(settings::set_leaderboard))
         .route("/puzzles/{year}/{day}", get(puzzles::open_puzzle))

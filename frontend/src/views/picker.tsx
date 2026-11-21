@@ -217,18 +217,35 @@ export function Picker({ current, hasSession, onPick }: Props) {
     [loadCachedForYear],
   );
 
-  // Poll the server's throttled background prefetch while a year is being cached.
+  // Poll the lightweight status endpoint while the server's throttled prefetch is running,
+  // fetching the full offline bundle only once caching finishes.
   useEffect(() => {
     if (!savingYear || savingYear.year !== year || !savingYear.caching) return;
     let cancelled = false;
     const timer = setInterval(() => {
-      void syncOfflineYear(year).catch((e: unknown) => {
-        if (!cancelled) {
-          setSavingYear((prev) =>
-            prev?.year === year ? { ...prev, caching: false, error: errorMessage(e) } : prev,
-          );
-        }
-      });
+      void api
+        .cacheYearStatus(year)
+        .then(async (status) => {
+          if (cancelled) return;
+          if (!status.caching) {
+            await syncOfflineYear(year);
+          } else {
+            setSavingYear({
+              year,
+              caching: status.caching,
+              cached: status.cached_days,
+              total: status.total_unlocked,
+              error: status.error,
+            });
+          }
+        })
+        .catch((e: unknown) => {
+          if (!cancelled) {
+            setSavingYear((prev) =>
+              prev?.year === year ? { ...prev, caching: false, error: errorMessage(e) } : prev,
+            );
+          }
+        });
     }, 2500);
     return () => {
       cancelled = true;
@@ -251,8 +268,18 @@ export function Picker({ current, hasSession, onPick }: Props) {
       if (helpers) {
         await putHelpers(helpers.language_id, helpers.file, helpers.text);
       }
-      await api.cacheYear(year);
-      await syncOfflineYear(year);
+      const status = await api.cacheYear(year);
+      if (!status.caching) {
+        await syncOfflineYear(year);
+      } else {
+        setSavingYear({
+          year,
+          caching: status.caching,
+          cached: status.cached_days,
+          total: status.total_unlocked,
+          error: status.error,
+        });
+      }
     } catch (e) {
       setSavingYear((prev) =>
         prev?.year === year ? { ...prev, caching: false, error: errorMessage(e) } : prev,

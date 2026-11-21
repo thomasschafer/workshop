@@ -51,7 +51,12 @@ export function Home({
     });
 
     // What was done offline is sent first, so what's suggested takes it into account.
-    Promise.allSettled([learning().sync(), outbox().flush()])
+    // `learning().sync()` already piggybacks pending outbox events in one `/api/sync` request;
+    // flush any leftover outbox events once it finishes.
+    learning()
+      .sync()
+      .then(() => outbox().flush())
+      .catch(() => {})
       .then(() => tracksApi.home(aWhile))
       .then((loaded) => {
         if (cancelled) return;

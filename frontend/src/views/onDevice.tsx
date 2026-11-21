@@ -12,7 +12,7 @@ import {
   type StorageDiagnostics,
   storageDiagnostics,
 } from "../offline/db";
-import { outbox } from "../offline/outbox";
+import { type OutboxIssue, outbox } from "../offline/outbox";
 import { ON_DEVICE_MODES, type OnDeviceMode } from "../preferences";
 
 const MODE_LABELS: Record<OnDeviceMode, string> = {
@@ -53,6 +53,7 @@ export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter 
   const conn = useConnectionStatus();
   const learning = useLearning();
   const [outboxCount, setOutboxCount] = useState(() => outbox().pending);
+  const [issues, setIssues] = useState<readonly OutboxIssue[]>(() => outbox().issues());
   const [storage, setStorage] = useState<StorageDiagnostics | null>(null);
   const [puzzles, setPuzzles] = useState<CachedAocPuzzle[]>([]);
   const [codingCount, setCodingCount] = useState(0);
@@ -76,7 +77,10 @@ export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter 
 
   useEffect(() => {
     void refresh();
-    return outbox().subscribe(() => setOutboxCount(outbox().pending));
+    return outbox().subscribe(() => {
+      setOutboxCount(outbox().pending);
+      setIssues(outbox().issues());
+    });
   }, [refresh]);
 
   const totalPending = learning.syncStatus.pending + outboxCount;
@@ -241,6 +245,28 @@ export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter 
               })}
             </ul>
           ) : null}
+        </div>
+      ) : null}
+
+      {issues.length > 0 ? (
+        <div class="on-device-puzzles">
+          <h3 class="settings-heading">Sync issues needing attention</h3>
+          <ul class="on-device-list">
+            {issues.map((issue) => (
+              <li key={issue.id} class="on-device-list-row">
+                <span>
+                  {issue.item}: {issue.message}
+                </span>
+                <button
+                  type="button"
+                  class="text-button"
+                  onClick={() => outbox().dismissIssue(issue.id)}
+                >
+                  Dismiss
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

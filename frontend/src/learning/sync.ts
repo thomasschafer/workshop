@@ -2,7 +2,14 @@
 // sent to the server whenever it can be reached. Each attempt and change has its own id, so
 // sending one again after a reply was lost changes nothing.
 
-import { ApiError, ConnectionError, connection, request, TimeoutError } from "../api";
+import {
+  ApiError,
+  ConnectionError,
+  connection,
+  onNetworkOnline,
+  request,
+  TimeoutError,
+} from "../api";
 import { errorMessage } from "../errors";
 import { outbox, type UnifiedSyncResponse } from "../offline/outbox";
 import { newId, utcOffset } from "./local";
@@ -175,8 +182,8 @@ export class Learning {
     const retirements = this.retirementChanges;
     const pendingOutbox =
       typeof localStorage !== "undefined" && this.storage === localStorage ? outbox() : null;
-    const outboxBatch =
-      pendingOutbox && pendingOutbox.pending > 0 ? pendingOutbox.snapshotBatch() : null;
+    const outboxBatch = pendingOutbox ? pendingOutbox.tryAcquireBatch() : null;
+    let outboxSettled = false;
     this.setStatus({ syncing: true });
     try {
       let deck: Deck;
@@ -193,6 +200,7 @@ export class Learning {
           },
         );
         pendingOutbox.applySyncResults(outboxBatch, unified);
+        outboxSettled = true;
         deck = unified.deck;
       } else {
         deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
@@ -215,6 +223,9 @@ export class Learning {
       this.save();
       this.setStatus({ syncing: false, offline: false, error: null });
     } catch (e) {
+      if (outboxBatch && pendingOutbox && !outboxSettled) {
+        pendingOutbox.releaseBatch(outboxBatch);
+      }
       const offline = e instanceof ConnectionError;
       const slow = e instanceof TimeoutError;
       this.setStatus({
@@ -239,7 +250,7 @@ export function learning(): Learning {
     const created = new Learning();
     // Straight away when the server or the network is back, rather than at the next retry.
     connection.subscribe((online) => online && created.syncIfPending());
-    window.addEventListener("online", () => created.syncIfPending());
+    onNetworkOnline(() => created.syncIfPending());
     shared = created;
   }
   return shared;

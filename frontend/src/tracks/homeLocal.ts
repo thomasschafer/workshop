@@ -44,14 +44,8 @@ export function patchHome(
   const answeredKeys = new Set(attempts.map((a) => a.item));
 
   const tracks: Track[] = snapshot.tracks.map((track) => {
-    // Only patch pure short-item tracks (not AoC, Coding, System design, or Timed rounds, whose
-    // summaries include server-side sessions and problems).
-    if (
-      track.id === "advent-of-code" ||
-      track.id === "coding" ||
-      track.id === "system-design" ||
-      track.id === "rounds"
-    ) {
+    // Only patch pure short-item practice tracks whose summary is fully derived from the deck.
+    if (track.destination.kind !== "practice") {
       return track;
     }
     const itemsInTrack = deck.items.filter((item) => item.track === track.id);

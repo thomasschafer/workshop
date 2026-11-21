@@ -520,6 +520,36 @@ export class Connection {
 
 export const connection = new Connection();
 
+/**
+ * Calls `listener` when the browser reports the network is back, ignoring spurious `online`
+ * events fired while offline or while a page is unloading/reloading (Chromium 156 fires `online`
+ * with `navigator.onLine === false` immediately before `pagehide` during an offline reload).
+ */
+export function onNetworkOnline(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  let unloading = false;
+  const onPageHide = () => {
+    unloading = true;
+  };
+  const onPageShow = () => {
+    unloading = false;
+  };
+  const onOnline = () => {
+    if (!unloading && navigator.onLine) listener();
+  };
+  window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("online", onOnline);
+  return () => {
+    window.removeEventListener("pagehide", onPageHide);
+    window.removeEventListener("pageshow", onPageShow);
+    window.removeEventListener("online", onOnline);
+  };
+}
+
+/** True when the most recent `/api/bootstrap` response came from the service worker cache. */
+export let bootstrapWasStale = false;
+
 export interface RequestOptions {
   /** Lets a request finish after the page is hidden or closed, which is when the phone is put down. */
   keepalive?: boolean;
@@ -540,20 +570,30 @@ async function send(
   let controller: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
+  let timeoutSignal: AbortSignal | null = null;
   const onCallerAbort = () => controller?.abort(signal?.reason);
 
   if (timeoutMs > 0) {
-    controller = new AbortController();
-    if (signal?.aborted) {
-      controller.abort(signal.reason);
-    } else if (signal) {
-      signal.addEventListener("abort", onCallerAbort, { once: true });
+    if (
+      typeof AbortSignal !== "undefined" &&
+      typeof AbortSignal.timeout === "function" &&
+      (!signal || typeof AbortSignal.any === "function")
+    ) {
+      timeoutSignal = AbortSignal.timeout(timeoutMs);
+      init.signal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    } else {
+      controller = new AbortController();
+      if (signal?.aborted) {
+        controller.abort(signal.reason);
+      } else if (signal) {
+        signal.addEventListener("abort", onCallerAbort, { once: true });
+      }
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller?.abort();
+      }, timeoutMs);
+      init.signal = controller.signal;
     }
-    timer = setTimeout(() => {
-      timedOut = true;
-      controller?.abort();
-    }, timeoutMs);
-    init.signal = controller.signal;
   } else if (signal) {
     init.signal = signal;
   }
@@ -570,7 +610,7 @@ async function send(
   try {
     response = await fetch(`/api${path}`, init);
   } catch (e) {
-    if (timedOut) {
+    if (timedOut || (timeoutSignal?.aborted && !signal?.aborted)) {
       connection.setSlow(true);
       throw new TimeoutError("The server took too long to respond.");
     }
@@ -585,7 +625,13 @@ async function send(
     connection.set(false);
     throw new ConnectionError("Can't reach the server.");
   }
-  connection.recordSuccess(performance.now() - started);
+  if (response.headers.get("X-Workshop-Cache") === "stale") {
+    if (path === "/bootstrap") bootstrapWasStale = true;
+    // Served from SW cache while offline or stalled; do not report as a live server round-trip.
+  } else {
+    if (path === "/bootstrap") bootstrapWasStale = false;
+    connection.recordSuccess(performance.now() - started);
+  }
   if (!response.ok) {
     const text = await response.text();
     const json: unknown = text ? JSON.parse(text) : null;
@@ -690,6 +736,8 @@ export const api = {
     request<OfflineYear>("GET", `/years/${year}/offline`, undefined, { timeoutMs: 15_000 }),
   cacheYear: (year: number) =>
     request<YearCacheStatus>("POST", `/years/${year}/cache`, undefined, { timeoutMs: 10_000 }),
+  cacheYearStatus: (year: number) =>
+    request<YearCacheStatus>("GET", `/years/${year}/cache`, undefined, { timeoutMs: 5_000 }),
   helpers: () => request<HelpersFile | null>("GET", "/helpers"),
   open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),
   saveCode: (p: Puzzle, text: string, version: string, keepalive = false) =>

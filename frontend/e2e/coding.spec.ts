@@ -708,20 +708,49 @@ test("saves coding problems for offline use, works through one offline, and sync
   await phone.reload();
   await expect(phone.locator(".banner.offline")).toContainText("Saved coding problems open");
 
-  // Open a cached problem offline and work through Understand -> Plan -> Review -> Finish.
+  // Open a cached problem offline, edit the plan, reconnect, edit again online (verifying no
+  // false version-conflict banner), and finish cleanly.
   await phone.locator(".coding-item", { hasText: "Count the islands" }).tap();
   await expect(phone.locator(".step.current")).toHaveText("Understand");
   await phone.getByRole("button", { name: "Skip" }).tap();
   await expect(phone.locator(".step.current")).toHaveText("Plan");
   await phone.getByLabel(/How will you solve it/).fill("BFS over the grid cells.");
+  // Wait for the debounced offline save to queue `session_updated` in the outbox.
+  await expect
+    .poll(() =>
+      phone.evaluate(() => localStorage.getItem("workshop:outbox")?.includes("BFS over the grid")),
+    )
+    .toBe(true);
+
+  // Reconnect mid-session so the offline open + update flush via the outbox, then edit again
+  // online: the saver must adopt the outbox's applied version without triggering a 409 banner.
+  await setOffline(context, false);
+  await expect
+    .poll(
+      () =>
+        phone.evaluate(() => {
+          const raw = localStorage.getItem("workshop:outbox");
+          return raw ? (JSON.parse(raw) as unknown[]).length : 0;
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe(0);
+  await phone
+    .getByLabel(/How will you solve it/)
+    .fill("BFS over the grid cells, marking visited land.");
   await phone.getByRole("button", { name: "Next: code" }).tap();
   await expect(phone.locator(".step.current")).toHaveText("Code");
-  await phone.getByRole("button", { name: "Submit" }).tap();
-  await phone.getByRole("button", { name: "Give up and see how it's solved" }).tap();
+  await expect(phone.getByText(/edited on another device/i)).toHaveCount(0);
+
+  // Go back offline, move to Review and finish offline, then sync back online.
+  await setOffline(context, true);
+  await phone.reload();
+  await expect(phone.getByRole("button", { name: "Review approach" })).toBeVisible();
+  await phone.getByRole("button", { name: "Review approach" }).tap();
   await expect(phone.locator(".step.current")).toHaveText("Review");
   await expect(phone.getByRole("region", { name: "Approach" })).toBeVisible();
   await phone.getByRole("button", { name: "Good" }).tap();
-  await expect(phone.getByRole("button", { name: "Back to Coding" })).toBeVisible();
+  await expect(phone.getByRole("button", { name: "More coding" })).toBeVisible();
 
   await setOffline(context, false);
   await expect
