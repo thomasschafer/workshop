@@ -2560,3 +2560,73 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
   font-family: var(--mono);
   font-size: 20px;
 }
+
+.picker-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.picker-status p {
+  margin: 0 0 10px;
+}
+
+.day.cached {
+  position: relative;
+}
+
+.day.cached::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+  opacity: 0.8;
+}
+
+.on-device-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 8px 0 16px;
+  font-size: 14px;
+}
+
+.on-device-dl dt {
+  color: var(--muted);
+}
+
+.on-device-dl dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.on-device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.on-device-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.on-device-list-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}

@@ -43,6 +43,18 @@ pub(super) fn bad_request(message: impl Into<String>) -> ApiError {
     )
 }
 
+/// Parses an optional JSON body: empty bodies yield `T::default()`, non-empty invalid JSON fails
+/// with 400. Unlike `Option<Json<T>>`, this accepts empty bodies sent with
+/// `Content-Type: application/json`.
+pub(super) fn optional_json<T: serde::de::DeserializeOwned + Default>(
+    body: axum::body::Bytes,
+) -> Result<T, ApiError> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(T::default());
+    }
+    serde_json::from_slice(&body).map_err(|err| bad_request(format!("Invalid request body: {err}")))
+}
+
 #[cfg(test)]
 mod tests {
     use axum::body::Body;

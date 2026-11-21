@@ -2,6 +2,7 @@ import type { RefObject } from "preact";
 import { useEffect } from "preact/hooks";
 import { api, type DayMeta, type Puzzle, type UiState } from "../api";
 import type { CodeEditor } from "../editor";
+import { mergeAocPuzzle } from "../offline/db";
 import type { LatestSaver, VersionedSaver } from "../saver";
 
 /** How often to look for changes made elsewhere while a puzzle is open. */
@@ -57,6 +58,12 @@ export function useFileSync({
       try {
         const opened = await api.open(p);
         if (puzzleRef.current !== p || editor.current !== current) return;
+        void mergeAocPuzzle(p.year, p.day, {
+          code: opened.code,
+          notes: opened.notes,
+          meta: opened.meta,
+          fileUri: opened.file_uri,
+        });
         // Each saver only takes the version from elsewhere if there are no local changes;
         // otherwise it saves them, which reports a conflict if the file changed.
         if (code?.saver.adopt(opened.code, code.mark)) {

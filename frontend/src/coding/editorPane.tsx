@@ -8,6 +8,7 @@ import { ConflictBanner } from "../views/frame";
 import { ProblemsSheet } from "../views/problems";
 import { StatusLine } from "../views/status";
 import { codingApi } from "./api";
+import { updateCachedCodingDraft } from "./offline";
 import { ToolchainOffer } from "./toolchain";
 import type { OpenedLanguage } from "./types";
 
@@ -56,8 +57,11 @@ export function EditorPane({
     const parent = host.current;
     if (!parent) return;
     const code = new VersionedSaver(
-      (text, version, keepalive) =>
-        codingApi.saveCode(itemKey, language.id, text, version, keepalive),
+      async (text, version, keepalive) => {
+        const saved = await codingApi.saveCode(itemKey, language.id, text, version, keepalive);
+        void updateCachedCodingDraft(itemKey, language.id, saved);
+        return saved;
+      },
       `workshop:unsaved:coding:${itemKey}:${language.id}`,
       language.code.version,
       language.code.text,
@@ -126,6 +130,7 @@ export function EditorPane({
       {conflict ? <ConflictBanner what="code" onResolve={resolve} /> : null}
       <StatusLine
         checks={lsp ? lspStatus : null}
+        backend={lsp ? "server" : undefined}
         unavailable={lspUnavailable}
         onRetry={retryLsp}
         serverError={lspError !== null}
@@ -144,6 +149,7 @@ export function EditorPane({
           server={
             lsp ? { error: lspError, onDismiss: dismissLspError, onRestart: restartLsp } : null
           }
+          backend={lsp ? "server" : undefined}
           onGoto={(problem) => {
             editor.current?.gotoProblem(problem);
             setShowProblems(false);

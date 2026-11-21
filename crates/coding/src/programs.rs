@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 use workshop_common::programs::{find_program, find_program_in};
@@ -129,7 +129,7 @@ pub struct Program {
 }
 
 /// What happened when a program ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Run {
     pub ending: Ending,
     pub stdout: String,

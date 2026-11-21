@@ -27,6 +27,7 @@ mod settings;
 mod setup;
 mod speech;
 mod state;
+mod sync;
 mod years;
 
 use axum::Router;
@@ -54,6 +55,7 @@ pub fn router(app: Shared) -> Router {
         .route("/home", get(home::home))
         .route("/learning/deck", get(learning::deck))
         .route("/learning/sync", post(learning::sync))
+        .route("/sync", post(sync::sync))
         .route("/mistakes", get(mistakes::mistakes))
         .route("/goals", get(mistakes::goals))
         .route("/design", get(design::list))
@@ -80,6 +82,7 @@ pub fn router(app: Shared) -> Router {
         .route("/cards/{pack}/{item}/fix", post(grading::fix))
         .route("/mistakes/tag", put(mistakes::tag))
         .route("/coding", get(coding::overview))
+        .route("/coding/offline-bundle", get(coding::offline_bundle))
         .route("/coding/items/{pack}/{item}/open", post(coding::open))
         .route(
             "/coding/items/{pack}/{item}/session",
@@ -174,6 +177,12 @@ pub fn router(app: Shared) -> Router {
         .route("/years/{year}/stars", get(years::stars))
         .route("/years/{year}/times", get(years::times))
         .route("/years/{year}/leaderboard", get(years::leaderboard))
+        .route("/years/{year}/offline", get(years::offline))
+        .route(
+            "/years/{year}/cache",
+            get(years::cache_status).post(years::cache),
+        )
+        .route("/helpers", get(puzzles::helpers))
         .route("/leaderboard", put(settings::set_leaderboard))
         .route("/puzzles/{year}/{day}", get(puzzles::open_puzzle))
         .route("/puzzles/{year}/{day}/code", put(puzzles::save_code))

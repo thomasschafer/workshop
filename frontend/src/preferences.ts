@@ -75,3 +75,15 @@ export const puzzleOffered = new DevicePreference<string>("workshop:puzzle-offer
 
 /** Whether Workshop's own keyboard keeps learning where its keys are touched, as they're typed. */
 export const learnKeys = flag("workshop:learn-keys", true);
+
+/**
+ * Where code checking and running happen on this device: always on the server, automatically
+ * falling back to on-device when disconnected, or preferring on-device.
+ */
+export const ON_DEVICE_MODES = ["server", "automatic", "local"] as const;
+export type OnDeviceMode = (typeof ON_DEVICE_MODES)[number];
+export const onDeviceMode = choice<OnDeviceMode>(
+  "workshop:on-device-mode",
+  ON_DEVICE_MODES,
+  "server",
+);

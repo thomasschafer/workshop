@@ -121,6 +121,14 @@ pub enum SaveError {
     Other(#[from] anyhow::Error),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DayMetaSaveError {
+    #[error("the puzzle's settings changed elsewhere since they were loaded")]
+    Conflict { current: Box<DayMeta> },
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 /// Per-puzzle state kept outside the solutions repo, because it can contain puzzle text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(from = "StoredDayMeta")]
@@ -134,6 +142,8 @@ pub struct DayMeta {
     pub sample_answers: [Option<String>; 2],
     /// Cursor position in the editor's own units, restored when the puzzle is reopened.
     pub cursor: Option<usize>,
+    /// Monotonic version bumped on every change, so offline saves don't overwrite edits made elsewhere.
+    pub version: u64,
 }
 
 impl DayMeta {
@@ -146,6 +156,14 @@ impl DayMeta {
             Part::Two => self.sample_inputs[1].as_deref(),
         }
     }
+
+    /// Whether two `DayMeta` values hold the same settings, ignoring `version`.
+    pub fn same_content(&self, other: &Self) -> bool {
+        self.sample_blocks == other.sample_blocks
+            && self.sample_inputs == other.sample_inputs
+            && self.sample_answers == other.sample_answers
+            && self.cursor == other.cursor
+    }
 }
 
 /// `DayMeta` as stored, including fields from before each part had its own sample.
@@ -156,6 +174,7 @@ struct StoredDayMeta {
     sample_inputs: [Option<String>; 2],
     sample_answers: [Option<String>; 2],
     cursor: Option<usize>,
+    version: u64,
     sample_block: Option<usize>,
     sample_input: Option<String>,
 }
@@ -169,6 +188,7 @@ impl From<StoredDayMeta> for DayMeta {
             sample_inputs: [input_one.or(stored.sample_input), input_two],
             sample_answers: stored.sample_answers,
             cursor: stored.cursor,
+            version: stored.version,
         }
     }
 }
@@ -221,18 +241,50 @@ impl Workspace {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
         if !path.exists() {
             files::write_atomic(&path, profile.template.as_bytes())?;
-            self.ensure_project(profile)?;
-            workshop_toolchain::toolchain::add_to_gitignore(
-                &self.solutions_dir,
-                "Build output",
-                &profile.gitignore,
-            )?;
-            let readme = self.solutions_dir.join("README.md");
-            if !readme.exists() {
-                files::write_atomic(&readme, solutions_readme(profile)?.as_bytes())?;
-            }
+            self.setup_solutions_project(profile)?;
         }
         read_versioned(&path)
+    }
+
+    /// Loads a solution if its file already exists on disk, without creating one from the template.
+    pub fn load_existing_code(
+        &self,
+        profile: &LanguageProfile,
+        puzzle: Puzzle,
+    ) -> Result<Option<VersionedFile>> {
+        let path = profile.solution_path(&self.solutions_dir, puzzle)?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        read_versioned(&path).map(Some)
+    }
+
+    /// Reads the current language's shared helpers file, falling back to its template if it hasn't
+    /// been created in the solutions directory yet.
+    pub fn helpers_file(&self, profile: &LanguageProfile) -> Result<Option<(String, String)>> {
+        let Some(helpers) = &profile.helpers else {
+            return Ok(None);
+        };
+        let path = self.solutions_dir.join(relative_inside(&helpers.file)?);
+        let text = match read_optional(&path)? {
+            Some(text) => text,
+            None => helpers.template.clone(),
+        };
+        Ok(Some((helpers.file.clone(), text)))
+    }
+
+    fn setup_solutions_project(&self, profile: &LanguageProfile) -> Result<()> {
+        self.ensure_project(profile)?;
+        workshop_toolchain::toolchain::add_to_gitignore(
+            &self.solutions_dir,
+            "Build output",
+            &profile.gitignore,
+        )?;
+        let readme = self.solutions_dir.join("README.md");
+        if !readme.exists() {
+            files::write_atomic(&readme, solutions_readme(profile)?.as_bytes())?;
+        }
+        Ok(())
     }
 
     /// Writes the helpers and the files that make the solutions a project, such as a Cargo.toml,
@@ -253,7 +305,12 @@ impl Workspace {
         expected_version: &str,
     ) -> Result<VersionedFile, SaveError> {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
-        self.save_versioned(&path, text, expected_version)
+        let creating = !path.exists();
+        let saved = self.save_versioned(&path, text, expected_version)?;
+        if creating && !saved.text.is_empty() {
+            self.setup_solutions_project(profile)?;
+        }
+        Ok(saved)
     }
 
     fn save_versioned(
@@ -298,11 +355,33 @@ impl Workspace {
         }
     }
 
-    pub fn save_day_meta(&self, puzzle: Puzzle, meta: &DayMeta) -> Result<()> {
+    pub fn save_day_meta(
+        &self,
+        puzzle: Puzzle,
+        meta: &DayMeta,
+    ) -> Result<DayMeta, DayMetaSaveError> {
+        let _guard = self
+            .save_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current = self.load_day_meta(puzzle)?;
+        if meta.same_content(&current) {
+            return Ok(current);
+        }
+        if meta.version != current.version {
+            return Err(DayMetaSaveError::Conflict {
+                current: Box::new(current),
+            });
+        }
+        let next = DayMeta {
+            version: current.version + 1,
+            ..meta.clone()
+        };
         files::write_atomic(
             &self.day_meta_path(puzzle),
-            &serde_json::to_vec_pretty(meta)?,
-        )
+            &serde_json::to_vec_pretty(&next).map_err(anyhow::Error::from)?,
+        )?;
+        Ok(next)
     }
 
     pub fn load_ui_state(&self) -> Result<UiState> {
@@ -548,9 +627,22 @@ mod tests {
             sample_inputs: [Some("1 2".into()), Some("5 6".into())],
             sample_answers: [Some("3".into()), Some("30".into())],
             cursor: Some(10),
+            version: 0,
         };
-        workspace.save_day_meta(puzzle, &meta).unwrap();
-        assert_eq!(workspace.load_day_meta(puzzle).unwrap(), meta);
+        let saved_meta = workspace.save_day_meta(puzzle, &meta).unwrap();
+        assert_eq!(saved_meta.version, 1);
+        assert_eq!(workspace.load_day_meta(puzzle).unwrap(), saved_meta);
+        // Repeating the same content with a stale version is idempotent (e.g. retried save).
+        assert_eq!(workspace.save_day_meta(puzzle, &meta).unwrap(), saved_meta);
+        // Divergent content against a stale version is reported as a conflict.
+        let stale_other = DayMeta {
+            cursor: Some(99),
+            ..meta
+        };
+        assert!(matches!(
+            workspace.save_day_meta(puzzle, &stale_other),
+            Err(DayMetaSaveError::Conflict { current }) if *current == saved_meta
+        ));
 
         let ui = UiState {
             puzzle: Some(puzzle),

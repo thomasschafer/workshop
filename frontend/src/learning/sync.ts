@@ -2,8 +2,16 @@
 // sent to the server whenever it can be reached. Each attempt and change has its own id, so
 // sending one again after a reply was lost changes nothing.
 
-import { ApiError, ConnectionError, connection, request } from "../api";
+import {
+  ApiError,
+  ConnectionError,
+  connection,
+  onNetworkOnline,
+  request,
+  TimeoutError,
+} from "../api";
 import { errorMessage } from "../errors";
+import { outbox, type UnifiedSyncResponse } from "../offline/outbox";
 import { newId, utcOffset } from "./local";
 import type { Attempt, Deck, FlagChange, RetirementChange } from "./types";
 
@@ -172,13 +180,35 @@ export class Learning {
     const attempts = this.saved.attempts;
     const flags = this.saved.flags;
     const retirements = this.retirementChanges;
+    const pendingOutbox =
+      typeof localStorage !== "undefined" && this.storage === localStorage ? outbox() : null;
+    const outboxBatch = pendingOutbox ? pendingOutbox.tryAcquireBatch() : null;
+    let outboxSettled = false;
     this.setStatus({ syncing: true });
     try {
-      const deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
-        attempts,
-        flags,
-        retirements,
-      });
+      let deck: Deck;
+      if (outboxBatch && pendingOutbox) {
+        const unified = await request<UnifiedSyncResponse>(
+          "POST",
+          `/sync?utc_offset=${utcOffset()}`,
+          {
+            attempts,
+            flags,
+            retirements,
+            coding_events: outboxBatch.coding_events,
+            mistake_tags: outboxBatch.mistake_tags,
+          },
+        );
+        pendingOutbox.applySyncResults(outboxBatch, unified);
+        outboxSettled = true;
+        deck = unified.deck;
+      } else {
+        deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
+          attempts,
+          flags,
+          retirements,
+        });
+      }
       // Anything done while this was on its way is still to send.
       const sentAttempts = new Set(attempts.map((a) => a.id));
       const sentFlags = new Set(flags.map((f) => f.id));
@@ -193,14 +223,18 @@ export class Learning {
       this.save();
       this.setStatus({ syncing: false, offline: false, error: null });
     } catch (e) {
+      if (outboxBatch && pendingOutbox && !outboxSettled) {
+        pendingOutbox.releaseBatch(outboxBatch);
+      }
       const offline = e instanceof ConnectionError;
+      const slow = e instanceof TimeoutError;
       this.setStatus({
         syncing: false,
-        offline,
+        offline: offline || slow,
         // What was sent is kept, so nothing done is lost, and the problem is shown until fixed.
-        error: offline ? null : e instanceof ApiError ? e.message : errorMessage(e),
+        error: offline || slow ? null : e instanceof ApiError ? e.message : errorMessage(e),
       });
-      if (offline) {
+      if (offline || slow) {
         this.retry = setTimeout(() => void this.sync(), this.retryMs);
         this.retryMs = Math.min(MAX_RETRY_MS, this.retryMs * 2);
       }
@@ -216,7 +250,7 @@ export function learning(): Learning {
     const created = new Learning();
     // Straight away when the server or the network is back, rather than at the next retry.
     connection.subscribe((online) => online && created.syncIfPending());
-    window.addEventListener("online", () => created.syncIfPending());
+    onNetworkOnline(() => created.syncIfPending());
     shared = created;
   }
   return shared;

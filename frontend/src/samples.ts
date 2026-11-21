@@ -7,6 +7,7 @@ export const EMPTY_META: DayMeta = {
   sample_inputs: [null, null],
   sample_answers: [null, null],
   cursor: null,
+  version: 0,
 };
 
 /**

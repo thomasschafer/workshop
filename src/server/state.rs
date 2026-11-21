@@ -21,6 +21,19 @@ use crate::settings::AppSettings;
 use crate::solutions::Solutions;
 use crate::workspace::Workspace;
 
+/// The run in progress, if there is one, and its client-supplied ID for safe cancellation.
+pub(super) struct ActiveRun {
+    pub(super) id: Option<String>,
+    pub(super) cancel: CancellationToken,
+}
+
+/// Status of a background Advent of Code prefetch for a year.
+#[derive(Debug, Clone, Default)]
+pub(super) struct YearCacheState {
+    pub(super) caching: bool,
+    pub(super) error: Option<String>,
+}
+
 pub struct App {
     pub(super) config: Config,
     pub(super) paths: Paths,
@@ -33,7 +46,7 @@ pub struct App {
     settings: std::sync::RwLock<AppSettings>,
     pub(super) run_lock: Mutex<()>,
     /// Cancels the run in progress, if there is one.
-    pub(super) current_run: std::sync::Mutex<Option<CancellationToken>>,
+    pub(super) current_run: std::sync::Mutex<Option<ActiveRun>>,
     /// Held while anything is being installed, as packages need the toolchain.
     pub(super) install_lock: Arc<Mutex<()>>,
     pub(super) packages_install: Installs,
@@ -78,6 +91,8 @@ pub struct App {
     pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
     /// Held while the tutor poses a twist, so a review asked for twice gets only the one.
     pub(super) posing_twist: tokio::sync::Mutex<()>,
+    /// Background prefetch jobs for saving a year's AoC puzzles offline.
+    pub(super) year_cache: std::sync::Mutex<BTreeMap<u16, YearCacheState>>,
 }
 
 pub(super) type Shared = Arc<App>;
@@ -151,6 +166,7 @@ impl App {
             author_reviewer: tokio::sync::Mutex::default(),
             oracles: tokio::sync::Mutex::default(),
             posing_twist: tokio::sync::Mutex::default(),
+            year_cache: std::sync::Mutex::new(BTreeMap::new()),
             config,
             paths,
             gate: Arc::new(workshop_auth::Gate::new(token, PUBLIC_ASSETS)),

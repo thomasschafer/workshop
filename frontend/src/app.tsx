@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { api, type Bootstrap, loginNeeded, type Problem, type Puzzle, type Tab } from "./api";
+import {
+  api,
+  type Bootstrap,
+  ConnectionError,
+  loginNeeded,
+  type OpenPuzzle,
+  type Problem,
+  type Puzzle,
+  type Tab,
+  TimeoutError,
+} from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
 import { CodeEditor, type Diagnostics, type HelixSetup, hoverText, NO_DIAGNOSTICS } from "./editor";
 import { errorMessage } from "./errors";
@@ -23,10 +33,11 @@ import { useSampleFinding } from "./hooks/useSampleFinding";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useTalkKey } from "./hooks/useTalkKey";
 import { useUiStateSaver } from "./hooks/useUiStateSaver";
+import { getAocPuzzle, getHelpers, mergeAocPuzzle, putHelpers } from "./offline/db";
 import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleTitle } from "./puzzle";
-import { sampleInput, withSuggestions } from "./samples";
+import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
 import { watchSwipes } from "./swipe";
 import { turnTab } from "./tabTurn";
@@ -76,6 +87,9 @@ type Sheet =
   | "shortcuts"
   | null;
 
+/** FNV-1a version of an empty file, matching `workshop_common::files::version_of("")`. */
+const EMPTY_FILE_VERSION = "cbf29ce484222325";
+
 /** The space kept clear below the code for the cards floating over it. */
 const insetFor = (stackHeight: number) => (stackHeight > 0 ? stackHeight + 16 : 0);
 
@@ -116,6 +130,7 @@ export function App({
   const [openError, setOpenError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
+  const [problemFromCache, setProblemFromCache] = useState(false);
   const [problemError, setProblemError] = useState<string | null>(null);
   const [problemLoading, setProblemLoading] = useState(false);
 
@@ -176,7 +191,7 @@ export function App({
     [],
   );
   const notify = (tone: "ok" | "info" | "warn" | "error", text: string) => queue.notify(tone, text);
-  const { meta, setMeta, metaRef, metaSavers, updateMeta } = useDayMeta(puzzleRef, notify);
+  const { meta, initMeta, metaRef, metaSavers, updateMeta } = useDayMeta(puzzleRef, notify);
   const { findingSamples, setFindingSamples, findSamples } = useSampleFinding(
     puzzleRef,
     metaRef,
@@ -188,7 +203,7 @@ export function App({
   // The part being worked on: the next one to solve, or for a solved puzzle being worked through
   // again, the one the code has got to.
   const workingPart = part ?? (part2Started === true ? 2 : 1);
-  const { run, setRun, doRun, doSubmit } = useRun({
+  const { run, setRun, doRun, cancelRun, doSubmit } = useRun({
     puzzleRef,
     part,
     workingPart,
@@ -224,6 +239,7 @@ export function App({
     [],
   );
   const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
+  const [onDeviceMode, setOnDeviceMode] = useState(() => preferences.onDeviceMode.get());
   const settings = useEditorSettings(boot.editor, editor);
   const {
     lineWrapping,
@@ -312,10 +328,21 @@ export function App({
         const loaded = await api.problem(p, refresh);
         if (puzzleRef.current !== p) return;
         setProblem(loaded);
+        setProblemFromCache(false);
+        void mergeAocPuzzle(p.year, p.day, { problem: loaded });
         const suggested = withSuggestions(metaRef.current, loaded);
         if (suggested !== metaRef.current) updateMeta(suggested);
         void findSamples(p, loaded);
       } catch (e) {
+        if (!refresh && (e instanceof ConnectionError || e instanceof TimeoutError)) {
+          const cached = await getAocPuzzle(p.year, p.day);
+          if (puzzleRef.current !== p) return;
+          if (cached?.problem) {
+            setProblem(cached.problem);
+            setProblemFromCache(true);
+            return;
+          }
+        }
         if (puzzleRef.current === p) setProblemError(errorMessage(e));
       } finally {
         if (puzzleRef.current === p) setProblemLoading(false);
@@ -329,6 +356,7 @@ export function App({
     if (!puzzle) return;
     let cancelled = false;
     setProblem(null);
+    setProblemFromCache(false);
     setOpenError(null);
     setRun(initialRunState);
     setCodeConflict(null);
@@ -341,18 +369,73 @@ export function App({
 
     (async () => {
       try {
-        const opened = await api.open(puzzle);
+        let opened: OpenPuzzle;
+        let fromOfflineCache = false;
+        try {
+          opened = await api.open(puzzle);
+          if (cancelled) return;
+          void mergeAocPuzzle(puzzle.year, puzzle.day, {
+            code: opened.code,
+            notes: opened.notes,
+            meta: opened.meta,
+            fileUri: opened.file_uri,
+          });
+          // Quietly cache the puzzle's input and shared helpers on-device for offline use.
+          void getAocPuzzle(puzzle.year, puzzle.day).then((existing) => {
+            if (existing?.input === undefined) {
+              api
+                .input(puzzle)
+                .then((inp) => mergeAocPuzzle(puzzle.year, puzzle.day, { input: inp.text }))
+                .catch(() => {});
+            }
+          });
+          void getHelpers(boot.language.id).then((existing) => {
+            if (!existing) {
+              api
+                .helpers()
+                .then((h) => (h ? putHelpers(h.language_id, h.file, h.text) : undefined))
+                .catch(() => {});
+            }
+          });
+        } catch (openErr) {
+          if (!(openErr instanceof ConnectionError || openErr instanceof TimeoutError)) {
+            throw openErr;
+          }
+          const cached = await getAocPuzzle(puzzle.year, puzzle.day);
+          if (cancelled) return;
+          if (!cached?.code) {
+            setOpenError(
+              "This puzzle isn't saved on this device yet. Open it once while connected, or save the year for offline use from the puzzle list.",
+            );
+            return;
+          }
+          fromOfflineCache = true;
+          opened = {
+            code: cached.code,
+            notes: cached.notes ?? { text: "", version: EMPTY_FILE_VERSION, path: "" },
+            meta: cached.meta ?? EMPTY_META,
+            file_uri: cached.fileUri ?? "",
+          };
+          if (cached.problem) {
+            setProblem(cached.problem);
+            setProblemFromCache(true);
+          }
+        }
+
         if (cancelled) return;
-        metaRef.current = opened.meta;
-        setMeta(opened.meta);
-        void loadProblem(puzzle, false);
+        initMeta(puzzle, opened.meta);
+        if (!fromOfflineCache) void loadProblem(puzzle, false);
 
         const host = editorHost.current;
         if (!host) return;
         fileUri.current = opened.file_uri;
         const key = `${puzzle.year}-${puzzle.day}`;
         const codeSaver = new VersionedSaver(
-          (text, version, keepalive) => api.saveCode(puzzle, text, version, keepalive),
+          async (text, version, keepalive) => {
+            const saved = await api.saveCode(puzzle, text, version, keepalive);
+            void mergeAocPuzzle(puzzle.year, puzzle.day, { code: saved });
+            return saved;
+          },
           `workshop:unsaved:code:${key}`,
           opened.code.version,
           opened.code.text,
@@ -361,7 +444,11 @@ export function App({
         );
         saver.current = codeSaver;
         const notes = new VersionedSaver(
-          (text, version, keepalive) => api.saveNotes(puzzle, text, version, keepalive),
+          async (text, version, keepalive) => {
+            const saved = await api.saveNotes(puzzle, text, version, keepalive);
+            void mergeAocPuzzle(puzzle.year, puzzle.day, { notes: saved });
+            return saved;
+          },
           `workshop:unsaved:notes:${key}`,
           opened.notes.version,
           opened.notes.text,
@@ -421,7 +508,14 @@ export function App({
       editor.current?.destroy();
       editor.current = null;
     };
-  }, [puzzle, boot, lsp, loadProblem, updateMeta, lookUpType]);
+  }, [puzzle, boot, lsp, loadProblem, initMeta, updateMeta, lookUpType]);
+
+  // Once back online, refresh a puzzle page that was loaded from cache so part 2 appears if solved.
+  useEffect(() => {
+    if (online && problemFromCache && puzzle) {
+      void loadProblem(puzzle, false);
+    }
+  }, [online, problemFromCache, puzzle, loadProblem]);
 
   useFileSync({
     puzzleRef,
@@ -755,6 +849,7 @@ export function App({
     <ProblemView
       puzzle={puzzle}
       problem={problem}
+      fromCache={problemFromCache}
       error={problemError}
       loading={problemLoading}
       meta={meta}
@@ -855,6 +950,7 @@ export function App({
           ) : null}
           <StatusLine
             checks={lsp ? lspStatus : null}
+            backend={lsp ? "server" : undefined}
             unavailable={lspUnavailable}
             onRetry={retryLsp}
             serverError={lspError !== null}
@@ -928,6 +1024,7 @@ export function App({
             server={
               lsp ? { error: lspError, onDismiss: dismissLspError, onRestart: restartLsp } : null
             }
+            backend={lsp ? "server" : undefined}
             onGoto={(problem) => {
               editor.current?.gotoProblem(problem);
               setSheet(null);
@@ -952,7 +1049,7 @@ export function App({
               expected={expected}
               accepted={problem?.answers ?? []}
               onRun={(input) => void doRun(input, true)}
-              onCancel={() => void api.cancelRun()}
+              onCancel={cancelRun}
               onAskSubmit={() => setRun((r) => ({ ...r, confirmSubmit: true }))}
               onSubmit={(answer) => void doSubmit(answer)}
               onDismissSubmit={() => setRun((r) => ({ ...r, confirmSubmit: false }))}
@@ -1015,6 +1112,16 @@ export function App({
               settings.setHelixOn(enabled);
               const uri = fileUri.current;
               editor.current?.setHelix(uri ? helixSetupRef.current(fileName(uri)) : null);
+            }}
+            onDevice={{
+              mode: onDeviceMode,
+              onMode: (mode) => {
+                preferences.onDeviceMode.set(mode);
+                setOnDeviceMode(mode);
+              },
+              languageName: boot.language.name,
+              hasLsp: boot.language.has_lsp,
+              hasFormatter: boot.language.has_formatter,
             }}
             onInsertSnippet={(s) => {
               editor.current?.insertSnippet(s.body);

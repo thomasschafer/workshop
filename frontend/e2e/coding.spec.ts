@@ -696,3 +696,71 @@ test("says clearly that problems need the server, while code to read works offli
   await expect(phone.locator(".step.current")).toHaveText("Understand");
   await expect(phone.locator(".learn-sync")).toHaveCount(0);
 });
+
+test("saves coding problems for offline use, works through one offline, and syncs back", async () => {
+  await phone.goto("/coding");
+  await phone.getByRole("button", { name: "Save problems for offline" }).tap();
+  await expect(phone.getByRole("button", { name: "Refresh offline copy" })).toBeVisible({
+    timeout: 15_000,
+  });
+
+  await setOffline(context, true);
+  await phone.reload();
+  await expect(phone.locator(".banner.offline")).toContainText("Saved coding problems open");
+
+  // Open a cached problem offline, edit the plan, reconnect, edit again online (verifying no
+  // false version-conflict banner), and finish cleanly.
+  await phone.locator(".coding-item", { hasText: "Count the islands" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Understand");
+  await phone.getByRole("button", { name: "Skip" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Plan");
+  await phone.getByLabel(/How will you solve it/).fill("BFS over the grid cells.");
+  // Wait for the debounced offline save to queue `session_updated` in the outbox.
+  await expect
+    .poll(() =>
+      phone.evaluate(() => localStorage.getItem("workshop:outbox")?.includes("BFS over the grid")),
+    )
+    .toBe(true);
+
+  // Reconnect mid-session so the offline open + update flush via the outbox, then edit again
+  // online: the saver must adopt the outbox's applied version without triggering a 409 banner.
+  await setOffline(context, false);
+  await expect
+    .poll(
+      () =>
+        phone.evaluate(() => {
+          const raw = localStorage.getItem("workshop:outbox");
+          return raw ? (JSON.parse(raw) as unknown[]).length : 0;
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe(0);
+  await phone
+    .getByLabel(/How will you solve it/)
+    .fill("BFS over the grid cells, marking visited land.");
+  await phone.getByRole("button", { name: "Next: code" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Code");
+  await expect(phone.getByText(/edited on another device/i)).toHaveCount(0);
+
+  // Go back offline, move to Review and finish offline, then sync back online.
+  await setOffline(context, true);
+  await phone.reload();
+  await expect(phone.getByRole("button", { name: "Review approach" })).toBeVisible();
+  await phone.getByRole("button", { name: "Review approach" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Review");
+  await expect(phone.getByRole("region", { name: "Approach" })).toBeVisible();
+  await phone.getByRole("button", { name: "Good" }).tap();
+  await expect(phone.getByRole("button", { name: "More coding" })).toBeVisible();
+
+  await setOffline(context, false);
+  await expect
+    .poll(
+      async () => {
+        const res = await phone.request.get("/api/coding?utc_offset=0");
+        const data = (await res.json()) as { items: { key: string; status: string }[] };
+        return data.items.find((i) => i.key === "sample/islands")?.status;
+      },
+      { timeout: 15_000 },
+    )
+    .toBe("done");
+});

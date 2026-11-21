@@ -16,6 +16,7 @@ import { GLIDE_MS } from "../src/helix/glide";
 import { charFor, DOUBLE_TAP_MS, LAYOUT } from "../src/keyboard";
 import { TYPING_PHRASES } from "../src/typingBench";
 import { FAKE_LSP_FAILS, HOME, PORT } from "./fixture";
+import { setOffline } from "./offline";
 import { installSimulatedSpeech } from "./speech";
 
 // The tests share one page and run in order, like one session with the app.
@@ -1076,6 +1077,10 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   if (!(await december.locator(".picker").isVisible())) {
     await december.locator(".puzzle-button").click();
   }
+  // Let the picker's initial stars and times fetches settle before jumping the fake clock an hour
+  // forward, which would otherwise trigger the client's 25s request timeout mid-flight.
+  await expect(december.locator(".star-times")).toContainText("1:02:03");
+  await expect(december.locator(".day.today")).toHaveText("3★");
   // Seven hours to go, stopped there, so the countdown reads the same however slowly the page
   // got here. Pausing a second short then fast-forwarding fires the countdown's timer, which
   // jumping doesn't.
@@ -1083,8 +1088,6 @@ test("counts down to the next puzzle, and offers today's", async ({ browser }) =
   await december.clock.fastForward(1000);
   await expect(december.locator(".countdown")).toContainText("Day 4 unlocks in 7h 00m");
   await expect(december.getByRole("button", { name: "Day 4, not unlocked yet" })).toBeDisabled();
-  await expect(december.locator(".star-times")).toContainText("1:02:03");
-  await expect(december.locator(".day.today")).toHaveText("3★");
 
   await december.clock.fastForward("07:00:01");
   await expect(december.getByRole("button", { name: "Day 4, not unlocked yet" })).toHaveCount(0);
@@ -2758,5 +2761,85 @@ test("types and deletes in Helix's insert mode however a keyboard other than Wor
 
   for (let i = 0; i < 5; i++) await input("insertText", "u");
   await expect.poll(saved).toBe(original);
+  await context.close();
+});
+
+test("opens a cached Advent of Code puzzle offline, edits notes, shows On-device settings, and syncs", async ({
+  browser,
+}) => {
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  const context = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${PORT}`,
+  });
+  const phone = await context.newPage();
+  await phone.goto(`/advent-of-code?token=${token}`);
+  await phone.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+  await phone.reload();
+  await expect
+    .poll(() => phone.evaluate(() => navigator.serviceWorker.controller !== null))
+    .toBe(true);
+
+  // Open Day 4 online so its problem, input, code and notes are cached in IndexedDB.
+  if (!(await phone.locator(".picker").isVisible())) {
+    await phone
+      .locator("header.top")
+      .getByRole("button", { name: /Practice puzzle|2017/ })
+      .tap();
+    await expect(phone.locator(".picker")).toBeVisible();
+  }
+  await phone.getByRole("button", { name: "2017", exact: true }).tap();
+  await phone.locator(".day", { hasText: /^4$/ }).tap();
+  await expect(phone.locator(".problem")).toContainText("Day 4: Counting Lines");
+
+  // Open Settings -> On-device and verify live diagnostics & cached puzzle count.
+  await phone.getByRole("button", { name: "Settings" }).tap();
+  await phone.locator(".settings-row", { hasText: "On-device" }).getByRole("button").tap();
+  await expect(phone.getByRole("dialog", { name: "On-device" })).toBeVisible();
+  await expect(phone.locator(".on-device")).toContainText("On server");
+  await expect(phone.locator(".on-device")).toContainText(/puzzle(s)? cached/);
+  await phone.getByRole("dialog").getByRole("button", { name: "Close" }).tap();
+
+  // Go offline, reload, open Day 4 from the picker offline, and verify cached problem, input,
+  // and offline notes editing.
+  await setOffline(context, true);
+  await phone.reload();
+  if (!(await phone.locator(".picker").isVisible())) {
+    await phone
+      .locator("header.top")
+      .getByRole("button", { name: /Practice puzzle|2017/ })
+      .tap();
+    await expect(phone.locator(".picker")).toBeVisible();
+  }
+  await phone.getByRole("button", { name: "2017", exact: true }).tap();
+  await expect(phone.locator(".day.cached", { hasText: /^4$/ })).toBeVisible();
+  await phone.locator(".day", { hasText: /^4$/ }).tap();
+  await phone.getByRole("button", { name: "Problem" }).tap();
+  await expect(phone.locator(".problem")).toContainText("Day 4: Counting Lines", {
+    timeout: 15_000,
+  });
+  await expect(phone.locator(".problem")).toContainText("Cached copy");
+  await phone.getByRole("button", { name: "Show your puzzle input" }).tap();
+  await expect(phone.locator(".input-text")).toBeVisible();
+
+  await phone.getByRole("button", { name: "Notes" }).tap();
+  await phone.locator(".notes textarea").fill("offline note check");
+
+  await setOffline(context, false);
+  const notesFile = join(HOME, "solutions", "notes", "2017", "day04.md");
+  await expect
+    .poll(
+      () => {
+        try {
+          return readFileSync(notesFile, "utf8");
+        } catch {
+          return "";
+        }
+      },
+      { timeout: 15_000 },
+    )
+    .toContain("offline note check");
   await context.close();
 });

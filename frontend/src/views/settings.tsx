@@ -19,6 +19,7 @@ import { CODE_SCALE_RANGE, stepCodeScale } from "../zoom";
 import { Checks } from "./checks";
 import { Modal } from "./modal";
 import { ModelsSection } from "./models";
+import { OnDevicePage, type OnDeviceProps } from "./onDevice";
 import { PackagesSection } from "./packages";
 import { ServerSpeechSection } from "./speech";
 import { ThemeSection } from "./theme";
@@ -63,6 +64,8 @@ interface Props {
   /** What's wrong with the Helix keys in the config, if anything. */
   helixProblems: string | null;
   onHelix: (enabled: boolean) => void;
+  /** On-device settings and live diagnostics. */
+  onDevice: OnDeviceProps;
 }
 
 /** A page of settings, opened from the list. */
@@ -71,6 +74,7 @@ type Page =
   | "talking"
   | "packages"
   | "display"
+  | "on-device"
   | "repo"
   | "leaderboard"
   | "notifications"
@@ -82,6 +86,7 @@ const TITLES: Record<Page, string> = {
   talking: "Talking",
   packages: "Packages",
   display: "Display",
+  "on-device": "On-device",
   repo: "Solutions repo",
   leaderboard: "Leaderboard",
   notifications: "Notifications",
@@ -144,6 +149,7 @@ function SettingsList(props: Props & { onOpen: (page: Page) => void }) {
     "talking",
     ...(packagesState ? (["packages"] as const) : []),
     "display",
+    "on-device",
     "repo",
     "notifications",
     "leaderboard",
@@ -205,6 +211,8 @@ function PageContent({ page, ...props }: Props & { page: Page }) {
       return <PackagesSection packages={props.packages} heading={false} />;
     case "display":
       return <DisplayPage {...props} />;
+    case "on-device":
+      return <OnDevicePage {...props.onDevice} />;
     case "repo":
       return <RepoPage {...props} />;
     case "leaderboard":

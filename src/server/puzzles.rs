@@ -12,7 +12,7 @@ use super::lsp::file_uri;
 use super::state::Shared;
 use crate::aoc::{Part, Problem};
 use crate::language::Puzzle;
-use crate::workspace::{DayMeta, SaveError, VersionedFile};
+use crate::workspace::{DayMeta, DayMetaSaveError, SaveError, VersionedFile};
 
 /// Asks the edit model for a part's example, for when the page's structure doesn't give it away.
 /// What it proposes, including that there's none, is kept, so each part is only asked about once.
@@ -144,9 +144,40 @@ pub(super) async fn save_meta(
     State(app): State<Shared>,
     Path((year, day)): Path<(u16, u8)>,
     Json(meta): Json<DayMeta>,
-) -> ApiResult<()> {
-    app.workspace.save_day_meta(puzzle(year, day)?, &meta)?;
-    Ok(Json(()))
+) -> ApiResult<DayMeta> {
+    match app.workspace.save_day_meta(puzzle(year, day)?, &meta) {
+        Ok(saved) => Ok(Json(saved)),
+        Err(DayMetaSaveError::Conflict { current }) => Err(ApiError(
+            StatusCode::CONFLICT,
+            serde_json::json!({
+                "error": "Puzzle settings changed elsewhere.",
+                "current": current,
+            }),
+        )),
+        Err(DayMetaSaveError::Other(err)) => Err(err.into()),
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct HelpersFile {
+    language_id: String,
+    file: String,
+    text: String,
+}
+
+/// The shared helpers module for the active AoC language, for caching on-device.
+pub(super) async fn helpers(State(app): State<Shared>) -> ApiResult<Option<HelpersFile>> {
+    let language_id = app.settings().language;
+    let profile = app.language();
+    let file = app
+        .workspace
+        .helpers_file(profile)?
+        .map(|(file, text)| HelpersFile {
+            language_id,
+            file,
+            text,
+        });
+    Ok(Json(file))
 }
 
 pub(super) async fn problem(
