@@ -454,14 +454,20 @@ impl AocClient {
             })
             .await?;
         let status = response.status();
+        // Differs from `url` when Advent of Code redirected the answer.
+        let landed = response.url().path().to_owned();
         let body = response.text().await?;
+        let what = format!("submitting {puzzle} part {}", part.number());
         if rejects_session(status, &body) {
+            tracing::warn!("{what}: {status} from {landed}, which asks to log in");
             return Err(SESSION_REJECTED.into());
         }
         if !status.is_success() {
+            tracing::warn!("{what}: {status} from {landed}");
             bail!("Advent of Code returned {status} when submitting");
         }
         let outcome = parse_submit_response(&body, part, answer);
+        tracing::info!("{what}: {status} from {landed}: {outcome:?}");
         if outcome.shows_progress() {
             // The problem page now shows the next part and the accepted answer.
             let _ = std::fs::remove_file(self.day_dir(puzzle).join("problem.html"));
