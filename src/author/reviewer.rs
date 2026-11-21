@@ -135,7 +135,7 @@ pub async fn chosen(config: &Config) -> Reviewer {
 }
 
 /// Whether a provider's CLI is installed and, if it can say, logged in.
-async fn is_ready(provider: &ProviderConfig) -> bool {
+pub async fn is_ready(provider: &ProviderConfig) -> bool {
     let Some(program) = provider.command.first() else {
         return false;
     };

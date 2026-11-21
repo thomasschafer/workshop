@@ -49,7 +49,7 @@ Which reviewer a run uses:
 2. Otherwise, the first of these that isn't the writer's provider, and whose CLI is installed and logged in: the newest Sol through Codex, then the newest Opus through Claude Code.
 3. Otherwise, the writer's own provider and model.
 
-It's chosen as each run starts. Packs, under the author, says which it is and why, and so does `workshop doctor`, which warns when it's the writer's own provider and says what to install for another, as an option. To use Claude Code alone, nothing needs setting, or to say so, set:
+It's chosen as each run starts. Packs, under the author, says which it is and why, and so does `workshop doctor`, which warns when it's the writer's own provider and says what to install for another, as an option, and fails when the one set isn't installed or logged in. To use Claude Code alone, nothing needs setting, or to say so, set:
 
 ```toml
 [author]

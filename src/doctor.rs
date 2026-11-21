@@ -179,10 +179,26 @@ pub async fn run(config: &Config, paths: &Paths, has_aoc_session: bool) -> Vec<C
 /// Which model reviews the author's items, and why. A reviewer from the writer's own provider
 /// works, so another provider, such as Codex alongside Claude Code, is only a suggestion.
 async fn check_author_reviewer(config: &Config) -> Check {
-    let reviewer = crate::author::reviewer::chosen(config).await;
+    use crate::author::reviewer::{self, Why};
+    let reviewer = reviewer::chosen(config).await;
     let name = "Author's reviewer";
-    let detail = crate::author::reviewer::named(config, &reviewer.model);
+    let detail = reviewer::named(config, &reviewer.model);
     let reason = reviewer.reason(config);
+    // One chosen by itself is already known to be ready; one set in the config isn't.
+    let provider = &config.providers[&reviewer.model.provider];
+    if reviewer.why == Why::Configured && !reviewer::is_ready(provider).await {
+        let program = &provider.command[0];
+        let install = provider
+            .install_hint
+            .clone()
+            .unwrap_or_else(|| format!("Install `{program}` and log in."));
+        return Check::problem(
+            Status::Fail,
+            name,
+            format!("{detail}, set under [author], isn't installed or logged in"),
+            format!("{install} Or choose another reviewer under [author]."),
+        );
+    }
     if reviewer.shares_provider(config) {
         Check::problem(
             Status::Warn,
@@ -528,11 +544,18 @@ pub fn print(checks: &[Check]) {
 mod tests {
     use super::*;
 
-    /// Config with Codex standing in, logged in or not, so no model CLI is run.
+    /// Config with Claude Code standing in, logged in, and Codex, logged in or not, so no model
+    /// CLI is run.
     fn config(author: &str, codex_logged_in: bool) -> Config {
-        let exit = if codex_logged_in { 0 } else { 1 };
+        let stand_in = |name: &str, exit: u8| {
+            format!(
+                "name = \"{name}\"\ncommand = [\"sh\"]\ninput = \"stdin\"\noutput = \"text\"\nauth_check_command = [\"sh\", \"-c\", \"exit {exit}\"]\n"
+            )
+        };
+        let codex = stand_in("Codex", if codex_logged_in { 0 } else { 1 });
+        let claude = stand_in("Claude Code", 0);
         Config::parse(&format!(
-            "[author]\n{author}\n[providers.codex]\nname = \"Codex\"\ncommand = [\"sh\"]\ninput = \"stdin\"\noutput = \"text\"\nauth_check_command = [\"sh\", \"-c\", \"exit {exit}\"]\n"
+            "[author]\n{author}\n[providers.codex]\n{codex}[providers.claude]\n{claude}"
         ))
         .unwrap()
     }
@@ -566,5 +589,24 @@ mod tests {
         .await;
         assert_eq!(set.status, Status::Warn);
         assert!(set.fix.unwrap().contains("set under [author]"));
+    }
+
+    #[tokio::test]
+    async fn fails_when_the_reviewer_set_isnt_installed_or_logged_in() {
+        let set = "reviewer = { provider = \"codex\", model = \"sol\" }";
+        let ready = check_author_reviewer(&config(set, true)).await;
+        assert_eq!(ready.status, Status::Ok);
+        let logged_out = check_author_reviewer(&config(set, false)).await;
+        assert_eq!(logged_out.status, Status::Fail);
+        assert_eq!(
+            logged_out.detail,
+            "sol with Codex, set under [author], isn't installed or logged in"
+        );
+        assert!(
+            logged_out
+                .fix
+                .unwrap()
+                .ends_with("Or choose another reviewer under [author]."),
+        );
     }
 }
