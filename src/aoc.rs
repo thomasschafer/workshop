@@ -37,6 +37,14 @@ const SESSION_REJECTED: NeedsLogin = NeedsLogin(
     "Advent of Code didn't accept your session cookie; it may have expired. Log in again in setup, or see `workshop doctor`.",
 );
 
+/// Whether Advent of Code turned the session cookie away. It answers a malformed cookie, or a
+/// logged-out request for an input, with an error asking to log in, but an expired cookie with
+/// an ordinary page asking to "identify yourself". An answer posted with one is redirected to
+/// that page.
+fn rejects_session(status: reqwest::StatusCode, body: &str) -> bool {
+    body.contains("identify yourself") || (!status.is_success() && body.contains("log in"))
+}
+
 /// Whether someone is waiting on a request, such as for a puzzle they've opened, or it's for
 /// something shown alongside, such as the calendar's stars. Requests are spaced apart either way,
 /// but one someone is waiting on goes first.
@@ -447,7 +455,7 @@ impl AocClient {
             .await?;
         let status = response.status();
         let body = response.text().await?;
-        if !status.is_success() && body.contains("log in") {
+        if rejects_session(status, &body) {
             return Err(SESSION_REJECTED.into());
         }
         if !status.is_success() {
@@ -491,9 +499,11 @@ impl AocClient {
         };
         let status = response.status();
         let body = response.text().await?;
+        if rejects_session(status, &body) {
+            return Err(SESSION_REJECTED.into());
+        }
         match status.as_u16() {
             200 => Ok(body),
-            400 | 500 if body.contains("log in") => Err(SESSION_REJECTED.into()),
             404 => bail!("Advent of Code has no page at {url}; is the puzzle unlocked yet?"),
             _ => bail!("Advent of Code returned {status} for {url}"),
         }
@@ -931,9 +941,8 @@ pub fn parse_calendar(html: &str) -> BTreeMap<u8, u8> {
 }
 
 pub fn parse_submit_response(html: &str, part: Part, answer: &str) -> SubmitOutcome {
-    // Advent of Code sometimes redirects an answer to the puzzle page rather than giving a
-    // verdict. That page's articles are the puzzle itself, so read whether the part is solved
-    // from it instead.
+    // Should Advent of Code send back the puzzle page rather than a verdict, its articles are
+    // the puzzle itself, so read whether the part is solved from it instead.
     if let Ok(problem) = parse_problem(html) {
         return match problem.answers.get(usize::from(part.number() - 1)) {
             Some(accepted) if accepted == answer => SubmitOutcome::Correct,
@@ -1299,6 +1308,22 @@ Day       Time    Rank  Score       Time   Rank  Score
                     _ => (StatusCode::INTERNAL_SERVER_ERROR, "error"),
                 }
             }),
+        )
+        // How Advent of Code treats an expired cookie: the puzzle without the parts that need a
+        // login, and an answer redirected there.
+        .route(
+            "/2017/day/4",
+            axum::routing::get(|| async {
+                r#"<html><body><main><article class="day-desc"><h2>--- Day 4: Counting Pebbles ---</h2><p>Count them.</p></article>
+<p>To play, please identify yourself via one of these services:</p>
+<p><a href="/auth/github">[GitHub]</a></p></main></body></html>"#
+            }),
+        )
+        .route(
+            "/2017/day/4/answer",
+            axum::routing::post(|| async {
+                axum::response::Redirect::to("/2017/day/4")
+            }),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -1320,6 +1345,29 @@ Day       Time    Rank  Score       Time   Rank  Score
         assert!(!client.has_session());
         client.set_session("good".into());
         assert!(client.has_session());
+    }
+
+    #[tokio::test]
+    async fn asks_to_log_in_again_when_the_cookie_has_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = AocClient::with_base_url(
+            Some("expired".into()),
+            "test",
+            dir.path().to_owned(),
+            fake_aoc().await,
+        )
+        .unwrap();
+        let puzzle = Puzzle::new(2017, 4).unwrap();
+        let submitted = client.submit(puzzle, Part::One, "12").await.unwrap_err();
+        assert!(
+            submitted.downcast_ref::<NeedsLogin>().is_some(),
+            "{submitted:#}"
+        );
+        let fetched = client.problem(puzzle, true).await.unwrap_err();
+        assert!(
+            fetched.downcast_ref::<NeedsLogin>().is_some(),
+            "{fetched:#}"
+        );
     }
 
     #[test]
