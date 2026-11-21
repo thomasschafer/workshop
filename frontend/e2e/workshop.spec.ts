@@ -287,6 +287,32 @@ test("discusses the puzzle, keeping the conversation", async () => {
   await input.pressSequentially("second line");
   await expect(input).toHaveValue("first line\nsecond line");
   await expect(page.locator(".turn")).toHaveCount(6);
+
+  // Typing at the end of a long question, scrolled to the bottom of a short screen (as when a
+  // phone's keyboard is up), keeps what's being typed in view rather than jumping up. A phone's
+  // keyboard can change the text without the browser scrolling to the caret, so the words are
+  // added as it would add them.
+  const phone = page.viewportSize();
+  await page.setViewportSize({ width: phone?.width ?? 412, height: 700 });
+  const pane = page.locator(".pane.discuss");
+  await input.fill("a question long enough to need a few lines ".repeat(4));
+  await pane.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  const fromBottom = () =>
+    pane.evaluate((el) => Math.round(el.scrollHeight - el.clientHeight - el.scrollTop));
+  await expect.poll(fromBottom).toBe(0);
+  expect(await pane.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  for (const word of [" and", " a", " few", " more", " words"]) {
+    await input.evaluate((el: HTMLTextAreaElement, w) => {
+      el.value += w;
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: w }));
+    }, word);
+    await expect.poll(fromBottom).toBe(0);
+  }
+  await expect(input).toHaveValue(/ more words$/);
+  if (phone) await page.setViewportSize(phone);
+
   await input.fill("");
   await expect.poll(height).toBe(oneLine);
 });

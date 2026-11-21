@@ -53,12 +53,19 @@ export function DiscussView({
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
 
-  // Grows with what's written, up to the CSS max-height, beyond which it scrolls.
+  // Grows with what's written, up to the CSS max-height, beyond which it scrolls. Measuring
+  // collapses the field for a moment, which can pull up anything scrolled to below it (WebKit
+  // and Chrome on Android do), so their scroll positions are put back afterwards.
   useLayoutEffect(() => {
     const el = field.current;
     if (!el) return;
+    const scrolled: [Element, number][] = [];
+    for (let a = el.parentElement; a; a = a.parentElement) {
+      if (a.scrollTop > 0) scrolled.push([a, a.scrollTop]);
+    }
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+    for (const [a, top] of scrolled) a.scrollTop = top;
   }, [draft]);
 
   useEffect(() => {
