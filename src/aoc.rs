@@ -453,7 +453,7 @@ impl AocClient {
         if !status.is_success() {
             bail!("Advent of Code returned {status} when submitting");
         }
-        let outcome = parse_submit_response(&body);
+        let outcome = parse_submit_response(&body, part, answer);
         if outcome.shows_progress() {
             // The problem page now shows the next part and the accepted answer.
             let _ = std::fs::remove_file(self.day_dir(puzzle).join("problem.html"));
@@ -930,7 +930,24 @@ pub fn parse_calendar(html: &str) -> BTreeMap<u8, u8> {
     stars
 }
 
-pub fn parse_submit_response(html: &str) -> SubmitOutcome {
+pub fn parse_submit_response(html: &str, part: Part, answer: &str) -> SubmitOutcome {
+    // Advent of Code sometimes redirects an answer to the puzzle page rather than giving a
+    // verdict. That page's articles are the puzzle itself, so read whether the part is solved
+    // from it instead.
+    if let Ok(problem) = parse_problem(html) {
+        return match problem.answers.get(usize::from(part.number() - 1)) {
+            Some(accepted) if accepted == answer => SubmitOutcome::Correct,
+            Some(accepted) => SubmitOutcome::AlreadySolved {
+                message: format!("This part is already solved, with the answer {accepted}."),
+            },
+            None => SubmitOutcome::Unknown {
+                message: "Advent of Code sent back the puzzle page without saying whether the \
+                          answer was right, so it may not have been recorded. Try submitting \
+                          again, or on the Advent of Code site."
+                    .to_owned(),
+            },
+        };
+    }
     let document = Html::parse_document(html);
     let message = document
         .select(&selector("main article"))
@@ -1184,29 +1201,29 @@ Day       Time    Rank  Score       Time   Rank  Score
 
     #[test]
     fn parses_submit_responses() {
-        let wrap = |s: &str| {
-            format!("<html><body><main><article><p>{s}</p></article></main></body></html>")
+        let verdict = |s: &str| {
+            parse_submit_response(
+                &format!("<html><body><main><article><p>{s}</p></article></main></body></html>"),
+                Part::One,
+                "1",
+            )
         };
         assert_eq!(
-            parse_submit_response(&wrap(
-                "That's the right answer! You are one gold star closer."
-            )),
+            verdict("That's the right answer! You are one gold star closer."),
             SubmitOutcome::Correct
         );
         assert!(matches!(
-            parse_submit_response(&wrap("That's not the right answer; your answer is too high.")),
+            verdict("That's not the right answer; your answer is too high."),
             SubmitOutcome::Incorrect { hint: Some(h), .. } if h == "too high"
         ));
         assert!(matches!(
-            parse_submit_response(&wrap(
-                "You gave an answer too recently; you have 30s left to wait."
-            )),
+            verdict("You gave an answer too recently; you have 30s left to wait."),
             SubmitOutcome::TooSoon { .. }
         ));
         assert_eq!(
-            parse_submit_response(&wrap(
+            verdict(
                 "You don't seem to be solving the right level. Did you already complete it? <a href=\"/2021/day/1\">[Return to Day 1]</a>"
-            )),
+            ),
             SubmitOutcome::AlreadySolved {
                 message:
                     "You don't seem to be solving the right level. Did you already complete it?"
@@ -1214,9 +1231,27 @@ Day       Time    Rank  Score       Time   Rank  Score
             }
         );
         assert!(matches!(
-            parse_submit_response(&wrap("Something new")),
+            verdict("Something new"),
             SubmitOutcome::Unknown { .. }
         ));
+    }
+
+    #[test]
+    fn reads_the_puzzle_page_when_sent_back_instead_of_a_verdict() {
+        assert_eq!(
+            parse_submit_response(PART_TWO_PAGE, Part::One, "1234"),
+            SubmitOutcome::Correct
+        );
+        assert!(matches!(
+            parse_submit_response(PART_TWO_PAGE, Part::One, "99"),
+            SubmitOutcome::AlreadySolved { message } if message.contains("1234")
+        ));
+        for (page, part) in [(PART_ONE_PAGE, Part::One), (PART_TWO_PAGE, Part::Two)] {
+            let SubmitOutcome::Unknown { message } = parse_submit_response(page, part, "5") else {
+                panic!("expected an unknown outcome for part {}", part.number());
+            };
+            assert!(!message.contains("Counting Pebbles"), "{message}");
+        }
     }
 
     #[tokio::test]
