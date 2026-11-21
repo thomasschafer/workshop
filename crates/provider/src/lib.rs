@@ -819,15 +819,31 @@ impl ProviderRunner {
                 let mut asked = std::collections::BTreeMap::new();
                 let mut outcome = None;
                 while let Some(line) = lines.next_line().await? {
-                    match parse_antigravity_event(&line) {
-                        Ok(AntigravityEvent::Init { model: m }) => model = m.or(model),
-                        Ok(AntigravityEvent::Delta(text)) => {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let event = match parse_antigravity_event(&line) {
+                        Ok(event) => event,
+                        // Read on, so what it says on stderr and how it exits explain it, such
+                        // as not being logged in, while a tool would still stop it.
+                        Err(err) => {
+                            outcome.get_or_insert(Err(err));
+                            continue;
+                        }
+                    };
+                    let stop = |message: String| {
+                        tracing::error!("{message}");
+                        anyhow::anyhow!(message)
+                    };
+                    match event {
+                        AntigravityEvent::Init { model: m } => model = m.or(model),
+                        AntigravityEvent::Delta(text) => {
                             // Nobody listening any more only means the reply isn't shown early.
                             if let Some(partial) = partial {
                                 let _ = partial.send(text);
                             }
                         }
-                        Ok(AntigravityEvent::Tool { step, name, state }) => match state {
+                        AntigravityEvent::Tool { step, name, state } => match state {
                             ToolState::Asked => {
                                 asked.insert(step, name);
                             }
@@ -837,35 +853,33 @@ impl ProviderRunner {
                             ToolState::Ran(state) => {
                                 stderr_task.abort();
                                 process.kill();
-                                tracing::error!(
-                                    "the model used a tool ({name}) despite tools being turned off, ending {state}; stopped it"
-                                );
-                                bail!(
-                                    "the model used a tool ({name}) although tools are turned off, so it was stopped, and its reply isn't used"
-                                );
+                                return Err(stop(format!(
+                                    "the model used a tool ({name}, which ended {state}) although tools are turned off, so it was stopped, and its reply isn't used"
+                                )));
                             }
                         },
-                        Ok(AntigravityEvent::Result(Ok(text))) => {
-                            if let Some(name) = asked.values().next() {
-                                stderr_task.abort();
-                                process.kill();
-                                bail!(
-                                    "the model asked for a tool ({name}) that was never refused, although tools are turned off, so its reply isn't used"
-                                );
-                            }
-                            stderr_task.abort();
-                            return Ok((text, model));
-                        }
-                        Ok(AntigravityEvent::Result(Err(err))) => {
-                            outcome = Some(Err(anyhow::anyhow!(err)));
-                            break;
-                        }
-                        Ok(AntigravityEvent::Other) => {}
-                        Err(err) => {
+                        AntigravityEvent::Unrecognised(what) => {
                             stderr_task.abort();
                             process.kill();
-                            return Err(err);
+                            return Err(stop(format!(
+                                "Antigravity reported {what}, which Workshop doesn't recognise, so it was stopped in case it was a tool; a newer `agy` may need a newer Workshop"
+                            )));
                         }
+                        AntigravityEvent::Result(result) if outcome.is_none() => match result {
+                            Ok(text) => {
+                                if let Some(name) = asked.values().next() {
+                                    stderr_task.abort();
+                                    process.kill();
+                                    return Err(stop(format!(
+                                        "the model asked for a tool ({name}) that was never refused, although tools are turned off, so its reply isn't used"
+                                    )));
+                                }
+                                stderr_task.abort();
+                                return Ok((text, model));
+                            }
+                            Err(err) => outcome = Some(Err(anyhow::anyhow!(err))),
+                        },
+                        AntigravityEvent::Result(_) | AntigravityEvent::Other => {}
                     }
                 }
                 outcome.unwrap_or_else(|| Err(anyhow::anyhow!("model CLI exited without a result")))
@@ -1037,6 +1051,8 @@ enum AntigravityEvent {
         name: String,
         state: ToolState,
     },
+    /// An event or kind of step Workshop doesn't know, which could be a tool, described.
+    Unrecognised(String),
     /// The reply, or why the call failed.
     Result(Result<String, String>),
     Other,
@@ -1048,21 +1064,27 @@ enum ToolState {
     Asked,
     /// Refused by the hook, so it never ran.
     Refused,
-    /// Anything else, such as `DONE`, which means it ran.
+    /// Anything else, such as `DONE`, or an error other than the hook's refusal, which means it
+    /// ran.
     Ran(String),
 }
 
-/// Steps that aren't tools. Any other kind is treated as a tool, so a new kind of step that
-/// reaches any end but being refused stops the call, rather than being allowed by default.
+/// Steps that aren't tools. A kind of step that isn't one of these or a tool stops the call, as
+/// it could be a new kind of tool.
 const ANTIGRAVITY_SAFE_STEPS: &[&str] = &["user_input", "agent_response"];
 
-/// Reads one line of Antigravity's `--output-format stream-json`. Event types it doesn't know
-/// are errors rather than being skipped, as one could report a tool being used.
+/// How Antigravity reports a tool call refused by the built-in preset's hook, whose reason is
+/// the last part.
+const ANTIGRAVITY_REFUSAL: &str = "tool call denied by pre-tool hook: Tools are turned off.";
+
+/// Reads one line of Antigravity's `--output-format stream-json`, failing only if it isn't JSON.
+/// Event types it doesn't know aren't skipped, as one could report a tool being used.
 fn parse_antigravity_event(line: &str) -> Result<AntigravityEvent> {
     let event: serde_json::Value = serde_json::from_str(line)
         .with_context(|| format!("model CLI printed a line that isn't JSON: {line}"))?;
     let string = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_str()).map(str::to_owned);
-    Ok(match event.get("event").and_then(|e| e.as_str()) {
+    let kind = string(event.get("event"));
+    Ok(match kind.as_deref() {
         Some("init") => AntigravityEvent::Init {
             model: string(event.pointer("/init/model")),
         },
@@ -1070,25 +1092,34 @@ fn parse_antigravity_event(line: &str) -> Result<AntigravityEvent> {
             let step = event.get("step_update");
             let field = |key: &str| string(step.and_then(|s| s.get(key)));
             let kind = field("step_type").unwrap_or_default();
-            if ANTIGRAVITY_SAFE_STEPS.contains(&kind.as_str()) {
-                match field("text_delta") {
+            let index = step
+                .and_then(|s| s.get("step_index"))
+                .and_then(|i| i.as_u64());
+            match (kind.as_str(), index) {
+                (safe, _) if ANTIGRAVITY_SAFE_STEPS.contains(&safe) => match field("text_delta") {
                     Some(text) if kind == "agent_response" => AntigravityEvent::Delta(text),
                     _ => AntigravityEvent::Other,
+                },
+                ("tool", Some(index)) => {
+                    let info = step.and_then(|s| s.get("tool_info"));
+                    let refused = info.is_some_and(|i| i.get("output").is_none())
+                        && string(info.and_then(|i| i.pointer("/error/message"))).as_deref()
+                            == Some(ANTIGRAVITY_REFUSAL);
+                    let state = field("state").unwrap_or_default();
+                    AntigravityEvent::Tool {
+                        step: index,
+                        name: field("tool_name").unwrap_or_else(|| "an unnamed tool".to_owned()),
+                        state: match state.as_str() {
+                            "ACTIVE" => ToolState::Asked,
+                            "ERROR" if refused => ToolState::Refused,
+                            _ => ToolState::Ran(state),
+                        },
+                    }
                 }
-            } else {
-                let state = field("state").unwrap_or_default();
-                AntigravityEvent::Tool {
-                    step: step
-                        .and_then(|s| s.get("step_index"))
-                        .and_then(|i| i.as_u64())
-                        .with_context(|| format!("a step has no index: {line}"))?,
-                    name: field("tool_name").unwrap_or(kind),
-                    state: match state.as_str() {
-                        "ACTIVE" => ToolState::Asked,
-                        "ERROR" => ToolState::Refused,
-                        _ => ToolState::Ran(state),
-                    },
+                ("tool", None) => {
+                    AntigravityEvent::Unrecognised("a tool step with no index".to_owned())
                 }
+                (other, _) => AntigravityEvent::Unrecognised(format!("a {other:?} step")),
             }
         }
         Some("result") => AntigravityEvent::Result(
@@ -1098,7 +1129,8 @@ fn parse_antigravity_event(line: &str) -> Result<AntigravityEvent> {
                 .and_then(antigravity_reply)
                 .map_err(|e| format!("{e:#}")),
         ),
-        _ => bail!("model CLI printed an event Workshop doesn't know: {line}"),
+        Some(other) => AntigravityEvent::Unrecognised(format!("a {other:?} event")),
+        None => AntigravityEvent::Unrecognised(format!("an event with no type ({line})")),
     })
 }
 
@@ -1384,6 +1416,9 @@ printf '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","re
         assert!(output.status.success());
         let decision: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(decision["decision"], "deny");
+        // It's how a refusal is told apart from a tool that ran and failed.
+        let reason = decision["reason"].as_str().unwrap();
+        assert!(ANTIGRAVITY_REFUSAL.ends_with(&format!(": {reason}")));
     }
 
     #[test]
@@ -1552,18 +1587,40 @@ printf '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","re
             ),
             tool(2, "read_file", ToolState::Ran("DONE".into()))
         );
-        // A kind of step Workshop doesn't know is treated as a tool.
+        // As it reports a tool that ran and failed, such as reading a file that isn't there.
         assert_eq!(
             event(
-                r#"{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"browser_subagent"}}"#
+                r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":2,"state":"ERROR","step_type":"tool","tool_name":"read_file","duration_seconds":0.15,"tool_info":{"name":"read_file","parameters":{"Path":"/tmp/call/missing.txt"},"error":{"type":"TOOL_ERROR","message":"file does not exist"}}}}"#
             ),
-            tool(5, "browser_subagent", ToolState::Ran("DONE".into()))
+            tool(2, "read_file", ToolState::Ran("ERROR".into()))
         );
-        assert!(
-            parse_antigravity_event(
-                r#"{"event":"step_update","step_update":{"state":"DONE","step_type":"tool"}}"#
-            )
-            .is_err()
+        // Only the hook's own refusal, with nothing from the tool, is a refusal.
+        for info in [
+            r#"{"error":{"message":"tool call denied by pre-tool hook: Some other reason."}}"#,
+            r#"{"error":{"message":"tool call denied by pre-tool hook: Tools are turned off."},"output":"hi"}"#,
+            r#"{"error":{"message":"Tools are turned off."}}"#,
+            r#"{}"#,
+        ] {
+            assert_eq!(
+                event(&format!(
+                    r#"{{"event":"step_update","step_update":{{"step_index":2,"state":"ERROR","step_type":"tool","tool_name":"run_command","tool_info":{info}}}}}"#
+                )),
+                tool(2, "run_command", ToolState::Ran("ERROR".into())),
+                "{info}"
+            );
+        }
+        // A kind of step Workshop doesn't know, whatever its state, as it could be a tool.
+        for state in ["ACTIVE", "DONE"] {
+            assert_eq!(
+                event(&format!(
+                    r#"{{"event":"step_update","step_update":{{"step_index":5,"state":"{state}","step_type":"browser_subagent"}}}}"#
+                )),
+                AntigravityEvent::Unrecognised("a \"browser_subagent\" step".into())
+            );
+        }
+        assert_eq!(
+            event(r#"{"event":"step_update","step_update":{"state":"DONE","step_type":"tool"}}"#),
+            AntigravityEvent::Unrecognised("a tool step with no index".into())
         );
 
         assert_eq!(
@@ -1600,7 +1657,10 @@ printf '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","re
             AntigravityEvent::Result(Err(_))
         ));
         // Events it doesn't know aren't skipped, as they could report a tool.
-        assert!(parse_antigravity_event(r#"{"event":"subagent_update","subagent":{}}"#).is_err());
+        assert_eq!(
+            event(r#"{"event":"subagent_update","subagent":{}}"#),
+            AntigravityEvent::Unrecognised("a \"subagent_update\" event".into())
+        );
         assert!(parse_antigravity_event("Error: something broke").is_err());
         assert!(parse_antigravity_event("").is_err());
     }
@@ -2138,7 +2198,9 @@ printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
             .to_string();
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(
-            err.contains("used a tool (run_command) although tools are turned off"),
+            err.contains(
+                "used a tool (run_command, which ended DONE) although tools are turned off"
+            ),
             "{err}"
         );
         assert_eq!(still_there(&root.path().join("dirs")), Vec::<String>::new());
@@ -2174,7 +2236,76 @@ printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("doesn't know"), "{err}");
+        assert!(
+            err.starts_with(
+                "Antigravity reported a \"subagent_update\" event, which Workshop doesn't recognise, so it was stopped"
+            ),
+            "{err}"
+        );
+
+        // A tool that ran and failed ended as a refused one does, but isn't one.
+        let failed = r#"{"event":"step_update","step_update":{"step_index":2,"state":"ERROR","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","output":"","error":{"type":"TOOL_ERROR","message":"exit status 1"}}}}"#;
+        let (runner, _) = antigravity_stand_in(root.path(), &[ASKS_FOR_A_SHELL, failed], "", None);
+        let err = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "Run false",
+                Duration::from_secs(20),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("(run_command, which ended ERROR)"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reads_antigravity_past_blank_lines_and_explains_what_it_cant_read() {
+        let root = tempfile::tempdir().unwrap();
+        let (runner, _) = antigravity_stand_in(root.path(), &["", REPLIES, ""], "", Some(0));
+        let reply = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "hi",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply.text, "I couldn't run it.");
+
+        // Something that isn't an event is explained by what it says on stderr, if it can be.
+        let (runner, _) = antigravity_stand_in(
+            root.path(),
+            &["Authentication required.", REPLIES],
+            "Error: authentication required. Run 'agy' to log in, then retry.",
+            Some(1),
+        );
+        let err = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "hi",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            err,
+            "Antigravity isn't logged in. On the server, run `sh` and log in, then try again."
+        );
+        // And otherwise is a failure, even if a reply follows.
+        let (runner, _) =
+            antigravity_stand_in(root.path(), &["Something odd.", REPLIES], "", Some(0));
+        let err = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "hi",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("isn't JSON: Something odd."), "{err}");
     }
 
     #[cfg(unix)]

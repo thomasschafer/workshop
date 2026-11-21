@@ -4,7 +4,8 @@
 # sandbox reliably stops its shell tool, so each call runs in a directory of its own with a hook
 # there that refuses every tool call before it runs: the model can ask for a tool, but only ever
 # gets back an error. In case the hook ever lets one through, Workshop also watches the steps it
-# reports, and stops it, using none of its reply, if a tool runs rather than being refused.
+# reports, and stops it, using none of its reply, if a tool runs rather than being refused, or if
+# it reports something Workshop doesn't recognise, which could be a new kind of tool.
 # There's no flag for a system prompt either, so Workshop's instructions are that directory's
 # AGENTS.md, which Antigravity reads as the project's rules.
 #
