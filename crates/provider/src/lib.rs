@@ -218,7 +218,8 @@ impl ProviderConfig {
             effort: self.effort.as_ref().map(|e| e.edit.clone()),
         };
         let vars = call_vars(&stand_in);
-        let mut seen = std::collections::HashSet::new();
+        // Each file's path as its components, ignoring case, as some file systems do.
+        let mut paths: Vec<(&str, Vec<String>)> = Vec::new();
         for file in &self.files {
             let path = Path::new(&file.path);
             let inside = path.components().next().is_some()
@@ -229,9 +230,28 @@ impl ProviderConfig {
                     file.path
                 );
             }
-            if !seen.insert(path.components().collect::<Vec<_>>()) {
-                bail!("the file {:?} is listed more than once", file.path);
+            if file.path.ends_with('/') || file.path.ends_with('\\') {
+                bail!("the file {:?} must not end in a slash", file.path);
             }
+            let components: Vec<String> = path
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+                .collect();
+            for (other, theirs) in &paths {
+                if *theirs == components {
+                    bail!(
+                        "the files {other:?} and {:?} are the same file, ignoring case",
+                        file.path
+                    );
+                }
+                if theirs.starts_with(&components) || components.starts_with(theirs) {
+                    bail!(
+                        "the files {other:?} and {:?} can't both be written, as one would be the other's directory",
+                        file.path
+                    );
+                }
+            }
+            paths.push((&file.path, components));
             template::render(&file.contents, &vars)
                 .with_context(|| format!("in the contents of {:?}", file.path))?;
         }
@@ -1137,10 +1157,28 @@ printf '{"conversation_id":"c","status":"SUCCESS","response":"{\\"edits\\": []}\
             let err = with_files(&[(path, "")]).validate().unwrap_err();
             assert!(err.to_string().contains("relative path"), "{path}: {err}");
         }
-        let err = with_files(&[("a/b", ""), ("a//b", "")])
+        for path in ["AGENTS.md/", ".agents/"] {
+            let err = with_files(&[(path, "")]).validate().unwrap_err();
+            assert!(err.to_string().contains("slash"), "{path}: {err}");
+        }
+        for pair in [("a/b", "a//b"), ("AGENTS.md", "agents.md")] {
+            let err = with_files(&[(pair.0, ""), (pair.1, "")])
+                .validate()
+                .unwrap_err();
+            assert!(err.to_string().contains("same file"), "{pair:?}: {err}");
+        }
+        for pair in [("a", "a/b"), ("a/b/c", "a/b"), ("A/b", "a")] {
+            let err = with_files(&[(pair.0, ""), (pair.1, "")])
+                .validate()
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("the other's directory"),
+                "{pair:?}: {err}"
+            );
+        }
+        with_files(&[("a/b", ""), ("a/c", ""), ("ab", "")])
             .validate()
-            .unwrap_err();
-        assert!(err.to_string().contains("more than once"), "{err}");
+            .unwrap();
         let err = format!(
             "{:#}",
             with_files(&[("AGENTS.md", "{system_promt}")])

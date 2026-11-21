@@ -264,7 +264,7 @@ input = "ollama-chat"
 output = "ollama-chat"
 ```
 
-A CLI that reads its instructions or settings from the directory it runs in, rather than from its arguments, can be given them as `files`, each a `path` relative to that directory and its `contents`, which can use `{model}`, `{system_prompt}` and `{effort}`, with `{{` and `}}` for literal braces. Each call then runs in a fresh directory of its own, with those files in it, which is removed when the call ends, however it ends, as calls can run at once with different system prompts. Paths must stay inside the directory, so they can't be absolute or use `..`, and `prespawn` can't be used with them. For the `acme` CLI above, if it read its instructions from an `AGENTS.md` where it runs:
+A CLI that reads its instructions or settings from the directory it runs in, rather than from its arguments, can be given them as `files`, each a `path` relative to that directory and its `contents`, which can use `{model}`, `{system_prompt}` and `{effort}`, with `{{` and `}}` for literal braces. Each call then runs in a fresh directory of its own, with those files in it, which is removed when the call ends, however it ends, as calls can run at once with different system prompts. Paths must stay inside the directory, so they can't be absolute or use `..`; they can't end in `/`, be inside one another or differ only in case; and `prespawn` can't be used with them. For the `acme` CLI above, if it read its instructions from an `AGENTS.md` where it runs:
 
 ```toml
 [[providers.acme.files]]
