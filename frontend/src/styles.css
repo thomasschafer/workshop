@@ -1194,6 +1194,7 @@ html[data-tab-turn] .content {
 }
 
 .buttons {
+  --button-height: 56px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1201,7 +1202,7 @@ html[data-tab-turn] .content {
 
 .round {
   width: 48px;
-  height: 56px;
+  height: var(--button-height);
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1216,7 +1217,7 @@ html[data-tab-turn] .content {
 
 .talk {
   flex: 1;
-  height: 72px;
+  height: var(--button-height);
   border-radius: 18px;
   border: none;
   background: var(--accent);
@@ -2421,12 +2422,8 @@ html[data-tab-turn] .content {
     padding-bottom: calc(6px + env(safe-area-inset-bottom));
   }
 
-  .round {
-    height: 44px;
-  }
-
-  .talk {
-    height: 48px;
+  .buttons {
+    --button-height: 44px;
   }
 
   .tabs button {
