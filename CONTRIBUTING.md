@@ -263,6 +263,14 @@ input = "ollama-chat"
 output = "ollama-chat"
 ```
 
+A CLI that reads its instructions or settings from the directory it runs in, rather than from its arguments, can be given them as `files`, each a `path` relative to that directory and its `contents`, which can use `{model}`, `{system_prompt}` and `{effort}`, with `{{` and `}}` for literal braces. Each call then runs in a fresh directory of its own, with those files in it, which is removed when the call ends, however it ends, as calls can run at once with different system prompts. Paths must stay inside the directory, so they can't be absolute or use `..`, and `prespawn` can't be used with them. For the `acme` CLI above, if it read its instructions from an `AGENTS.md` where it runs:
+
+```toml
+[[providers.acme.files]]
+path = "AGENTS.md"
+contents = "{system_prompt}"
+```
+
 Check one with `workshop eval` before relying on it. On a 16 GB M2 Pro, Qwen2.5-Coder 7B and 14B made far more wrong edits than Haiku, and the 14B was also slower, so larger models on bigger machines are the ones worth trying.
 
 Use cheap, fast models for editing, since every utterance is a call. If the CLI can name its models (as `codex debug models` does), set `model_catalog` to that command, and a family name such as "luna" will always mean the newest model in the family. See `crates/provider/providers/codex.toml` for a preset built this way. For a new input or output format, add a variant to `InputMode` or `OutputMode` in `crates/provider/src/lib.rs` with tests for its parsing.

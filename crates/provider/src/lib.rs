@@ -3,7 +3,7 @@
 
 mod agent;
 
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -54,6 +54,22 @@ pub struct ProviderConfig {
     /// role that has tools.
     #[serde(default)]
     pub agent: Option<AgentConfig>,
+    /// Files written into the directory the CLI runs in, for CLIs that read instructions or
+    /// settings from there. With any, each call runs in a fresh directory of its own, removed
+    /// when the call ends, as calls can run at once with different system prompts.
+    #[serde(default)]
+    pub files: Vec<CallFile>,
+}
+
+/// A file written into a call's directory.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CallFile {
+    /// Relative to the call's directory, such as `.agents/hooks.json`, and staying inside it.
+    pub path: String,
+    /// Placeholders: `{model}`, `{system_prompt}` and `{effort}`. `{{` and `}}` are literal
+    /// braces.
+    pub contents: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -134,6 +150,7 @@ impl ProviderConfig {
             discuss_models: Vec::new(),
             effort: None,
             agent: None,
+            files: Vec::new(),
         }
     }
 
@@ -165,6 +182,7 @@ impl ProviderConfig {
         if self.command.iter().any(|arg| arg.contains("{effort")) && self.effort.is_none() {
             bail!("`command` uses {{effort}}, so `effort` needs setting for edit and discuss");
         }
+        self.validate_files()?;
         let mentions_prompt = self.command.iter().any(|arg| arg.contains("{prompt}"));
         match self.input {
             InputMode::Argument if !mentions_prompt => {
@@ -181,6 +199,89 @@ impl ProviderConfig {
                 bail!("{{prompt}} is only available with `input = \"argument\"`")
             }
             _ => Ok(()),
+        }
+    }
+
+    fn validate_files(&self) -> Result<()> {
+        if !self.files.is_empty() && self.prespawn {
+            bail!(
+                "`prespawn` can't be used with `files`, as each call's files are written when it starts"
+            );
+        }
+        // Rendered with stand-in values, so an unknown placeholder fails when the config is read.
+        let stand_in = CallSpec {
+            model: String::new(),
+            system_prompt: String::new(),
+            effort: self.effort.as_ref().map(|e| e.edit.clone()),
+        };
+        let vars = call_vars(&stand_in);
+        let mut seen = std::collections::HashSet::new();
+        for file in &self.files {
+            let path = Path::new(&file.path);
+            let inside = path.components().next().is_some()
+                && path.components().all(|c| matches!(c, Component::Normal(_)));
+            if !inside {
+                bail!(
+                    "the file {:?} must be a relative path inside the call's directory, such as \".agents/hooks.json\", with no `..`",
+                    file.path
+                );
+            }
+            if !seen.insert(path.components().collect::<Vec<_>>()) {
+                bail!("the file {:?} is listed more than once", file.path);
+            }
+            template::render(&file.contents, &vars)
+                .with_context(|| format!("in the contents of {:?}", file.path))?;
+        }
+        Ok(())
+    }
+}
+
+/// The placeholders that describe a call, for its command and its files.
+fn call_vars(spec: &CallSpec) -> Vars<'static> {
+    let vars = Vars::new()
+        .set("model", spec.model.clone())
+        .set("system_prompt", spec.system_prompt.clone());
+    match &spec.effort {
+        Some(effort) => vars.set("effort", effort.clone()),
+        None => vars,
+    }
+}
+
+/// A directory of one call's own, holding the provider's files, and removed when it's dropped,
+/// so also when the call fails, times out or is cancelled.
+struct CallDir {
+    path: PathBuf,
+}
+
+impl CallDir {
+    fn create(working_dir: &Path, files: &[CallFile], spec: &CallSpec) -> Result<Self> {
+        let dir = Self {
+            path: tempfile::Builder::new()
+                .prefix("call-")
+                .tempdir_in(working_dir)
+                .with_context(|| format!("creating a directory in {}", working_dir.display()))?
+                .keep(),
+        };
+        let vars = call_vars(spec);
+        for file in files {
+            let path = dir.path.join(&file.path);
+            let contents = template::render(&file.contents, &vars)
+                .with_context(|| format!("in the contents of {:?}", file.path))?;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            std::fs::write(&path, contents)
+                .with_context(|| format!("writing {}", path.display()))?;
+        }
+        Ok(dir)
+    }
+}
+
+impl Drop for CallDir {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_dir_all(&self.path) {
+            tracing::warn!("couldn't remove {}: {err}", self.path.display());
         }
     }
 }
@@ -325,7 +426,7 @@ impl ProviderRunner {
         }
         *spare = Some(Spare {
             spec: spec.clone(),
-            process: self.spawn(spec, None)?,
+            process: self.spawn(spec, None, &self.working_dir)?,
         });
         Ok(())
     }
@@ -369,13 +470,28 @@ impl ProviderRunner {
     ) -> Result<Reply> {
         let started = std::time::Instant::now();
         let spec = &self.resolve(spec).await;
+        // Declared before the process, so it's removed after the process is stopped.
+        let call_dir = if self.provider.files.is_empty() {
+            None
+        } else {
+            self.ensure_working_dir()?;
+            Some(CallDir::create(
+                &self.working_dir,
+                &self.provider.files,
+                spec,
+            )?)
+        };
         let spare = match spares {
             Spares::Use => self.take_spare(spec).await?,
             Spares::Leave => None,
         };
         let process = match spare {
             Some(process) => process,
-            None => self.spawn(spec, Some(prompt))?,
+            None => self.spawn(
+                spec,
+                Some(prompt),
+                call_dir.as_ref().map_or(&self.working_dir, |dir| &dir.path),
+            )?,
         };
         if self.provider.prespawn && spares == Spares::Use {
             // Failing to warm only costs latency on the next call, so it mustn't fail this one.
@@ -408,11 +524,9 @@ impl ProviderRunner {
         Ok(Some(spare.process))
     }
 
-    fn spawn(&self, spec: &CallSpec, prompt: Option<&str>) -> Result<GroupedChild> {
+    fn spawn(&self, spec: &CallSpec, prompt: Option<&str>, dir: &Path) -> Result<GroupedChild> {
         self.ensure_working_dir()?;
-        let mut vars = Vars::new()
-            .set("model", spec.model.clone())
-            .set("system_prompt", spec.system_prompt.clone());
+        let mut vars = call_vars(spec);
         if self
             .provider
             .command
@@ -420,9 +534,6 @@ impl ProviderRunner {
             .any(|arg| arg.contains("{system_prompt_file"))
         {
             vars = vars.set("system_prompt_file", self.system_prompt_file(spec)?);
-        }
-        if let Some(effort) = &spec.effort {
-            vars = vars.set("effort", effort.clone());
         }
         if self.provider.input == InputMode::Argument {
             let prompt = prompt.context("argument input needs the prompt at spawn time")?;
@@ -433,7 +544,7 @@ impl ProviderRunner {
         GroupedChild::spawn(
             process::command(program)
                 .args(rest)
-                .current_dir(&self.working_dir)
+                .current_dir(dir)
                 .stdin(match self.provider.input {
                     InputMode::Argument => Stdio::null(),
                     InputMode::Stdin | InputMode::ClaudeStreamJson | InputMode::OllamaChat => {
@@ -889,6 +1000,63 @@ mod tests {
     }
 
     #[test]
+    fn validation_checks_call_files() {
+        let with_files = |files: &[(&str, &str)]| ProviderConfig {
+            files: files
+                .iter()
+                .map(|(path, contents)| CallFile {
+                    path: (*path).to_owned(),
+                    contents: (*contents).to_owned(),
+                })
+                .collect(),
+            ..ProviderConfig::with_command(vec!["cli".into()], InputMode::Stdin, OutputMode::Text)
+        };
+        with_files(&[
+            ("AGENTS.md", "{system_prompt}"),
+            (".agents/hooks.json", "{{\"model\": \"{model}\"}}"),
+        ])
+        .validate()
+        .unwrap();
+        for path in [
+            "",
+            "/etc/hosts",
+            "../AGENTS.md",
+            "a/../../b",
+            "a/..",
+            "./AGENTS.md",
+        ] {
+            let err = with_files(&[(path, "")]).validate().unwrap_err();
+            assert!(err.to_string().contains("relative path"), "{path}: {err}");
+        }
+        let err = with_files(&[("a/b", ""), ("a//b", "")])
+            .validate()
+            .unwrap_err();
+        assert!(err.to_string().contains("more than once"), "{err}");
+        let err = format!(
+            "{:#}",
+            with_files(&[("AGENTS.md", "{system_promt}")])
+                .validate()
+                .unwrap_err()
+        );
+        assert!(err.contains("unknown placeholder {system_promt}"), "{err}");
+        assert!(with_files(&[("AGENTS.md", "{effort}")]).validate().is_err());
+        ProviderConfig {
+            effort: Some(Effort {
+                edit: "low".into(),
+                discuss: "high".into(),
+            }),
+            ..with_files(&[("AGENTS.md", "{effort}")])
+        }
+        .validate()
+        .unwrap();
+        let prespawned = ProviderConfig {
+            prespawn: true,
+            ..with_files(&[("AGENTS.md", "{system_prompt}")])
+        };
+        assert!(prespawned.validate().is_err());
+    }
+
+    #[test]
     fn parses_claude_results() {
         let ok = r#"{"type":"result","is_error":false,"result":"hi","modelUsage":{"claude-haiku-x":{}}}"#;
         assert_eq!(
@@ -1106,5 +1274,171 @@ printf '{"type":"assistant","message":{"model":"m","content":[{"type":"text","te
             .await
             .unwrap();
         assert_eq!(reply.text, "m2|third");
+    }
+
+    /// The `call-` directories in `dir`.
+    #[cfg(unix)]
+    fn call_dirs(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("call-"))
+            })
+            .collect()
+    }
+
+    /// A runner whose stand-in CLI notes each directory it runs in under `record`, then replies
+    /// with the files written there, fails or hangs, as the prompt asks.
+    #[cfg(unix)]
+    fn runner_with_files(root: &Path, output: OutputMode) -> (ProviderRunner, PathBuf, PathBuf) {
+        let record = root.join("record");
+        let working_dir = root.join("work");
+        std::fs::create_dir_all(&record).unwrap();
+        let script = root.join("fake-cli.sh");
+        std::fs::write(
+            &script,
+            r#"pwd >> "$1/dirs"
+prompt=$(cat)
+case "$prompt" in
+  fail) printf '{"type":"result","is_error":true,"result":"it broke"}'; exit 1;;
+  hang) sleep 30;;
+esac
+printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
+"#,
+        )
+        .unwrap();
+        let provider = ProviderConfig {
+            files: vec![
+                CallFile {
+                    path: "AGENTS.md".into(),
+                    contents: "{system_prompt}".into(),
+                },
+                CallFile {
+                    path: ".agents/hooks.json".into(),
+                    contents: "{{\"model\": \"{model}\"}}".into(),
+                },
+            ],
+            ..ProviderConfig::with_command(
+                vec![
+                    "sh".into(),
+                    script.to_string_lossy().into_owned(),
+                    record.to_string_lossy().into_owned(),
+                ],
+                InputMode::Stdin,
+                output,
+            )
+        };
+        let runner = ProviderRunner::new(provider, working_dir.clone()).unwrap();
+        (runner, working_dir, record.join("dirs"))
+    }
+
+    #[cfg(unix)]
+    fn recorded_dirs(file: &Path) -> Vec<PathBuf> {
+        std::fs::read_to_string(file)
+            .unwrap_or_default()
+            .lines()
+            .map(PathBuf::from)
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runs_each_call_in_a_fresh_directory_with_its_files() {
+        let root = tempfile::tempdir().unwrap();
+        let (runner, working_dir, dirs) = runner_with_files(root.path(), OutputMode::Text);
+        let spec = |system_prompt: &str| CallSpec {
+            model: "m1".into(),
+            system_prompt: system_prompt.into(),
+            effort: None,
+        };
+        let (first, second) = (spec("Be brief."), spec("Be thorough."));
+        let timeout = Duration::from_secs(10);
+        let (one, two) = tokio::join!(
+            runner.call(&first, "one", timeout),
+            runner.call_aside(&second, "two", timeout),
+        );
+        assert_eq!(one.unwrap().text, r#"one|Be brief.|{"model": "m1"}"#);
+        assert_eq!(two.unwrap().text, r#"two|Be thorough.|{"model": "m1"}"#);
+        let ran_in = recorded_dirs(&dirs);
+        assert_eq!(ran_in.len(), 2);
+        assert_ne!(ran_in[0], ran_in[1]);
+        for dir in &ran_in {
+            assert!(
+                dir.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("call-"),
+                "{}",
+                dir.display()
+            );
+            assert!(!dir.exists(), "{} wasn't removed", dir.display());
+        }
+        assert_eq!(call_dirs(&working_dir), Vec::<PathBuf>::new());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn removes_a_calls_directory_when_it_fails_times_out_or_is_cancelled() {
+        let root = tempfile::tempdir().unwrap();
+        let (runner, working_dir, dirs) = runner_with_files(root.path(), OutputMode::ClaudeJson);
+        let spec = CallSpec {
+            model: "m".into(),
+            system_prompt: "s".into(),
+            effort: None,
+        };
+        let err = runner
+            .call(&spec, "fail", Duration::from_secs(10))
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("it broke"), "{err:#}");
+        let err = runner
+            .call(&spec, "hang", Duration::from_millis(500))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("longer than"), "{err}");
+        // Dropped mid-call, once it's running in its directory.
+        let call = runner.call(&spec, "hang", Duration::from_secs(30));
+        let started = async {
+            while recorded_dirs(&dirs).len() < 3 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::select! {
+            _ = call => panic!("the hanging call finished"),
+            () = started => {}
+        }
+        let ran_in = recorded_dirs(&dirs);
+        assert_eq!(ran_in.len(), 3);
+        for dir in &ran_in {
+            assert!(!dir.exists(), "{} wasn't removed", dir.display());
+        }
+        assert_eq!(call_dirs(&working_dir), Vec::<PathBuf>::new());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runs_providers_without_files_in_the_working_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = ProviderConfig::with_command(
+            vec!["sh".into(), "-c".into(), "cat > /dev/null; pwd".into()],
+            InputMode::Stdin,
+            OutputMode::Text,
+        );
+        let runner = ProviderRunner::new(provider, root.path().to_owned()).unwrap();
+        let spec = CallSpec {
+            model: "m".into(),
+            system_prompt: "s".into(),
+            effort: None,
+        };
+        let reply = runner
+            .call(&spec, "hi", Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(
+            Path::new(&reply.text).canonicalize().unwrap(),
+            root.path().canonicalize().unwrap()
+        );
     }
 }
