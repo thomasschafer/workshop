@@ -119,6 +119,7 @@ pub enum OutputMode {
 const BUILTIN: &[(&str, &str)] = &[
     ("claude", include_str!("../providers/claude.toml")),
     ("codex", include_str!("../providers/codex.toml")),
+    ("antigravity", include_str!("../providers/antigravity.toml")),
 ];
 
 pub fn builtin_providers() -> Result<Vec<(String, ProviderConfig)>> {
@@ -1001,6 +1002,88 @@ mod tests {
                 .any(|w| w[0] == "--tools" && w[1].is_empty()),
             "the Claude preset must disable tools"
         );
+    }
+
+    fn builtin(id: &str) -> ProviderConfig {
+        builtin_providers()
+            .unwrap()
+            .into_iter()
+            .find(|(provider, _)| provider == id)
+            .map(|(_, provider)| provider)
+            .unwrap()
+    }
+
+    /// Runs Antigravity's preset with a stand-in for `agy` that copies the files in the
+    /// directory it runs in to `copy`, and replies as `agy` does.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn gives_antigravity_its_instructions_and_a_hook_refusing_every_tool() {
+        let root = tempfile::tempdir().unwrap();
+        let copy = root.path().join("copy");
+        let script = root.path().join("fake-agy.sh");
+        std::fs::write(
+            &script,
+            r#"copy=$1; shift
+printf '%s\n' "$@" > args
+cp -R . "$copy"
+cat > "$copy/prompt"
+printf '{"conversation_id":"c","status":"SUCCESS","response":"{\\"edits\\": []}\\n","num_turns":1}\n'
+"#,
+        )
+        .unwrap();
+        let mut provider = builtin("antigravity");
+        assert!(provider.agent.is_none());
+        assert_eq!(provider.input, InputMode::Stdin);
+        assert!(!provider.prespawn);
+        assert_eq!(provider.command[0], "agy");
+        provider.command.splice(
+            0..1,
+            [
+                "sh".to_owned(),
+                script.to_string_lossy().into_owned(),
+                copy.to_string_lossy().into_owned(),
+            ],
+        );
+        let runner = ProviderRunner::new(provider, root.path().join("work")).unwrap();
+        let spec = CallSpec {
+            model: "gemini-4-neon-low".into(),
+            system_prompt: "Reply with JSON {\"edits\": []}.".into(),
+            effort: None,
+        };
+        let reply = runner
+            .call(&spec, "Make no edits.", Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(reply.text, "{\"edits\": []}");
+        assert_eq!(reply.model.as_deref(), Some("gemini-4-neon-low"));
+        let read = |name: &str| std::fs::read_to_string(copy.join(name)).unwrap();
+        assert_eq!(read("prompt"), "Make no edits.");
+        assert_eq!(read("AGENTS.md"), spec.system_prompt);
+        let args: Vec<String> = read("args").lines().map(str::to_owned).collect();
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--model", "gemini-4-neon-low"])
+        );
+        assert!(args.windows(2).any(|w| w == ["--output-format", "json"]));
+        assert!(args.contains(&"--disable-slash-commands".to_owned()));
+        assert!(!args.contains(&"-p".to_owned()));
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
+
+        // The hook matches every tool, and refuses it.
+        let hooks: serde_json::Value = serde_json::from_str(&read(".agents/hooks.json")).unwrap();
+        let groups = hooks["no-tools"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0]["matcher"], "*");
+        let hook = &groups[0]["hooks"][0];
+        assert_eq!(hook["type"], "command");
+        let output = std::process::Command::new("sh")
+            .args(["-c", hook["command"].as_str().unwrap()])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let decision: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(decision["decision"], "deny");
     }
 
     #[test]

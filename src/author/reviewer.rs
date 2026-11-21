@@ -208,6 +208,19 @@ mod tests {
     }
 
     #[test]
+    fn can_review_with_antigravity() {
+        let set =
+            config("reviewer = { provider = \"antigravity\", model = \"gemini-4-neon-high\" }");
+        let chosen = choose(&set, |_| false);
+        assert_eq!(chosen.why, Why::Configured);
+        assert_eq!(
+            named(&set, &chosen.model),
+            "gemini-4-neon-high with Antigravity"
+        );
+        assert!(!chosen.shares_provider(&set));
+    }
+
+    #[test]
     fn says_to_set_a_reviewer_when_theres_no_other_provider_to_try() {
         let mut config = config("");
         config.providers.remove("codex");

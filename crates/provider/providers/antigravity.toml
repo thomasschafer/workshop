@@ -1,0 +1,57 @@
+# Google's Antigravity CLI in headless mode, using the user's existing login.
+#
+# Antigravity has no way to run without tools, and neither its permission settings nor its
+# sandbox reliably stops its shell tool, so each call runs in a directory of its own with a hook
+# there that refuses every tool call before it runs: the model can ask for a tool, but only ever
+# gets back an error. There's no flag for a system prompt either, so Workshop's instructions are
+# that directory's AGENTS.md, which Antigravity reads as the project's rules.
+#
+# Antigravity still reads the user's own global rules, in ~/.gemini/AGENTS.md, as well as
+# Workshop's instructions, and there's no way to skip them without skipping its login too, so
+# they can change how it replies.
+#
+# There's no `[agent]` command, so it can't be the author's writer, but it can be any model that
+# runs without tools, such as the author's reviewer.
+command = [
+  "agy",
+  "--model", "{model}",
+  "--output-format", "json",
+  "--disable-slash-commands",
+]
+# With no -p, the prompt is read from stdin.
+input = "stdin"
+output = "antigravity-json"
+name = "Antigravity"
+# The effort is part of each model's name.
+edit_models = ["gemini-3.8-flash-medium", "gemini-4-neon-low"]
+discuss_models = ["gemini-4-neon-high", "gemini-4-neon-medium"]
+version_command = ["agy", "--version"]
+# Fails when logged out.
+auth_check_command = ["agy", "models"]
+install_hint = "Install the Antigravity CLI (https://antigravity.google), then run `agy` once to log in."
+
+[[files]]
+path = "AGENTS.md"
+contents = "{system_prompt}"
+
+# Refuses every tool, whatever its name, including any added later.
+[[files]]
+path = ".agents/hooks.json"
+contents = '''
+{{
+  "no-tools": {{
+    "PreToolUse": [
+      {{
+        "matcher": "*",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "printf '{{\"decision\":\"deny\",\"reason\":\"Tools are turned off.\"}}'",
+            "timeout": 5
+          }}
+        ]
+      }}
+    ]
+  }}
+}}
+'''

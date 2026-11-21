@@ -40,6 +40,11 @@ fn codex_message(text: &str) -> String {
         .to_string()
 }
 
+fn antigravity_result(text: &str) -> String {
+    serde_json::json!({ "conversation_id": "c", "status": "SUCCESS", "response": text, "num_turns": 1 })
+        .to_string()
+}
+
 fn card(question: &str) -> String {
     format!(
         "+++\nkind = \"card\"\nskills = [\"probability.counting\"]\n+++\n{question}\n\n## Answer\n\n21.\n"
@@ -304,6 +309,62 @@ async fn reviews_with_the_writers_own_provider_in_a_call_of_its_own() {
         ran_in.lines().all(|dir| !dir.ends_with("copy/pack")),
         "{ran_in}"
     );
+    let blind = std::fs::read_to_string(reviewer.join("prompt-0")).unwrap();
+    assert!(blind.starts_with("Solve this"));
+    assert!(!blind.contains("## Answer"));
+}
+
+#[tokio::test]
+async fn reviews_with_antigravity_in_a_directory_of_each_calls_own() {
+    let mut s = setup();
+    s.config.author.reviewer = Some(crate::config::AuthorModel {
+        provider: "antigravity".to_owned(),
+        model: "gemini-4-neon-high".to_owned(),
+    });
+    let reviewer_cli = fake_cli(&s.root, "agy");
+    let antigravity = s.config.providers.get_mut("antigravity").unwrap();
+    antigravity.command[0] = "sh".to_owned();
+    antigravity.command.insert(1, reviewer_cli);
+    let writer = s.root.join("claude");
+    write(
+        &writer.join("write-0/items/author/pips.md"),
+        &card("How many pips on a standard die?"),
+    );
+    write(
+        &writer.join("reply-0"),
+        &claude_result("{\"items\": [{\"path\": \"items/author/pips.md\"}]}"),
+    );
+    let reviewer = s.root.join("agy");
+    write(
+        &reviewer.join("solved"),
+        &antigravity_result("{\"answer\": \"21\", \"working\": \"1+2+...+6\"}"),
+    );
+    write(
+        &reviewer.join("reply"),
+        &antigravity_result("{\"agree\": true, \"ambiguous\": false, \"objection\": \"\"}"),
+    );
+
+    let notifier = Arc::new(workshop_push::Notifier::load(&s.paths.data_dir).unwrap());
+    let last = run(&s.config, &s.paths, &s.learning, &s.desk, notifier, None)
+        .await
+        .unwrap();
+    assert_eq!(last.error, None, "{last:#?}");
+    assert_eq!(last.report.as_ref().unwrap().accepted.len(), 1);
+    let args = std::fs::read_to_string(reviewer.join("args-0")).unwrap();
+    let args: Vec<&str> = args.lines().collect();
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--model", "gemini-4-neon-high"])
+    );
+    // Each call ran in a directory of its own, removed once it finished.
+    let ran_in = std::fs::read_to_string(reviewer.join("ran-in")).unwrap();
+    let ran_in: Vec<&Path> = ran_in.lines().map(Path::new).collect();
+    assert!(ran_in.len() >= 2, "{ran_in:?}");
+    for dir in &ran_in {
+        let name = dir.file_name().unwrap().to_string_lossy();
+        assert!(name.starts_with("call-"), "{}", dir.display());
+        assert!(!dir.exists(), "{} wasn't removed", dir.display());
+    }
     let blind = std::fs::read_to_string(reviewer.join("prompt-0")).unwrap();
     assert!(blind.starts_with("Solve this"));
     assert!(!blind.contains("## Answer"));

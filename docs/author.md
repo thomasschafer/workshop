@@ -45,7 +45,7 @@ Not everyone has two providers, though, so the reviewer can use the writer's own
 
 Which reviewer a run uses:
 
-1. The one set as `reviewer` under `[author]`, if there is one, whatever its provider.
+1. The one set as `reviewer` under `[author]`, if there is one, whatever its provider, such as `{ provider = "antigravity", model = "gemini-4-neon-high" }` for Gemini through Antigravity.
 2. Otherwise, the first of these that isn't the writer's provider, and whose CLI is installed and logged in: the newest Sol through Codex, then the newest Opus through Claude Code.
 3. Otherwise, the writer's own provider and model.
 
@@ -71,7 +71,7 @@ A run is due `every` after the last one started, whether that was scheduled, fro
 
 Scheduled runs are like any other: one at a time, waiting while one from the app or the command is going, with the same `max_items` and checks, and the writer's programs run only in the sandbox. Devices that turned on notifications are told how each run went, or why it failed. The sample pack is built in, so it's never run on.
 
-The writer's provider needs an `[agent]` command, which the built-in Claude Code and Codex providers have. A pack's `prompts.author` add-on is added to both models' instructions.
+The writer's provider needs an `[agent]` command, which the built-in Claude Code and Codex providers have. Antigravity has none, so it can review but not write. A pack's `prompts.author` add-on is added to both models' instructions.
 
 ## What the writer can reach
 

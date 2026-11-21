@@ -20,7 +20,7 @@ Workshop is unofficial and isn't affiliated with Advent of Code.
 
 ## Requirements
 
-- [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex), logged in. Workshop uses your existing subscription.
+- [Claude Code](https://claude.com/claude-code), [Codex](https://developers.openai.com/codex) or the [Antigravity](https://antigravity.google) CLI, logged in. Workshop uses your existing subscription.
 - Your language's toolchain, or [mise](https://mise.jdx.dev) to install it for you.
 - Your Advent of Code session cookie.
 - A way to reach the server from your phone over HTTPS, which browsers require for the microphone. [Tailscale](https://tailscale.com) works well.
@@ -111,7 +111,7 @@ language = "haskell"   # or "python", "typescript", "go" or "rust"
 commit_after_star = false
 
 [models.edit]
-provider = "claude"    # or "codex"
+provider = "claude"    # or "codex" or "antigravity"
 model = "haiku"        # always the latest; for Codex, a family such as "luna"
 
 [models.discuss]
@@ -163,7 +163,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for adding a language or a model CLI.
 
 Workshop runs code and spends your model subscription, so it only listens on localhost by default and every request needs the token. Use `workshop serve --tailscale` rather than binding to other interfaces.
 
-The model never gets to run commands or change files, except the author's writer, below. With Claude Code, it's given no tools at all. Codex can't be run entirely without tools, so Workshop turns off every tool it can, runs Codex in its read-only sandbox, and stops it, making no edit, the moment it starts to use one.
+The model never gets to run commands or change files, except the author's writer, below. With Claude Code, it's given no tools at all. Codex can't be run entirely without tools, so Workshop turns off every tool it can, runs Codex in its read-only sandbox, and stops it, making no edit, the moment it starts to use one. Antigravity can't either, and its own permission settings don't stop its shell, so each call runs in a directory of its own with a hook there that refuses every tool before it runs. Your own global Antigravity rules, in `~/.gemini/AGENTS.md`, still apply.
 
 The author's writer is the only model with tools, and only in a copy of your pack: with Claude Code, just its file tools, in its restricted mode; with Codex, in its workspace-write sandbox with no network. [docs/author.md](docs/author.md) says what each guarantees, and what it doesn't.
 
