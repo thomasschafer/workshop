@@ -44,8 +44,15 @@ impl ProcessGroup {
         }
     }
 
-    /// Kills anything left in the group, then stops tracking it.
+    /// Kills anything left in the group, then stops tracking it, so it's never killed again.
+    /// Only call it once the leader has been reaped, straight after.
     pub fn finish(mut self) {
+        self.reaped();
+    }
+
+    /// Like `finish`, for a group that's kept: anything left in it is killed, and later kills do
+    /// nothing, as its ID could by then belong to another group.
+    pub fn reaped(&mut self) {
         self.kill();
         self.id = None;
     }
@@ -64,12 +71,19 @@ impl GroupedChild {
         Ok(Self { child, group })
     }
 
-    /// Kills the child and everything in its group, without waiting for them to exit.
+    /// Kills the child and everything in its group, without waiting for them to exit. Once the
+    /// child has been reaped and `reaped` called, it kills nothing.
     pub fn kill(&mut self) {
         self.group.kill();
         // Where there are no process groups, this is all that stops it. It fails only if the
         // child has already exited.
         let _ = self.child.start_kill();
+    }
+
+    /// Kills anything left in the group, straight after the child has been reaped, such as a
+    /// grandchild still holding its output open, and stops tracking the group.
+    pub fn reaped(&mut self) {
+        self.group.reaped();
     }
 
     /// Kills anything left in the group once the child has exited.

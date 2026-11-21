@@ -349,26 +349,33 @@ impl CallProcess {
     }
 
     /// Stops the process and everything it started, waits for it to exit, then removes its
-    /// directory.
+    /// directory. If this is cancelled while waiting, the drop cleans up instead.
     async fn stop(mut self) {
-        if let Some(mut process) = self.process.take() {
+        if let Some(process) = self.process.as_mut() {
             process.kill();
-            if let Err(err) = process.child.wait().await {
-                tracing::warn!("couldn't wait for the model CLI to exit: {err}");
+            match tokio::time::timeout(EXIT_GRACE, process.child.wait()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => tracing::warn!("couldn't wait for the model CLI to exit: {err}"),
+                Err(_) => tracing::error!(
+                    "the model CLI was still running {}s after being killed; removing its directory anyway",
+                    EXIT_GRACE.as_secs()
+                ),
             }
+        }
+        if let Some(process) = self.process.take() {
             process.finish();
         }
         drop(self.dir.take());
     }
 }
 
-/// How long a cancelled call's process may take to exit after being killed, before its directory
-/// is removed anyway.
+/// How long a call's process may take to exit after being killed, before its directory is
+/// removed anyway.
 const EXIT_GRACE: Duration = Duration::from_secs(5);
 
 impl Drop for CallProcess {
-    /// Only reached with the process still there when the call was cancelled, as `stop` couldn't
-    /// run, and a drop can't wait.
+    /// Only reached with the process still there when the call was cancelled, as `stop` didn't
+    /// finish, and a drop can't wait.
     fn drop(&mut self) {
         let Some(mut process) = self.process.take() else {
             return;
@@ -377,25 +384,48 @@ impl Drop for CallProcess {
         let Some(dir) = self.dir.take() else {
             return;
         };
+        let leftover = Leftover { process, _dir: dir };
+        // Waiting for the process here would hold up the thread, so a task waits, and the
+        // leftover's own drop cleans up if the task can't run.
         match tokio::runtime::Handle::try_current() {
             Ok(runtime) => {
                 runtime.spawn(async move {
-                    let _ = tokio::time::timeout(EXIT_GRACE, process.child.wait()).await;
-                    process.finish();
-                    drop(dir);
+                    let mut leftover = leftover;
+                    let _ = tokio::time::timeout(EXIT_GRACE, leftover.process.child.wait()).await;
                 });
             }
-            Err(_) => {
-                let deadline = std::time::Instant::now() + EXIT_GRACE;
-                while matches!(process.child.try_wait(), Ok(None))
-                    && std::time::Instant::now() < deadline
-                {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                process.finish();
-                drop(dir);
-            }
+            Err(_) => drop(leftover),
         }
+    }
+}
+
+/// A cancelled call's killed process, and the directory to remove once it has exited.
+///
+/// Its drop waits for the process, for at most `EXIT_GRACE`, then removes the directory. A task
+/// that has already waited makes that wait instant; a task that never runs, as the runtime is
+/// shutting down, is dropped with the runtime, so the drop still cleans up. Only a Workshop that
+/// exits without running drops, such as when it's killed, leaves the directory behind.
+struct Leftover {
+    process: GroupedChild,
+    /// Removed as this is dropped, once the process has exited.
+    _dir: CallDir,
+}
+
+impl Drop for Leftover {
+    fn drop(&mut self) {
+        let deadline = std::time::Instant::now() + EXIT_GRACE;
+        while matches!(self.process.child.try_wait(), Ok(None)) {
+            if std::time::Instant::now() >= deadline {
+                tracing::error!(
+                    "the model CLI was still running {}s after being killed; removing its directory anyway",
+                    EXIT_GRACE.as_secs()
+                );
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.process.reaped();
+        // The directory is removed as the fields are dropped, after this.
     }
 }
 
@@ -879,6 +909,8 @@ impl ProviderRunner {
         };
 
         let status = process.child.wait().await?;
+        // Anything it started could still hold stderr open, and keep the call waiting.
+        process.reaped();
         let stderr = stderr_task.await.unwrap_or_default();
         let Err(err) = parsed else {
             return parsed;
@@ -2143,6 +2175,58 @@ printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
             .unwrap_err()
             .to_string();
         assert!(err.contains("doesn't know"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn doesnt_wait_for_what_a_finished_cli_left_running() {
+        let root = tempfile::tempdir().unwrap();
+        // Something it started holds stderr open after it has exited.
+        let provider = ProviderConfig::with_command(
+            vec![
+                "sh".into(),
+                "-c".into(),
+                "cat > /dev/null; sleep 30 > /dev/null & echo done".into(),
+            ],
+            InputMode::Stdin,
+            OutputMode::Text,
+        );
+        let runner = ProviderRunner::new(provider, root.path().to_owned()).unwrap();
+        let started = std::time::Instant::now();
+        let reply = runner
+            .call(&spec_for("m"), "hi", Duration::from_secs(20))
+            .await
+            .unwrap();
+        assert_eq!(reply.text, "done");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removes_a_cancelled_calls_directory_as_the_runtime_shuts_down() {
+        let root = tempfile::tempdir().unwrap();
+        let (runner, working_dir, dirs) = runner_with_files(root.path(), OutputMode::Text);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let spec = spec_for("m");
+            let call = runner.call(&spec, "hang", Duration::from_secs(30));
+            let started = async {
+                while recorded_dirs(&dirs).is_empty() {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            };
+            tokio::select! {
+                _ = call => panic!("the hanging call finished"),
+                () = started => {}
+            }
+        });
+        // The task left to wait for the process never gets to run.
+        drop(runtime);
+        assert_eq!(call_dirs(&working_dir), Vec::<PathBuf>::new());
+        assert_eq!(still_there(&dirs), Vec::<String>::new());
     }
 
     #[cfg(unix)]
