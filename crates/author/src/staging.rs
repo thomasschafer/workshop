@@ -9,6 +9,12 @@ use anyhow::{Context, Result};
 /// A pack's files, by their paths relative to it, with `/` between directories.
 pub type Files = BTreeMap<String, Vec<u8>>;
 
+/// Whether a path in a pack is a draft: a Markdown file directly in `drafts/`.
+pub fn is_draft(path: &str) -> bool {
+    path.strip_prefix("drafts/")
+        .is_some_and(|name| name.ends_with(".md") && !name.contains('/'))
+}
+
 /// Reads every file in a pack, leaving out names starting with `.`, such as `.git`, as
 /// `Pack::load` does.
 pub fn read(dir: &Path) -> Result<Files> {
@@ -120,7 +126,7 @@ pub fn police(original: &Files, dir: &Path) -> Result<Changes> {
         if now.contains_key(path) {
             continue;
         }
-        if path.starts_with("drafts/") && path.ends_with(".md") && !path[7..].contains('/') {
+        if is_draft(path) {
             changes.drafts_removed.push(path.clone());
         } else {
             write(dir, path, bytes)?;

@@ -425,6 +425,54 @@ async fn notes_the_draft_an_item_was_made_from() {
     );
 }
 
+#[tokio::test]
+async fn notes_a_draft_the_writer_left_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(
+        |copy: &Path, _: &str, _| {
+            std::fs::write(
+                copy.join("items/two-sixes.md"),
+                card("What's the chance of two sixes?", "1/36."),
+            )
+            .unwrap();
+            "{\"items\": [{\"path\": \"items/two-sixes.md\", \"from_draft\": \"drafts/two-sixes.md\"}]}".to_owned()
+        },
+        reviewer("1/36", vec![agrees()]),
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    assert_eq!(
+        report.accepted[0].from_draft.as_deref(),
+        Some("drafts/two-sixes.md")
+    );
+}
+
+#[tokio::test]
+async fn ignores_a_draft_named_that_isnt_one() {
+    for named in [
+        "pack.toml",
+        "drafts/missing.md",
+        "drafts/../pack.toml",
+        "items/x.md",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake::new(
+            move |copy: &Path, _: &str, _| {
+                std::fs::write(
+                    copy.join("items/two-sixes.md"),
+                    card("What's the chance of two sixes?", "1/36."),
+                )
+                .unwrap();
+                format!(
+                    "{{\"items\": [{{\"path\": \"items/two-sixes.md\", \"from_draft\": \"{named}\"}}]}}"
+                )
+            },
+            reviewer("1/36", vec![agrees()]),
+        );
+        let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+        assert_eq!(report.accepted[0].from_draft, None, "{named}");
+    }
+}
+
 #[test]
 fn reads_the_json_at_the_end_of_a_reply() {
     #[derive(Deserialize, Debug, PartialEq)]

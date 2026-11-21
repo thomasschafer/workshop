@@ -273,10 +273,13 @@ pub async fn run<M: Models>(
 
     // A second model solves each one blind, then reviews it, and they discuss what it objects to.
     for mut item in passing {
-        item.from_draft = from_drafts
-            .get(&item.path)
-            .cloned()
-            .filter(|draft| changes.drafts_removed.contains(draft));
+        // A writer whose tools can't delete files leaves the draft in place, so a draft that's
+        // still in the pack counts too. Only a draft in the original pack can be named, as it's
+        // removed from the pack itself once the item is accepted.
+        item.from_draft = from_drafts.get(&item.path).cloned().filter(|draft| {
+            changes.drafts_removed.contains(draft)
+                || (staging::is_draft(draft) && original.contains_key(draft))
+        });
         match review(
             &copy,
             &original,
