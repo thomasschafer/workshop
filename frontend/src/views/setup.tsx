@@ -302,6 +302,10 @@ function LoginStep({
             and Safari), and under Cookies copy the value of the one called
             <code> session</code>. It's saved on the server only.
           </p>
+          <p class="small">
+            Phone browsers don't show cookies, but on Android, Firefox with the Cookie-Editor add-on
+            can: log in there, open Cookie-Editor and copy <code>session</code>.
+          </p>
           <form class="cookie-form" onSubmit={save}>
             <input
               type="password"
