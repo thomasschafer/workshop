@@ -1321,6 +1321,9 @@ printf '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","re
         let read = |name: &str| std::fs::read_to_string(copy.join(name)).unwrap();
         assert_eq!(read("prompt"), "Make no edits.");
         assert_eq!(read("AGENTS.md"), spec.system_prompt);
+        // A repository's root of its own, so no rules are read from directories above it.
+        assert!(copy.join(".git").is_file());
+        assert_eq!(read(".git"), "gitdir: /nonexistent\n");
         let args: Vec<String> = read("args").lines().map(str::to_owned).collect();
         assert!(
             args.windows(2)

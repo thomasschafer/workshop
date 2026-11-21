@@ -39,6 +39,14 @@ unix_only = true
 path = "AGENTS.md"
 contents = "{system_prompt}"
 
+# Antigravity also reads the rules of the git repository it's in, looking up from the directory
+# it runs in, such as the AGENTS.md of a checkout of Workshop that a development build keeps its
+# data in. A .git file pointing nowhere makes the directory a repository's root of its own, so
+# none are found above it; an empty .git directory doesn't.
+[[files]]
+path = ".git"
+contents = "gitdir: /nonexistent\n"
+
 # Refuses every tool, whatever its name, including any added later.
 [[files]]
 path = ".agents/hooks.json"
