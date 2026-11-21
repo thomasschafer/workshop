@@ -3,24 +3,27 @@
 # Antigravity has no way to run without tools, and neither its permission settings nor its
 # sandbox reliably stops its shell tool, so each call runs in a directory of its own with a hook
 # there that refuses every tool call before it runs: the model can ask for a tool, but only ever
-# gets back an error. There's no flag for a system prompt either, so Workshop's instructions are
-# that directory's AGENTS.md, which Antigravity reads as the project's rules.
+# gets back an error. In case the hook ever lets one through, Workshop also watches the steps it
+# reports, and stops it, using none of its reply, if a tool runs rather than being refused.
+# There's no flag for a system prompt either, so Workshop's instructions are that directory's
+# AGENTS.md, which Antigravity reads as the project's rules.
 #
-# Antigravity still reads the user's own global rules, in ~/.gemini/AGENTS.md, as well as
-# Workshop's instructions, and there's no way to skip them without skipping its login too, so
-# they can change how it replies.
+# Antigravity still loads the user's own global config: their global rules, in
+# ~/.gemini/AGENTS.md, as well as Workshop's instructions, their global hooks and their MCP
+# servers. There's no way to skip it without skipping its login too, so the rules can change how
+# it replies, though tools stay refused by the hook and stopped by Workshop's check.
 #
 # There's no `[agent]` command, so it can't be the author's writer, but it can be any model that
 # runs without tools, such as the author's reviewer.
 command = [
   "agy",
   "--model", "{model}",
-  "--output-format", "json",
+  "--output-format", "stream-json",
   "--disable-slash-commands",
 ]
 # With no -p, the prompt is read from stdin.
 input = "stdin"
-output = "antigravity-json"
+output = "antigravity-stream-json"
 name = "Antigravity"
 # The effort is part of each model's name.
 edit_models = ["gemini-3.8-flash-medium", "gemini-4-neon-low"]

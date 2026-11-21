@@ -64,6 +64,14 @@ impl GroupedChild {
         Ok(Self { child, group })
     }
 
+    /// Kills the child and everything in its group, without waiting for them to exit.
+    pub fn kill(&mut self) {
+        self.group.kill();
+        // Where there are no process groups, this is all that stops it. It fails only if the
+        // child has already exited.
+        let _ = self.child.start_kill();
+    }
+
     /// Kills anything left in the group once the child has exited.
     pub fn finish(self) {
         let Self { child, group } = self;

@@ -112,8 +112,9 @@ pub enum OutputMode {
     CodexJson,
     /// An Ollama `/api/chat` response.
     OllamaChat,
-    /// Antigravity `--output-format json`.
-    AntigravityJson,
+    /// Antigravity `--output-format stream-json`. Antigravity can't run without tools, so the
+    /// process is stopped, and the call fails, if a tool ever runs rather than being refused.
+    AntigravityStreamJson,
 }
 
 const BUILTIN: &[(&str, &str)] = &[
@@ -303,8 +304,81 @@ impl CallDir {
 
 impl Drop for CallDir {
     fn drop(&mut self) {
-        if let Err(err) = std::fs::remove_dir_all(&self.path) {
-            tracing::warn!("couldn't remove {}: {err}", self.path.display());
+        // A process that has only just exited can briefly keep files open on some systems.
+        for attempt in 1..=3 {
+            match std::fs::remove_dir_all(&self.path) {
+                Ok(()) => return,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+                Err(err) if attempt == 3 => {
+                    tracing::warn!("couldn't remove {}: {err}", self.path.display());
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+    }
+}
+
+/// A call's process, with the directory of its own it runs in, if it has one. The directory is
+/// removed only once the process has exited, however the call ends.
+struct CallProcess {
+    process: Option<GroupedChild>,
+    dir: Option<CallDir>,
+}
+
+impl CallProcess {
+    fn process(&mut self) -> &mut GroupedChild {
+        self.process
+            .as_mut()
+            .expect("a call's process is only taken when it's stopped")
+    }
+
+    /// Stops the process and everything it started, waits for it to exit, then removes its
+    /// directory.
+    async fn stop(mut self) {
+        if let Some(mut process) = self.process.take() {
+            process.kill();
+            if let Err(err) = process.child.wait().await {
+                tracing::warn!("couldn't wait for the model CLI to exit: {err}");
+            }
+            process.finish();
+        }
+        drop(self.dir.take());
+    }
+}
+
+/// How long a cancelled call's process may take to exit after being killed, before its directory
+/// is removed anyway.
+const EXIT_GRACE: Duration = Duration::from_secs(5);
+
+impl Drop for CallProcess {
+    /// Only reached with the process still there when the call was cancelled, as `stop` couldn't
+    /// run, and a drop can't wait.
+    fn drop(&mut self) {
+        let Some(mut process) = self.process.take() else {
+            return;
+        };
+        process.kill();
+        let Some(dir) = self.dir.take() else {
+            return;
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => {
+                runtime.spawn(async move {
+                    let _ = tokio::time::timeout(EXIT_GRACE, process.child.wait()).await;
+                    process.finish();
+                    drop(dir);
+                });
+            }
+            Err(_) => {
+                let deadline = std::time::Instant::now() + EXIT_GRACE;
+                while matches!(process.child.try_wait(), Ok(None))
+                    && std::time::Instant::now() < deadline
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                process.finish();
+                drop(dir);
+            }
         }
     }
 }
@@ -493,8 +567,7 @@ impl ProviderRunner {
     ) -> Result<Reply> {
         let started = std::time::Instant::now();
         let spec = &self.resolve(spec).await;
-        // Declared before the process, so it's removed after the process is stopped.
-        let call_dir = if self.provider.files.is_empty() {
+        let dir = if self.provider.files.is_empty() {
             None
         } else {
             self.ensure_working_dir()?;
@@ -513,8 +586,12 @@ impl ProviderRunner {
             None => self.spawn(
                 spec,
                 Some(prompt),
-                call_dir.as_ref().map_or(&self.working_dir, |dir| &dir.path),
+                dir.as_ref().map_or(&self.working_dir, |dir| &dir.path),
             )?,
+        };
+        let mut call = CallProcess {
+            process: Some(process),
+            dir,
         };
         if self.provider.prespawn && spares == Spares::Use {
             // Failing to warm only costs latency on the next call, so it mustn't fail this one.
@@ -522,8 +599,12 @@ impl ProviderRunner {
                 tracing::warn!("could not start a spare model process: {err:#}");
             }
         }
-        let result =
-            tokio::time::timeout(timeout, self.communicate(process, spec, prompt, partial)).await;
+        let result = tokio::time::timeout(
+            timeout,
+            self.communicate(call.process(), spec, prompt, partial),
+        )
+        .await;
+        call.stop().await;
         let (text, model) = match result {
             Ok(reply) => reply?,
             Err(_) => bail!("the model took longer than {}s to reply", timeout.as_secs()),
@@ -580,9 +661,11 @@ impl ProviderRunner {
         .with_context(|| format!("starting `{program}`"))
     }
 
+    /// Gives the process the prompt and reads its reply. Whoever started it stops it afterwards,
+    /// as some CLIs carry on after replying; this only stops it early, as soon as it uses a tool.
     async fn communicate(
         &self,
-        mut process: GroupedChild,
+        process: &mut GroupedChild,
         spec: &CallSpec,
         prompt: &str,
         partial: Option<&mpsc::UnboundedSender<String>>,
@@ -670,7 +753,6 @@ impl ProviderRunner {
                     // which only adds latency here, so it is stopped rather than awaited.
                     Some(Ok(reply)) => {
                         stderr_task.abort();
-                        drop(process);
                         return Ok(reply);
                     }
                     Some(Err(err)) => Err(err),
@@ -682,10 +764,63 @@ impl ProviderRunner {
                 BufReader::new(stdout).read_to_string(&mut out).await?;
                 parse_ollama_reply(&out).map(|text| (text, Some(spec.model.clone())))
             }
-            OutputMode::AntigravityJson => {
-                let mut out = String::new();
-                BufReader::new(stdout).read_to_string(&mut out).await?;
-                parse_antigravity_result(&out).map(|text| (text, None))
+            OutputMode::AntigravityStreamJson => {
+                let mut lines = BufReader::new(stdout).lines();
+                let mut model = None;
+                // Tool steps asked for and not yet refused, by step, with the tool's name.
+                let mut asked = std::collections::BTreeMap::new();
+                let mut outcome = None;
+                while let Some(line) = lines.next_line().await? {
+                    match parse_antigravity_event(&line) {
+                        Ok(AntigravityEvent::Init { model: m }) => model = m.or(model),
+                        Ok(AntigravityEvent::Delta(text)) => {
+                            // Nobody listening any more only means the reply isn't shown early.
+                            if let Some(partial) = partial {
+                                let _ = partial.send(text);
+                            }
+                        }
+                        Ok(AntigravityEvent::Tool { step, name, state }) => match state {
+                            ToolState::Asked => {
+                                asked.insert(step, name);
+                            }
+                            ToolState::Refused => {
+                                asked.remove(&step);
+                            }
+                            ToolState::Ran(state) => {
+                                stderr_task.abort();
+                                process.kill();
+                                tracing::error!(
+                                    "the model used a tool ({name}) despite tools being turned off, ending {state}; stopped it"
+                                );
+                                bail!(
+                                    "the model used a tool ({name}) although tools are turned off, so it was stopped, and its reply isn't used"
+                                );
+                            }
+                        },
+                        Ok(AntigravityEvent::Result(Ok(text))) => {
+                            if let Some(name) = asked.values().next() {
+                                stderr_task.abort();
+                                process.kill();
+                                bail!(
+                                    "the model asked for a tool ({name}) that was never refused, although tools are turned off, so its reply isn't used"
+                                );
+                            }
+                            stderr_task.abort();
+                            return Ok((text, model));
+                        }
+                        Ok(AntigravityEvent::Result(Err(err))) => {
+                            outcome = Some(Err(anyhow::anyhow!(err)));
+                            break;
+                        }
+                        Ok(AntigravityEvent::Other) => {}
+                        Err(err) => {
+                            stderr_task.abort();
+                            process.kill();
+                            return Err(err);
+                        }
+                    }
+                }
+                outcome.unwrap_or_else(|| Err(anyhow::anyhow!("model CLI exited without a result")))
             }
             OutputMode::CodexJson => {
                 let mut lines = BufReader::new(stdout).lines();
@@ -697,9 +832,8 @@ impl ProviderRunner {
                             break;
                         }
                         CodexEvent::Tool(kind) => {
-                            // Dropping the process kills it along with anything it started.
                             stderr_task.abort();
-                            drop(process);
+                            process.kill();
                             tracing::warn!("the model tried to use a tool ({kind}); stopped it");
                             bail!(
                                 "the model tried to use a tool ({kind}), which Workshop doesn't allow, so it was stopped and nothing changed"
@@ -718,7 +852,6 @@ impl ProviderRunner {
                 match outcome {
                     Some(Ok(text)) => {
                         stderr_task.abort();
-                        drop(process);
                         return Ok((text, None));
                     }
                     Some(Err(err)) => Err(err),
@@ -727,8 +860,7 @@ impl ProviderRunner {
             }
         };
 
-        let status = child.wait().await?;
-        process.finish();
+        let status = process.child.wait().await?;
         let stderr = stderr_task.await.unwrap_or_default();
         let Err(err) = parsed else {
             return parsed;
@@ -843,11 +975,86 @@ fn parse_ollama_reply(json: &str) -> Result<String> {
         .context("Ollama's reply has no message")
 }
 
-/// The reply in Antigravity's `--output-format json` result, or why the call failed.
-fn parse_antigravity_result(json: &str) -> Result<String> {
-    let value: serde_json::Value = serde_json::from_str(json.trim())
-        .with_context(|| format!("model CLI output isn't valid JSON: {json}"))?;
-    let string = |key: &str| value.get(key).and_then(|v| v.as_str());
+#[derive(Debug, PartialEq, Eq)]
+enum AntigravityEvent {
+    Init {
+        model: Option<String>,
+    },
+    /// Part of the reply's text, as it's written.
+    Delta(String),
+    Tool {
+        step: u64,
+        name: String,
+        state: ToolState,
+    },
+    /// The reply, or why the call failed.
+    Result(Result<String, String>),
+    Other,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ToolState {
+    /// Asked for, and not yet refused: the hook decides between this and what comes next.
+    Asked,
+    /// Refused by the hook, so it never ran.
+    Refused,
+    /// Anything else, such as `DONE`, which means it ran.
+    Ran(String),
+}
+
+/// Steps that aren't tools. Any other kind is treated as a tool, so a new kind of step that
+/// reaches any end but being refused stops the call, rather than being allowed by default.
+const ANTIGRAVITY_SAFE_STEPS: &[&str] = &["user_input", "agent_response"];
+
+/// Reads one line of Antigravity's `--output-format stream-json`. Event types it doesn't know
+/// are errors rather than being skipped, as one could report a tool being used.
+fn parse_antigravity_event(line: &str) -> Result<AntigravityEvent> {
+    let event: serde_json::Value = serde_json::from_str(line)
+        .with_context(|| format!("model CLI printed a line that isn't JSON: {line}"))?;
+    let string = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_str()).map(str::to_owned);
+    Ok(match event.get("event").and_then(|e| e.as_str()) {
+        Some("init") => AntigravityEvent::Init {
+            model: string(event.pointer("/init/model")),
+        },
+        Some("step_update") => {
+            let step = event.get("step_update");
+            let field = |key: &str| string(step.and_then(|s| s.get(key)));
+            let kind = field("step_type").unwrap_or_default();
+            if ANTIGRAVITY_SAFE_STEPS.contains(&kind.as_str()) {
+                match field("text_delta") {
+                    Some(text) if kind == "agent_response" => AntigravityEvent::Delta(text),
+                    _ => AntigravityEvent::Other,
+                }
+            } else {
+                let state = field("state").unwrap_or_default();
+                AntigravityEvent::Tool {
+                    step: step
+                        .and_then(|s| s.get("step_index"))
+                        .and_then(|i| i.as_u64())
+                        .with_context(|| format!("a step has no index: {line}"))?,
+                    name: field("tool_name").unwrap_or(kind),
+                    state: match state.as_str() {
+                        "ACTIVE" => ToolState::Asked,
+                        "ERROR" => ToolState::Refused,
+                        _ => ToolState::Ran(state),
+                    },
+                }
+            }
+        }
+        Some("result") => AntigravityEvent::Result(
+            event
+                .get("result")
+                .context("the result event has no result")
+                .and_then(antigravity_reply)
+                .map_err(|e| format!("{e:#}")),
+        ),
+        _ => bail!("model CLI printed an event Workshop doesn't know: {line}"),
+    })
+}
+
+/// The reply in an Antigravity result, or why the call failed.
+fn antigravity_reply(result: &serde_json::Value) -> Result<String> {
+    let string = |key: &str| result.get(key).and_then(|v| v.as_str());
     match string("status") {
         Some("SUCCESS") => string("response")
             .map(|text| text.trim().to_owned())
@@ -1047,12 +1254,16 @@ mod tests {
 printf '%s\n' "$@" > args
 cp -R . "$copy"
 cat > "$copy/prompt"
-printf '{"conversation_id":"c","status":"SUCCESS","response":"{\\"edits\\": []}\\n","num_turns":1}\n'
+printf '{"event":"init","conversation_id":"c","init":{"model":"gemini-4-neon-low","cwd":"/tmp/c","tools":["read_file","run_command"]}}\n'
+printf '{"event":"step_update","step_update":{"conversation_id":"c","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"{\\"edits\\": "}}\n'
+printf '{"event":"step_update","step_update":{"conversation_id":"c","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"[]}\\n"}}\n'
+printf '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"{\\"edits\\": []}\\n","num_turns":1}}\n'
 "#,
         )
         .unwrap();
         let mut provider = builtin("antigravity");
         assert!(provider.agent.is_none());
+        assert_eq!(provider.output, OutputMode::AntigravityStreamJson);
         assert_eq!(provider.input, InputMode::Stdin);
         assert!(!provider.prespawn);
         assert_eq!(provider.command[0], "agy");
@@ -1070,12 +1281,24 @@ printf '{"conversation_id":"c","status":"SUCCESS","response":"{\\"edits\\": []}\
             system_prompt: "Reply with JSON {\"edits\": []}.".into(),
             effort: None,
         };
+        let (sender, mut receiver) = mpsc::unbounded_channel();
         let reply = runner
-            .call(&spec, "Make no edits.", Duration::from_secs(10))
+            .call_streaming(
+                &spec,
+                "Make no edits.",
+                Duration::from_secs(10),
+                Some(&sender),
+            )
             .await
             .unwrap();
         assert_eq!(reply.text, "{\"edits\": []}");
         assert_eq!(reply.model.as_deref(), Some("gemini-4-neon-low"));
+        drop(sender);
+        let mut parts = Vec::new();
+        while let Some(part) = receiver.recv().await {
+            parts.push(part);
+        }
+        assert_eq!(parts, ["{\"edits\": ", "[]}\n"]);
         let read = |name: &str| std::fs::read_to_string(copy.join(name)).unwrap();
         assert_eq!(read("prompt"), "Make no edits.");
         assert_eq!(read("AGENTS.md"), spec.system_prompt);
@@ -1084,7 +1307,10 @@ printf '{"conversation_id":"c","status":"SUCCESS","response":"{\\"edits\\": []}\
             args.windows(2)
                 .any(|w| w == ["--model", "gemini-4-neon-low"])
         );
-        assert!(args.windows(2).any(|w| w == ["--output-format", "json"]));
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--output-format", "stream-json"])
+        );
         assert!(args.contains(&"--disable-slash-commands".to_owned()));
         assert!(!args.contains(&"-p".to_owned()));
         assert!(!args.contains(&"--dangerously-skip-permissions".to_owned()));
@@ -1204,28 +1430,110 @@ printf '{"conversation_id":"c","status":"SUCCESS","response":"{\\"edits\\": []}\
     }
 
     #[test]
-    fn parses_antigravity_results() {
-        // As `agy --output-format json` prints them.
-        let ok = r#"{"conversation_id":"b49e8b36-f224-41d5-b5d4-0a1cdb92a71f","status":"SUCCESS","response":"pong\n","duration_seconds":3.027478,"num_turns":1,"usage":{"input_tokens":11037,"output_tokens":23,"thinking_tokens":21,"cache_read_tokens":0,"total_tokens":11060}}"#;
+    fn parses_antigravity_events() {
+        // As `agy --output-format stream-json` prints them, shortened.
+        let event = |line: &str| parse_antigravity_event(line).unwrap();
         assert_eq!(
-            parse_antigravity_result(&format!("{ok}\n")).unwrap(),
-            "pong"
+            event(
+                r#"{"event":"init","conversation_id":"c","init":{"model":"gemini-4-neon-low","cwd":"/tmp/call","tools":["read_file","run_command"]}}"#
+            ),
+            AntigravityEvent::Init {
+                model: Some("gemini-4-neon-low".into())
+            }
         );
-        let bad_model = r#"{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \"no-such-model\" --effort \"\"): model no-such-model is not recognized as a known model or custom model in settings","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0},"finished_reason":"error"}"#;
-        let err = parse_antigravity_result(bad_model).unwrap_err().to_string();
-        assert!(err.contains("(ERROR)"), "{err}");
+        assert_eq!(
+            event(
+                r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":0,"state":"DONE","step_type":"user_input"}}"#
+            ),
+            AntigravityEvent::Other
+        );
+        assert_eq!(
+            event(
+                r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":1,"state":"DONE","step_type":"agent_response","duration_seconds":3.8}}"#
+            ),
+            AntigravityEvent::Other
+        );
+        assert_eq!(
+            event(
+                r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":4,"state":"ACTIVE","step_type":"agent_response","text_delta":"I couldn't run `echo hi`"}}"#
+            ),
+            AntigravityEvent::Delta("I couldn't run `echo hi`".into())
+        );
+        let tool = |step: u64, name: &str, state: ToolState| AntigravityEvent::Tool {
+            step,
+            name: name.into(),
+            state,
+        };
+        assert_eq!(
+            event(
+                r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi"}}}}"#
+            ),
+            tool(3, "run_command", ToolState::Asked)
+        );
+        assert_eq!(
+            event(
+                r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"ERROR","step_type":"tool","tool_name":"run_command","duration_seconds":0.15,"tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi"},"error":{"type":"TOOL_ERROR","message":"tool call denied by pre-tool hook: Tools are turned off."}}}}"#
+            ),
+            tool(3, "run_command", ToolState::Refused)
+        );
+        // As it reports a file read that wasn't refused.
+        assert_eq!(
+            event(
+                r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":2,"state":"DONE","step_type":"tool","tool_name":"read_file","duration_seconds":0.02,"tool_info":{"name":"read_file","parameters":{"Path":"/tmp/call/notes.txt"},"output":"1 lines, 18 bytes"}}}"#
+            ),
+            tool(2, "read_file", ToolState::Ran("DONE".into()))
+        );
+        // A kind of step Workshop doesn't know is treated as a tool.
+        assert_eq!(
+            event(
+                r#"{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"browser_subagent"}}"#
+            ),
+            tool(5, "browser_subagent", ToolState::Ran("DONE".into()))
+        );
         assert!(
-            err.contains("model no-such-model is not recognized"),
-            "{err}"
+            parse_antigravity_event(
+                r#"{"event":"step_update","step_update":{"state":"DONE","step_type":"tool"}}"#
+            )
+            .is_err()
         );
-        let unexplained = parse_antigravity_result(r#"{"status":"CANCELLED","response":"half"}"#)
-            .unwrap_err()
-            .to_string();
-        assert!(unexplained.contains("(CANCELLED)"), "{unexplained}");
-        assert!(parse_antigravity_result(r#"{"response":"no status"}"#).is_err());
-        assert!(parse_antigravity_result(r#"{"status":"SUCCESS"}"#).is_err());
-        assert!(parse_antigravity_result("Error: something broke").is_err());
-        assert!(parse_antigravity_result("").is_err());
+
+        assert_eq!(
+            event(
+                r#"{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"pong\n","duration_seconds":2.35,"num_turns":1}}"#
+            ),
+            AntigravityEvent::Result(Ok("pong".into()))
+        );
+        let AntigravityEvent::Result(Err(bad_model)) = event(
+            r#"{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \"no-such-model\" --effort \"\"): model no-such-model is not recognized as a known model or custom model in settings","duration_seconds":0,"num_turns":0,"finished_reason":"error"}}"#,
+        ) else {
+            panic!("an error status isn't a failure");
+        };
+        assert!(bad_model.contains("(ERROR)"), "{bad_model}");
+        assert!(
+            bad_model.contains("model no-such-model is not recognized"),
+            "{bad_model}"
+        );
+        for result in [
+            r#"{"status":"CANCELLED","response":"half"}"#,
+            r#"{"response":"no status"}"#,
+            r#"{"status":"SUCCESS"}"#,
+        ] {
+            assert!(
+                matches!(
+                    event(&format!(r#"{{"event":"result","result":{result}}}"#)),
+                    AntigravityEvent::Result(Err(_))
+                ),
+                "{result}"
+            );
+        }
+        assert!(matches!(
+            event(r#"{"event":"result"}"#),
+            AntigravityEvent::Result(Err(_))
+        ));
+        // Events it doesn't know aren't skipped, as they could report a tool.
+        assert!(parse_antigravity_event(r#"{"event":"subagent_update","subagent":{}}"#).is_err());
+        assert!(parse_antigravity_event("Error: something broke").is_err());
+        assert!(parse_antigravity_event("").is_err());
     }
 
     #[test]
@@ -1472,10 +1780,11 @@ printf '{"type":"assistant","message":{"model":"m","content":[{"type":"text","te
         std::fs::write(
             &script,
             r#"pwd >> "$1/dirs"
+echo $$ >> "$1/pids"
 prompt=$(cat)
 case "$prompt" in
   fail) printf '{"type":"result","is_error":true,"result":"it broke"}'; exit 1;;
-  hang) sleep 30;;
+  hang) sleep 30 & wait;;
 esac
 printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
 "#,
@@ -1515,6 +1824,25 @@ printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
             .collect()
     }
 
+    /// Whether the processes the stand-in CLI noted beside `dirs` are still there, unreaped or
+    /// running.
+    #[cfg(unix)]
+    fn still_there(dirs: &Path) -> Vec<String> {
+        std::fs::read_to_string(dirs.with_file_name("pids"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|pid| {
+                std::process::Command::new("kill")
+                    .args(["-0", pid])
+                    .stderr(Stdio::null())
+                    .status()
+                    .unwrap()
+                    .success()
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn runs_each_call_in_a_fresh_directory_with_its_files() {
@@ -1548,6 +1876,7 @@ printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
             assert!(!dir.exists(), "{} wasn't removed", dir.display());
         }
         assert_eq!(call_dirs(&working_dir), Vec::<PathBuf>::new());
+        assert_eq!(still_there(&dirs), Vec::<String>::new());
     }
 
     #[cfg(unix)]
@@ -1570,6 +1899,12 @@ printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
             .await
             .unwrap_err();
         assert!(err.to_string().contains("longer than"), "{err}");
+        // Each process has exited, and been waited for, by the time its call returns, and only
+        // then is its directory removed.
+        assert_eq!(still_there(&dirs), Vec::<String>::new());
+        for dir in recorded_dirs(&dirs) {
+            assert!(!dir.exists(), "{} wasn't removed", dir.display());
+        }
         // Dropped mid-call, once it's running in its directory.
         let call = runner.call(&spec, "hang", Duration::from_secs(30));
         let started = async {
@@ -1581,11 +1916,224 @@ printf '%s|%s|%s' "$prompt" "$(cat AGENTS.md)" "$(cat .agents/hooks.json)"
             _ = call => panic!("the hanging call finished"),
             () = started => {}
         }
+        // A drop can't wait, so the process is killed straight away, and its directory removed
+        // once it has exited.
         let ran_in = recorded_dirs(&dirs);
         assert_eq!(ran_in.len(), 3);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while ran_in[2].exists() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         for dir in &ran_in {
             assert!(!dir.exists(), "{} wasn't removed", dir.display());
         }
+        assert_eq!(call_dirs(&working_dir), Vec::<PathBuf>::new());
+        assert_eq!(still_there(&dirs), Vec::<String>::new());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn removes_a_calls_directory_when_its_files_or_process_cant_be_made() {
+        let root = tempfile::tempdir().unwrap();
+        let spec = CallSpec {
+            model: "m".into(),
+            system_prompt: "s".into(),
+            effort: None,
+        };
+        // A file where the next needs a directory, which validation would refuse, so that
+        // writing the second fails after the first is written.
+        let clashing = [
+            CallFile {
+                path: "x".into(),
+                contents: "a file".into(),
+            },
+            CallFile {
+                path: "x/y".into(),
+                contents: "".into(),
+            },
+        ];
+        assert!(CallDir::create(root.path(), &clashing, &spec).is_err());
+        assert_eq!(call_dirs(root.path()), Vec::<PathBuf>::new());
+
+        let provider = ProviderConfig {
+            files: vec![CallFile {
+                path: "AGENTS.md".into(),
+                contents: "{system_prompt}".into(),
+            }],
+            ..ProviderConfig::with_command(
+                vec!["no-such-model-cli".into()],
+                InputMode::Stdin,
+                OutputMode::Text,
+            )
+        };
+        let runner = ProviderRunner::new(provider, root.path().to_owned()).unwrap();
+        let err = runner
+            .call(&spec, "hi", Duration::from_secs(10))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no-such-model-cli"), "{err}");
+        assert_eq!(call_dirs(root.path()), Vec::<PathBuf>::new());
+    }
+
+    /// Antigravity's preset, run by a stand-in for `agy` that prints `events` and exits with
+    /// `exit`, or hangs once it has printed them if `exit` is `None`.
+    #[cfg(unix)]
+    fn antigravity_stand_in(
+        root: &Path,
+        events: &[&str],
+        stderr: &str,
+        exit: Option<u8>,
+    ) -> (ProviderRunner, PathBuf) {
+        let events_file = root.join("events.jsonl");
+        std::fs::write(&events_file, events.join("\n") + "\n").unwrap();
+        let end = match exit {
+            Some(code) => format!("exit {code}"),
+            None => "sleep 30 & wait".to_owned(),
+        };
+        let script = root.join("fake-agy.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "cat > /dev/null\necho $$ > '{pids}'\ncat '{events}'\nprintf '%s' '{stderr}' >&2\n{end}\n",
+                pids = root.join("pids").display(),
+                events = events_file.display(),
+            ),
+        )
+        .unwrap();
+        let mut provider = builtin("antigravity");
+        provider.command.splice(
+            0..1,
+            ["sh".to_owned(), script.to_string_lossy().into_owned()],
+        );
+        let working_dir = root.join("work");
+        (
+            ProviderRunner::new(provider, working_dir.clone()).unwrap(),
+            working_dir,
+        )
+    }
+
+    #[cfg(unix)]
+    const ASKS_FOR_A_SHELL: &str = r#"{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi"}}}}"#;
+
+    #[cfg(unix)]
+    const REPLIES: &str = r#"{"event":"result","result":{"status":"SUCCESS","response":"I couldn't run it.\n","num_turns":1}}"#;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn carries_on_when_antigravity_is_refused_a_tool() {
+        let root = tempfile::tempdir().unwrap();
+        let refused = r#"{"event":"step_update","step_update":{"step_index":2,"state":"ERROR","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","error":{"type":"TOOL_ERROR","message":"tool call denied by pre-tool hook: Tools are turned off."}}}}"#;
+        let (runner, _) = antigravity_stand_in(
+            root.path(),
+            &[ASKS_FOR_A_SHELL, refused, REPLIES],
+            "",
+            Some(0),
+        );
+        let reply = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "Run echo hi",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply.text, "I couldn't run it.");
+    }
+
+    #[cfg(unix)]
+    fn spec_for(model: &str) -> CallSpec {
+        CallSpec {
+            model: model.into(),
+            system_prompt: "s".into(),
+            effort: None,
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stops_antigravity_as_soon_as_a_tool_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let ran = r#"{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","output":"hi"}}}"#;
+        // It would hang after the tool, so the call only ends promptly if it's stopped.
+        let (runner, working_dir) =
+            antigravity_stand_in(root.path(), &[ASKS_FOR_A_SHELL, ran], "", None);
+        let started = std::time::Instant::now();
+        let err = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "Run echo hi",
+                Duration::from_secs(20),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(
+            err.contains("used a tool (run_command) although tools are turned off"),
+            "{err}"
+        );
+        assert_eq!(still_there(&root.path().join("dirs")), Vec::<String>::new());
+        assert_eq!(call_dirs(&working_dir), Vec::<PathBuf>::new());
+
+        // Asked for and never refused is as bad, as there's no knowing it didn't run.
+        let (runner, _) =
+            antigravity_stand_in(root.path(), &[ASKS_FOR_A_SHELL, REPLIES], "", Some(0));
+        let err = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "Run echo hi",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("never refused"), "{err}");
+
+        // As is an event it doesn't know.
+        let (runner, _) = antigravity_stand_in(
+            root.path(),
+            &[r#"{"event":"subagent_update"}"#, REPLIES],
+            "",
+            Some(0),
+        );
+        let err = runner
+            .call(
+                &spec_for("gemini-4-neon-low"),
+                "hi",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("doesn't know"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn says_why_antigravity_failed() {
+        let root = tempfile::tempdir().unwrap();
+        let failed = r#"{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \"gemini-0\" --effort \"\"): model gemini-0 is not recognized as a known model or custom model in settings","duration_seconds":0,"num_turns":0,"finished_reason":"error"}}"#;
+        let (runner, working_dir) = antigravity_stand_in(
+            root.path(),
+            &[failed],
+            "error: invalid model selection (--model gemini-0)",
+            Some(1),
+        );
+        let err = runner
+            .call(&spec_for("gemini-0"), "hi", Duration::from_secs(10))
+            .await
+            .unwrap_err();
+        let err = format!("{err:#}");
+        assert!(
+            err.starts_with(
+                "Antigravity exited with exit status: 1: error: invalid model selection (--model gemini-0): "
+            ),
+            "{err}"
+        );
+        assert!(
+            err.contains("model CLI reported an error (ERROR): invalid model selection"),
+            "{err}"
+        );
         assert_eq!(call_dirs(&working_dir), Vec::<PathBuf>::new());
     }
 

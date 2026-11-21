@@ -41,8 +41,12 @@ fn codex_message(text: &str) -> String {
 }
 
 fn antigravity_result(text: &str) -> String {
-    serde_json::json!({ "conversation_id": "c", "status": "SUCCESS", "response": text, "num_turns": 1 })
-        .to_string()
+    let init = serde_json::json!({ "event": "init", "init": { "model": "gemini-4-neon-high" } });
+    let result = serde_json::json!({
+        "event": "result",
+        "result": { "status": "SUCCESS", "response": text, "num_turns": 1 },
+    });
+    format!("{init}\n{result}\n")
 }
 
 fn card(question: &str) -> String {
