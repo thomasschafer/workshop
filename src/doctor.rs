@@ -428,12 +428,7 @@ async fn check_provider(config: &Config, id: &str) -> Vec<Check> {
     }
     let program = &provider.command[0];
     if find_program(program).is_none() {
-        let alternatives: Vec<&str> = config
-            .providers
-            .iter()
-            .filter(|(other, p)| *other != id && find_program(&p.command[0]).is_some())
-            .map(|(other, _)| other.as_str())
-            .collect();
+        let alternatives = alternatives(config, id, cfg!(windows));
         let fix = match alternatives.first() {
             Some(other) => format!(
                 "{install_hint} Or use `{other}`, which is installed: set `provider = \"{other}\"` under [models.edit] and [models.discuss] in your config."
@@ -474,6 +469,20 @@ async fn check_provider(config: &Config, id: &str) -> Vec<Check> {
         });
     }
     checks
+}
+
+/// The other providers that are installed and can run here, to suggest instead of `id`.
+fn alternatives<'a>(config: &'a Config, id: &str, windows: bool) -> Vec<&'a str> {
+    config
+        .providers
+        .iter()
+        .filter(|(other, p)| {
+            *other != id
+                && p.check_platform(other, windows).is_ok()
+                && find_program(&p.command[0]).is_some()
+        })
+        .map(|(other, _)| other.as_str())
+        .collect()
 }
 
 async fn check_network(aoc: &crate::config::AocConfig) -> Check {
@@ -597,6 +606,18 @@ mod tests {
         .await;
         assert_eq!(set.status, Status::Warn);
         assert!(set.fix.unwrap().contains("set under [author]"));
+    }
+
+    #[test]
+    fn suggests_only_providers_that_can_run_here() {
+        let mut config = config("", true);
+        // Antigravity, installed, as `sh` is.
+        let antigravity = config.providers.get_mut("antigravity").unwrap();
+        antigravity.command = vec!["sh".into()];
+        assert!(alternatives(&config, "claude", false).contains(&"antigravity"));
+        let on_windows = alternatives(&config, "claude", true);
+        assert!(!on_windows.contains(&"antigravity"), "{on_windows:?}");
+        assert!(on_windows.contains(&"codex"), "{on_windows:?}");
     }
 
     #[tokio::test]
