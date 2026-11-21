@@ -545,7 +545,7 @@ html[data-tab-turn] .content {
   max-width: 85%;
 }
 
-.discuss-input input,
+.discuss-input textarea,
 .typed input {
   width: 100%;
   padding: 10px 12px;
@@ -553,6 +553,14 @@ html[data-tab-turn] .content {
   border: 1px solid var(--border);
   background: var(--surface);
   outline: none;
+}
+
+.discuss-input textarea {
+  display: block;
+  resize: none;
+  line-height: 1.4;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 /* Sheets */

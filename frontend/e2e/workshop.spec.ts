@@ -271,7 +271,24 @@ test("discusses the puzzle, keeping the conversation", async () => {
   await page.getByRole("button", { name: "Notes", exact: true }).click();
   await page.getByRole("button", { name: "Discuss", exact: true }).click();
   await expect(input).toHaveValue("half a thought");
+
+  // A long question wraps onto more lines, and the field grows to show them; Shift+Enter starts
+  // a new line rather than sending.
+  const height = async () => {
+    const box = await input.boundingBox();
+    if (!box) throw new Error("The question field isn't visible");
+    return box.height;
+  };
+  const oneLine = await height();
+  await input.fill("a question long enough that it can't possibly fit on one line ".repeat(4));
+  await expect.poll(height).toBeGreaterThan(oneLine * 2);
+  await input.fill("first line");
+  await input.press("Shift+Enter");
+  await input.pressSequentially("second line");
+  await expect(input).toHaveValue("first line\nsecond line");
+  await expect(page.locator(".turn")).toHaveCount(6);
   await input.fill("");
+  await expect.poll(height).toBe(oneLine);
 });
 
 test("keeps everything across a reload", async () => {

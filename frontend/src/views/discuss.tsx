@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { Turn } from "../api";
 import { useMarkdown } from "../hooks/useMarkdown";
 
@@ -51,13 +51,22 @@ export function DiscussView({
   intro = "Stuck? Ask about the puzzle or your code. The coach can see both, won't edit anything, and won't give the answer away unless you ask.",
 }: Props) {
   const end = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+
+  // Grows with what's written, up to the CSS max-height, beyond which it scrolls.
+  useLayoutEffect(() => {
+    const el = field.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [draft]);
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
   }, [turns.length, thinking, partial]);
 
-  const send = (event: Event) => {
-    event.preventDefault();
+  const send = (event?: Event) => {
+    event?.preventDefault();
     const text = draft.trim();
     if (!text) return;
     onDraft("");
@@ -107,11 +116,19 @@ export function DiscussView({
         <div ref={end} />
       </div>
       <form class="discuss-input" onSubmit={send}>
-        <input
+        <textarea
+          ref={field}
           value={draft}
-          onInput={(e) => onDraft((e.target as HTMLInputElement).value)}
+          rows={1}
+          onInput={(e) => onDraft((e.target as HTMLTextAreaElement).value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+              e.preventDefault();
+              send();
+            }
+          }}
           placeholder="Or type a question"
-          enterKeyHint="send"
+          enterkeyhint="send"
         />
       </form>
     </div>
