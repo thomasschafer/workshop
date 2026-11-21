@@ -234,6 +234,7 @@ input = "stdin"
 # "claude-json" and "claude-stream-json": Claude Code's JSON output formats.
 # "codex-json": Codex's `exec --json` events. The call is stopped if the model uses a tool.
 # "ollama-chat": an Ollama /api/chat response.
+# "antigravity-json": Antigravity's `--output-format json` result.
 output = "text"
 # Start the next process ahead of time to hide start-up latency. Only for stdin input, and only
 # if the CLI waits for stdin rather than giving up when no input arrives quickly.

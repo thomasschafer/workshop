@@ -112,6 +112,8 @@ pub enum OutputMode {
     CodexJson,
     /// An Ollama `/api/chat` response.
     OllamaChat,
+    /// Antigravity `--output-format json`.
+    AntigravityJson,
 }
 
 const BUILTIN: &[(&str, &str)] = &[
@@ -659,6 +661,11 @@ impl ProviderRunner {
                 BufReader::new(stdout).read_to_string(&mut out).await?;
                 parse_ollama_reply(&out).map(|text| (text, Some(spec.model.clone())))
             }
+            OutputMode::AntigravityJson => {
+                let mut out = String::new();
+                BufReader::new(stdout).read_to_string(&mut out).await?;
+                parse_antigravity_result(&out).map(|text| (text, None))
+            }
             OutputMode::CodexJson => {
                 let mut lines = BufReader::new(stdout).lines();
                 let mut outcome = None;
@@ -813,6 +820,25 @@ fn parse_ollama_reply(json: &str) -> Result<String> {
         .and_then(|c| c.as_str())
         .map(str::to_owned)
         .context("Ollama's reply has no message")
+}
+
+/// The reply in Antigravity's `--output-format json` result, or why the call failed.
+fn parse_antigravity_result(json: &str) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(json.trim())
+        .with_context(|| format!("model CLI output isn't valid JSON: {json}"))?;
+    let string = |key: &str| value.get(key).and_then(|v| v.as_str());
+    match string("status") {
+        Some("SUCCESS") => string("response")
+            .map(|text| text.trim().to_owned())
+            .context("model CLI output has no `response`"),
+        status => {
+            let status = status.unwrap_or("no status");
+            match string("error").filter(|e| !e.trim().is_empty()) {
+                Some(error) => bail!("model CLI reported an error ({status}): {error}"),
+                None => bail!("model CLI reported an error ({status})"),
+            }
+        }
+    }
 }
 
 fn parse_model_catalog(json: &str) -> Result<Vec<String>> {
@@ -1054,6 +1080,31 @@ mod tests {
             ..with_files(&[("AGENTS.md", "{system_prompt}")])
         };
         assert!(prespawned.validate().is_err());
+    }
+
+    #[test]
+    fn parses_antigravity_results() {
+        // As `agy --output-format json` prints them.
+        let ok = r#"{"conversation_id":"b49e8b36-f224-41d5-b5d4-0a1cdb92a71f","status":"SUCCESS","response":"pong\n","duration_seconds":3.027478,"num_turns":1,"usage":{"input_tokens":11037,"output_tokens":23,"thinking_tokens":21,"cache_read_tokens":0,"total_tokens":11060}}"#;
+        assert_eq!(
+            parse_antigravity_result(&format!("{ok}\n")).unwrap(),
+            "pong"
+        );
+        let bad_model = r#"{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \"no-such-model\" --effort \"\"): model no-such-model is not recognized as a known model or custom model in settings","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0},"finished_reason":"error"}"#;
+        let err = parse_antigravity_result(bad_model).unwrap_err().to_string();
+        assert!(err.contains("(ERROR)"), "{err}");
+        assert!(
+            err.contains("model no-such-model is not recognized"),
+            "{err}"
+        );
+        let unexplained = parse_antigravity_result(r#"{"status":"CANCELLED","response":"half"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(unexplained.contains("(CANCELLED)"), "{unexplained}");
+        assert!(parse_antigravity_result(r#"{"response":"no status"}"#).is_err());
+        assert!(parse_antigravity_result(r#"{"status":"SUCCESS"}"#).is_err());
+        assert!(parse_antigravity_result("Error: something broke").is_err());
+        assert!(parse_antigravity_result("").is_err());
     }
 
     #[test]
