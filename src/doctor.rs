@@ -418,6 +418,14 @@ async fn check_provider(config: &Config, id: &str) -> Vec<Check> {
         .clone()
         .unwrap_or_else(|| format!("Install the CLI used by the `{id}` provider."));
     let name = format!("Model CLI ({id})");
+    if provider.check_platform(id, cfg!(windows)).is_err() {
+        return vec![Check::problem(
+            Status::Fail,
+            name,
+            format!("{} doesn't work on Windows yet", provider.display_name(id)),
+            "Choose another provider in Settings, under Models.",
+        )];
+    }
     let program = &provider.command[0];
     if find_program(program).is_none() {
         let alternatives: Vec<&str> = config

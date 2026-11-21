@@ -32,6 +32,8 @@ version_command = ["agy", "--version"]
 # Fails when logged out.
 auth_check_command = ["agy", "models"]
 install_hint = "Install the Antigravity CLI (https://antigravity.google), then run `agy` once to log in."
+# The hook's command is written for a Unix shell.
+unix_only = true
 
 [[files]]
 path = "AGENTS.md"

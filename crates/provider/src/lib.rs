@@ -59,6 +59,10 @@ pub struct ProviderConfig {
     /// when the call ends, as calls can run at once with different system prompts.
     #[serde(default)]
     pub files: Vec<CallFile>,
+    /// Refuse to run on Windows, for a provider that relies on a Unix shell, such as for a hook
+    /// its files set up.
+    #[serde(default)]
+    pub unix_only: bool,
 }
 
 /// A file written into a call's directory.
@@ -155,6 +159,7 @@ impl ProviderConfig {
             effort: None,
             agent: None,
             files: Vec::new(),
+            unix_only: false,
         }
     }
 
@@ -204,6 +209,17 @@ impl ProviderConfig {
             }
             _ => Ok(()),
         }
+    }
+
+    /// Whether it can run here, on Windows or not.
+    pub fn check_platform(&self, id: &str, windows: bool) -> Result<()> {
+        if self.unix_only && windows {
+            bail!(
+                "{} doesn't work on Windows yet, so choose another provider in Settings",
+                self.display_name(id)
+            );
+        }
+        Ok(())
     }
 
     fn validate_files(&self) -> Result<()> {
@@ -565,6 +581,8 @@ impl ProviderRunner {
         partial: Option<&mpsc::UnboundedSender<String>>,
         spares: Spares,
     ) -> Result<Reply> {
+        let program = &self.provider.command[0];
+        self.provider.check_platform(program, cfg!(windows))?;
         let started = std::time::Instant::now();
         let spec = &self.resolve(spec).await;
         let dir = if self.provider.files.is_empty() {
@@ -1264,6 +1282,7 @@ printf '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","re
         let mut provider = builtin("antigravity");
         assert!(provider.agent.is_none());
         assert_eq!(provider.output, OutputMode::AntigravityStreamJson);
+        assert!(provider.unix_only);
         assert_eq!(provider.input, InputMode::Stdin);
         assert!(!provider.prespawn);
         assert_eq!(provider.command[0], "agy");
@@ -1427,6 +1446,21 @@ printf '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","re
             ..with_files(&[("AGENTS.md", "{system_prompt}")])
         };
         assert!(prespawned.validate().is_err());
+    }
+
+    #[test]
+    fn checks_where_a_provider_can_run() {
+        let antigravity = builtin("antigravity");
+        antigravity.check_platform("antigravity", false).unwrap();
+        let err = antigravity
+            .check_platform("antigravity", true)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.starts_with("Antigravity doesn't work on Windows"),
+            "{err}"
+        );
+        builtin("claude").check_platform("claude", true).unwrap();
     }
 
     #[test]
