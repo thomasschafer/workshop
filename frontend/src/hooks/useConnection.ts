@@ -7,7 +7,11 @@ const RETRY_MS = 3000;
 /** Whether the server can be reached, trying it again every few seconds while it can't. */
 export function useConnection(): boolean {
   const [online, setOnline] = useState(connection.isOnline);
-  useEffect(() => connection.subscribe(setOnline), []);
+  useEffect(() => {
+    // It may have changed between rendering and subscribing, which would otherwise be missed.
+    setOnline(connection.isOnline);
+    return connection.subscribe(setOnline);
+  }, []);
   useEffect(() => {
     if (online) return;
     const timer = setInterval(() => {
@@ -22,6 +26,9 @@ export function useConnection(): boolean {
 /** Detailed connection state (online, slow, last RTT), for diagnostics UI. */
 export function useConnectionStatus(): ConnectionSnapshot {
   const [status, setStatus] = useState<ConnectionSnapshot>(() => connection.snapshot());
-  useEffect(() => connection.subscribeStatus(setStatus), []);
+  useEffect(() => {
+    setStatus(connection.snapshot());
+    return connection.subscribeStatus(setStatus);
+  }, []);
   return status;
 }
