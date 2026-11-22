@@ -81,10 +81,16 @@ pub fn router(app: Shared) -> Router {
         .route("/author/questions/{id}", post(author::answer))
         .route("/cards/{pack}/{item}/review", post(grading::review))
         .route("/cards/{pack}/{item}/fix", post(grading::fix))
+        .route("/cards/{pack}/{item}/follow-ups", get(follow_ups::open))
         .route(
-            "/cards/{pack}/{item}/follow-ups",
-            get(follow_ups::open).post(follow_ups::answer),
+            "/cards/{pack}/{item}/follow-ups/start",
+            post(follow_ups::start),
         )
+        .route(
+            "/cards/{pack}/{item}/follow-ups/reply",
+            post(follow_ups::reply),
+        )
+        .route("/cards/{pack}/{item}/follow-ups/ask", post(follow_ups::ask))
         .route(
             "/cards/{pack}/{item}/follow-ups/finish",
             post(follow_ups::finish),

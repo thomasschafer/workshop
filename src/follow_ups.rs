@@ -47,11 +47,14 @@ pub struct Question {
     pub reply: Option<Said>,
 }
 
-/// A card answered in the learner's own words, and followed up, saved as it goes until it's
-/// marked.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A card answered in the learner's own words, and followed up, saved as it goes, and kept with
+/// its marks once it's marked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exchange {
+    /// Made by the app as it starts, so starting it again, as after a lost reply, finds it, and
+    /// each reply says which exchange it's for. It's also the id of the attempt it's marked as.
+    pub id: String,
     /// The most questions the tutor asks, as the card said when the exchange started.
     pub limit: FollowUps,
     /// The learner's answer to the card itself.
@@ -59,9 +62,16 @@ pub struct Exchange {
     /// The tutor's questions so far, in the order they were asked.
     #[serde(default)]
     pub questions: Vec<Question>,
+    /// How many attempts the card had when it started: one more, from answering it some other
+    /// way, ends it, whatever the clocks of the devices say.
+    pub attempts_before: u64,
     /// When it was started, and last changed, in milliseconds since 1970.
     pub started_at: i64,
     pub updated_at: i64,
+    /// How the grader marked it, once it has. It's over then, and kept, so asking to mark it
+    /// again, as after a lost reply, gives the same marks rather than a second attempt.
+    #[serde(default)]
+    pub marked: Option<crate::grader::Marked>,
 }
 
 /// What happens next in an exchange.
@@ -88,12 +98,23 @@ pub enum ExchangeError {
     NotWaiting,
     #[error("the tutor has asked all {0} of its questions")]
     AllAsked(u8),
+    #[error("the tutor hasn't asked question {0}")]
+    NoSuchQuestion(usize),
+    #[error("question {0} has been answered already, with something else")]
+    Answered(usize),
+    #[error("these follow-up questions have been marked already")]
+    Marked,
+    #[error("something was added while it was being marked, so mark it again")]
+    Changed,
 }
 
 impl Exchange {
-    /// Starts an exchange with the learner's answer to the card.
+    /// Starts an exchange with the learner's answer to the card, which had `attempts_before`
+    /// attempts.
     pub fn new(
+        id: &str,
         limit: FollowUps,
+        attempts_before: u64,
         text: &str,
         spoken: bool,
         now: i64,
@@ -102,12 +123,21 @@ impl Exchange {
             return Err(ExchangeError::NotOffered);
         }
         Ok(Self {
+            id: id.to_owned(),
             limit,
             answer: said(text, spoken, now)?,
             questions: Vec::new(),
+            attempts_before,
             started_at: now,
             updated_at: now,
+            marked: None,
         })
+    }
+
+    /// Whether it's over without being marked, as the card it's on now has `attempts`, or is
+    /// flagged as wrong, so it's left out of practice.
+    pub fn superseded(&self, attempts: u64, flagged: bool) -> bool {
+        self.marked.is_none() && (attempts > self.attempts_before || flagged)
     }
 
     pub fn next(&self) -> Next {
@@ -120,6 +150,9 @@ impl Exchange {
 
     /// Adds the tutor's next question.
     pub fn asked(&mut self, question: &str, now: i64) -> Result<(), ExchangeError> {
+        if self.marked.is_some() {
+            return Err(ExchangeError::Marked);
+        }
         match self.next() {
             Next::Ask => {}
             Next::Reply => return Err(ExchangeError::Waiting),
@@ -138,14 +171,51 @@ impl Exchange {
         Ok(())
     }
 
-    /// Adds the learner's reply to the question waiting.
-    pub fn replied(&mut self, text: &str, spoken: bool, now: i64) -> Result<(), ExchangeError> {
-        let reply = said(text, spoken, now)?;
-        match self.questions.last_mut() {
-            Some(question) if question.reply.is_none() => question.reply = Some(reply),
-            _ => return Err(ExchangeError::NotWaiting),
+    /// Adds the learner's reply to a question, counting from 0, which must be the one waiting.
+    /// The same reply sent again, as after a lost reply, changes nothing, and says so by
+    /// returning false; a different one to a question already answered is refused.
+    pub fn replied(
+        &mut self,
+        question: usize,
+        text: &str,
+        spoken: bool,
+        now: i64,
+    ) -> Result<bool, ExchangeError> {
+        if self.marked.is_some() {
+            return Err(ExchangeError::Marked);
         }
-        self.updated_at = now;
+        let reply = said(text, spoken, now)?;
+        let last = self.questions.len().checked_sub(1);
+        let asked = self
+            .questions
+            .get_mut(question)
+            .ok_or(ExchangeError::NoSuchQuestion(question + 1))?;
+        match &asked.reply {
+            Some(given) if given.text == reply.text && given.spoken == reply.spoken => Ok(false),
+            Some(_) => Err(ExchangeError::Answered(question + 1)),
+            None if Some(question) == last => {
+                asked.reply = Some(reply);
+                self.updated_at = now;
+                Ok(true)
+            }
+            None => Err(ExchangeError::NotWaiting),
+        }
+    }
+
+    /// Keeps the grader's marks, given for the exchange as it was when last changed at
+    /// `marked_as_of`, so marks for it as it was before a later reply are refused.
+    pub fn mark(
+        &mut self,
+        marked: crate::grader::Marked,
+        marked_as_of: i64,
+    ) -> Result<(), ExchangeError> {
+        if self.marked.is_some() {
+            return Err(ExchangeError::Marked);
+        }
+        if self.updated_at != marked_as_of {
+            return Err(ExchangeError::Changed);
+        }
+        self.marked = Some(marked);
         Ok(())
     }
 
@@ -278,33 +348,51 @@ mod tests {
         FollowUps::new(2).unwrap()
     }
 
+    fn start(text: &str) -> Exchange {
+        Exchange::new("first", two(), 3, text, false, 1).unwrap()
+    }
+
+    fn marks(score: f64) -> crate::grader::Marked {
+        crate::grader::Marked {
+            score,
+            points: Vec::new(),
+            findings: Vec::new(),
+            feedback: String::new(),
+            clarity: None,
+            questioning: None,
+        }
+    }
+
     #[test]
     fn takes_turns_until_every_question_is_answered() {
         let none = FollowUps::new(0).unwrap();
         assert_eq!(
-            Exchange::new(none, "O(log n)", false, 1),
+            Exchange::new("x", none, 0, "O(log n)", false, 1),
             Err(ExchangeError::NotOffered)
         );
         assert_eq!(
-            Exchange::new(two(), "  ", false, 1),
+            Exchange::new("x", two(), 0, "  ", false, 1),
             Err(ExchangeError::Empty)
         );
-        let mut exchange = Exchange::new(two(), " O(log n) ", false, 1).unwrap();
-        assert_eq!(exchange.answer.text, "O(log n)");
+        let mut exchange = start(" O(log n) ");
+        assert_eq!(
+            (exchange.id.as_str(), exchange.answer.text.as_str()),
+            ("first", "O(log n)")
+        );
         assert_eq!(exchange.next(), Next::Ask);
         // The learner can't reply before there's a question.
         assert_eq!(
-            exchange.replied("Because", false, 2),
-            Err(ExchangeError::NotWaiting)
+            exchange.replied(0, "Because", false, 2),
+            Err(ExchangeError::NoSuchQuestion(1))
         );
         exchange.asked("Why log n?", 2).unwrap();
         assert_eq!(exchange.next(), Next::Reply);
         // Nor the tutor ask again before it's answered.
         assert_eq!(exchange.asked("And?", 3), Err(ExchangeError::Waiting));
-        assert_eq!(exchange.replied(" ", true, 3), Err(ExchangeError::Empty));
-        exchange.replied("It's one path", true, 3).unwrap();
+        assert_eq!(exchange.replied(0, " ", true, 3), Err(ExchangeError::Empty));
+        assert_eq!(exchange.replied(0, "It's one path", true, 3), Ok(true));
         exchange.asked("And the smallest?", 4).unwrap();
-        exchange.replied("At the root", false, 5).unwrap();
+        assert_eq!(exchange.replied(1, "At the root", false, 5), Ok(true));
         assert_eq!(exchange.next(), Next::Mark);
         assert_eq!(exchange.asked("More?", 6), Err(ExchangeError::AllAsked(2)));
         assert_eq!((exchange.started_at, exchange.updated_at), (1, 5));
@@ -318,11 +406,62 @@ mod tests {
     }
 
     #[test]
+    fn files_each_reply_under_the_question_it_names() {
+        let mut exchange = start("O(log n)");
+        exchange.asked("Why?", 2).unwrap();
+        exchange.replied(0, "One path", false, 3).unwrap();
+        exchange.asked("And the smallest?", 4).unwrap();
+        // The first reply sent again, as after its reply was lost, is taken as already given,
+        // never as the answer to the question asked since.
+        assert_eq!(exchange.replied(0, " One path ", false, 5), Ok(false));
+        assert!(exchange.questions[1].reply.is_none());
+        assert_eq!(exchange.updated_at, 4);
+        // Something else for a question already answered is refused.
+        assert_eq!(
+            exchange.replied(0, "Two paths", false, 5),
+            Err(ExchangeError::Answered(1))
+        );
+        assert_eq!(
+            exchange.replied(0, "One path", true, 5),
+            Err(ExchangeError::Answered(1))
+        );
+        // As is a reply to a question not asked yet.
+        assert_eq!(
+            exchange.replied(2, "Later", false, 5),
+            Err(ExchangeError::NoSuchQuestion(3))
+        );
+        assert_eq!(exchange.replied(1, "At the root", false, 6), Ok(true));
+    }
+
+    #[test]
+    fn is_over_once_marked_or_once_the_card_is_answered_another_way() {
+        let mut exchange = start("O(log n)");
+        // The card had three attempts as it started; a fourth, such as the learner's own
+        // rating, or it being flagged as wrong, ends it.
+        assert!(!exchange.superseded(3, false));
+        assert!(exchange.superseded(4, false));
+        assert!(exchange.superseded(3, true));
+        exchange.asked("Why?", 2).unwrap();
+        // Marks for it as it was before a later change are refused.
+        assert_eq!(exchange.mark(marks(0.5), 1), Err(ExchangeError::Changed));
+        exchange.mark(marks(0.5), 2).unwrap();
+        assert_eq!(exchange.mark(marks(0.9), 2), Err(ExchangeError::Marked));
+        assert_eq!(exchange.marked.as_ref().unwrap().score, 0.5);
+        // Its own attempt doesn't end it; it's kept, with its marks.
+        assert!(!exchange.superseded(4, false));
+        assert_eq!(exchange.asked("More?", 3), Err(ExchangeError::Marked));
+        assert_eq!(
+            exchange.replied(0, "x", false, 3),
+            Err(ExchangeError::Marked)
+        );
+    }
+
+    #[test]
     fn writes_out_the_exchange_saying_what_was_aloud_and_unanswered() {
-        let mut exchange = Exchange::new(two(), "It's\nO(log n)", false, 1).unwrap();
+        let mut exchange = start("It's\nO(log n)");
         assert!(!exchange.spoken());
         exchange.asked("Why?", 2).unwrap();
-        exchange.replied("one path down", true, 3).unwrap();
+        exchange.replied(0, "one path down", true, 3).unwrap();
         exchange.asked("When isn't it?", 4).unwrap();
         assert_eq!(
             exchange.transcript(TUTOR),
@@ -334,7 +473,7 @@ mod tests {
     fn asks_the_tutor_to_probe_what_was_said_without_giving_it_away() {
         let pack = Pack::sample();
         let card = pack.item("binary-heap-costs").unwrap();
-        let mut exchange = Exchange::new(two(), "Log n to add", false, 1).unwrap();
+        let mut exchange = start("Log n to add");
         let prompt = ask_prompt(card, &exchange).unwrap();
         assert!(prompt.starts_with("<question>\nIn a binary heap of n items"));
         assert!(prompt.contains("<answer>\nAdding and removing take O(log n)"));
@@ -348,7 +487,7 @@ mod tests {
         exchange.asked("Why log n?", 2).unwrap();
         // Waiting for the learner, there's nothing to ask.
         assert!(ask_prompt(card, &exchange).is_err());
-        exchange.replied("The height", true, 3).unwrap();
+        exchange.replied(0, "The height", true, 3).unwrap();
         let last = ask_prompt(card, &exchange).unwrap();
         assert!(last.contains(
             "<conversation>\nLearner: Log n to add\nYou: Why log n?\nLearner (aloud): The height\n</conversation>"

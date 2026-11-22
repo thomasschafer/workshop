@@ -1,9 +1,15 @@
 //! Follow-up questions on cards: the learner's answer in their own words, then the tutor's
 //! questions about it, each saved as it's given, and the whole exchange marked by the grader at
 //! the end, as the card's attempt.
+//!
+//! A phone's connection can drop a reply on its way back, so every request is safe to send
+//! again: starting finds the exchange already started, each reply names the exchange and the
+//! question it answers, so it's never filed under another, and marking it again gives the marks
+//! already given rather than another attempt.
 
 use axum::Json;
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use workshop_learning::Attempt;
 use workshop_pack::{Content, FollowUps, Item, Pack};
@@ -13,7 +19,7 @@ use super::error::{ApiError, ApiResult, bad_request};
 use super::grading::{MarkedReply, due, find, packs};
 use super::state::Shared;
 use crate::follow_ups::{Exchange, Next, TUTOR};
-use crate::grader::{Answer, Work};
+use crate::grader::{Answer, Marked, Work};
 use crate::learning::now_ms;
 
 /// A card in the packs, with its pack, its key and how many follow-up questions it offers.
@@ -37,19 +43,58 @@ fn card<'a>(
     ))
 }
 
+/// Refuses something sent for an exchange that isn't the card's any more, saying why, as a
+/// conflict, so the app knows to look again at what's under way.
+fn over(why: &str) -> ApiError {
+    ApiError(StatusCode::CONFLICT, serde_json::json!({ "error": why }))
+}
+
+const SUPERSEDED: &str =
+    "These follow-up questions are over, as the card's been answered another way since.";
+const MARKED: &str = "These follow-up questions have been marked already.";
+
+/// The exchange under way on a card with this id, refusing one that's over or marked.
+fn under_way(app: &Shared, key: &str, id: &str) -> Result<Exchange, ApiError> {
+    match app.learning.exchange(key)? {
+        Some(exchange) if exchange.id == id && exchange.marked.is_some() => Err(over(MARKED)),
+        Some(exchange) if exchange.id == id => Ok(exchange),
+        _ => Err(over(SUPERSEDED)),
+    }
+}
+
 /// An exchange as the app sees it, with what happens next.
 #[derive(Serialize)]
 pub(super) struct ExchangeView {
-    #[serde(flatten)]
-    exchange: Exchange,
+    id: String,
+    limit: FollowUps,
+    answer: crate::follow_ups::Said,
+    questions: Vec<crate::follow_ups::Question>,
+    started_at: i64,
+    updated_at: i64,
     next: Next,
 }
 
 impl From<Exchange> for ExchangeView {
     fn from(exchange: Exchange) -> Self {
+        let next = exchange.next();
+        let Exchange {
+            id,
+            limit,
+            answer,
+            questions,
+            attempts_before: _,
+            started_at,
+            updated_at,
+            marked: _,
+        } = exchange;
         Self {
-            next: exchange.next(),
-            exchange,
+            id,
+            limit,
+            answer,
+            questions,
+            started_at,
+            updated_at,
+            next,
         }
     }
 }
@@ -78,103 +123,194 @@ fn tutor<'a>(app: &'a Shared, pack: &Pack) -> Result<(&'a ProviderRunner, CallSp
     Ok(app.coach_target(system)?)
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct AnswerBody {
-    /// The learner's answer to the card, which starts the exchange, or their reply to the
-    /// question waiting. None asks the tutor again for a question it couldn't ask before.
-    #[serde(default)]
-    text: Option<String>,
-    /// Whether it was explained aloud, so `text` is what was heard.
-    #[serde(default)]
-    spoken: bool,
-}
-
-/// Adds what the learner said, saving it: their answer to the card, which starts the exchange,
-/// or their reply to the tutor's question. Then the tutor asks its next question, if it has one
-/// to ask. If it can't be reached, what the learner said is kept, and asking again carries on.
-pub(super) async fn answer(
-    State(app): State<Shared>,
-    Path((pack, item)): Path<(String, String)>,
-    Json(body): Json<AnswerBody>,
+/// Has the tutor ask its next question, if it has one to ask, and keeps it.
+async fn ask_if_due(
+    app: &Shared,
+    (runner, spec): (&ProviderRunner, CallSpec),
+    key: &str,
+    item: &Item,
+    exchange: Exchange,
 ) -> ApiResult<ExchangeView> {
-    let packs = packs(&app)?;
-    let (pack, key, item, limit) = card(&packs, &pack, &item)?;
-    // Without a tutor to ask, nothing's started.
-    let (runner, spec) = tutor(&app, pack)?;
-    let exchanges = app.learning.exchanges();
-    let now = now_ms();
-    let said = body
-        .text
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty());
-    let exchange = match (app.learning.follow_ups(&key)?, said) {
-        (None, Some(text)) => {
-            let started = Exchange::new(limit, text, body.spoken, now)
-                .map_err(|err| bad_request(err.to_string()))?;
-            exchanges.put_new(&key, started)?
-        }
-        (None, None) => return Err(bad_request("Answer the card before it's followed up.")),
-        (Some(_), Some(text)) => {
-            let (exchange, spent) = exchanges
-                .change(&key, |exchange| {
-                    let spent = workshop_sessions::spent(exchange.updated_at, now);
-                    exchange.replied(text, body.spoken, now)?;
-                    Ok(spent)
-                })
-                .map_err(|err| bad_request(format!("{err:#}")))?
-                .ok_or_else(|| bad_request("The follow-ups ended before the answer was saved."))?;
-            app.learning.store().record_time(&key, now, spent)?;
-            exchange
-        }
-        (Some(exchange), None) => exchange,
-    };
     if exchange.next() != Next::Ask {
         return Ok(Json(exchange.into()));
     }
     let question = crate::follow_ups::ask(runner, &spec, item, &exchange)
         .await
         .map_err(|err| bad_request(format!("{err:#}")))?;
-    let (exchange, ()) = exchanges
-        .change(&key, |exchange| Ok(exchange.asked(&question, now_ms())?))
-        .map_err(|err| bad_request(format!("{err:#}")))?
-        .ok_or_else(|| bad_request("The follow-ups ended while the tutor was asking."))?;
+    let id = exchange.id;
+    let (exchange, ()) = app
+        .learning
+        .exchanges()
+        .change(key, |current| {
+            if current.id != id {
+                anyhow::bail!(SUPERSEDED);
+            }
+            // Asked twice at once, the first question is kept.
+            if current.next() == Next::Ask {
+                current.asked(&question, now_ms())?;
+            }
+            Ok(())
+        })
+        .map_err(|err| over(&format!("{err:#}")))?
+        .ok_or_else(|| over(SUPERSEDED))?;
     Ok(Json(exchange.into()))
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FinishBody {
-    /// Made by the app, for the attempt this records.
+pub(super) struct StartBody {
+    /// Made by the app, and the same each time it's sent, for the exchange and its attempt.
     id: String,
+    /// The learner's answer to the card.
+    text: String,
+    /// Whether it was explained aloud, so `text` is what was heard.
+    #[serde(default)]
+    spoken: bool,
+}
+
+/// Starts follow-up questions on a card with the learner's answer, saving it, and has the tutor
+/// ask its first question. If the card has follow-ups under way already, such as these, sent
+/// again after a lost reply, or ones started on another device, it's those, as they were, and
+/// the answer sent now isn't taken.
+pub(super) async fn start(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+    Json(body): Json<StartBody>,
+) -> ApiResult<ExchangeView> {
+    let packs = packs(&app)?;
+    let (pack, key, item, limit) = card(&packs, &pack, &item)?;
+    // Without a tutor to ask, nothing's started.
+    let tutor = tutor(&app, pack)?;
+    let exchanges = app.learning.exchanges();
+    let exchange = match app.learning.exchange(&key)? {
+        Some(kept) if kept.marked.is_none() => kept,
+        Some(kept) if kept.id == body.id => return Err(over(MARKED)),
+        marked => {
+            // Only the last marked is kept, for marking it again to find.
+            if marked.is_some() {
+                exchanges.remove(&key)?;
+            }
+            let attempts = app
+                .learning
+                .store()
+                .attempt_counts()?
+                .get(&key)
+                .copied()
+                .unwrap_or(0);
+            let started =
+                Exchange::new(&body.id, limit, attempts, &body.text, body.spoken, now_ms())
+                    .map_err(|err| bad_request(err.to_string()))?;
+            exchanges.put_new(&key, started)?
+        }
+    };
+    ask_if_due(&app, tutor, &key, item, exchange).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ReplyBody {
+    /// The exchange it's for, by its id.
+    exchange: String,
+    /// The question it answers, counting from 0.
+    question: usize,
+    text: String,
+    /// Whether it was explained aloud, so `text` is what was heard.
+    #[serde(default)]
+    spoken: bool,
+    /// Whether the tutor then asks its next question, if it has one; not when the learner's
+    /// about to have it marked.
+    #[serde(default = "yes")]
+    ask: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Saves the learner's reply to the question it names, then has the tutor ask its next
+/// question, if it has one. The same reply sent again, as after a lost reply, is taken as
+/// given already. If the tutor can't be reached, the reply's kept, and asking again carries on.
+pub(super) async fn reply(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+    Json(body): Json<ReplyBody>,
+) -> ApiResult<ExchangeView> {
+    let packs = packs(&app)?;
+    let (pack, key, item, _) = card(&packs, &pack, &item)?;
+    let tutor = tutor(&app, pack)?;
+    under_way(&app, &key, &body.exchange)?;
+    let now = now_ms();
+    let (exchange, spent) = app
+        .learning
+        .exchanges()
+        .change(&key, |exchange| {
+            if exchange.id != body.exchange {
+                anyhow::bail!(SUPERSEDED);
+            }
+            let spent = workshop_sessions::spent(exchange.updated_at, now);
+            let new = exchange.replied(body.question, &body.text, body.spoken, now)?;
+            Ok(new.then_some(spent))
+        })
+        .map_err(|err| bad_request(format!("{err:#}")))?
+        .ok_or_else(|| over(SUPERSEDED))?;
+    if let Some(spent) = spent {
+        app.learning.store().record_time(&key, now, spent)?;
+    }
+    if !body.ask {
+        return Ok(Json(exchange.into()));
+    }
+    ask_if_due(&app, tutor, &key, item, exchange).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ExchangeBody {
+    /// The exchange it's for, by its id.
+    exchange: String,
+}
+
+/// Has the tutor ask the question it couldn't before, such as when it couldn't be reached.
+pub(super) async fn ask(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+    Json(body): Json<ExchangeBody>,
+) -> ApiResult<ExchangeView> {
+    let packs = packs(&app)?;
+    let (pack, key, item, _) = card(&packs, &pack, &item)?;
+    let tutor = tutor(&app, pack)?;
+    let exchange = under_way(&app, &key, &body.exchange)?;
+    ask_if_due(&app, tutor, &key, item, exchange).await
 }
 
 /// Has the grader mark the whole exchange, against the card's answer and explanation, for how
 /// deeply the learner understands it as well as whether they're right, and for clarity where
-/// they explained aloud. It's the card's attempt, rated from the score, with what the grader
-/// finds in the mistake log; then the exchange is over. It can be marked before every question's
-/// been answered, which the grader is told.
+/// they explained aloud. It's the card's attempt, with the exchange's id, rated from the score,
+/// with what the grader finds in the mistake log; then the exchange is over, and kept with its
+/// marks, so marking it again, as after a lost reply, gives those. It can be marked before every
+/// question's been answered, which the grader is told. One card's follow-ups are marked one
+/// at a time, so they can't be marked twice at once.
 pub(super) async fn finish(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
-    Json(body): Json<FinishBody>,
+    Json(body): Json<ExchangeBody>,
 ) -> ApiResult<MarkedReply> {
     let packs = packs(&app)?;
     let (pack, key, item, _) = card(&packs, &pack, &item)?;
-    if app
-        .learning
-        .store()
-        .attempts(&key)?
-        .iter()
-        .any(|a| a.id == body.id)
-    {
-        return Err(bad_request("Those follow-ups have been marked already."));
+    let _marking = app.marking_follow_ups(&key).await;
+    let marked_reply = |marked: Marked| -> ApiResult<MarkedReply> {
+        Ok(Json(MarkedReply {
+            rubric: marked.points.iter().map(|p| p.point.clone()).collect(),
+            due: due(&app, &key)?,
+            marked,
+        }))
+    };
+    let exchange = match app.learning.exchange(&key)? {
+        Some(exchange) if exchange.id == body.exchange => exchange,
+        _ => return Err(over(SUPERSEDED)),
+    };
+    if let Some(marked) = exchange.marked {
+        return marked_reply(marked);
     }
-    let exchange = app
-        .learning
-        .follow_ups(&key)?
-        .ok_or_else(|| bad_request("There are no follow-up questions under way on that card."))?;
     let transcript = exchange.transcript(TUTOR);
     let error_types = crate::mistakes::error_types(&packs);
     let (runner, spec) =
@@ -193,26 +329,34 @@ pub(super) async fn finish(
     .await
     .map_err(|err| bad_request(format!("{err:#}")))?;
     let now = now_ms();
-    let findings = marked.mistakes(&body.id, &key, now);
-    app.learning.record_marked(
-        Attempt {
-            id: body.id,
-            item: key.clone(),
-            answered_at: now,
-            duration_ms: workshop_sessions::spent(exchange.updated_at, now),
-            rating: marked.rating(),
-            response: Some(transcript),
-            seed: None,
-        },
-        &findings,
-        now,
-    )?;
-    app.learning.exchanges().remove(&key)?;
-    Ok(Json(MarkedReply {
-        rubric: marked.points.iter().map(|p| p.point.clone()).collect(),
-        due: due(&app, &key)?,
-        marked,
-    }))
+    let findings = marked.mistakes(&exchange.id, &key, now);
+    // Kept with the exchange as the attempt's recorded, so neither happens without the other,
+    // and only if nothing was said while the grader was marking.
+    let (_, ()) = app
+        .learning
+        .exchanges()
+        .change(&key, |current| {
+            if current.id != exchange.id {
+                anyhow::bail!(SUPERSEDED);
+            }
+            current.mark(marked.clone(), exchange.updated_at)?;
+            app.learning.record_marked(
+                Attempt {
+                    id: exchange.id.clone(),
+                    item: key.clone(),
+                    answered_at: now,
+                    duration_ms: workshop_sessions::spent(exchange.updated_at, now),
+                    rating: marked.rating(),
+                    response: Some(transcript.clone()),
+                    seed: None,
+                },
+                &findings,
+                now,
+            )
+        })
+        .map_err(|err| over(&format!("{err:#}")))?
+        .ok_or_else(|| over(SUPERSEDED))?;
+    marked_reply(marked)
 }
 
 #[cfg(all(test, unix))]
@@ -277,7 +421,7 @@ case "$prompt" in
     echo asked >> '{asked}'
     n=$(wc -l < '{asked}' | tr -d ' ')
     printf 'Question %s: why is that?' "$n" ;;
-  *'<work>'*) printf '%s' "$prompt" > '{graded}'; cat '{mark}' ;;
+  *'<work>'*) printf '%s' "$prompt" > '{graded}'; echo graded >> '{graded}-times'; sleep 0.2; cat '{mark}' ;;
   *) echo 'The fake model has no reply for this prompt' >&2; exit 1 ;;
 esac
 "#,
@@ -298,6 +442,41 @@ esac
 
     const HEAP: &str = "/api/cards/sample/binary-heap-costs/follow-ups";
     const BFS: &str = "/api/cards/sample/breadth-first-shortest-paths/follow-ups";
+    const ID: &str = "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a71";
+
+    async fn status(router: &Router, path: &str, body: serde_json::Value) -> StatusCode {
+        send(router, request("POST", path, Some(body)))
+            .await
+            .status()
+    }
+
+    async fn start(router: &Router, card: &str, id: &str, text: &str) -> serde_json::Value {
+        post(
+            router,
+            &format!("{card}/start"),
+            serde_json::json!({ "id": id, "text": text }),
+        )
+        .await
+    }
+
+    async fn reply(
+        router: &Router,
+        card: &str,
+        question: usize,
+        text: &str,
+        spoken: bool,
+    ) -> serde_json::Value {
+        post(
+            router,
+            &format!("{card}/reply"),
+            serde_json::json!({ "exchange": ID, "question": question, "text": text, "spoken": spoken }),
+        )
+        .await
+    }
+
+    fn asked(dir: &std::path::Path) -> usize {
+        std::fs::read_to_string(dir.join("asked")).map_or(0, |text| text.lines().count())
+    }
 
     #[tokio::test]
     async fn follows_up_a_card_then_marks_the_whole_exchange_as_its_attempt() {
@@ -305,20 +484,15 @@ esac
         let router = app(dir.path());
         let opened = json(send(&router, request("GET", BFS, None)).await).await;
         assert_eq!(opened["exchange"], serde_json::Value::Null);
-        // There's nothing to follow up before the card's answered.
-        let early = send(
-            &router,
-            request("POST", BFS, Some(serde_json::json!({ "text": " " }))),
-        )
-        .await;
-        assert_eq!(early.status(), StatusCode::BAD_REQUEST);
+        // There's nothing to follow up without an answer.
+        let empty = serde_json::json!({ "id": ID, "text": " " });
+        assert_eq!(
+            status(&router, &format!("{BFS}/start"), empty).await,
+            StatusCode::BAD_REQUEST
+        );
 
-        let started = post(
-            &router,
-            BFS,
-            serde_json::json!({ "text": "It goes out a layer at a time" }),
-        )
-        .await;
+        let started = start(&router, BFS, ID, "It goes out a layer at a time").await;
+        assert_eq!(started["id"], ID);
         assert_eq!(started["limit"], 2);
         assert_eq!(started["answer"]["text"], "It goes out a layer at a time");
         assert_eq!(started["answer"]["spoken"], false);
@@ -327,7 +501,7 @@ esac
         // Saved, so opened again, as after closing the app, it's where it was.
         let opened = json(send(&router, request("GET", BFS, None)).await).await;
         assert_eq!(opened["exchange"], started);
-        // And the deck says so, for the app to carry on with it first.
+        // And the deck says so, for the app to carry on with it first, as does home.
         let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
         assert_eq!(
             deck["follow_ups"],
@@ -340,36 +514,39 @@ esac
             .find(|item| item["key"] == "sample/breadth-first-shortest-paths")
             .unwrap();
         assert_eq!(card["follow_ups"], 2);
+        let home = json(send(&router, request("GET", "/api/home?utc_offset=0", None)).await).await;
+        let review = home["tracks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|track| track["id"] == "review")
+            .unwrap();
+        assert!(
+            review["summary"]
+                .as_str()
+                .unwrap()
+                .starts_with("1 being followed up · "),
+            "{review}"
+        );
+        assert_eq!(review["next"]["priority"], "unfinished");
+        assert_eq!(
+            review["next"]["reason"],
+            "Where you left off: its follow-up questions"
+        );
 
-        let replied = post(
-            &router,
-            BFS,
-            serde_json::json!({ "text": "the queue keeps nearer ones first", "spoken": true }),
-        )
-        .await;
+        let replied = reply(&router, BFS, 0, "the queue keeps nearer ones first", true).await;
         assert_eq!(replied["questions"][0]["reply"]["spoken"], true);
         assert_eq!(replied["questions"][1]["text"], "Question 2: why is that?");
-        let last = post(
-            &router,
-            BFS,
-            serde_json::json!({ "text": "With weights it's Dijkstra's" }),
-        )
-        .await;
+        let last = reply(&router, BFS, 1, "With weights it's Dijkstra's", false).await;
         // Two questions is all the card asks for, so it's ready to mark.
         assert_eq!(last["questions"].as_array().unwrap().len(), 2);
         assert_eq!(last["next"], "mark");
-        let more = send(
-            &router,
-            request("POST", BFS, Some(serde_json::json!({ "text": "And more" }))),
-        )
-        .await;
-        assert_eq!(more.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(asked(dir.path()), 2);
 
-        let id = "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a71";
         let marked = post(
             &router,
             &format!("{BFS}/finish"),
-            serde_json::json!({ "id": id }),
+            serde_json::json!({ "exchange": ID }),
         )
         .await;
         assert_eq!(marked["marked"]["score"], 0.7);
@@ -399,19 +576,96 @@ esac
             .unwrap();
         assert_eq!(found["source"], "grader");
         assert_eq!(found["suggested"], "concept-gap");
-        // And it's over.
+        // And it's over: nothing more can be said, and it's not under way.
         let opened = json(send(&router, request("GET", BFS, None)).await).await;
         assert_eq!(opened["exchange"], serde_json::Value::Null);
-        let again = send(
+        let late = serde_json::json!({ "exchange": ID, "question": 1, "text": "More" });
+        assert_eq!(
+            status(&router, &format!("{BFS}/reply"), late).await,
+            StatusCode::CONFLICT
+        );
+    }
+
+    #[tokio::test]
+    async fn takes_what_was_sent_again_after_a_lost_reply_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = app(dir.path());
+        let started = start(&router, BFS, ID, "Layer by layer").await;
+        // Started again with the same id, as after its reply was lost, it's the same exchange,
+        // with no new question.
+        assert_eq!(start(&router, BFS, ID, "Layer by layer").await, started);
+        // As it is from another device, or a second tap, with an answer of its own, which
+        // isn't taken as a reply to a question it never saw.
+        let elsewhere = start(
             &router,
-            request(
-                "POST",
-                &format!("{BFS}/finish"),
-                Some(serde_json::json!({ "id": id })),
-            ),
+            BFS,
+            "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a79",
+            "Something else",
         )
         .await;
-        assert_eq!(again.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(elsewhere, started);
+        assert_eq!(asked(dir.path()), 1);
+
+        let replied = reply(&router, BFS, 0, "Nearer first", false).await;
+        assert_eq!(replied["questions"][1]["text"], "Question 2: why is that?");
+        // The first reply sent again, as after its reply was lost, isn't filed under the
+        // second question.
+        let again = reply(&router, BFS, 0, "Nearer first", false).await;
+        assert_eq!(again, replied);
+        assert_eq!(asked(dir.path()), 2);
+        // Nor is anything else said to a question answered already, or not asked yet.
+        for (question, text) in [(0, "Something else"), (2, "Too soon")] {
+            let wrong = serde_json::json!({ "exchange": ID, "question": question, "text": text });
+            assert_eq!(
+                status(&router, &format!("{BFS}/reply"), wrong).await,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        // Nor anything for another exchange.
+        let other = serde_json::json!({ "exchange": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a79", "question": 1, "text": "Mine" });
+        assert_eq!(
+            status(&router, &format!("{BFS}/reply"), other).await,
+            StatusCode::CONFLICT
+        );
+        let opened = json(send(&router, request("GET", BFS, None)).await).await;
+        assert_eq!(opened["exchange"], replied);
+
+        // Marked twice, as after its reply was lost, it's marked once, with the same marks.
+        let finish = || async {
+            post(
+                &router,
+                &format!("{BFS}/finish"),
+                serde_json::json!({ "exchange": ID }),
+            )
+            .await
+        };
+        let (first, second) = tokio::join!(finish(), finish());
+        assert_eq!(first["marked"], second["marked"]);
+        assert_eq!(finish().await["marked"], first["marked"]);
+        let graded = std::fs::read_to_string(dir.path().join("graded-times")).unwrap();
+        assert_eq!(graded.lines().count(), 1);
+        let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
+        assert_eq!(
+            deck["schedules"]["sample/breadth-first-shortest-paths"]["reviews"],
+            1
+        );
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        assert_eq!(log["mistakes"].as_array().unwrap().len(), 1);
+        // Started again with the id of the exchange marked, it's refused rather than started
+        // afresh; with a new id, it starts afresh.
+        let restart = serde_json::json!({ "id": ID, "text": "Layer by layer" });
+        assert_eq!(
+            status(&router, &format!("{BFS}/start"), restart).await,
+            StatusCode::CONFLICT
+        );
+        let fresh = start(
+            &router,
+            BFS,
+            "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a7a",
+            "Again",
+        )
+        .await;
+        assert_eq!(fresh["answer"]["text"], "Again");
     }
 
     #[tokio::test]
@@ -419,57 +673,93 @@ esac
         let dir = tempfile::tempdir().unwrap();
         let router = app(dir.path());
         std::fs::write(dir.path().join("away"), "").unwrap();
-        let away = send(
-            &router,
-            request(
-                "POST",
-                HEAP,
-                Some(serde_json::json!({ "text": "Log n to add" })),
-            ),
-        )
-        .await;
-        assert_eq!(away.status(), StatusCode::BAD_REQUEST);
+        let body = serde_json::json!({ "id": ID, "text": "Log n to add" });
+        assert_eq!(
+            status(&router, &format!("{HEAP}/start"), body).await,
+            StatusCode::BAD_REQUEST
+        );
         let opened = json(send(&router, request("GET", HEAP, None)).await).await;
         assert_eq!(opened["exchange"]["answer"]["text"], "Log n to add");
         assert_eq!(opened["exchange"]["next"], "ask");
         // Asked again, it carries on.
         std::fs::remove_file(dir.path().join("away")).unwrap();
-        let asked = post(&router, HEAP, serde_json::json!({})).await;
+        let asked = post(
+            &router,
+            &format!("{HEAP}/ask"),
+            serde_json::json!({ "exchange": ID }),
+        )
+        .await;
         assert_eq!(asked["questions"][0]["text"], "Question 1: why is that?");
-        // The card asks for one question, so it can be marked once that's answered, or before.
-        assert_eq!(asked["next"], "reply");
+        // The card asks for one question. A reply the learner hasn't sent is sent before it's
+        // marked, without the tutor being asked for another.
+        let sent = post(
+            &router,
+            &format!("{HEAP}/reply"),
+            serde_json::json!({ "exchange": ID, "question": 0, "text": "One path", "ask": false }),
+        )
+        .await;
+        assert_eq!(sent["next"], "mark");
         let marked = post(
             &router,
             &format!("{HEAP}/finish"),
-            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a72" }),
+            serde_json::json!({ "exchange": ID }),
         )
         .await;
         assert_eq!(marked["marked"]["score"], 0.7);
         let graded = std::fs::read_to_string(dir.path().join("graded")).unwrap();
-        assert!(graded.contains("Learner: (Not answered.)\n</work>"));
+        assert!(graded.contains("Learner: One path\n</work>"));
         // Written throughout, it's not marked for clarity.
         assert!(!graded.contains("aloud"));
     }
 
     #[tokio::test]
-    async fn ends_follow_ups_once_the_card_is_answered_some_other_way() {
+    async fn can_be_marked_before_every_question_is_answered() {
         let dir = tempfile::tempdir().unwrap();
         let router = app(dir.path());
+        start(&router, BFS, ID, "Layer by layer").await;
         post(
             &router,
-            BFS,
-            serde_json::json!({ "text": "Layer by layer" }),
+            &format!("{BFS}/finish"),
+            serde_json::json!({ "exchange": ID }),
         )
         .await;
-        // Rated by the learner instead, such as offline, the follow-ups are over.
-        let attempt = serde_json::json!({ "attempts": [{
+        let graded = std::fs::read_to_string(dir.path().join("graded")).unwrap();
+        assert!(graded.contains("Learner: (Not answered.)\n</work>"));
+    }
+
+    #[tokio::test]
+    async fn ends_follow_ups_once_the_card_is_answered_or_flagged_whatever_its_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = app(dir.path());
+        let sync = |body: serde_json::Value| {
+            let router = router.clone();
+            async move { post(&router, "/api/learning/sync", body).await }
+        };
+        // An attempt made before they started, offline, on a phone whose clock is ahead, and
+        // sent only now, doesn't end them: it had been made by the time they started.
+        let early = serde_json::json!({ "attempts": [{
             "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a73",
             "item": "sample/breadth-first-shortest-paths",
-            "answered_at": crate::learning::now_ms(),
+            "answered_at": crate::learning::now_ms() + 3_600_000,
             "duration_ms": 1000,
             "rating": "good",
         }] });
-        let deck = post(&router, "/api/learning/sync", attempt).await;
+        sync(early).await;
+        start(&router, BFS, ID, "Layer by layer").await;
+        let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
+        assert_eq!(
+            deck["follow_ups"],
+            serde_json::json!(["sample/breadth-first-shortest-paths"])
+        );
+        // Rated by the learner instead, on a phone whose clock is behind, they're over.
+        let rated = serde_json::json!({ "attempts": [{
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a74",
+            "item": "sample/breadth-first-shortest-paths",
+            "answered_at": crate::learning::now_ms() - 7_200_000,
+            "duration_ms": 1000,
+            "rating": "good",
+        }] });
+        let deck = sync(rated).await;
         assert_eq!(deck["follow_ups"], serde_json::json!([]));
         let opened = json(send(&router, request("GET", BFS, None)).await).await;
         assert_eq!(opened["exchange"], serde_json::Value::Null);
@@ -478,44 +768,67 @@ esac
                 .join("data/follow-ups/sample/breadth-first-shortest-paths.json")
                 .exists()
         );
+        // A reply sent now says they're over, rather than starting them again.
+        let late = serde_json::json!({ "exchange": ID, "question": 0, "text": "Nearer first" });
+        assert_eq!(
+            status(&router, &format!("{BFS}/reply"), late).await,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            json(send(&router, request("GET", BFS, None)).await).await["exchange"],
+            serde_json::Value::Null
+        );
+
+        // Flagged as wrong, which records no attempt, they're over too.
+        start(&router, HEAP, ID, "Log n").await;
+        let flag = serde_json::json!({ "flags": [{
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a75",
+            "item": "sample/binary-heap-costs",
+            "at": crate::learning::now_ms() - 7_200_000,
+            "flagged": true,
+        }] });
+        let deck = sync(flag).await;
+        assert_eq!(deck["follow_ups"], serde_json::json!([]));
+        let finish = serde_json::json!({ "exchange": ID });
+        assert_eq!(
+            status(&router, &format!("{HEAP}/finish"), finish).await,
+            StatusCode::CONFLICT
+        );
     }
 
     #[tokio::test]
     async fn only_follows_up_cards_that_offer_it() {
         let dir = tempfile::tempdir().unwrap();
         let router = app(dir.path());
-        let body = || Some(serde_json::json!({ "text": "Equal keys keep their order" }));
-        let none = send(
-            &router,
-            request(
-                "POST",
-                "/api/cards/sample/stable-sorting/follow-ups",
-                body(),
-            ),
-        )
-        .await;
-        assert_eq!(none.status(), StatusCode::BAD_REQUEST);
-        let problem = send(
-            &router,
-            request("POST", "/api/cards/sample/islands/follow-ups", body()),
-        )
-        .await;
-        assert_eq!(problem.status(), StatusCode::BAD_REQUEST);
+        let body = || serde_json::json!({ "id": ID, "text": "Equal keys keep their order" });
+        assert_eq!(
+            status(
+                &router,
+                "/api/cards/sample/stable-sorting/follow-ups/start",
+                body()
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status(
+                &router,
+                "/api/cards/sample/islands/follow-ups/start",
+                body()
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
         // Nor can follow-ups be marked as other work is, without what was said.
-        let mark = send(
-            &router,
-            request(
-                "POST",
-                "/api/items/sample/stable-sorting/mark",
-                Some(serde_json::json!({
-                    "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a74",
-                    "work": "follow_ups",
-                    "text": "x",
-                })),
-            ),
-        )
-        .await;
-        assert_eq!(mark.status(), StatusCode::BAD_REQUEST);
-        assert!(!dir.path().join("asked").exists());
+        let mark = serde_json::json!({
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a76",
+            "work": "follow_ups",
+            "text": "x",
+        });
+        assert_eq!(
+            status(&router, "/api/items/sample/stable-sorting/mark", mark).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(asked(dir.path()), 0);
     }
 }
