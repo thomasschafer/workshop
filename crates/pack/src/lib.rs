@@ -25,7 +25,8 @@ pub use code::{Case, Coding, Language, Question, Reading, ReadingCheck, Source};
 pub use drafts::Draft;
 pub use error_types::ErrorType;
 pub use item::{
-    Content, DIFFICULTY, Item, Kind, MentalMaths, Param, Probability, Simulation, replace_section,
+    Content, DIFFICULTY, FollowUps, Item, Kind, MentalMaths, Param, Probability, Simulation,
+    replace_section,
 };
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
 
@@ -520,6 +521,34 @@ mod tests {
             );
         }
         assert_eq!(report.skipped().len(), coding + reading);
+    }
+
+    #[tokio::test]
+    async fn checks_how_many_follow_up_questions_each_card_offers() {
+        let pack = Pack::from_files(files(&[
+            ("pack.toml", MANIFEST),
+            (
+                "items/deeper.md",
+                "+++\nkind = \"card\"\nskills = [\"dice\"]\nfollow_ups = 3\n+++\nQ\n## Answer\nA\n",
+            ),
+            (
+                "items/too-deep.md",
+                "+++\nkind = \"card\"\nskills = [\"dice\"]\nfollow_ups = 5\n+++\nQ\n## Answer\nA\n",
+            ),
+        ]))
+        .unwrap();
+        let report = pack.check(&NotRun).await;
+        let failures: Vec<String> = report.failures().iter().map(ToString::to_string).collect();
+        assert_eq!(failures.len(), 1, "{failures:#?}");
+        assert!(failures[0].contains("items/too-deep.md"), "{failures:#?}");
+        assert!(
+            failures[0].contains("follow_ups should be from 0 to 3, not 5"),
+            "{failures:#?}"
+        );
+        let Content::Card { follow_ups, .. } = &pack.item("deeper").unwrap().content else {
+            panic!("not a card");
+        };
+        assert_eq!(follow_ups.get(), 3);
     }
 
     const CODING: &str = "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n+++\nRoll some dice.\n## Approach\nAdd them up.\n";

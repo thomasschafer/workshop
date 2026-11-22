@@ -123,6 +123,9 @@ pub enum Content {
     Card {
         answer: String,
         explanation: Option<String>,
+        /// How many follow-up questions the tutor asks when the learner goes deeper, having
+        /// answered in their own words.
+        follow_ups: FollowUps,
     },
     MentalMaths(MentalMaths),
     Probability(Probability),
@@ -190,6 +193,52 @@ pub struct Simulation {
     pub tolerance: f64,
 }
 
+/// How many follow-up questions the tutor asks about a card answered in the learner's own
+/// words, before the grader marks the whole exchange: none, for a card that shouldn't offer them,
+/// up to [`FollowUps::MOST`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub struct FollowUps(u8);
+
+impl FollowUps {
+    /// For a card that doesn't say.
+    pub const DEFAULT: Self = Self(2);
+    pub const MOST: u8 = 3;
+
+    pub fn new(count: i64) -> Result<Self, String> {
+        match u8::try_from(count) {
+            Ok(count) if count <= Self::MOST => Ok(Self(count)),
+            _ => Err(format!(
+                "follow_ups should be from 0 to {}, not {count}",
+                Self::MOST
+            )),
+        }
+    }
+
+    pub fn get(self) -> u8 {
+        self.0
+    }
+
+    /// Whether the card offers follow-up questions at all.
+    pub fn offered(self) -> bool {
+        self.0 > 0
+    }
+}
+
+impl TryFrom<u8> for FollowUps {
+    type Error = String;
+
+    fn try_from(count: u8) -> Result<Self, String> {
+        Self::new(i64::from(count))
+    }
+}
+
+impl From<FollowUps> for u8 {
+    fn from(follow_ups: FollowUps) -> Self {
+        follow_ups.0
+    }
+}
+
 /// How hard an item can be: 1 is a warm-up, 3 typical of its kind, and 5 among the hardest of
 /// its kind.
 pub const DIFFICULTY: std::ops::RangeInclusive<u8> = 1..=5;
@@ -221,6 +270,12 @@ struct Common {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NoFields {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CardFields {
+    follow_ups: Option<i64>,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -316,12 +371,13 @@ impl Item {
         let kind_fields = toml::Value::Table(table);
         let content = match common.kind {
             Kind::Card => {
-                kind_fields
-                    .try_into::<NoFields>()
-                    .map_err(|err| err.to_string())?;
+                let fields: CardFields = kind_fields.try_into().map_err(|err| err.to_string())?;
                 Content::Card {
                     answer: section("Answer").expect("required"),
                     explanation: section("Explanation"),
+                    follow_ups: fields
+                        .follow_ups
+                        .map_or(Ok(FollowUps::DEFAULT), FollowUps::new)?,
                 }
             }
             Kind::MentalMaths => {
@@ -803,10 +859,34 @@ mod tests {
             item.content,
             Content::Card {
                 answer: "56".to_owned(),
-                explanation: Some("7 × 8 = 7 × 7 + 7.".to_owned())
+                explanation: Some("7 × 8 = 7 × 7 + 7.".to_owned()),
+                follow_ups: FollowUps::DEFAULT,
             }
         );
         assert_eq!(item.label(), "What's 7 × 8?");
+    }
+
+    #[test]
+    fn reads_how_many_follow_up_questions_a_card_offers() {
+        let follow_ups = |line: &str| {
+            let item = parse(&format!(
+                "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\n{line}\n+++\nQ\n\n## Answer\n\nA\n"
+            ))
+            .unwrap();
+            let Content::Card { follow_ups, .. } = item.content else {
+                panic!("not a card");
+            };
+            follow_ups
+        };
+        assert_eq!(follow_ups(""), FollowUps::DEFAULT);
+        assert_eq!(FollowUps::DEFAULT.get(), 2);
+        assert_eq!(follow_ups("follow_ups = 3").get(), 3);
+        let none = follow_ups("follow_ups = 0");
+        assert!(!none.offered());
+        assert!(follow_ups("follow_ups = 1").offered());
+        // Kept as a number, and never read back out of range.
+        assert_eq!(serde_json::to_string(&none).unwrap(), "0");
+        assert!(serde_json::from_str::<FollowUps>("4").is_err());
     }
 
     #[test]
@@ -1254,6 +1334,18 @@ mod tests {
             (
                 &*format!("+++\n{card}\ndifficulty = 6\n+++\nQ\n## Answer\nA"),
                 "from 1 to 5, not 6",
+            ),
+            (
+                &*format!("+++\n{card}\nfollow_ups = 4\n+++\nQ\n## Answer\nA"),
+                "follow_ups should be from 0 to 3, not 4",
+            ),
+            (
+                &*format!("+++\n{card}\nfollow_ups = -1\n+++\nQ\n## Answer\nA"),
+                "follow_ups should be from 0 to 3, not -1",
+            ),
+            (
+                "+++\nkind = \"probability\"\nskills = [\"dice\"]\nfollow_ups = 1\nanswer = \"1/2\"\n[simulation]\ntrials = 1000\ntolerance = 0.1\n+++\nQ\n## Solution\nS\n## Simulation\n```rhai\ntrue\n```",
+                "follow_ups",
             ),
         ];
         for (source, expected) in broken {

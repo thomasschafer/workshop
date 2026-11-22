@@ -170,6 +170,7 @@ pub(super) async fn flagged(State(app): State<Shared>) -> ApiResult<Flagged> {
             let Content::Card {
                 answer,
                 explanation,
+                ..
             } = &item.content
             else {
                 return None;

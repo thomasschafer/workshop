@@ -17,7 +17,7 @@ use workshop_learning::{
     RetirementChange, SkillMastery, Store, TrackPlan,
 };
 use workshop_pack::number::Tolerance;
-use workshop_pack::{Content, Item, Pack};
+use workshop_pack::{Content, FollowUps, Item, Pack};
 use workshop_tracks::{Priority, Step, Track, TrackIcon, TrackId};
 
 use crate::config::LearningConfig;
@@ -95,6 +95,9 @@ pub enum DeckContent {
     Card {
         answer: String,
         explanation: Option<String>,
+        /// How many follow-up questions the tutor asks when the learner goes deeper, or 0 if
+        /// the card doesn't offer them.
+        follow_ups: FollowUps,
     },
     MentalMaths {
         instances: Vec<workshop_pack::mental::Instance>,
@@ -767,9 +770,11 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
         Content::Card {
             answer,
             explanation,
+            follow_ups,
         } => DeckContent::Card {
             answer: answer.clone(),
             explanation: explanation.clone(),
+            follow_ups: *follow_ups,
         },
         Content::MentalMaths(template) => {
             let generator = workshop_pack::mental::Generator::new(template, &item.prompt)

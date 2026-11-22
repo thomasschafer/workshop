@@ -186,6 +186,7 @@ fn own_rubric(
             Content::Card {
                 answer,
                 explanation,
+                ..
             },
         ) => Ok((
             vec![
@@ -517,6 +518,7 @@ pub fn review_prompt(item: &Item, note: Option<&str>) -> Result<String> {
     let Content::Card {
         answer,
         explanation,
+        ..
     } = &item.content
     else {
         bail!("only cards are reviewed");
