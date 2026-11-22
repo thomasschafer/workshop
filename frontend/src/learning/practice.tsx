@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ConnectionError, connection } from "../api";
+import { ApiError, ConnectionError, connection } from "../api";
 import { codingApi } from "../coding/api";
 import { CodingItems, toDo } from "../coding/screen";
 import type { Overview } from "../coding/types";
@@ -85,16 +85,19 @@ export function Practice({
     );
     setChosen(step(next).map((item) => item.key));
     setResults([]);
+    begun.current = false;
   };
   // The first step starts once there's a deck, from the device or the server.
   useEffect(() => {
     if (deck && chosen === null) startStep();
   }, [deck !== null]);
+  // Whether anything's been begun in the step, typed or tapped, so it isn't taken away.
+  const begun = useRef(false);
   // A step started from the device's deck, before it synced, is started again if the server
   // says a card has follow-up questions under way that it doesn't start with, such as ones
-  // started on another device, unless anything in it's been done.
+  // started on another device, unless anything in it's been begun.
   useEffect(() => {
-    if (!tried || !deck || chosen === null || results.length > 0) return;
+    if (!tried || !deck || chosen === null || results.length > 0 || begun.current) return;
     const underWay = queue(
       deck,
       track,
@@ -148,7 +151,15 @@ export function Practice({
           Couldn't sync: {state.syncStatus.error}. Your answers are kept on this device.
         </div>
       ) : null}
-      <main class="learn-content">
+      <main
+        class="learn-content"
+        onInputCapture={() => {
+          begun.current = true;
+        }}
+        onClickCapture={() => {
+          begun.current = true;
+        }}
+      >
         {current ? (
           <>
             <p class="learn-count muted">
@@ -432,6 +443,12 @@ function CardView({
     try {
       started = await gradingApi.startFollowUps(item.key, exchangeId.current, answer, spoken);
     } catch (e) {
+      // Those with this id were marked, as on another device, so going deeper again starts
+      // afresh.
+      if (e instanceof ApiError && e.status === 409) {
+        exchangeId.current = newId();
+        throw e;
+      }
       // The answer may have been kept even though the tutor couldn't ask its question.
       const kept = await gradingApi.followUps(item.key).catch(() => null);
       if (!kept) throw e;
@@ -547,6 +564,7 @@ function CardView({
           }}
           onShowAnswer={() => setRevealed(true)}
           onOver={(why) => {
+            setAloudBusy(false);
             setExchange(null);
             setExchangeError(null);
             setExchangeAbout(null);

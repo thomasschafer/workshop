@@ -111,8 +111,11 @@ export function FollowUpsView({
     if (answering !== null && replied(saved, answering)) forgetDraft();
   };
 
-  /** Sends the reply to the question waiting, and has the tutor ask its next, unless `ask`. */
-  const send = async (said: string, ask = true): Promise<boolean> => {
+  /**
+   * Sends the reply to the question waiting, and has the tutor ask its next, unless `ask`,
+   * giving the follow-ups as they then are, or null if it couldn't.
+   */
+  const send = async (said: string, ask = true): Promise<Exchange | null> => {
     if (question === null) throw new Error("there's no question waiting for a reply");
     setSending(true);
     setError(null);
@@ -128,10 +131,10 @@ export function FollowUpsView({
       setExchange(next);
       forgetDraft();
       if (next.next === "reply" && mode === "writing") reply.current?.focus();
-      return true;
+      return next;
     } catch (e) {
       await recover(e, question);
-      return false;
+      return null;
     } finally {
       setSending(false);
     }
@@ -151,8 +154,11 @@ export function FollowUpsView({
 
   /** Has it marked, sending first any reply written but not sent, so it isn't lost. */
   const finish = async () => {
-    if (question !== null && kept.current.text.trim() && !(await send(kept.current.text, false))) {
-      return;
+    let latest = exchange;
+    if (question !== null && kept.current.text.trim()) {
+      const sent = await send(kept.current.text, false);
+      if (!sent) return;
+      latest = sent;
     }
     setMarking(true);
     setError(null);
@@ -162,7 +168,7 @@ export function FollowUpsView({
       learning().forgetFollowUps(itemKey);
       // So the attempt is on this device too, rather than offering the card again first.
       void learning().sync();
-      onMarked(marked, exchange);
+      onMarked(marked, latest);
     } catch (e) {
       // Marking it again gives the marks already given, so it's left to be tried again, unless
       // the server says it's over.

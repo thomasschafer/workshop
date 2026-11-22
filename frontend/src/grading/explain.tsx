@@ -46,6 +46,8 @@ export function ExplainAloud({
   const [marked, setMarked] = useState<MarkedReply | null>(null);
   const busy = marking || deepening;
   useEffect(() => onBusy?.(busy), [busy]);
+  // Gone, as when going deeper takes its place part-way, it's busy no more.
+  useEffect(() => () => onBusy?.(false), []);
   const mark = () => {
     setMarking(true);
     setError(null);

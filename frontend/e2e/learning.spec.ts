@@ -893,6 +893,9 @@ test("keeps an answer when the tutor can't be reached, asks again, and sends a r
   await expect(phone.getByRole("region", { name: "Marked" })).toContainText(
     "Shallow: no idea really",
   );
+  // What was said, shown with the marks, has the reply sent as it was marked.
+  await phone.getByText("What you said").tap();
+  await expect(phone.locator(".follow-ups-done .design-turn").last()).toHaveText("no idea really");
   await expect.poll(followedUp).toEqual([]);
   expect(await serverFollowUps(key)).toBeNull();
   expect((await serverDeck()).schedules[key]?.reviews).toBe(1);
@@ -1076,6 +1079,50 @@ test("offers no follow-ups on a card that doesn't want them", async ({ browser }
   await expect(page.getByRole("region", { name: "Explain it aloud" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Go deeper" })).toHaveCount(0);
   await other.close();
+});
+
+test("answers a card as usual once its follow-ups end elsewhere, after going deeper aloud", async () => {
+  await phone.goto("/practice/review");
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  const key = await cardShown();
+  await phone.getByRole("button", { name: "Explain it aloud" }).tap();
+  const explain = phone.getByRole("region", { name: "Explain it aloud" });
+  await holdToTalk(
+    phone,
+    explain.getByRole("button", { name: "Hold to explain" }),
+    "it depends",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("depends"),
+  );
+  await explain.getByRole("button", { name: "Go deeper" }).tap();
+  const deeper = phone.getByRole("region", { name: "Follow-up questions" });
+  await expect(deeper.locator(".design-turn.coach")).toBeVisible();
+  // Rated on another device meanwhile, which ends them.
+  const rated = await phone.request.post("/api/learning/sync", {
+    data: {
+      attempts: [
+        {
+          id: crypto.randomUUID(),
+          item: key,
+          answered_at: Date.now(),
+          duration_ms: 1000,
+          rating: "good",
+        },
+      ],
+    },
+  });
+  expect(rated.ok()).toBe(true);
+  await deeper.getByRole("button", { name: "Type it" }).tap();
+  await deeper.getByLabel("Your answer").fill("still depends");
+  await deeper.getByRole("button", { name: "Answer", exact: true }).tap();
+  // It says why, and the card can be answered as usual, with nothing left waiting.
+  await expect(phone.getByRole("status").filter({ hasText: "answered another way" })).toBeVisible();
+  await expect(deeper).toHaveCount(0);
+  const show = phone.getByRole("button", { name: "Show answer" });
+  await expect(show).toBeEnabled();
+  await phone.getByRole("button", { name: "Answer in my own words" }).tap();
+  await phone.getByLabel("Your answer, in your own words").fill("It depends on the keys");
+  await expect(phone.getByRole("button", { name: "Mark my answer" })).toBeEnabled();
+  await expect(phone.getByRole("button", { name: "Show answer" })).toBeEnabled();
 });
 
 test("runs a timed round with the examiner, carrying on after a reload and a break, until time's up", async () => {
