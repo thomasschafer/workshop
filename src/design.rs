@@ -19,13 +19,7 @@ pub const TIMEOUT: Duration = Duration::from_secs(120);
 /// The coach's instructions, with a pack's tutor add-on if it has one, as the coach is the
 /// tutor's counterpart for design prompts.
 pub fn coach_system_prompt(add_on: Option<&str>) -> String {
-    let base = include_str!("../prompts/coach.md").trim_end();
-    match add_on {
-        Some(add_on) if !add_on.trim().is_empty() => {
-            format!("{base}\n\nThe pack adds:\n\n{}", add_on.trim())
-        }
-        _ => base.to_owned(),
-    }
+    crate::grader::with_add_on(include_str!("../prompts/coach.md"), add_on)
 }
 
 /// How the learner's questions are to be answered from a brief, by the coach or the examiner.

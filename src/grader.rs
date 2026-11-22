@@ -18,12 +18,15 @@ pub const TIMEOUT: Duration = Duration::from_secs(180);
 
 /// The grader's instructions, with a pack's add-on if it has one.
 pub fn system_prompt(add_on: Option<&str>) -> String {
-    let base = include_str!("../prompts/grader.md").trim_end();
-    match add_on {
-        Some(add_on) if !add_on.trim().is_empty() => {
-            format!("{base}\n\nThe pack adds:\n\n{}", add_on.trim())
-        }
-        _ => base.to_owned(),
+    with_add_on(include_str!("../prompts/grader.md"), add_on)
+}
+
+/// A coach's instructions, with a pack's add-on to them if it has one.
+pub fn with_add_on(base: &str, add_on: Option<&str>) -> String {
+    let base = base.trim_end();
+    match add_on.map(str::trim).filter(|add_on| !add_on.is_empty()) {
+        Some(add_on) => format!("{base}\n\nThe pack adds:\n\n{add_on}"),
+        None => base.to_owned(),
     }
 }
 
@@ -813,6 +816,16 @@ mod tests {
                 .clarity,
             None
         );
+    }
+
+    #[test]
+    fn adds_a_packs_add_on_to_a_coachs_instructions() {
+        assert_eq!(
+            with_add_on("Be fair.\n", Some(" Be kind. ")),
+            "Be fair.\n\nThe pack adds:\n\nBe kind."
+        );
+        assert_eq!(with_add_on("Be fair.\n", Some(" \n")), "Be fair.");
+        assert_eq!(with_add_on("Be fair.", None), "Be fair.");
     }
 
     #[test]
