@@ -199,19 +199,17 @@ impl Learning {
         &self.exchanges
     }
 
-    /// A card's follow-up questions, under way or marked, if it has any. Ones under way that
-    /// were superseded, as the card's been answered some other way since they started, such as
-    /// rated by the learner, offline or on another device, or flagged as wrong, are dropped.
+    /// A card's follow-up questions, under way or marked, if it has any, as they stand now.
+    /// Ones under way that were superseded, as the card's been answered some other way since
+    /// they started, such as rated by the learner, offline or on another device, or flagged as
+    /// wrong, are over, so there are none. They're only replaced when follow-ups start again.
     pub fn exchange(&self, key: &str) -> Result<Option<Exchange>> {
         let Some(exchange) = self.exchanges.get(key)? else {
             return Ok(None);
         };
-        let attempts = self.store.attempt_counts()?.get(key).copied().unwrap_or(0);
-        if exchange.superseded(attempts, self.store.flags()?.contains_key(key)) {
-            self.exchanges.remove(key)?;
-            return Ok(None);
-        }
-        Ok(Some(exchange))
+        let attempts = self.store.attempts(key)?.len() as u64;
+        let flagged = self.store.flags()?.contains_key(key);
+        Ok((!exchange.superseded(attempts, flagged)).then_some(exchange))
     }
 
     /// The follow-up questions under way on a card, if there are any, as `exchange` finds them,
@@ -222,21 +220,20 @@ impl Learning {
             .filter(|exchange| exchange.marked.is_none()))
     }
 
-    /// The cards with follow-up questions under way, dropping those superseded, as `exchange`
-    /// does.
+    /// The cards with follow-up questions under way, as `follow_ups` finds them.
     pub fn follow_ups_under_way(&self) -> Result<BTreeSet<String>> {
         let attempts = self.store.attempt_counts()?;
         let flags = self.store.flags()?;
-        let mut under_way = BTreeSet::new();
-        for (key, exchange) in self.exchanges.all()? {
-            let count = attempts.get(&key).copied().unwrap_or(0);
-            if exchange.superseded(count, flags.contains_key(&key)) {
-                self.exchanges.remove(&key)?;
-            } else if exchange.marked.is_none() {
-                under_way.insert(key);
-            }
-        }
-        Ok(under_way)
+        Ok(self
+            .exchanges
+            .all()?
+            .into_iter()
+            .filter(|(key, exchange)| {
+                let count = attempts.get(key).copied().unwrap_or(0);
+                exchange.marked.is_none() && !exchange.superseded(count, flags.contains_key(key))
+            })
+            .map(|(key, _)| key)
+            .collect())
     }
 
     /// The packs, as the config lists them. The first time they're read after the log is
@@ -608,7 +605,13 @@ impl Learning {
     pub fn planned(&self, clock: Clock) -> Result<Planned> {
         let packs = self.packs()?;
         let items = practised(&packs);
-        let refs = item_refs(&items);
+        // Cards being followed up are carried on with first, apart from what's due and new,
+        // and today's limits, as the app does.
+        let follow_ups = self.follow_ups_under_way()?;
+        let refs: Vec<ItemRef<'_>> = item_refs(&items)
+            .into_iter()
+            .filter(|item| !follow_ups.contains(item.key))
+            .collect();
         let apart = Apart::new(&packs, &items);
         let (progress, apart_progress) = self.progress(clock, &apart)?;
         let limits = self.limits();
@@ -650,6 +653,7 @@ impl Learning {
             .map(|skill| (skill.id.clone(), skill.name.clone()))
             .collect();
         Ok(Planned {
+            follow_ups,
             focus,
             skill_names,
             week: Week {
@@ -675,7 +679,6 @@ impl Learning {
         clock: Clock,
         designs: &BTreeMap<String, workshop_sessions::design::Session>,
         problems: &BTreeMap<String, crate::coding::Session>,
-        follow_ups: &BTreeSet<String>,
     ) -> Tracks {
         let tracks = planned
             .names
@@ -686,7 +689,8 @@ impl Learning {
                 if *id == TrackId::SystemDesign {
                     return design_track(plan, planned, designs);
                 }
-                let followed_up: Vec<&Item> = follow_ups
+                let followed_up: Vec<&Item> = planned
+                    .follow_ups
                     .iter()
                     .filter_map(|key| planned.item(key))
                     .filter(|item| item.track == *id)
@@ -727,6 +731,8 @@ impl Learning {
 /// Every track's items, by what's to be done with them, and the packs they're from.
 pub struct Planned {
     pub packs: Vec<Pack>,
+    /// The cards with follow-up questions under way, which aren't in the plans.
+    pub follow_ups: BTreeSet<String>,
     /// The skills recent mistakes point to, most first.
     pub focus: Vec<String>,
     /// Every skill's name, by id.
@@ -1221,13 +1227,7 @@ mod tests {
         assert_eq!(planned.week.minutes, 0);
 
         // Offered when it's opened, but never by Continue, nor as a timed round.
-        let tracks = learning.tracks(
-            &planned,
-            next_day,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeSet::new(),
-        );
+        let tracks = learning.tracks(&planned, next_day, &BTreeMap::new(), &BTreeMap::new());
         let track = tracks.tracks.iter().find(|t| t.id == drill).unwrap();
         assert!(!track.in_continue);
         assert_eq!(track.next.as_ref().unwrap().priority, Priority::Due);
@@ -1280,13 +1280,7 @@ mod tests {
         let found = crate::coding::find(&packs, "apart", "add").unwrap();
         // With nothing begun, the short items come first.
         let planned = learning.planned(clock(NOW)).unwrap();
-        let tracks = learning.tracks(
-            &planned,
-            clock(NOW),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeSet::new(),
-        );
+        let tracks = learning.tracks(&planned, clock(NOW), &BTreeMap::new(), &BTreeMap::new());
         let track = tracks.tracks.iter().find(|t| t.id == drill).unwrap();
         assert_eq!(
             track.next.as_ref().unwrap().destination,
@@ -1297,13 +1291,7 @@ mod tests {
         // A problem started is carried on with from the track, and isn't the Coding track's.
         problems.start(&found, &[], false, None, NOW).unwrap();
         let sessions = problems.sessions().unwrap();
-        let tracks = learning.tracks(
-            &planned,
-            clock(NOW),
-            &BTreeMap::new(),
-            &sessions,
-            &BTreeSet::new(),
-        );
+        let tracks = learning.tracks(&planned, clock(NOW), &BTreeMap::new(), &sessions);
         let next = tracks
             .tracks
             .iter()
@@ -1345,13 +1333,7 @@ mod tests {
 
     fn tracks_at(learning: &Learning, clock: Clock) -> Tracks {
         let planned = learning.planned(clock).unwrap();
-        learning.tracks(
-            &planned,
-            clock,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeSet::new(),
-        )
+        learning.tracks(&planned, clock, &BTreeMap::new(), &BTreeMap::new())
     }
 
     fn attempt(id: &str, item: &str, at: i64, rating: Rating) -> Attempt {
@@ -1566,13 +1548,7 @@ mod tests {
         let probability = &planned.plans[&TrackId::Probability];
         let first = planned.item(&probability.new[0]).unwrap();
         assert!(first.skills.contains(&"probability.conditional".to_owned()));
-        let tracks = learning.tracks(
-            &planned,
-            clock(NOW + 1),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeSet::new(),
-        );
+        let tracks = learning.tracks(&planned, clock(NOW + 1), &BTreeMap::new(), &BTreeMap::new());
         let next = tracks
             .tracks
             .iter()

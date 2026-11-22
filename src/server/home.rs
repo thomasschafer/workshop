@@ -54,13 +54,9 @@ pub(super) async fn home(
     // Advent of Code stays usable whatever is wrong with the packs.
     let learning = app.learning.planned(clock).and_then(|planned| {
         let problems = app.problems.sessions()?;
-        let tracks = app.learning.tracks(
-            &planned,
-            clock,
-            &app.design_sessions.all()?,
-            &problems,
-            &app.learning.follow_ups_under_way()?,
-        );
+        let tracks = app
+            .learning
+            .tracks(&planned, clock, &app.design_sessions.all()?, &problems);
         let coding = crate::coding::track(&planned, &problems);
         let rounds = crate::rounds::track(&planned, &app.rounds.all()?, clock.now, query.time);
         Ok((tracks, coding.into_iter().chain(rounds)))

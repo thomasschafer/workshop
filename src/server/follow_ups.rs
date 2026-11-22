@@ -18,7 +18,7 @@ use workshop_provider::{CallSpec, ProviderRunner};
 use super::error::{ApiError, ApiResult, bad_request};
 use super::grading::{MarkedReply, due, find, packs};
 use super::state::Shared;
-use crate::follow_ups::{Exchange, Next, TUTOR};
+use crate::follow_ups::{Exchange, ExchangeError, Next, TUTOR};
 use crate::grader::{Answer, Marked, Work};
 use crate::learning::now_ms;
 
@@ -43,7 +43,7 @@ fn card<'a>(
     ))
 }
 
-/// Refuses something sent for an exchange that isn't the card's any more, saying why, as a
+/// Refuses something sent for follow-ups that aren't the card's any more, saying why, as a
 /// conflict, so the app knows to look again at what's under way.
 fn over(why: &str) -> ApiError {
     ApiError(StatusCode::CONFLICT, serde_json::json!({ "error": why }))
@@ -52,6 +52,15 @@ fn over(why: &str) -> ApiError {
 const SUPERSEDED: &str =
     "These follow-up questions are over, as the card's been answered another way since.";
 const MARKED: &str = "These follow-up questions have been marked already.";
+
+/// Refuses what an exchange can't take: as over, if it's been marked, and otherwise as a bad
+/// request.
+fn refused(err: ExchangeError) -> ApiError {
+    match err {
+        ExchangeError::Marked => over(MARKED),
+        other => bad_request(other.to_string()),
+    }
+}
 
 /// The exchange under way on a card with this id, refusing one that's over or marked.
 fn under_way(app: &Shared, key: &str, id: &str) -> Result<Exchange, ApiError> {
@@ -123,13 +132,14 @@ fn tutor<'a>(app: &'a Shared, pack: &Pack) -> Result<(&'a ProviderRunner, CallSp
     Ok(app.coach_target(system)?)
 }
 
-/// Has the tutor ask its next question, if it has one to ask, and keeps it.
+/// Has the tutor ask its next question, if it has one to ask, and keeps it. Called with the
+/// card's follow-ups held.
 async fn ask_if_due(
     app: &Shared,
     (runner, spec): (&ProviderRunner, CallSpec),
     key: &str,
     item: &Item,
-    exchange: Exchange,
+    mut exchange: Exchange,
 ) -> ApiResult<ExchangeView> {
     if exchange.next() != Next::Ask {
         return Ok(Json(exchange.into()));
@@ -137,22 +147,8 @@ async fn ask_if_due(
     let question = crate::follow_ups::ask(runner, &spec, item, &exchange)
         .await
         .map_err(|err| bad_request(format!("{err:#}")))?;
-    let id = exchange.id;
-    let (exchange, ()) = app
-        .learning
-        .exchanges()
-        .change(key, |current| {
-            if current.id != id {
-                anyhow::bail!(SUPERSEDED);
-            }
-            // Asked twice at once, the first question is kept.
-            if current.next() == Next::Ask {
-                current.asked(&question, now_ms())?;
-            }
-            Ok(())
-        })
-        .map_err(|err| over(&format!("{err:#}")))?
-        .ok_or_else(|| over(SUPERSEDED))?;
+    exchange.asked(&question, now_ms()).map_err(refused)?;
+    app.learning.exchanges().put(key, &exchange)?;
     Ok(Json(exchange.into()))
 }
 
@@ -179,28 +175,29 @@ pub(super) async fn start(
 ) -> ApiResult<ExchangeView> {
     let packs = packs(&app)?;
     let (pack, key, item, limit) = card(&packs, &pack, &item)?;
+    workshop_learning::store::validate_id(&body.id)
+        .map_err(|err| bad_request(format!("{err:#}")))?;
     // Without a tutor to ask, nothing's started.
     let tutor = tutor(&app, pack)?;
-    let exchanges = app.learning.exchanges();
+    let _card = app.follow_ups_lock(&key).await;
+    let store = app.learning.store();
+    if store.flags()?.contains_key(&key) {
+        return Err(bad_request(
+            "This card's flagged as wrong, so it isn't practised until it's fixed.",
+        ));
+    }
     let exchange = match app.learning.exchange(&key)? {
         Some(kept) if kept.marked.is_none() => kept,
         Some(kept) if kept.id == body.id => return Err(over(MARKED)),
-        marked => {
-            // Only the last marked is kept, for marking it again to find.
-            if marked.is_some() {
-                exchanges.remove(&key)?;
-            }
-            let attempts = app
-                .learning
-                .store()
-                .attempt_counts()?
-                .get(&key)
-                .copied()
-                .unwrap_or(0);
+        // Any kept is over, or marked, and kept only for marking it again to find, so the
+        // new one replaces it.
+        _ => {
+            let attempts = store.attempts(&key)?.len() as u64;
             let started =
                 Exchange::new(&body.id, limit, attempts, &body.text, body.spoken, now_ms())
-                    .map_err(|err| bad_request(err.to_string()))?;
-            exchanges.put_new(&key, started)?
+                    .map_err(refused)?;
+            app.learning.exchanges().put(&key, &started)?;
+            started
         }
     };
     ask_if_due(&app, tutor, &key, item, exchange).await
@@ -238,22 +235,15 @@ pub(super) async fn reply(
     let packs = packs(&app)?;
     let (pack, key, item, _) = card(&packs, &pack, &item)?;
     let tutor = tutor(&app, pack)?;
-    under_way(&app, &key, &body.exchange)?;
+    let _card = app.follow_ups_lock(&key).await;
+    let mut exchange = under_way(&app, &key, &body.exchange)?;
     let now = now_ms();
-    let (exchange, spent) = app
-        .learning
-        .exchanges()
-        .change(&key, |exchange| {
-            if exchange.id != body.exchange {
-                anyhow::bail!(SUPERSEDED);
-            }
-            let spent = workshop_sessions::spent(exchange.updated_at, now);
-            let new = exchange.replied(body.question, &body.text, body.spoken, now)?;
-            Ok(new.then_some(spent))
-        })
-        .map_err(|err| bad_request(format!("{err:#}")))?
-        .ok_or_else(|| over(SUPERSEDED))?;
-    if let Some(spent) = spent {
+    let spent = workshop_sessions::spent(exchange.updated_at, now);
+    if exchange
+        .replied(body.question, &body.text, body.spoken, now)
+        .map_err(refused)?
+    {
+        app.learning.exchanges().put(&key, &exchange)?;
         app.learning.store().record_time(&key, now, spent)?;
     }
     if !body.ask {
@@ -278,6 +268,7 @@ pub(super) async fn ask(
     let packs = packs(&app)?;
     let (pack, key, item, _) = card(&packs, &pack, &item)?;
     let tutor = tutor(&app, pack)?;
+    let _card = app.follow_ups_lock(&key).await;
     let exchange = under_way(&app, &key, &body.exchange)?;
     ask_if_due(&app, tutor, &key, item, exchange).await
 }
@@ -287,8 +278,7 @@ pub(super) async fn ask(
 /// they explained aloud. It's the card's attempt, with the exchange's id, rated from the score,
 /// with what the grader finds in the mistake log; then the exchange is over, and kept with its
 /// marks, so marking it again, as after a lost reply, gives those. It can be marked before every
-/// question's been answered, which the grader is told. One card's follow-ups are marked one
-/// at a time, so they can't be marked twice at once.
+/// question's been answered, which the grader is told.
 pub(super) async fn finish(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
@@ -296,7 +286,8 @@ pub(super) async fn finish(
 ) -> ApiResult<MarkedReply> {
     let packs = packs(&app)?;
     let (pack, key, item, _) = card(&packs, &pack, &item)?;
-    let _marking = app.marking_follow_ups(&key).await;
+    // Held while the grader marks it too, so nothing's said to it meanwhile, and it's marked once.
+    let _card = app.follow_ups_lock(&key).await;
     let marked_reply = |marked: Marked| -> ApiResult<MarkedReply> {
         Ok(Json(MarkedReply {
             rubric: marked.points.iter().map(|p| p.point.clone()).collect(),
@@ -304,7 +295,7 @@ pub(super) async fn finish(
             marked,
         }))
     };
-    let exchange = match app.learning.exchange(&key)? {
+    let mut exchange = match app.learning.exchange(&key)? {
         Some(exchange) if exchange.id == body.exchange => exchange,
         _ => return Err(over(SUPERSEDED)),
     };
@@ -328,37 +319,29 @@ pub(super) async fn finish(
     )
     .await
     .map_err(|err| bad_request(format!("{err:#}")))?;
+    // The card may have been answered another way, or flagged, by another device while the
+    // grader was marking, which ends these without an attempt of their own.
+    if app.learning.follow_ups(&key)?.is_none() {
+        return Err(over(SUPERSEDED));
+    }
     let now = now_ms();
-    let findings = marked.mistakes(&exchange.id, &key, now);
-    // Kept with the exchange as the attempt's recorded, so neither happens without the other,
-    // and only if nothing was said while the grader was marking.
-    let (_, ()) = app
-        .learning
-        .exchanges()
-        .change(&key, |current| {
-            if current.id != exchange.id {
-                anyhow::bail!(SUPERSEDED);
-            }
-            current.mark(marked.clone(), exchange.updated_at)?;
-            app.learning.record_marked(
-                Attempt {
-                    id: exchange.id.clone(),
-                    item: key.clone(),
-                    answered_at: now,
-                    duration_ms: workshop_sessions::spent(exchange.updated_at, now),
-                    rating: marked.rating(),
-                    response: Some(transcript.clone()),
-                    seed: None,
-                },
-                &findings,
-                now,
-            )
-        })
-        .map_err(|err| over(&format!("{err:#}")))?
-        .ok_or_else(|| over(SUPERSEDED))?;
+    app.learning.record_marked(
+        Attempt {
+            id: exchange.id.clone(),
+            item: key.clone(),
+            answered_at: now,
+            duration_ms: workshop_sessions::spent(exchange.updated_at, now),
+            rating: marked.rating(),
+            response: Some(transcript),
+            seed: None,
+        },
+        &marked.mistakes(&exchange.id, &key, now),
+        now,
+    )?;
+    exchange.mark(marked.clone()).map_err(refused)?;
+    app.learning.exchanges().put(&key, &exchange)?;
     marked_reply(marked)
 }
-
 #[cfg(all(test, unix))]
 mod tests {
     use axum::Router;
@@ -521,13 +504,8 @@ esac
             .iter()
             .find(|track| track["id"] == "review")
             .unwrap();
-        assert!(
-            review["summary"]
-                .as_str()
-                .unwrap()
-                .starts_with("1 being followed up · "),
-            "{review}"
-        );
+        // It's counted once, apart from what's new, and spends none of today's new items.
+        assert_eq!(review["summary"], "1 being followed up · 9 new");
         assert_eq!(review["next"]["priority"], "unfinished");
         assert_eq!(
             review["next"]["reason"],
@@ -763,11 +741,6 @@ esac
         assert_eq!(deck["follow_ups"], serde_json::json!([]));
         let opened = json(send(&router, request("GET", BFS, None)).await).await;
         assert_eq!(opened["exchange"], serde_json::Value::Null);
-        assert!(
-            !dir.path()
-                .join("data/follow-ups/sample/breadth-first-shortest-paths.json")
-                .exists()
-        );
         // A reply sent now says they're over, rather than starting them again.
         let late = serde_json::json!({ "exchange": ID, "question": 0, "text": "Nearer first" });
         assert_eq!(
@@ -793,6 +766,71 @@ esac
         assert_eq!(
             status(&router, &format!("{HEAP}/finish"), finish).await,
             StatusCode::CONFLICT
+        );
+    }
+
+    #[tokio::test]
+    async fn records_no_attempt_for_follow_ups_ended_while_they_were_marked() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = app(dir.path());
+        start(&router, BFS, ID, "Layer by layer").await;
+        // Rated on another device while the grader's marking, the card's answered already.
+        let rated = serde_json::json!({ "attempts": [{
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a77",
+            "item": "sample/breadth-first-shortest-paths",
+            "answered_at": crate::learning::now_ms(),
+            "duration_ms": 1000,
+            "rating": "good",
+        }] });
+        let path = format!("{BFS}/finish");
+        let finish = status(&router, &path, serde_json::json!({ "exchange": ID }));
+        let rate = async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            post(&router, "/api/learning/sync", rated).await
+        };
+        let (finished, _) = tokio::join!(finish, rate);
+        assert_eq!(finished, StatusCode::CONFLICT);
+        let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
+        assert_eq!(
+            deck["schedules"]["sample/breadth-first-shortest-paths"]["reviews"],
+            1
+        );
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        assert_eq!(log["mistakes"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn keeps_marks_to_give_again_until_follow_ups_start_afresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = app(dir.path());
+        start(&router, HEAP, ID, "Log n").await;
+        let finish = serde_json::json!({ "exchange": ID });
+        let marked = post(&router, &format!("{HEAP}/finish"), finish.clone()).await;
+        // A start that can't be taken, with nothing in it, or an id that isn't one, leaves the
+        // marks to give again.
+        for body in [
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a78", "text": " " }),
+            serde_json::json!({ "id": "../x", "text": "Log n" }),
+        ] {
+            assert_eq!(
+                status(&router, &format!("{HEAP}/start"), body).await,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        let again = post(&router, &format!("{HEAP}/finish"), finish).await;
+        assert_eq!(again["marked"], marked["marked"]);
+        // Nor can follow-ups start on a card flagged as wrong.
+        let flag = serde_json::json!({ "flags": [{
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a79",
+            "item": "sample/breadth-first-shortest-paths",
+            "at": crate::learning::now_ms(),
+            "flagged": true,
+        }] });
+        post(&router, "/api/learning/sync", flag).await;
+        let flagged = serde_json::json!({ "id": ID, "text": "Layer by layer" });
+        assert_eq!(
+            status(&router, &format!("{BFS}/start"), flagged).await,
+            StatusCode::BAD_REQUEST
         );
     }
 

@@ -91,9 +91,10 @@ pub struct App {
     pub(super) oracles: tokio::sync::Mutex<BTreeMap<String, Arc<workshop_coding::Oracle>>>,
     /// Held while the tutor poses a twist, so a review asked for twice gets only the one.
     pub(super) posing_twist: tokio::sync::Mutex<()>,
-    /// Held for each card while its follow-up questions are marked, by card, so they're
-    /// marked once however many times it's asked for at once.
-    marking_follow_ups: std::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Held for each card, by card, while anything changes its follow-up questions, so each
+    /// change is decided on them as they are, and they're marked once however many times
+    /// that's asked for at once.
+    follow_ups_locks: std::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Background prefetch jobs for saving a year's AoC puzzles offline.
     pub(super) year_cache: std::sync::Mutex<BTreeMap<u16, YearCacheState>>,
 }
@@ -169,7 +170,7 @@ impl App {
             author_reviewer: tokio::sync::Mutex::default(),
             oracles: tokio::sync::Mutex::default(),
             posing_twist: tokio::sync::Mutex::default(),
-            marking_follow_ups: std::sync::Mutex::default(),
+            follow_ups_locks: std::sync::Mutex::default(),
             year_cache: std::sync::Mutex::new(BTreeMap::new()),
             config,
             paths,
@@ -278,10 +279,10 @@ impl App {
         self.coach_target(crate::discuss::tutor_system_prompt(add_on))
     }
 
-    /// Waits for any marking of a card's follow-up questions under way to end, and holds them
-    /// until the guard's dropped.
-    pub(super) async fn marking_follow_ups(&self, key: &str) -> tokio::sync::OwnedMutexGuard<()> {
-        let card = lock(&self.marking_follow_ups)
+    /// Waits for anything changing a card's follow-up questions to finish, and holds them until
+    /// the guard's dropped.
+    pub(super) async fn follow_ups_lock(&self, key: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let card = lock(&self.follow_ups_locks)
             .entry(key.to_owned())
             .or_default()
             .clone();

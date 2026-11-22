@@ -82,7 +82,7 @@ pub enum Next {
     Ask,
     /// The learner replies to the question waiting.
     Reply,
-    /// Every question's been asked and answered, so it's ready to mark.
+    /// Every question's been asked and answered, so it's ready to mark, or it's been marked.
     Mark,
 }
 
@@ -104,8 +104,6 @@ pub enum ExchangeError {
     Answered(usize),
     #[error("these follow-up questions have been marked already")]
     Marked,
-    #[error("something was added while it was being marked, so mark it again")]
-    Changed,
 }
 
 impl Exchange {
@@ -141,6 +139,9 @@ impl Exchange {
     }
 
     pub fn next(&self) -> Next {
+        if self.marked.is_some() {
+            return Next::Mark;
+        }
         match self.questions.last() {
             Some(question) if question.reply.is_none() => Next::Reply,
             _ if self.questions.len() < usize::from(self.limit.get()) => Next::Ask,
@@ -202,18 +203,10 @@ impl Exchange {
         }
     }
 
-    /// Keeps the grader's marks, given for the exchange as it was when last changed at
-    /// `marked_as_of`, so marks for it as it was before a later reply are refused.
-    pub fn mark(
-        &mut self,
-        marked: crate::grader::Marked,
-        marked_as_of: i64,
-    ) -> Result<(), ExchangeError> {
+    /// Keeps the grader's marks, which end it.
+    pub fn mark(&mut self, marked: crate::grader::Marked) -> Result<(), ExchangeError> {
         if self.marked.is_some() {
             return Err(ExchangeError::Marked);
-        }
-        if self.updated_at != marked_as_of {
-            return Err(ExchangeError::Changed);
         }
         self.marked = Some(marked);
         Ok(())
@@ -442,10 +435,10 @@ mod tests {
         assert!(exchange.superseded(4, false));
         assert!(exchange.superseded(3, true));
         exchange.asked("Why?", 2).unwrap();
-        // Marks for it as it was before a later change are refused.
-        assert_eq!(exchange.mark(marks(0.5), 1), Err(ExchangeError::Changed));
-        exchange.mark(marks(0.5), 2).unwrap();
-        assert_eq!(exchange.mark(marks(0.9), 2), Err(ExchangeError::Marked));
+        exchange.mark(marks(0.5)).unwrap();
+        assert_eq!(exchange.mark(marks(0.9)), Err(ExchangeError::Marked));
+        // Marked, it has nothing more to ask.
+        assert_eq!(exchange.next(), Next::Mark);
         assert_eq!(exchange.marked.as_ref().unwrap().score, 0.5);
         // Its own attempt doesn't end it; it's kept, with its marks.
         assert!(!exchange.superseded(4, false));

@@ -719,7 +719,8 @@ fn fnv1a(text: &str) -> u64 {
     })
 }
 
-fn validate_id(id: &str) -> Result<()> {
+/// Checks an id made by a device, for an attempt or a change, is one the log takes.
+pub fn validate_id(id: &str) -> Result<()> {
     let valid =
         (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
     if !valid {
