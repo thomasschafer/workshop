@@ -21,6 +21,7 @@ use workshop_pack::{Content, FollowUps, Item, Pack};
 use workshop_tracks::{Priority, Step, Track, TrackIcon, TrackId};
 
 use crate::config::LearningConfig;
+use crate::follow_ups::Exchange;
 use crate::tracks::Destination;
 
 /// How many questions the deck has ready from each mental maths template, for practising
@@ -30,6 +31,8 @@ const INSTANCES: u64 = 12;
 pub struct Learning {
     store: Store,
     config: LearningConfig,
+    /// Cards answered in the learner's own words and being followed up, by card.
+    exchanges: workshop_sessions::Saved<Exchange>,
 }
 
 /// Everything the app needs to practise short items, offline too.
@@ -50,6 +53,8 @@ pub struct Deck {
     pub skills: Vec<DeckSkill>,
     /// The skills recent mistakes point to, whose new items come first.
     pub focus: Vec<String>,
+    /// Cards with follow-up questions under way, by key, which come first, to carry on with.
+    pub follow_ups: Vec<String>,
     /// What's wrong in the packs, which is left out.
     pub problems: Vec<String>,
 }
@@ -185,7 +190,44 @@ impl Learning {
         Ok(Self {
             store: Store::open(&data_dir.join("learning.sqlite"))?,
             config: config.clone(),
+            exchanges: workshop_sessions::Saved::new(data_dir.join("follow-ups")),
         })
+    }
+
+    /// Cards being followed up, kept as each answer and question is given.
+    pub fn exchanges(&self) -> &workshop_sessions::Saved<Exchange> {
+        &self.exchanges
+    }
+
+    /// The follow-up questions under way on a card, if there are any. Once the card's been
+    /// answered some other way since they started, such as rated by the learner, offline or on
+    /// another device, they're over, and dropped.
+    pub fn follow_ups(&self, key: &str) -> Result<Option<Exchange>> {
+        let Some(exchange) = self.exchanges.get(key)? else {
+            return Ok(None);
+        };
+        if answered_since(&exchange, self.store.schedules()?.get(key)) {
+            self.exchanges.remove(key)?;
+            return Ok(None);
+        }
+        Ok(Some(exchange))
+    }
+
+    /// The cards with follow-up questions under way, dropping those that are over, as
+    /// `follow_ups` does.
+    fn follow_ups_under_way(
+        &self,
+        schedules: &BTreeMap<String, ItemSchedule>,
+    ) -> Result<Vec<String>> {
+        let mut under_way = Vec::new();
+        for (key, exchange) in self.exchanges.all()? {
+            if answered_since(&exchange, schedules.get(&key)) {
+                self.exchanges.remove(&key)?;
+            } else {
+                under_way.push(key);
+            }
+        }
+        Ok(under_way)
     }
 
     /// The packs, as the config lists them. The first time they're read after the log is
@@ -289,6 +331,11 @@ impl Learning {
             .collect();
         let keys: std::collections::BTreeSet<&str> =
             shorts.iter().map(|s| s.key.as_str()).collect();
+        let follow_ups = self
+            .follow_ups_under_way(&schedules)?
+            .into_iter()
+            .filter(|key| keys.contains(key.as_str()))
+            .collect();
         Ok(Deck {
             limits: self.limits(),
             progress,
@@ -307,6 +354,7 @@ impl Learning {
                 .collect(),
             skills,
             focus: self.focus(&packs, clock.now)?,
+            follow_ups,
             problems: problems(&packs),
         })
     }
@@ -817,6 +865,11 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
         minutes: item.minutes,
         content,
     })
+}
+
+/// Whether a card's been answered since its follow-up questions started, which ends them.
+fn answered_since(exchange: &Exchange, schedule: Option<&ItemSchedule>) -> bool {
+    schedule.is_some_and(|schedule| schedule.last_review >= exchange.started_at)
 }
 
 /// Where a template's seeds start, different for each item so they don't all make their

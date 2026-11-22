@@ -1,6 +1,7 @@
 //! The grader: a coach that marks written work against a rubric, such as an answer to a design
-//! prompt, a coding problem's plan or a card answered in the learner's own words, and checks
-//! cards for mistakes. It's a model with no tools, through the provider layer, as the tutor is.
+//! prompt, a coding problem's plan or a card answered in the learner's own words, with any
+//! follow-up questions on it, and checks cards for mistakes. It's a model with no tools, through
+//! the provider layer, as the tutor is.
 //!
 //! Its marks feed the mistake log, with each finding tagged with a kind of mistake, and mastery,
 //! as an attempt rated from the score. A card it finds wrong gets a proposed fix, which the
@@ -49,13 +50,20 @@ pub enum Work {
     /// An answer to a twist on a coding problem solved before, posed for its review, against
     /// what a good answer to the twist covers.
     Twist,
+    /// A card's answer, in the learner's own words, and their replies to the tutor's follow-up
+    /// questions about it, marked for how deeply they understand it as well as whether it's
+    /// right.
+    FollowUps,
 }
 
 impl Work {
     /// Whether marking it counts as an attempt at the item. A coding problem's attempt is its
     /// own, when it's finished, so its plan and explanation only add to the mistake log.
     pub fn is_attempt(self) -> bool {
-        matches!(self, Self::Design | Self::Card | Self::Round)
+        matches!(
+            self,
+            Self::Design | Self::Card | Self::Round | Self::FollowUps
+        )
     }
 }
 
@@ -96,6 +104,12 @@ impl<'a> Answer<'a> {
 pub const QUESTIONING: [&str; 2] = [
     "Asks the questions that matter, finding out the key requirements before designing",
     "Asks rather than assumes: takes nothing as given that could have been asked",
+];
+
+/// The rubric points for a card's follow-up questions, added to its own.
+pub const FOLLOWED_UP_POINTS: [&str; 2] = [
+    "Answers each follow-up question soundly",
+    "Shows why the answer holds, and where it wouldn't, not only what it is",
 ];
 
 /// The rubric for a piece of work on an item, and what a good answer looks like, if the item
@@ -185,22 +199,28 @@ fn own_rubric(
             Ok((points, notes.clone()))
         }
         (
-            Work::Card,
+            Work::Card | Work::FollowUps,
             Content::Card {
                 answer,
                 explanation,
                 ..
             },
-        ) => Ok((
-            vec![
+        ) => {
+            let mut points = vec![
                 "Gives the card's answer, in any words".to_owned(),
                 "Says nothing that contradicts the card".to_owned(),
-            ],
-            Some(match explanation {
-                Some(explanation) => format!("{answer}\n\n{explanation}"),
-                None => answer.clone(),
-            }),
-        )),
+            ];
+            if work == Work::FollowUps {
+                points.extend(FOLLOWED_UP_POINTS.iter().map(|&point| point.to_owned()));
+            }
+            Ok((
+                points,
+                Some(match explanation {
+                    Some(explanation) => format!("{answer}\n\n{explanation}"),
+                    None => answer.clone(),
+                }),
+            ))
+        }
         _ => bail!("{} can't be marked as that kind of work", item.label()),
     }
 }
@@ -246,10 +266,18 @@ pub fn mark_prompt(
         out.push_str(&format!("<brief>\n{}\n</brief>\n\n{BRIEFED}", brief.trim()));
     }
     out.push_str(&format!("<work>\n{}\n</work>\n\n", answer.text.trim()));
+    if work == Work::FollowUps {
+        out.push_str(FOLLOWED_UP);
+    }
     if let Some(note) = answer.note {
         out.push_str(&format!("{}\n\n", note.trim()));
     }
     if answer.spoken {
+        out.push_str(if work == Work::FollowUps {
+            SPOKEN_IN_PART
+        } else {
+            SPOKEN_WHOLE
+        });
         out.push_str(SPOKEN);
     }
     out.push_str(&kinds(error_types));
@@ -271,8 +299,18 @@ pub fn mark_prompt(
 /// What the grader is told about a design whose questions were answered from a brief.
 const BRIEFED: &str = "The brief is what the learner's questions were answered from. They never saw it, so they only know what they asked, and what the question itself says. Besides the design, judge what they asked: in `questioning`, list the brief's key requirements they found out, by asking or from the question (`found`), those that matter to the design that they never found out (`missed`), and what they took as given without asking that they could have asked (`assumed`), each in a few words. A requirement in `missed` is kept as a mistake already, so don't list it in `findings` too. A design that goes against a requirement they did find out is a finding, as is an assumption that contradicts the brief.\n\n";
 
-/// What the grader is told about work explained aloud.
-const SPOKEN: &str = "The learner explained this aloud, and the work is what speech recognition heard. Mark what they meant where a word is plainly misheard, such as one that sounds like the right term, and don't count the way speech is written down against them. Besides marking it against the rubric, judge how clearly they explained it: whether it's in a sensible order, gets to the point, names things precisely and would be easy to follow if heard. The score is for the rubric alone; clarity has its own score and feedback.\n\n";
+/// What the grader is told about a card's answer followed up by the tutor's questions.
+const FOLLOWED_UP: &str = "The work is the learner's answer to the card, then the follow-up questions a tutor asked about what they said, each with their reply. Mark the exchange as a whole, against the reference: credit the depth their replies show, such as saying why the answer holds, what happens in an edge case or how it would change under a different condition, and say in the points' comments and the findings what was shallow or wrong. A reply that only restates the answer shows no more depth, and a question left unanswered counts as not knowing. A reply that's wrong, or shows they don't understand why the answer holds, is a finding, usually a concept-gap. The tutor's questions aren't the learner's work, so don't mark them.\n\n";
+
+/// What the grader is told about work explained aloud, before [`SPOKEN`].
+const SPOKEN_WHOLE: &str =
+    "The learner explained this aloud, and the work is what speech recognition heard.";
+
+/// What the grader is told about follow-ups answered aloud in part, before [`SPOKEN`].
+const SPOKEN_IN_PART: &str = "The learner explained this aloud in part: what's marked \"(aloud)\" is what speech recognition heard, and the rest was written, so judge clarity on what they said aloud.";
+
+/// What the grader is told about work explained aloud, wholly or in part.
+const SPOKEN: &str = " Mark what they meant where a word is plainly misheard, such as one that sounds like the right term, and don't count the way speech is written down against them. Besides marking it against the rubric, judge how clearly they explained it: whether it's in a sensible order, gets to the point, names things precisely and would be easy to follow if heard. The score is for the rubric alone; clarity has its own score and feedback.\n\n";
 
 fn kinds(error_types: &[ErrorType]) -> String {
     let mut out = String::from("<kinds_of_mistake>\n");
@@ -816,6 +854,45 @@ mod tests {
                 .clarity,
             None
         );
+    }
+
+    #[test]
+    fn marks_a_cards_follow_ups_for_depth_and_what_was_said_aloud_for_clarity() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let card = pack.item("binary-heap-costs").unwrap();
+        let exchange = "Learner: Log n\nTutor: Why?\nLearner (aloud): one path down";
+        let answer = Answer {
+            spoken: true,
+            ..Answer::written(exchange)
+        };
+        let prompt = mark_prompt(card, Work::FollowUps, answer, &types).unwrap();
+        assert!(prompt.contains("- Gives the card's answer, in any words\n"));
+        assert!(prompt.contains(&format!(
+            "- {}\n- {}\n</rubric>",
+            FOLLOWED_UP_POINTS[0], FOLLOWED_UP_POINTS[1]
+        )));
+        assert!(prompt.contains("<reference>\nAdding and removing take O(log n)"));
+        assert!(prompt.contains("the learner hasn't seen it"));
+        assert!(prompt.contains(&format!("<work>\n{exchange}\n</work>\n\n{FOLLOWED_UP}")));
+        assert!(prompt.contains("usually a concept-gap"));
+        // Only what's marked as aloud was, so clarity is judged on that.
+        assert!(prompt.contains(&format!("{SPOKEN_IN_PART}{SPOKEN}")));
+        assert!(!prompt.contains(SPOKEN_WHOLE));
+        assert!(
+            prompt.ends_with("\"clarity\": {\"score\": number from 0 to 1, \"feedback\": string}}")
+        );
+        assert!(Work::FollowUps.is_attempt());
+        // Written throughout, it isn't marked for clarity.
+        let written =
+            mark_prompt(card, Work::FollowUps, Answer::written(exchange), &types).unwrap();
+        assert!(!written.contains(SPOKEN) && !written.contains("clarity"));
+        // A card answered without follow-ups is marked as before.
+        let plain = mark_prompt(card, Work::Card, Answer::written("Log n"), &types).unwrap();
+        assert!(!plain.contains(FOLLOWED_UP_POINTS[0]) && !plain.contains(FOLLOWED_UP));
+        // Only a card is followed up.
+        let problem = pack.item("islands").unwrap();
+        assert!(mark_prompt(problem, Work::FollowUps, answer, &types).is_err());
     }
 
     #[test]

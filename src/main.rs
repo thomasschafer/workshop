@@ -10,6 +10,7 @@ mod doctor;
 mod edit;
 mod eval;
 mod examiner;
+mod follow_ups;
 mod goals;
 mod grader;
 mod language;

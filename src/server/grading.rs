@@ -35,6 +35,17 @@ pub(super) fn find<'a>(
         })
 }
 
+/// When an item comes back, as it's now scheduled, in milliseconds since 1970, if it's been
+/// attempted.
+pub(super) fn due(app: &Shared, key: &str) -> Result<Option<i64>, ApiError> {
+    let store = app.learning.store();
+    Ok(store.schedules()?.get(key).map(|schedule| {
+        store
+            .scheduler()
+            .due(schedule, app.config.learning.desired_retention)
+    }))
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct MarkBody {
@@ -68,6 +79,11 @@ pub(super) async fn mark(
     let packs = packs(&app)?;
     let (pack, item) = find(&packs, &pack, &item)?;
     let key = format!("{}/{}", pack.manifest.id, item.id);
+    if body.work == Work::FollowUps {
+        return Err(bad_request(
+            "A card's follow-ups are marked when they're finished, with what was said.",
+        ));
+    }
     // An explanation of a solution is marked with the solution it explains.
     let code = if body.work == Work::Explanation {
         let found = crate::coding::find(&packs, &pack.manifest.id, &item.id)
@@ -94,7 +110,6 @@ pub(super) async fn mark(
         .await
         .map_err(|err| bad_request(format!("{err:#}")))?;
     let now = now_ms();
-    let store = app.learning.store();
     let findings = marked.mistakes(&body.id, &key, now);
     let due = if body.work.is_attempt() {
         app.learning.record_marked(
@@ -110,13 +125,9 @@ pub(super) async fn mark(
             &findings,
             now,
         )?;
-        store.schedules()?.get(&key).map(|schedule| {
-            store
-                .scheduler()
-                .due(schedule, app.config.learning.desired_retention)
-        })
+        due(&app, &key)?
     } else {
-        store.record_mistakes(&findings)?;
+        app.learning.store().record_mistakes(&findings)?;
         None
     };
     if body.work == Work::Design {

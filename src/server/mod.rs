@@ -10,6 +10,7 @@ mod design;
 mod discuss;
 mod edit;
 mod error;
+mod follow_ups;
 mod git;
 mod grading;
 mod home;
@@ -80,6 +81,14 @@ pub fn router(app: Shared) -> Router {
         .route("/author/questions/{id}", post(author::answer))
         .route("/cards/{pack}/{item}/review", post(grading::review))
         .route("/cards/{pack}/{item}/fix", post(grading::fix))
+        .route(
+            "/cards/{pack}/{item}/follow-ups",
+            get(follow_ups::open).post(follow_ups::answer),
+        )
+        .route(
+            "/cards/{pack}/{item}/follow-ups/finish",
+            post(follow_ups::finish),
+        )
         .route("/mistakes/tag", put(mistakes::tag))
         .route("/coding", get(coding::overview))
         .route("/coding/offline-bundle", get(coding::offline_bundle))

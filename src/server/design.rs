@@ -14,7 +14,7 @@ use workshop_sessions::brief::Brief;
 use workshop_sessions::design::{Component, Edit, Session, Stage, StageWork};
 
 use super::error::{ApiError, ApiResult, bad_request};
-use super::grading::{MarkedReply, find, packs};
+use super::grading::{MarkedReply, due, find, packs};
 use super::learning::Where;
 use super::state::Shared;
 use crate::grader::{Answer, Work};
@@ -445,11 +445,7 @@ pub(super) async fn finish(
         workshop_tracks::TrackId::SystemDesign,
         now,
     )?;
-    let due = store.schedules()?.get(&key).map(|schedule| {
-        store
-            .scheduler()
-            .due(schedule, app.config.learning.desired_retention)
-    });
+    let due = due(&app, &key)?;
     let Content::Design { rubric, .. } = &item.content else {
         unreachable!("design() only finds design prompts");
     };
