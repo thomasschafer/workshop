@@ -171,6 +171,7 @@
 
 .learn-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
 }
@@ -328,4 +329,11 @@
 
 .learn-choice-after .pill {
   min-height: 48px;
+}
+
+.learn-resume {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }

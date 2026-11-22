@@ -110,6 +110,8 @@ export interface FollowUpQuestion {
 
 /** A card answered in the learner's own words, and being followed up by the tutor. */
 export interface Exchange {
+  /** Made by the app as it starts, and named by every reply, so none is filed under another. */
+  id: string;
   /** The most questions the tutor asks. */
   limit: number;
   answer: Said;

@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
 import { useConnection } from "../hooks/useConnection";
 import { useDictation } from "../hooks/useDictation";
@@ -22,6 +22,7 @@ export function ExplainAloud({
   onMarked,
   mark: markWith,
   onDeeper,
+  onBusy,
 }: {
   itemKey: string;
   work: Work;
@@ -34,6 +35,8 @@ export function ExplainAloud({
   onMarked: (reply: MarkedReply, heard: string) => void;
   /** Goes deeper instead of having it marked now, with follow-up questions on what was heard. */
   onDeeper?: (heard: string) => Promise<void>;
+  /** Whenever it starts or stops marking or going deeper, so nothing else is done meanwhile. */
+  onBusy?: (busy: boolean) => void;
 }) {
   const online = useConnection();
   const [heard, setHeard] = useState("");
@@ -42,6 +45,7 @@ export function ExplainAloud({
   const [error, setError] = useState<string | null>(null);
   const [marked, setMarked] = useState<MarkedReply | null>(null);
   const busy = marking || deepening;
+  useEffect(() => onBusy?.(busy), [busy]);
   const mark = () => {
     setMarking(true);
     setError(null);
@@ -70,12 +74,7 @@ export function ExplainAloud({
         Talk it through as you would to someone listening. You're marked on whether it's right and
         how clearly you put it.
       </p>
-      <AloudInput
-        heard={heard}
-        setHeard={setHeard}
-        readOnly={busy}
-        serverDictation={serverDictation}
-      />
+      <AloudInput heard={heard} setHeard={setHeard} busy={busy} serverDictation={serverDictation} />
       {error ? (
         <p class="error-text" role="alert">
           {error}
@@ -123,12 +122,13 @@ export function ExplainAloud({
 export function AloudInput({
   heard,
   setHeard,
-  readOnly,
+  busy,
   serverDictation,
 }: {
   heard: string;
   setHeard: (update: (sofar: string) => string) => void;
-  readOnly: boolean;
+  /** While what's been heard is being sent, so nothing more's added to it. */
+  busy: boolean;
   serverDictation: boolean;
 }) {
   const { dictationMethod } = useDictation(serverDictation);
@@ -140,6 +140,7 @@ export function AloudInput({
       <DictateButton
         serverDictation={serverDictation}
         label="Hold to explain"
+        disabled={busy}
         onHeard={(text) => {
           setNotice(null);
           setHeard((sofar) => (sofar.trim() ? `${sofar.trimEnd()} ${text}` : text));
@@ -152,7 +153,7 @@ export function AloudInput({
           class="written explain-heard"
           aria-label="What you said"
           value={heard}
-          readOnly={readOnly}
+          readOnly={busy}
           onInput={(event) => {
             const text = event.currentTarget.value;
             setHeard(() => text);

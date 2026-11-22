@@ -26,6 +26,7 @@ class MemoryStorage implements Storage {
 
 /** An exchange with one question answered aloud, and a second waiting. */
 const EXCHANGE: Exchange = {
+  id: "first",
   limit: 2,
   answer: { text: "Log n", spoken: false, at: 1 },
   questions: [
@@ -65,7 +66,7 @@ describe("a reply being written", () => {
   it("is kept for the question it replies to, until it's sent", () => {
     const storage = new MemoryStorage();
     expect(readDraft(storage, "p/a", EXCHANGE)).toBeNull();
-    const draft = { question: 1, text: "At the root", mode: "writing" as const };
+    const draft = { exchange: "first", question: 1, text: "At the root", mode: "writing" as const };
     writeDraft(storage, "p/a", draft);
     expect(readDraft(storage, "p/a", EXCHANGE)).toEqual(draft);
     // Each card keeps its own.
@@ -80,6 +81,8 @@ describe("a reply being written", () => {
       next: "mark",
     };
     expect(readDraft(storage, "p/a", answered)).toBeNull();
+    // As it is for later follow-ups on the same card, at the same question.
+    expect(readDraft(storage, "p/a", { ...EXCHANGE, id: "second" })).toBeNull();
     // Nothing written is nothing to keep.
     writeDraft(storage, "p/a", { ...draft, text: " " });
     expect(storage.length).toBe(0);

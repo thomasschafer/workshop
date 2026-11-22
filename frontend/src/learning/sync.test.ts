@@ -80,6 +80,20 @@ describe("Learning", () => {
     expect(reloaded.syncStatus).toMatchObject({ pending: 0, offline: false });
   });
 
+  it("forgets follow-ups marked, so the deck on the device doesn't offer them again", async () => {
+    const storage = new MemoryStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ...DECK, follow_ups: ["p/a", "p/b"] }))),
+    );
+    const learning = new Learning(storage);
+    await learning.sync();
+    learning.forgetFollowUps("p/a");
+    learning.forgetFollowUps("p/none");
+    expect(learning.deck?.follow_ups).toEqual(["p/b"]);
+    expect(new Learning(storage).deck?.follow_ups).toEqual(["p/b"]);
+  });
+
   it("keeps what's done while a sync is on its way, and sends it next", async () => {
     let answer: (() => void) | null = null;
     const bodies: { attempts: Attempt[] }[] = [];

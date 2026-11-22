@@ -118,6 +118,18 @@ export class Learning {
     void this.sync();
   }
 
+  /**
+   * Forgets that a card's follow-up questions are under way, once they're marked, so the deck
+   * on the device doesn't offer them again before it next syncs.
+   */
+  forgetFollowUps(key: string): void {
+    const deck = this.saved.deck;
+    if (!deck?.follow_ups?.includes(key)) return;
+    const follow_ups = deck.follow_ups.filter((k) => k !== key);
+    this.saved = { ...this.saved, deck: { ...deck, follow_ups } };
+    this.save();
+  }
+
   flag(change: FlagChange): void {
     this.saved = { ...this.saved, flags: [...this.saved.flags, change] };
     this.save();

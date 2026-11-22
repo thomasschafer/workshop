@@ -1,7 +1,8 @@
 import { useRef, useState } from "preact/hooks";
+import { ApiError } from "../api";
 import { errorMessage } from "../errors";
 import { useConnection } from "../hooks/useConnection";
-import { newId } from "../learning/local";
+import { learning } from "../learning/sync";
 import { DictateButton } from "../views/dictate";
 import { gradingApi } from "./api";
 import { AloudInput } from "./explain";
@@ -27,25 +28,32 @@ export function FollowUpTurns({ exchange }: { exchange: Exchange }) {
  * A card being followed up: the tutor's questions about the learner's answer, each replied to
  * as the answer was, written or aloud, and switched between as they like, until it's asked them
  * all and the grader marks the lot. Each reply is kept on the device as it's written and saved
- * on the server once it's given, so the app can be closed at any point and carried on.
+ * on the server once it's given, naming the question it answers, so it's safe to send again
+ * after a lost reply, and the app can be closed at any point and carried on.
  */
 export function FollowUpsView({
   itemKey,
   exchange: initial,
   error: initialError = null,
+  about = null,
   serverDictation,
   onMarked,
   onShowAnswer,
+  onOver,
 }: {
   itemKey: string;
   exchange: Exchange;
   /** Why the tutor couldn't ask its question, if it couldn't. */
   error?: string | null;
+  /** Something to say about these follow-ups, such as that they were started before. */
+  about?: string | null;
   serverDictation: boolean;
   /** Once the grader's marked the whole exchange, which is the card's attempt. */
   onMarked: (reply: MarkedReply, exchange: Exchange) => void;
   /** Leaves the questions, to see the answer and rate the card as usual. */
   onShowAnswer: () => void;
+  /** Once the server says they're over, as the card was answered another way, saying why. */
+  onOver: (why: string) => void;
 }) {
   const online = useConnection();
   const [exchange, setExchange] = useState(initial);
@@ -68,47 +76,102 @@ export function FollowUpsView({
     kept.current = { text, mode };
     setTextState(text);
     setModeState(mode);
-    if (question !== null) writeDraft(localStorage, itemKey, { question, text, mode });
+    if (question !== null) {
+      writeDraft(localStorage, itemKey, { exchange: exchange.id, question, text, mode });
+    }
   };
   const setText = (update: string | ((sofar: string) => string)) =>
     keep(typeof update === "function" ? update(kept.current.text) : update, kept.current.mode);
   const setMode = (mode: Mode) => keep(kept.current.text, mode);
+  const forgetDraft = () => {
+    kept.current = { ...kept.current, text: "" };
+    setTextState("");
+    writeDraft(localStorage, itemKey, null);
+  };
 
-  const send = async (said: string | null) => {
-    const answering = question;
+  /**
+   * After a request fails, where things stand on the server: the same follow-ups, with the
+   * reply to `answering` kept or not, or none, if they're over.
+   */
+  const recover = async (e: unknown, answering: number | null) => {
+    if (e instanceof ApiError && e.status === 409) {
+      forgetDraft();
+      onOver(e.message);
+      return;
+    }
+    setError(errorMessage(e));
+    const saved = await gradingApi.followUps(itemKey).catch(() => undefined);
+    if (saved === undefined) return;
+    if (saved === null || saved.id !== exchange.id) {
+      forgetDraft();
+      onOver("These follow-up questions are over, as the card's been answered another way since.");
+      return;
+    }
+    setExchange(saved);
+    if (answering !== null && replied(saved, answering)) forgetDraft();
+  };
+
+  /** Sends the reply to the question waiting, and has the tutor ask its next, unless `ask`. */
+  const send = async (said: string, ask = true): Promise<boolean> => {
+    if (question === null) throw new Error("there's no question waiting for a reply");
     setSending(true);
     setError(null);
     try {
-      const next = await gradingApi.answerFollowUp(itemKey, said, mode === "aloud");
+      const next = await gradingApi.replyToFollowUp(
+        itemKey,
+        exchange.id,
+        question,
+        said,
+        mode === "aloud",
+        ask,
+      );
       setExchange(next);
-      setText("");
-      writeDraft(localStorage, itemKey, null);
+      forgetDraft();
       if (next.next === "reply" && mode === "writing") reply.current?.focus();
+      return true;
     } catch (e) {
-      setError(errorMessage(e));
-      // The reply may have been kept even though the tutor couldn't ask its next question.
-      const saved = await gradingApi.followUps(itemKey).catch(() => null);
-      if (saved) {
-        setExchange(saved);
-        if (answering !== null && replied(saved, answering)) {
-          setText("");
-          writeDraft(localStorage, itemKey, null);
-        }
-      }
+      await recover(e, question);
+      return false;
     } finally {
       setSending(false);
     }
   };
 
+  const askAgain = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      setExchange(await gradingApi.askFollowUp(itemKey, exchange.id));
+    } catch (e) {
+      await recover(e, null);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /** Has it marked, sending first any reply written but not sent, so it isn't lost. */
   const finish = async () => {
+    if (question !== null && kept.current.text.trim() && !(await send(kept.current.text, false))) {
+      return;
+    }
     setMarking(true);
     setError(null);
     try {
-      const marked = await gradingApi.finishFollowUps(itemKey, newId());
-      writeDraft(localStorage, itemKey, null);
+      const marked = await gradingApi.finishFollowUps(itemKey, exchange.id);
+      forgetDraft();
+      learning().forgetFollowUps(itemKey);
+      // So the attempt is on this device too, rather than offering the card again first.
+      void learning().sync();
       onMarked(marked, exchange);
     } catch (e) {
-      setError(errorMessage(e));
+      // Marking it again gives the marks already given, so it's left to be tried again, unless
+      // the server says it's over.
+      if (e instanceof ApiError && e.status === 409) {
+        forgetDraft();
+        onOver(e.message);
+      } else {
+        setError(errorMessage(e));
+      }
     } finally {
       setMarking(false);
     }
@@ -121,6 +184,11 @@ export function FollowUpsView({
       <h3 class="tracks-heading">
         {asked === 0 ? "Follow-up questions" : `Follow-up question ${asked} of ${exchange.limit}`}
       </h3>
+      {about ? (
+        <p class="muted" role="status">
+          {about}
+        </p>
+      ) : null}
       <FollowUpTurns exchange={exchange} />
       {question !== null ? (
         mode === "writing" ? (
@@ -159,6 +227,7 @@ export function FollowUpsView({
             </span>
             <DictateButton
               serverDictation={serverDictation}
+              disabled={busy}
               onHeard={(heard) =>
                 setText((sofar) => (sofar.trim() ? `${sofar.trimEnd()} ${heard}` : heard))
               }
@@ -174,7 +243,7 @@ export function FollowUpsView({
             <AloudInput
               heard={text}
               setHeard={setText}
-              readOnly={busy}
+              busy={busy}
               serverDictation={serverDictation}
             />
             <span class="learn-actions">
@@ -206,7 +275,7 @@ export function FollowUpsView({
             type="button"
             class="pill primary wide"
             disabled={busy || !online}
-            onClick={() => void send(null)}
+            onClick={() => void askAgain()}
           >
             {sending ? "Asking…" : "Ask the tutor"}
           </button>
@@ -243,10 +312,18 @@ export function FollowUpsView({
             disabled={busy || !online}
             onClick={() => void finish()}
           >
-            {marking ? "Marking…" : "Mark it now"}
+            {marking ? "Marking…" : text.trim() ? "Send it and mark it now" : "Mark it now"}
           </button>
         ) : null}
-        <button type="button" class="learn-link" disabled={busy} onClick={onShowAnswer}>
+        <button
+          type="button"
+          class="learn-link"
+          disabled={busy}
+          onClick={() => {
+            forgetDraft();
+            onShowAnswer();
+          }}
+        >
           Show answer and rate it myself
         </button>
       </span>

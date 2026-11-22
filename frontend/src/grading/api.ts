@@ -63,14 +63,49 @@ export const gradingApi = {
       (r) => r.exchange,
     ),
   /**
-   * Answers a card, starting its follow-ups, or the tutor's question waiting, and has the tutor
-   * ask its next question; with `text` null, asks it again for one it couldn't ask before.
+   * Starts follow-up questions on a card with the learner's answer, and has the tutor ask its
+   * first. `id` is the exchange's, the same each time it's sent. If the card has follow-ups under
+   * way already, it's those, with an id of their own.
    */
-  answerFollowUp: (key: string, text: string | null, spoken: boolean) =>
-    request<Exchange>("POST", `/cards/${path(key)}/follow-ups`, { text, spoken }, { timeoutMs: 0 }),
-  /** Has the grader mark a card's follow-ups, which ends them; `id` is the attempt's. */
-  finishFollowUps: (key: string, id: string) =>
-    request<MarkedReply>("POST", `/cards/${path(key)}/follow-ups/finish`, { id }, { timeoutMs: 0 }),
+  startFollowUps: (key: string, id: string, text: string, spoken: boolean) =>
+    request<Exchange>(
+      "POST",
+      `/cards/${path(key)}/follow-ups/start`,
+      { id, text, spoken },
+      { timeoutMs: 0 },
+    ),
+  /**
+   * Replies to the tutor's question, counting from 0, of the exchange it's for, and, unless `ask`
+   * is false, has the tutor ask its next. Sent again, the same reply is taken once.
+   */
+  replyToFollowUp: (
+    key: string,
+    exchange: string,
+    question: number,
+    text: string,
+    spoken: boolean,
+    ask = true,
+  ) =>
+    request<Exchange>(
+      "POST",
+      `/cards/${path(key)}/follow-ups/reply`,
+      { exchange, question, text, spoken, ask },
+      { timeoutMs: 0 },
+    ),
+  /** Has the tutor ask the question it couldn't before. */
+  askFollowUp: (key: string, exchange: string) =>
+    request<Exchange>("POST", `/cards/${path(key)}/follow-ups/ask`, { exchange }, { timeoutMs: 0 }),
+  /**
+   * Has the grader mark a card's follow-ups, which ends them, as an attempt with the exchange's
+   * id. Asked again, as after a lost reply, it gives the same marks.
+   */
+  finishFollowUps: (key: string, exchange: string) =>
+    request<MarkedReply>(
+      "POST",
+      `/cards/${path(key)}/follow-ups/finish`,
+      { exchange },
+      { timeoutMs: 0 },
+    ),
   flagged: () => request<{ cards: FlaggedCard[] }>("GET", "/cards/flagged").then((r) => r.cards),
   review: (key: string) =>
     request<{ review: Review; cleared: boolean }>("POST", `/cards/${path(key)}/review`, undefined, {

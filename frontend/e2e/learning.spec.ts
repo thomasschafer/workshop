@@ -740,9 +740,9 @@ test("explains a card aloud, marked for what's right and how clearly it's put", 
 });
 
 /** The card showing, by its key, from the deck the phone keeps. */
-async function cardShown(): Promise<string> {
-  const prompt = (await phone.locator(".learn-prompt").innerText()).replace(/\s+/g, " ").trim();
-  return phone.evaluate((prompt) => {
+async function cardShown(on: Page = phone): Promise<string> {
+  const prompt = (await on.locator(".learn-prompt").innerText()).replace(/\s+/g, " ").trim();
+  return on.evaluate((prompt) => {
     const saved = JSON.parse(localStorage.getItem("workshop:learning") ?? "null") as {
       deck: Deck;
     };
@@ -832,7 +832,35 @@ test("goes deeper on a card with the tutor's questions, carrying on after a relo
   expect(shallow).toMatchObject({ item: key, source: "grader", suggested: "concept-gap" });
 });
 
-test("keeps an answer when the tutor can't be reached, asks again, and can stop to rate it as usual", async () => {
+/** Whether everything fits across the phone's screen, or a narrower one's. */
+async function fitsAcross(width?: number): Promise<void> {
+  const size = phone.viewportSize();
+  if (!size) throw new Error("the phone has no viewport");
+  if (width !== undefined) await phone.setViewportSize({ width, height: size.height });
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width ?? size.width,
+  );
+  if (width !== undefined) await phone.setViewportSize(size);
+}
+
+/** Starts follow-up questions on a card as another device would, by its key. */
+async function startElsewhere(key: string, text: string): Promise<void> {
+  const response = await phone.request.post(`/api/cards/${key}/follow-ups/start`, {
+    data: { id: crypto.randomUUID(), text },
+  });
+  expect(response.ok()).toBe(true);
+}
+
+/** The follow-up questions under way on a card, as the server has them. */
+async function serverFollowUps(key: string): Promise<{
+  questions: { text: string; reply: { text: string } | null }[];
+} | null> {
+  const response = await phone.request.get(`/api/cards/${key}/follow-ups`);
+  expect(response.ok()).toBe(true);
+  return ((await response.json()) as { exchange: never }).exchange;
+}
+
+test("keeps an answer when the tutor can't be reached, asks again, and sends a reply before marking it now", async () => {
   await phone.goto("/practice/review");
   const key = await cardShown();
   await phone.getByRole("button", { name: "Explain it aloud" }).tap();
@@ -843,6 +871,9 @@ test("keeps an answer when the tutor can't be reached, asks again, and can stop 
     "the tutor is away",
     () => expect(explain.locator(".dictate-hearing")).toContainText("away"),
   );
+  // Going deeper sits beside marking it, and still fits on a narrow phone.
+  await expect(explain.getByRole("button", { name: "Go deeper" })).toBeVisible();
+  await fitsAcross(360);
   await explain.getByRole("button", { name: "Go deeper" }).tap();
   const deeper = phone.getByRole("region", { name: "Follow-up questions" });
   await expect(deeper.getByRole("alert")).toContainText("can't be reached");
@@ -854,45 +885,197 @@ test("keeps an answer when the tutor can't be reached, asks again, and can stop 
     'Question 1 of 2: why is it that "the tutor is away"?',
   );
   await expect(deeper.getByRole("alert")).toHaveCount(0);
-  // Stopped there, it's rated as usual, and the questions are over once that reaches the server.
-  await deeper.getByRole("button", { name: "Show answer and rate it myself" }).tap();
-  await phone.getByRole("button", { name: "Good" }).tap();
-  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  await fitsAcross(360);
+  // A reply written but not sent is sent before it's marked, rather than lost.
+  await deeper.getByRole("button", { name: "Type it" }).tap();
+  await deeper.getByLabel("Your answer").fill("no idea really");
+  await deeper.getByRole("button", { name: "Send it and mark it now" }).tap();
+  await expect(phone.getByRole("region", { name: "Marked" })).toContainText(
+    "Shallow: no idea really",
+  );
   await expect.poll(followedUp).toEqual([]);
-  const opened = await phone.request.get(`/api/cards/${key}/follow-ups`);
-  expect(((await opened.json()) as { exchange: unknown }).exchange).toBeNull();
+  expect(await serverFollowUps(key)).toBeNull();
+  expect((await serverDeck()).schedules[key]?.reviews).toBe(1);
+  await phone.getByRole("button", { name: "Next" }).tap();
 });
 
-test("goes deeper only with the server, and offline answers a card being followed up as usual", async () => {
-  await phone.goto("/practice/review");
-  const key = await cardShown();
-  await phone.getByRole("button", { name: "Answer in my own words" }).tap();
-  await phone.getByLabel("Your answer, in your own words").fill("Equal ones stay put");
-  await phone.getByRole("button", { name: "Go deeper" }).tap();
-  const deeper = phone.getByRole("region", { name: "Follow-up questions" });
+test("sends a reply or a marking again when its answer was lost, taking it once", async ({
+  browser,
+}) => {
+  // Without the service worker, which would keep the page's requests from the test.
+  const other = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${LEARNING_PORT}`,
+    serviceWorkers: "block",
+  });
+  const page = await other.newPage();
+  await page.goto(`/practice/review?token=${token()}`);
+  await expect(page.locator(".learn-sync")).toHaveText("Saved");
+  const key = await cardShown(page);
+  await page.getByRole("button", { name: "Answer in my own words" }).tap();
+  await page.getByLabel("Your answer, in your own words").fill("It holds");
+  await page.getByRole("button", { name: "Go deeper" }).tap();
+  const deeper = page.getByRole("region", { name: "Follow-up questions" });
   await expect(deeper.getByRole("heading")).toHaveText("Follow-up question 1 of 2");
-  await expect.poll(followedUp).toEqual([key]);
 
+  // The reply reaches the server, which asks the next question, but the answer is lost, as is
+  // the look at where things stand that follows.
+  const lose = async (pattern: string, method: string) => {
+    let lost = false;
+    await page.route(pattern, async (route) => {
+      if (lost || route.request().method() !== method) return route.fallback();
+      lost = true;
+      if (method === "POST") await route.fetch();
+      await route.abort("connectionreset");
+    });
+  };
+  await lose("**/follow-ups/reply", "POST");
+  await lose(`**/api/cards/${key}/follow-ups`, "GET");
+  await deeper.getByLabel("Your answer").fill("because it does");
+  await deeper.getByRole("button", { name: "Answer", exact: true }).tap();
+  await expect(deeper.getByRole("alert")).toBeVisible();
+  await expect(deeper.getByRole("heading")).toHaveText("Follow-up question 1 of 2");
+  await expect(deeper.getByLabel("Your answer")).toHaveValue("because it does");
+  // Sent again, it's taken as the answer to the first question, never the second.
+  const answer = deeper.getByRole("button", { name: "Answer", exact: true });
+  await expect(answer).toBeEnabled({ timeout: 10_000 });
+  await answer.tap();
+  await expect(deeper.getByRole("heading")).toHaveText("Follow-up question 2 of 2");
+  const kept = await serverFollowUps(key);
+  expect(kept?.questions.map((q) => q.reply?.text ?? null)).toEqual(["because it does", null]);
+
+  await deeper.getByLabel("Your answer").fill("because it must");
+  await deeper.getByRole("button", { name: "Answer", exact: true }).tap();
+  await expect(deeper).toContainText("That's all its questions.");
+  // Marked, but the marks are lost on their way: asked again, it's the same marks, once.
+  await lose("**/follow-ups/finish", "POST");
+  await deeper.getByRole("button", { name: "Mark my answers" }).tap();
+  await expect(deeper.getByRole("alert")).toBeVisible();
+  const mark = deeper.getByRole("button", { name: "Mark my answers" });
+  await expect(mark).toBeEnabled({ timeout: 10_000 });
+  await mark.tap();
+  await expect(page.getByRole("region", { name: "Marked" })).toContainText("90%");
+  await page.unrouteAll();
+  expect((await serverDeck()).schedules[key]?.reviews).toBe(1);
+  await page.getByRole("button", { name: "Next" }).tap();
+  await other.close();
+});
+
+test("carries on with follow-ups started elsewhere, through a failed look, offline and back", async ({
+  browser,
+}) => {
+  await phone.goto("/practice/review");
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  const first = await cardShown();
+  const deck = await serverDeck();
+  const other = deck.items.find(
+    (item) =>
+      item.kind === "card" &&
+      item.key !== first &&
+      !deck.schedules[item.key] &&
+      !deck.flags[item.key],
+  );
+  if (!other) throw new Error("the review track has no other new card left");
+  const key = other.key;
+
+  // Started on another device, it comes first here once the phone hears of it, even though
+  // the step was chosen from the deck the phone had.
+  await startElsewhere(key, "Started on the laptop");
+  await phone.reload();
+  await expect.poll(cardShown).toBe(key);
+  const deeper = phone.getByRole("region", { name: "Follow-up questions" });
+  await expect(deeper.locator(".design-turn.learner").first()).toHaveText("Started on the laptop");
+
+  // When looking for them fails, it says so, and they can be looked for again. Without the
+  // service worker, which would keep the page's requests from the test.
+  const elsewhere = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${LEARNING_PORT}`,
+    serviceWorkers: "block",
+  });
+  const page = await elsewhere.newPage();
+  let failed = false;
+  await page.route(`**/api/cards/${key}/follow-ups`, async (route) => {
+    if (failed || route.request().method() !== "GET") return route.fallback();
+    failed = true;
+    await route.fulfill({ status: 500, json: { error: "The disk is full" } });
+  });
+  await page.goto(`/practice/review?token=${token()}`);
+  await expect(page.getByRole("alert")).toContainText(
+    "Couldn't load your follow-up questions: The disk is full",
+  );
+  await page.getByRole("button", { name: "Try again" }).tap();
+  await expect(
+    page.getByRole("region", { name: "Follow-up questions" }).locator(".design-turn.coach"),
+  ).toBeVisible();
+  await elsewhere.close();
+
+  // Offline, they need the server, and the card can be answered as usual meanwhile. Back
+  // online, what's being written isn't taken from under the learner; going deeper carries on
+  // with those under way.
   await setOffline(context, true);
   await phone.reload();
   expect(await cardShown()).toBe(key);
   await expect(phone.getByRole("status").filter({ hasText: "under way" })).toContainText(
     "they need the server",
   );
-  // Answered in the learner's own words, it can't go deeper without the server.
   await phone.getByRole("button", { name: "Answer in my own words" }).tap();
   await expect(phone.getByRole("button", { name: "Go deeper" })).toBeDisabled();
-  await expect(
-    phone.getByText("Going deeper, with the tutor's follow-up questions, needs the server."),
-  ).toBeVisible();
+  await expect(phone.getByRole("button", { name: "Mark my answer" })).toBeDisabled();
+  await expect(phone.getByText("Marking it, and going deeper, need the server.")).toBeVisible();
+  await phone.getByLabel("Your answer, in your own words").fill("Written on the train");
+  await setOffline(context, false);
+  await expect(phone.getByRole("button", { name: "Go deeper" })).toBeEnabled();
+  await expect(deeper).toHaveCount(0);
+  await expect(phone.getByLabel("Your answer, in your own words")).toHaveValue(
+    "Written on the train",
+  );
+  await phone.getByRole("button", { name: "Go deeper" }).tap();
+  await expect(deeper.getByRole("status")).toContainText(
+    "started follow-up questions on this card",
+  );
+  await expect(deeper.locator(".design-turn.learner").first()).toHaveText("Started on the laptop");
+
+  // Offline again, it's rated as usual, which ends them once it reaches the server.
+  await setOffline(context, true);
+  await phone.reload();
+  expect(await cardShown()).toBe(key);
   await phone.getByRole("button", { name: "Show answer" }).tap();
   await phone.getByRole("button", { name: "Hard" }).tap();
   await expect(phone.locator(".learn-sync")).toHaveText("Offline · 1 to sync");
-
   await setOffline(context, false);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   expect((await serverDeck()).schedules[key]?.reviews).toBe(1);
   await expect.poll(followedUp).toEqual([]);
+  expect(await serverFollowUps(key)).toBeNull();
+});
+
+test("offers no follow-ups on a card that doesn't want them", async ({ browser }) => {
+  // Without the service worker, which would keep the page's requests from the test.
+  const other = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${LEARNING_PORT}`,
+    serviceWorkers: "block",
+  });
+  const page = await other.newPage();
+  // Every card is made one with `follow_ups = 0`, as the server would send it.
+  await page.route("**/api/learning/sync*", async (route) => {
+    const response = await route.fetch();
+    const deck = (await response.json()) as Deck & { items: { follow_ups?: number }[] };
+    for (const item of deck.items) item.follow_ups = 0;
+    await route.fulfill({ response, json: deck });
+  });
+  await page.goto(`/practice/review?token=${token()}`);
+  await expect(page.locator(".learn-sync")).toHaveText("Saved");
+  await page.getByRole("button", { name: "Answer in my own words" }).tap();
+  await expect(page.getByRole("button", { name: "Mark my answer" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Go deeper" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show answer" })).toHaveClass(/pill/);
+  await page.reload();
+  await page.getByRole("button", { name: "Explain it aloud" }).tap();
+  await expect(page.getByRole("region", { name: "Explain it aloud" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Go deeper" })).toHaveCount(0);
+  await other.close();
 });
 
 test("runs a timed round with the examiner, carrying on after a reload and a break, until time's up", async () => {

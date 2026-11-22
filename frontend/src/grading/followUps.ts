@@ -43,6 +43,8 @@ export function replied(exchange: Exchange, question: number): boolean {
 
 /** A reply being written, kept on the device until it's sent, so closing the app keeps it. */
 export interface Draft {
+  /** The exchange it's for, by its id. */
+  exchange: string;
   /** The question it replies to, counting from 0. */
   question: number;
   text: string;
@@ -56,7 +58,9 @@ export function readDraft(storage: Storage, key: string, exchange: Exchange): Dr
   try {
     const raw = storage.getItem(draftKey(key));
     const draft = raw ? (JSON.parse(raw) as Draft) : null;
-    return draft && draft.question === waiting(exchange) ? draft : null;
+    return draft && draft.exchange === exchange.id && draft.question === waiting(exchange)
+      ? draft
+      : null;
   } catch {
     return null;
   }

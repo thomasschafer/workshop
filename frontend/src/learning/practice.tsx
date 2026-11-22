@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { ConnectionError, connection } from "../api";
 import { codingApi } from "../coding/api";
 import { CodingItems, toDo } from "../coding/screen";
 import type { Overview } from "../coding/types";
@@ -89,6 +90,22 @@ export function Practice({
   useEffect(() => {
     if (deck && chosen === null) startStep();
   }, [deck !== null]);
+  // A step started from the device's deck, before it synced, is started again if the server
+  // says a card has follow-up questions under way that it doesn't start with, such as ones
+  // started on another device, unless anything in it's been done.
+  useEffect(() => {
+    if (!tried || !deck || chosen === null || results.length > 0) return;
+    const underWay = queue(
+      deck,
+      track,
+      state.attempts,
+      state.flagChanges,
+      state.retirementChanges,
+      Date.now(),
+      utcOffset(),
+    ).followUps;
+    if (underWay.some((item, at) => chosen[at] !== item.key)) startStep();
+  }, [tried]);
 
   const name = deck?.tracks.find((t) => t.id === track)?.name ?? "Practice";
   const header = (
@@ -325,28 +342,76 @@ function CardView({
   /** The follow-up questions under way, once the learner's gone deeper or come back to them. */
   const [exchange, setExchange] = useState<Exchange | null>(null);
   const [exchangeError, setExchangeError] = useState<string | null>(null);
+  /** What to say about the follow-ups shown, or, once they're over, why. */
+  const [exchangeAbout, setExchangeAbout] = useState<string | null>(null);
+  const [overWhy, setOverWhy] = useState<string | null>(null);
   /** The exchange the grader marked, to show with its marks. */
   const [followedUpMarked, setFollowedUpMarked] = useState<Exchange | null>(null);
-  const [resuming, setResuming] = useState(followedUp);
   const [deepening, setDeepening] = useState(false);
+  const [aloudBusy, setAloudBusy] = useState(false);
+  // The same each time going deeper is tried, so a start sent again finds the one started.
+  const exchangeId = useRef(newId());
+  const busy = marking || deepening || aloudBusy;
+
+  /**
+   * Carrying on with follow-ups under way: waiting to look for them until the server can be
+   * reached, unless the learner's begun on the card another way, when going deeper finds them.
+   */
+  const [resume, setResume] = useState<"waiting" | "loading" | "failed" | "done">(
+    followedUp ? "waiting" : "done",
+  );
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const begun = answering !== null || revealed;
+  const begunRef = useRef(begun);
+  begunRef.current = begun;
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
+  // Heard of only once the deck's synced, such as for ones started on another device.
   useEffect(() => {
-    if (!followedUp || !online || exchange) return;
-    let current = true;
-    gradingApi
-      .followUps(item.key)
-      .then(
-        (kept) => {
-          if (current && kept) setExchange(kept);
-        },
-        () => {},
-      )
-      .finally(() => {
-        if (current) setResuming(false);
-      });
-    return () => {
-      current = false;
+    if (followedUp && resume === "done" && !exchange && !begun) setResume("waiting");
+  }, [followedUp]);
+  useEffect(() => {
+    if (resume !== "waiting" || !online) return;
+    if (begun) {
+      setResume("done");
+      return;
+    }
+    setResume("loading");
+    const look = async () => {
+      // What was done on this device goes first, as it may have ended them.
+      await learning().sync();
+      // Lost again, it looks once the server's back.
+      if (!connection.isOnline) return "waiting" as const;
+      const status = learning().syncStatus;
+      if (status.pending > 0) {
+        throw new Error(status.error ?? "What was done here couldn't be sent first");
+      }
+      if (!learning().deck?.follow_ups?.includes(item.key)) return "done" as const;
+      const kept = await gradingApi.followUps(item.key);
+      // Left alone once the learner's begun another way, rather than taken from under them.
+      if (kept && mounted.current && !begunRef.current) setExchange(kept);
+      return "done" as const;
     };
-  }, [followedUp, online]);
+    look().then(
+      (next) => {
+        if (mounted.current) setResume(next);
+      },
+      (e: unknown) => {
+        if (!mounted.current) return;
+        if (e instanceof ConnectionError) {
+          setResume("waiting");
+          return;
+        }
+        setResumeError(errorMessage(e));
+        setResume("failed");
+      },
+    );
+  }, [resume, online, begun]);
   const mark = () => {
     setMarking(true);
     setMarkError(null);
@@ -361,17 +426,25 @@ function CardView({
       )
       .finally(() => setMarking(false));
   };
-  /** Starts the follow-up questions with the learner's answer. */
+  /** Starts the follow-up questions with the learner's answer, or finds those under way. */
   const goDeeper = async (answer: string, spoken: boolean) => {
+    let started: Exchange;
     try {
-      setExchange(await gradingApi.answerFollowUp(item.key, answer, spoken));
+      started = await gradingApi.startFollowUps(item.key, exchangeId.current, answer, spoken);
     } catch (e) {
       // The answer may have been kept even though the tutor couldn't ask its question.
       const kept = await gradingApi.followUps(item.key).catch(() => null);
       if (!kept) throw e;
-      setExchange(kept);
+      started = kept;
       setExchangeError(errorMessage(e));
     }
+    setExchangeAbout(
+      started.id === exchangeId.current
+        ? null
+        : "You'd started follow-up questions on this card already, so they carry on as they were.",
+    );
+    setOverWhy(null);
+    setExchange(started);
     // So the deck on this device has it first, to carry on with after the app's closed.
     void learning().sync();
   };
@@ -465,6 +538,7 @@ function CardView({
           itemKey={item.key}
           exchange={exchange}
           error={exchangeError}
+          about={exchangeAbout}
           serverDictation={serverDictation}
           onMarked={(reply, done) => {
             setMarked(reply.marked);
@@ -472,8 +546,16 @@ function CardView({
             setRevealed(true);
           }}
           onShowAnswer={() => setRevealed(true)}
+          onOver={(why) => {
+            setExchange(null);
+            setExchangeError(null);
+            setExchangeAbout(null);
+            setOverWhy(why);
+            setAnswering(null);
+            exchangeId.current = newId();
+          }}
         />
-      ) : followedUp && resuming && online ? (
+      ) : resume === "loading" && !begun ? (
         <p class="muted" role="status">
           Loading your follow-up questions…
         </p>
@@ -489,8 +571,14 @@ function CardView({
               setRevealed(true);
             }}
             {...(offersFollowUps ? { onDeeper: (heard: string) => goDeeper(heard, true) } : {})}
+            onBusy={setAloudBusy}
           />
-          <button type="button" class="learn-link" onClick={() => setRevealed(true)}>
+          <button
+            type="button"
+            class="learn-link"
+            disabled={busy}
+            onClick={() => setRevealed(true)}
+          >
             Show answer
           </button>
         </>
@@ -510,7 +598,7 @@ function CardView({
             class="written"
             rows={4}
             value={written}
-            readOnly={marking}
+            readOnly={busy}
             onInput={(event) => setWritten(event.currentTarget.value)}
           />
           {markError ? (
@@ -524,43 +612,67 @@ function CardView({
               <button
                 type="button"
                 class="pill"
-                disabled={marking || deepening || !online || !written.trim()}
+                disabled={busy || !online || !written.trim()}
                 onClick={goDeeperWritten}
               >
                 {deepening ? "Asking…" : "Go deeper"}
               </button>
             ) : (
-              <button type="button" class="pill" onClick={() => setRevealed(true)}>
+              <button type="button" class="pill" disabled={busy} onClick={() => setRevealed(true)}>
                 Show answer
               </button>
             )}
             <button
               type="submit"
               class="pill primary"
-              disabled={marking || deepening || !written.trim()}
+              disabled={busy || !online || !written.trim()}
             >
               {marking ? "Marking…" : "Mark my answer"}
             </button>
           </span>
-          {offersFollowUps ? (
-            <>
+          {online ? (
+            offersFollowUps ? (
               <p class="muted explain-hint">
-                {online
-                  ? "Go deeper to answer the tutor's follow-up questions on it before it's marked."
-                  : "Going deeper, with the tutor's follow-up questions, needs the server."}
+                Go deeper to answer the tutor's follow-up questions on it before it's marked.
               </p>
-              <button type="button" class="learn-link" onClick={() => setRevealed(true)}>
-                Show answer
-              </button>
-            </>
+            ) : null
+          ) : (
+            <p class="muted explain-hint">
+              {offersFollowUps
+                ? "Marking it, and going deeper, need the server."
+                : "Marking it needs the server."}
+            </p>
+          )}
+          {offersFollowUps ? (
+            <button
+              type="button"
+              class="learn-link"
+              disabled={busy}
+              onClick={() => setRevealed(true)}
+            >
+              Show answer
+            </button>
           ) : null}
         </form>
       ) : (
         <>
-          {followedUp && !online ? (
+          {resume === "waiting" && !online ? (
             <p class="muted" role="status">
               Follow-up questions on this card are under way, but they need the server. Until it can
               be reached, answer it as usual.
+            </p>
+          ) : null}
+          {resume === "failed" ? (
+            <div class="learn-resume" role="alert">
+              <p class="error-text">Couldn't load your follow-up questions: {resumeError}</p>
+              <button type="button" class="pill" onClick={() => setResume("waiting")}>
+                Try again
+              </button>
+            </div>
+          ) : null}
+          {overWhy ? (
+            <p class="muted" role="status">
+              {overWhy}
             </p>
           ) : null}
           <button type="button" class="pill primary wide" onClick={() => setRevealed(true)}>
@@ -854,7 +966,7 @@ function Done({
     now,
     utcOffset(),
   );
-  const more = left.due.length + left.fresh.length;
+  const more = left.followUps.length + left.due.length + left.fresh.length;
   const keptApart = limitsOf(deck, track) !== null;
   const week = progress(deck, state.attempts, now, utcOffset(), track);
   // A track can have only problems, listed below, and nothing to practise a few at a time.

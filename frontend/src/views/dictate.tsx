@@ -13,12 +13,15 @@ export function DictateButton({
   onHeard,
   onNotice,
   label = "Hold to dictate",
+  disabled = false,
 }: {
   serverDictation: boolean;
   onHeard: (text: string) => void;
   onNotice: (text: string) => void;
   /** What the button says while it isn't held. */
   label?: string;
+  /** While what's been said is being sent, so nothing more is heard into it. */
+  disabled?: boolean;
 }) {
   const { dictationMethod } = useDictation(serverDictation);
   const presses = useRef(0);
@@ -42,6 +45,7 @@ export function DictateButton({
       <button
         type="button"
         class={`pill talk ${talk.held ?? ""}`}
+        disabled={disabled && !talk.held}
         onPointerDown={talk.start}
         onPointerUp={() => void talk.stop()}
         onPointerCancel={() => void talk.stop()}
