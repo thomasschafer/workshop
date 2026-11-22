@@ -164,6 +164,11 @@ export function progress(
 }
 
 export interface Queue {
+  /**
+   * Cards whose follow-up questions are under way, to carry on with first, whatever today's
+   * limits, as they're started already.
+   */
+  followUps: DeckItem[];
   /** Due now, within today's limit, most overdue first. */
   due: DeckItem[];
   /** Due, but waiting for tomorrow as today's limit is reached. */
@@ -178,8 +183,7 @@ export interface Queue {
 }
 
 /**
- * What there is to do in a track now: due reviews first, then new items, with any card being
- * followed up first of its kind.
+ * What there is to do in a track now: cards being followed up, then due reviews, then new items.
  */
 export function queue(
   deck: Deck,
@@ -193,38 +197,41 @@ export function queue(
   const scheduled = schedules(deck, attempts);
   const wrong = flagged(deck, changes);
   const standing = retirements(deck, retirementChanges);
+  // Cards being followed up, unless answered since, which ends their follow-ups once it's
+  // synced, come first, so the learner carries on where they left off.
+  const answered = new Set(attempts.map((attempt) => attempt.item));
+  const underWay = new Set((deck.follow_ups ?? []).filter((key) => !answered.has(key)));
   // Left out, as flagged items are: retired ones are never offered.
   const offered = (item: DeckItem) =>
     !wrong.has(item.key) && standing[item.key]?.state !== "retired";
-  // Cards being followed up come first, so the learner carries on where they left off.
-  const underWay = new Set(deck.follow_ups ?? []);
-  const later = (item: DeckItem) => Number(!underWay.has(item.key));
+  const followUps = deck.items.filter(
+    (item) => item.track === track && underWay.has(item.key) && offered(item),
+  );
+  const rest = (item: DeckItem) => offered(item) && !underWay.has(item.key);
   const { reviewsToday, newToday } = progress(deck, attempts, now, offset, track);
   const allowed = Math.max(0, deck.limits.daily_reviews - reviewsToday);
   // The daily limit is shared across tracks, as on the server, so it's spent on the most overdue
   // items anywhere, but in tracks kept apart, which each have a limit of their own.
   const limits = limitsOf(deck, track);
   const dueEverywhere = deck.items
-    .filter((item) => offered(item) && limitsOf(deck, item.track) === limits)
+    .filter((item) => rest(item) && limitsOf(deck, item.track) === limits)
     .flatMap((item) => {
       const schedule = scheduled[item.key];
       if (!schedule) return [];
       const when = dueAt(schedule, standing[item.key], deck.limits.retention);
       return when <= now ? [{ item, when }] : [];
     })
-    .sort(
-      (a, b) =>
-        later(a.item) - later(b.item) || a.when - b.when || a.item.key.localeCompare(b.item.key),
-    );
+    .sort((a, b) => a.when - b.when || a.item.key.localeCompare(b.item.key));
   const within = dueEverywhere.slice(0, allowed);
   // Also shared across tracks but those kept apart, so each offers up to what's left of it, as
   // on the server.
   const allowedNew = Math.max(0, (deck.limits.daily_new ?? Number.POSITIVE_INFINITY) - newToday);
   const fresh = deck.items
-    .filter((item) => item.track === track && offered(item) && !scheduled[item.key])
+    .filter((item) => item.track === track && rest(item) && !scheduled[item.key])
     // Sorting is stable, so otherwise they keep the deck's order.
-    .sort((a, b) => later(a) - later(b) || Number(inFocus(deck, b)) - Number(inFocus(deck, a)));
+    .sort((a, b) => Number(inFocus(deck, b)) - Number(inFocus(deck, a)));
   return {
+    followUps,
     due: within.filter(({ item }) => item.track === track).map(({ item }) => item),
     waiting: dueEverywhere.slice(allowed).filter(({ item }) => item.track === track).length,
     fresh: fresh.slice(0, allowedNew),
@@ -237,11 +244,14 @@ function inFocus(deck: Deck, item: DeckItem): boolean {
   return item.skills.some((skill) => deck.focus?.includes(skill) ?? false);
 }
 
-/** The items for one step: due ones first, then new, until there's a few minutes' worth. */
+/**
+ * The items for one step: cards being followed up first, then due ones, then new, until there's
+ * a few minutes' worth.
+ */
 export function step(next: Queue): DeckItem[] {
   const chosen: DeckItem[] = [];
   let minutes = 0;
-  for (const item of [...next.due, ...next.fresh]) {
+  for (const item of [...next.followUps, ...next.due, ...next.fresh]) {
     if (minutes >= STEP_MINUTES) break;
     chosen.push(item);
     minutes += item.minutes;

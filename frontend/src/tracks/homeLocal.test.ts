@@ -103,6 +103,25 @@ describe("homeLocal", () => {
     expect(patched.continue).toBeNull();
   });
 
+  it("keeps a card being followed up to carry on with, past today's limits", () => {
+    const spent = {
+      ...DECK,
+      progress: { reviews_today: 0, new_today: 10, minutes_this_week: 5 },
+      follow_ups: ["sample/card-1"],
+    };
+    // Patched as something else was done offline.
+    const elsewhere: Attempt = {
+      id: "a2",
+      item: "sample/read-1",
+      answered_at: NOW,
+      duration_ms: 60_000,
+      rating: "good",
+    };
+    const patched = patchHome(SNAPSHOT, spent, [elsewhere], [], [], NOW, 0);
+    expect(patched.tracks.find((t) => t.id === "review")?.summary).toBe("1 being followed up");
+    expect(patched.continue?.track).toBe("review");
+  });
+
   it("drops Continue when a reading item in Coding was retired locally", () => {
     const withReading: Home = {
       ...SNAPSHOT,

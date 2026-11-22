@@ -141,7 +141,7 @@ describe("queue", () => {
     ]);
   });
 
-  it("puts a card being followed up first, to carry on with", () => {
+  it("puts cards being followed up first, whatever today's limits", () => {
     const seen = (days: number) => review(null, LATE_MONDAY - days * DAY_MS, "good");
     const items = [
       card("p/a"),
@@ -149,33 +149,36 @@ describe("queue", () => {
       card("p/c"),
       { ...card("p/new"), skills: ["heaps"] },
       card("p/deeper"),
+      card("p/other", "mental-maths"),
     ];
     const d = deck(items, {
       schedules: { "p/a": seen(60), "p/b": seen(30), "p/c": seen(45) },
-      limits: { daily_reviews: 2, weekly_minutes: 60, retention: 0.9 },
-      focus: [],
+      limits: { daily_reviews: 2, daily_new: 1, weekly_minutes: 60, retention: 0.9 },
     });
-    const keys = (next: ReturnType<typeof queue>) => [...next.due, ...next.fresh].map((i) => i.key);
-    expect(keys(queue(d, "review", [], [], [], LATE_MONDAY, 0))).toEqual([
-      "p/a",
-      "p/c",
-      "p/new",
-      "p/deeper",
-    ]);
-    // Even past today's limit, as it's started already.
-    const due = { ...d, follow_ups: ["p/b"] };
-    expect(keys(queue(due, "review", [], [], [], LATE_MONDAY, 0))).toEqual([
-      "p/b",
-      "p/a",
-      "p/new",
-      "p/deeper",
-    ]);
-    // Before even the skills recent mistakes point to.
-    const fresh = { ...d, follow_ups: ["p/deeper"], focus: ["heaps"] };
-    expect(queue(fresh, "review", [], [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual([
-      "p/deeper",
-      "p/new",
-    ]);
+    const next = (changes: Partial<Deck>, attempts: Attempt[] = []) =>
+      queue({ ...d, ...changes }, "review", attempts, [], [], LATE_MONDAY, 0);
+    const keys = (q: ReturnType<typeof queue>) =>
+      [...q.followUps, ...q.due, ...q.fresh].map((i) => i.key);
+    expect(keys(next({}))).toEqual(["p/a", "p/c", "p/new"]);
+    // A due card and a new one, each being followed up, come first, without using up today's
+    // limits; those of other tracks are theirs.
+    const both = { follow_ups: ["p/b", "p/deeper", "p/other"], focus: ["heaps"] };
+    expect(keys(next(both))).toEqual(["p/b", "p/deeper", "p/a", "p/c", "p/new"]);
+    // Even once today's limits are spent.
+    const spent = {
+      ...both,
+      progress: { reviews_today: 2, new_today: 1, minutes_this_week: 0 },
+    };
+    expect(keys(next(spent))).toEqual(["p/b", "p/deeper"]);
+    // A step of a few minutes has them, before anything due.
+    expect(step(next(both)).map((i) => i.key)).toEqual(["p/b", "p/deeper", "p/a"]);
+    // Answered since on this device, which ends their follow-ups once it's synced, it's as any
+    // other card.
+    const rated = [attempt("p/deeper", LATE_MONDAY - 60_000)];
+    expect(next(both, rated).followUps.map((i) => i.key)).toEqual(["p/b"]);
+    // Flagged, it's left out as ever.
+    const flaggedDeck = { ...both, flags: { "p/b": { at: 1, note: null } } };
+    expect(next(flaggedDeck).followUps.map((i) => i.key)).toEqual(["p/deeper"]);
   });
 
   it("leaves out flagged items until the flag is cleared", () => {
@@ -272,6 +275,7 @@ describe("step", () => {
   it("takes a few minutes' worth, due items first", () => {
     const long = { ...card("p/long"), minutes: 3 };
     const chosen = step({
+      followUps: [],
       due: [card("p/due")],
       waiting: 0,
       fresh: [card("p/x"), card("p/y"), long],
@@ -279,7 +283,9 @@ describe("step", () => {
     });
     expect(chosen.map((item) => item.key)).toEqual(["p/due", "p/x", "p/y"]);
     expect(
-      step({ due: [], waiting: 0, fresh: [long, card("p/x")], freshWaiting: 0 }).map((i) => i.key),
+      step({ followUps: [], due: [], waiting: 0, fresh: [long, card("p/x")], freshWaiting: 0 }).map(
+        (i) => i.key,
+      ),
     ).toEqual(["p/long"]);
   });
 });

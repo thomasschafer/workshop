@@ -53,6 +53,7 @@ export function patchHome(
     const q = queue(deck, track.id, attempts, flagChanges, retirementChanges, now, offsetMinutes);
     const flaggedCount = itemsInTrack.filter((item) => wrong.has(item.key)).length;
     const parts: string[] = [];
+    if (q.followUps.length > 0) parts.push(`${q.followUps.length} being followed up`);
     if (q.due.length > 0) parts.push(`${q.due.length} due`);
     if (q.fresh.length > 0) parts.push(`${q.fresh.length} new`);
     if (q.waiting > 0) parts.push(`${q.waiting} waiting`);
@@ -76,7 +77,7 @@ export function patchHome(
           now,
           offsetMinutes,
         );
-        if (q.due.length === 0 && q.fresh.length === 0) {
+        if (q.followUps.length === 0 && q.due.length === 0 && q.fresh.length === 0) {
           next = null;
         }
       }
