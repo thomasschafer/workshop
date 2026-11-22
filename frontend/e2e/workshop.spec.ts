@@ -2333,7 +2333,8 @@ test("imports what's completed, however the language server adds the import", as
     await computer.locator(".cm-content").click();
     await computer.keyboard.press(`${mod}+End`);
     await computer.keyboard.type(typed);
-    await expect(completions.getByRole("option")).toHaveText([label]);
+    await expect(completions.locator(".cm-completionLabel")).toHaveText([label]);
+    await expect(completions.locator(".cm-completionDetail")).toHaveText(["fake"]);
     await computer.waitForTimeout(700);
     await computer.keyboard.press("Enter");
     // Typing before the list closes can lose what's chosen, with or without an import.
@@ -2369,7 +2370,7 @@ test("imports what's completed, however the language server adds the import", as
   const offered = helix.locator(".cm-tooltip-autocomplete");
   await helix.locator(".cm-content").click();
   await helix.keyboard.type("ggOfetchB");
-  await expect(offered.getByRole("option")).toHaveText(["fetchByCommand"]);
+  await expect(offered.locator(".cm-completionLabel")).toHaveText(["fetchByCommand"]);
   await helix.waitForTimeout(700);
   await helix.keyboard.press("Tab");
   await helix.keyboard.press("Enter");
@@ -2381,6 +2382,60 @@ test("imports what's completed, however the language server adds the import", as
   }
   expect(saved()).toBe(original);
   await helixContext.close();
+});
+
+test("offers completions on a phone as rows a finger can tap, on screen", async ({ browser }) => {
+  const { context, phone } = await openOnPhone(browser);
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+  await expect(phone.locator(".status-line")).toContainText("no errors", { timeout: 15_000 });
+  await phone.getByRole("button", { name: "Type" }).tap();
+  const line = await phone.locator(".cm-line", { hasText: "def part1" }).boundingBox();
+  if (line === null) throw new Error("there's no line defining part1");
+  await phone.touchscreen.tap(line.x + 30, line.y + line.height / 2);
+  await expect(phone.locator(".cm-helix-keyboard")).toBeFocused();
+  await phone.keyboard.type("Ofetch");
+
+  const offered = phone.locator(".cm-tooltip-autocomplete");
+  const rows = offered.getByRole("option");
+  await expect(offered.locator(".cm-completionLabel")).toHaveText([
+    "fetchByCommand",
+    "fetchOnResolve",
+    "fetchSnippet",
+  ]);
+  // Where each is imported from, on a line of its own beneath its name.
+  await expect(offered.locator(".cm-completionDetail")).toHaveText(["fake", "fake", "fake"]);
+  const label = await offered.locator(".cm-completionLabel").first().boundingBox();
+  const detail = await offered.locator(".cm-completionDetail").first().boundingBox();
+  if (label === null || detail === null) throw new Error("the first completion isn't shown");
+  expect(detail.y).toBeGreaterThanOrEqual(label.y + label.height - 1);
+  const width = phone.viewportSize()?.width;
+  if (width === undefined) throw new Error("the phone has no viewport");
+  for (const row of await rows.all()) {
+    const box = await row.boundingBox();
+    if (box === null) throw new Error("a completion isn't shown");
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+  }
+
+  // Tapping one chooses it, import and all.
+  const second = await rows.nth(1).boundingBox();
+  if (second === null) throw new Error("the second completion isn't shown");
+  await phone.touchscreen.tap(second.x + second.width / 2, second.y + second.height / 2);
+  await expect(offered).toHaveCount(0);
+  await expect
+    .poll(saved)
+    .toBe(
+      `from fake import fetchOnResolve\n${original.replace("def part1", "fetchOnResolve\ndef part1")}`,
+    );
+  await phone.keyboard.press("Escape");
+  for (let i = 0; i < 8 && saved() !== original; i++) {
+    await phone.keyboard.type("u");
+    await phone.waitForTimeout(700);
+  }
+  expect(saved()).toBe(original);
+  await context.close();
 });
 
 test("formats the code when asked, before a run, and once Helix is left alone", async ({

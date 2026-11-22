@@ -112,9 +112,51 @@ const theme = EditorView.theme({
     maxHeight: "40vh",
     overflow: "auto",
   },
-  // A finger has no way to point without tapping, and a problem's message can be longer than a
-  // phone's screen, so there it's read from the status line, and nothing comes up over the code.
-  "@media (pointer: coarse)": { ".cm-tooltip-hover": { display: "none" } },
+  "@media (pointer: coarse)": {
+    // A finger has no way to point without tapping, and a problem's message can be longer than a
+    // phone's screen, so there it's read from the status line, and nothing comes up over the code.
+    ".cm-tooltip-hover": { display: "none" },
+    // Completions are picked by tapping, so each is as tall as a phone's own list items, with
+    // what it says about itself, such as where it's imported from, on a line of its own rather
+    // than cut short beside a long name. A little over four show at once, so it's clear there
+    // are more to scroll to.
+    ".cm-tooltip.cm-tooltip-autocomplete > ul": {
+      minWidth: "min(250px, 100vw)",
+      maxWidth: "100vw",
+      maxHeight: "calc(4.5 * var(--touch-target))",
+    },
+    ".cm-tooltip.cm-tooltip-autocomplete > ul > li": {
+      display: "flex",
+      flexWrap: "wrap",
+      alignItems: "center",
+      boxSizing: "border-box",
+      minHeight: "var(--touch-target)",
+      padding: "4px 10px",
+      lineHeight: "1.3",
+    },
+    ".cm-tooltip.cm-tooltip-autocomplete > ul > li + li": {
+      borderTop: "1px solid var(--border)",
+    },
+    ".cm-completionLabel": {
+      flex: "1 1 0",
+      minWidth: "0",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+    },
+    ".cm-completionDetail": {
+      flexBasis: "100%",
+      // In line with the label, past the icon before it.
+      marginLeft: "1.4em",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      fontSize: "0.85em",
+      fontStyle: "normal",
+      color: "var(--muted)",
+    },
+    ".cm-tooltip.cm-lsp-signature-tooltip": { maxHeight: "25vh" },
+    ".cm-textfield, .cm-button": { minHeight: "var(--touch-target)" },
+    ".cm-lsp-reference": { minHeight: "var(--touch-target)", alignContent: "center" },
+  },
   ".cm-tooltip-autocomplete ul li[aria-selected]": {
     background: "var(--selection)",
     color: "var(--fg)",

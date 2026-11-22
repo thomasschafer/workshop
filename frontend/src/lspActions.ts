@@ -170,7 +170,8 @@ const CODE_ACTION_KINDS = [
 /**
  * What Workshop does beyond its language client, for the capabilities the client offers as it
  * connects: code actions that come with their edits, or that can be asked for them; completions
- * whose other edits, such as an import, can be asked for once one's chosen; and edits a server
+ * whose other edits, such as an import, can be asked for once one's chosen, and that say more
+ * beside their labels, such as where they're imported from; and edits a server
  * asks to make, as it does for a completion that runs a command.
  */
 export const EXTRA_CAPABILITIES = {
@@ -181,7 +182,12 @@ export const EXTRA_CAPABILITIES = {
       dataSupport: true,
       disabledSupport: true,
     },
-    completion: { completionItem: { resolveSupport: { properties: ["additionalTextEdits"] } } },
+    completion: {
+      completionItem: {
+        resolveSupport: { properties: ["additionalTextEdits"] },
+        labelDetailsSupport: true,
+      },
+    },
   },
   workspace: { applyEdit: true },
 };

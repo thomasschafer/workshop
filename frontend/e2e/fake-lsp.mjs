@@ -8,7 +8,8 @@
 // It also completes three names that need importing, each imported the way one kind of server
 // does it: `fetchByCommand` with a command it runs to ask the client to add the import, as the
 // Haskell language server does; `fetchOnResolve` with the import given only once it's asked for
-// the completion in full; and `fetchSnippet`, a snippet sent with its import.
+// the completion in full; and `fetchSnippet`, a snippet sent with its import. Each says, beside
+// its label, the module it's imported from.
 //
 // It formats by squeezing runs of spaces within a line to one and dropping spaces at the ends of
 // lines, sending the whole file back as one edit, as some servers do. It can't format a file with
@@ -147,6 +148,7 @@ const handlers = {
     const imported = [
       {
         label: "fetchByCommand",
+        labelDetails: { description: "fake" },
         kind: 3,
         command: {
           title: "import",
@@ -154,9 +156,15 @@ const handlers = {
           arguments: [{ uri, name: "fetchByCommand" }],
         },
       },
-      { label: "fetchOnResolve", kind: 3, data: { uri, name: "fetchOnResolve" } },
+      {
+        label: "fetchOnResolve",
+        labelDetails: { description: "fake" },
+        kind: 3,
+        data: { uri, name: "fetchOnResolve" },
+      },
       {
         label: "fetchSnippet",
+        labelDetails: { description: "fake" },
         kind: 3,
         // biome-ignore lint/suspicious/noTemplateCurlyInString: a snippet, not a template
         insertText: "fetchSnippet(${1:url})",

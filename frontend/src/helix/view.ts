@@ -1227,6 +1227,7 @@ class StatusPanel {
           run(this.helix, this.helix.handler.handle("ret" as Key));
         }),
       );
+      revealPickerSelection(this.extra);
     } else if (editor.autoinfo) this.extra.append(renderInfo(editor.autoinfo));
     this.status.replaceChildren();
     if (editor.prompt) {
@@ -1324,6 +1325,18 @@ function renderInfo(info: Info): HTMLElement {
 }
 
 const PICKER_ROWS = 12;
+
+/**
+ * Scrolls the picker in `extra` so its highlighted row is in view, as with rows a finger can tap
+ * not all of them fit.
+ */
+function revealPickerSelection(extra: HTMLElement): void {
+  const box = extra.querySelector<HTMLElement>(".cm-helix-picker");
+  const selected = extra.querySelector(".cm-helix-picker-selected");
+  if (box === null || selected === null) return;
+  const below = selected.getBoundingClientRect().bottom - box.getBoundingClientRect().bottom;
+  if (below > 0) box.scrollTop += below;
+}
 
 /** The picker, whose rows run when tapped or clicked, with `pick` given the match's index. */
 function renderPicker(editor: HelixEditor, pick: (index: number) => void): HTMLElement {
@@ -1545,11 +1558,6 @@ const theme = EditorView.theme({
     pointerEvents: "none",
     zIndex: "-1",
   },
-  // On a phone, no key help, which would take up most of the screen.
-  "@media (pointer: coarse)": {
-    ".cm-helix-info-keys": { display: "none" },
-    ".cm-helix-info-text, .cm-helix-picker": { maxHeight: "30vh" },
-  },
   ".cm-helix-picker-query": { display: "block", marginBottom: "2px" },
   ".cm-helix-picker-row": { display: "flex", gap: "2ch", whiteSpace: "pre", overflow: "hidden" },
   ".cm-helix-picker-selected": { background: "var(--selection)" },
@@ -1557,6 +1565,19 @@ const theme = EditorView.theme({
     color: "var(--muted)",
     overflow: "hidden",
     textOverflow: "ellipsis",
+  },
+  "@media (pointer: coarse)": {
+    // On a phone, no key help, which would take up most of the screen.
+    ".cm-helix-info-keys": { display: "none" },
+    ".cm-helix-info-text, .cm-helix-picker": { maxHeight: "30vh" },
+    // Rows are picked by tapping, so they're as tall as a phone's own list items.
+    ".cm-helix-picker-row": {
+      alignItems: "center",
+      minHeight: "var(--touch-target)",
+      padding: "0 1ch",
+      margin: "0 -1ch",
+    },
+    ".cm-helix-picker-row + .cm-helix-picker-row": { borderTop: "1px solid var(--border)" },
   },
 });
 

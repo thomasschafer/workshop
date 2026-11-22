@@ -28,9 +28,19 @@ interface MarkupContent {
   readonly value: string;
 }
 
+/**
+ * More about a completion, shown beside its label: `detail` straight after it, such as a
+ * function's parameters, and `description` after that, such as the module it's imported from.
+ */
+interface LabelDetails {
+  readonly detail?: string;
+  readonly description?: string;
+}
+
 /** A completion as the server sends it, which is sent back as it was to be resolved. */
 interface CompletionItem {
   readonly label: string;
+  readonly labelDetails?: LabelDetails;
   readonly kind?: number;
   readonly detail?: string;
   readonly documentation?: string | MarkupContent;
@@ -73,6 +83,16 @@ function completionItem(value: unknown): CompletionItem {
       throw new Error("the language server sent a completion whose command can't be read");
     }
   }
+  if (value.labelDetails !== undefined) {
+    const details = value.labelDetails;
+    if (
+      !isRecord(details) ||
+      (details.detail !== undefined && typeof details.detail !== "string") ||
+      (details.description !== undefined && typeof details.description !== "string")
+    ) {
+      throw new Error("the language server sent a completion whose label details can't be read");
+    }
+  }
   return value as unknown as CompletionItem;
 }
 
@@ -107,6 +127,24 @@ const KIND_TO_TYPE: Readonly<Record<number, string>> = {
   22: "class",
   25: "type",
 };
+
+/**
+ * How a completion's shown: its label with the label details' `detail` straight after, and then,
+ * as the protocol has editors do, their `description` in place of the completion's own `detail`
+ * when there is one, as servers give it to say where an import's from.
+ */
+export function shownLabel(item: {
+  readonly label: string;
+  readonly labelDetails?: LabelDetails;
+  readonly detail?: string;
+}): { label: string; detail?: string } {
+  const { labelDetails } = item;
+  const detail = labelDetails?.description ?? item.detail;
+  return {
+    label: item.label + (labelDetails?.detail ?? ""),
+    ...(detail !== undefined && detail !== "" && { detail }),
+  };
+}
 
 /**
  * An LSP snippet in @codemirror/autocomplete's syntax, which has no backslash escapes and needs
@@ -236,11 +274,12 @@ function option(
   const isSnippet = (item.insertTextFormat ?? defaults?.insertTextFormat) === INSERT_TEXT_SNIPPET;
   const { documentation } = item;
   const type = item.kind === undefined ? undefined : KIND_TO_TYPE[item.kind];
+  const shown = shownLabel(item);
   return {
     label: item.filterText || item.label,
-    displayLabel: item.label,
+    displayLabel: shown.label,
     ...(type !== undefined && { type }),
-    ...(item.detail !== undefined && { detail: item.detail }),
+    ...(shown.detail !== undefined && { detail: shown.detail }),
     ...(item.sortText !== undefined && { sortText: item.sortText }),
     ...(item.commitCharacters !== undefined &&
       item.commitCharacters !== defaults?.commitCharacters && {

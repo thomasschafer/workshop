@@ -34,6 +34,7 @@ describe("adjustCapabilities", () => {
               completionItem: {
                 snippetSupport: true,
                 resolveSupport: { properties: ["additionalTextEdits"] },
+                labelDetailsSupport: true,
               },
               contextSupport: true,
             },

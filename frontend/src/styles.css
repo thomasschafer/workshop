@@ -4,6 +4,8 @@
   /* Fields that are a little smaller than the text around them. */
   --small-field-size: 13px;
   --radius: 10px;
+  /* How tall what's tapped is, as phones' own lists and settings are. */
+  --touch-target: 44px;
 
   --bg: #f7f6f3;
   --surface: #ffffff;
@@ -840,7 +842,7 @@ html[data-tab-turn] .content {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 44px;
+  min-height: var(--touch-target);
 }
 
 .toggle input {
@@ -1542,7 +1544,7 @@ html[data-tab-turn] .content {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 44px;
+  min-height: var(--touch-target);
 }
 
 .code-size-stepper {
