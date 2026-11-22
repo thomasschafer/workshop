@@ -211,3 +211,21 @@ textarea.explain-heard {
   font: inherit;
   padding: 6px 8px;
 }
+
+.follow-ups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.follow-ups > .tracks-heading {
+  margin: 0;
+}
+
+.follow-ups-aloud {
+  font-size: 13px;
+}
+
+.follow-ups-done summary {
+  padding: 8px 0;
+}

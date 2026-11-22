@@ -91,6 +91,35 @@ export interface DesignOpened {
   previous: string | null;
 }
 
+// A card's follow-up questions mirror src/follow_ups.rs, and their routes
+// src/server/follow_ups.rs.
+
+/** Something the learner said: their answer to the card, or a reply to a question. */
+export interface Said {
+  text: string;
+  /** Whether it was explained aloud, so it's marked for clarity too. */
+  spoken: boolean;
+  at: number;
+}
+
+export interface FollowUpQuestion {
+  text: string;
+  asked_at: number;
+  reply: Said | null;
+}
+
+/** A card answered in the learner's own words, and being followed up by the tutor. */
+export interface Exchange {
+  /** The most questions the tutor asks. */
+  limit: number;
+  answer: Said;
+  questions: FollowUpQuestion[];
+  started_at: number;
+  updated_at: number;
+  /** Whether the tutor asks next, the learner replies, or every question's been answered. */
+  next: "ask" | "reply" | "mark";
+}
+
 export interface Review {
   verdict: "correct" | "wrong";
   explanation: string;

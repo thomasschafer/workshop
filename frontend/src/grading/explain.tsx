@@ -21,6 +21,7 @@ export function ExplainAloud({
   serverDictation,
   onMarked,
   mark: markWith,
+  onDeeper,
 }: {
   itemKey: string;
   work: Work;
@@ -31,14 +32,16 @@ export function ExplainAloud({
   serverDictation: boolean;
   /** Once it's been marked, with what was heard. */
   onMarked: (reply: MarkedReply, heard: string) => void;
+  /** Goes deeper instead of having it marked now, with follow-up questions on what was heard. */
+  onDeeper?: (heard: string) => Promise<void>;
 }) {
   const online = useConnection();
-  const { dictationMethod } = useDictation(serverDictation);
   const [heard, setHeard] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
+  const [deepening, setDeepening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [marked, setMarked] = useState<MarkedReply | null>(null);
+  const busy = marking || deepening;
   const mark = () => {
     setMarking(true);
     setError(null);
@@ -52,9 +55,14 @@ export function ExplainAloud({
       )
       .finally(() => setMarking(false));
   };
+  const deeper = (go: (heard: string) => Promise<void>) => {
+    setDeepening(true);
+    setError(null);
+    go(heard)
+      .catch((e: unknown) => setError(errorMessage(e)))
+      .finally(() => setDeepening(false));
+  };
   if (marked) return <MarkedView marked={marked.marked} />;
-  // Only the keyboard's microphone can hear on this device, so it types what's heard here.
-  const byKeyboard = dictationMethod === "keyboard";
   return (
     <section class="explain" aria-label="Explain it aloud">
       <p class="learn-question">{question}</p>
@@ -62,6 +70,73 @@ export function ExplainAloud({
         Talk it through as you would to someone listening. You're marked on whether it's right and
         how clearly you put it.
       </p>
+      <AloudInput
+        heard={heard}
+        setHeard={setHeard}
+        readOnly={busy}
+        serverDictation={serverDictation}
+      />
+      {error ? (
+        <p class="error-text" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <span class="learn-actions">
+        <button type="button" class="pill" disabled={busy || !heard} onClick={() => setHeard("")}>
+          Start again
+        </button>
+        {onDeeper ? (
+          <button
+            type="button"
+            class="pill"
+            disabled={busy || !heard.trim() || !online}
+            onClick={() => deeper(onDeeper)}
+          >
+            {deepening ? "Asking…" : "Go deeper"}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          class="pill primary"
+          disabled={busy || !heard.trim() || !online}
+          onClick={mark}
+        >
+          {marking ? "Marking…" : "Mark my explanation"}
+        </button>
+      </span>
+      {online ? null : (
+        <p class="muted">
+          {onDeeper
+            ? "Marking it, and going deeper, need the server."
+            : "Marking it needs the server."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Saying something aloud: hold the button and talk, as many times as it takes, each time adding
+ * to what was heard, which is shown as it's said. Where only the keyboard's microphone can hear,
+ * it types what's heard into a box here instead.
+ */
+export function AloudInput({
+  heard,
+  setHeard,
+  readOnly,
+  serverDictation,
+}: {
+  heard: string;
+  setHeard: (update: (sofar: string) => string) => void;
+  readOnly: boolean;
+  serverDictation: boolean;
+}) {
+  const { dictationMethod } = useDictation(serverDictation);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Only the keyboard's microphone can hear on this device, so it types what's heard here.
+  const byKeyboard = dictationMethod === "keyboard";
+  return (
+    <>
       <DictateButton
         serverDictation={serverDictation}
         label="Hold to explain"
@@ -77,38 +152,17 @@ export function ExplainAloud({
           class="written explain-heard"
           aria-label="What you said"
           value={heard}
-          readOnly={marking}
-          onInput={(event) => setHeard(event.currentTarget.value)}
+          readOnly={readOnly}
+          onInput={(event) => {
+            const text = event.currentTarget.value;
+            setHeard(() => text);
+          }}
         />
       ) : heard ? (
         <blockquote class="explain-heard" aria-label="What you said">
           {heard}
         </blockquote>
       ) : null}
-      {error ? (
-        <p class="error-text" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <span class="learn-actions">
-        <button
-          type="button"
-          class="pill"
-          disabled={marking || !heard}
-          onClick={() => setHeard("")}
-        >
-          Start again
-        </button>
-        <button
-          type="button"
-          class="pill primary"
-          disabled={marking || !heard.trim() || !online}
-          onClick={mark}
-        >
-          {marking ? "Marking…" : "Mark my explanation"}
-        </button>
-      </span>
-      {online ? null : <p class="muted">Marking it needs the server.</p>}
-    </section>
+    </>
   );
 }

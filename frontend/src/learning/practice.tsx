@@ -5,8 +5,9 @@ import type { Overview } from "../coding/types";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
 import { ExplainAloud } from "../grading/explain";
+import { FollowUpsView, FollowUpTurns } from "../grading/followUpsView";
 import { MarkedView } from "../grading/marked";
-import type { Marked } from "../grading/types";
+import type { Exchange, Marked } from "../grading/types";
 import { useConnection } from "../hooks/useConnection";
 import { useMarkdown } from "../hooks/useMarkdown";
 import { HomeButton, TrackTitle } from "../progress/page";
@@ -139,6 +140,7 @@ export function Practice({
             <ItemView
               key={`${current.key}-${results.length}`}
               item={current}
+              followedUp={deck.follow_ups?.includes(current.key) ?? false}
               serverDictation={serverDictation}
               onDone={(right) => setResults((done) => [...done, { key: current.key, right }])}
             />
@@ -179,10 +181,13 @@ export function SyncChip({ status }: { status: SyncStatus }) {
 /** One item, until it's answered or marked, and what to do next. */
 export function ItemView({
   item,
+  followedUp = false,
   serverDictation,
   onDone,
 }: {
   item: DeckItem;
+  /** Whether it's a card with follow-up questions under way, to carry on with. */
+  followedUp?: boolean;
   serverDictation: boolean;
   onDone: (right: boolean | null) => void;
 }) {
@@ -230,6 +235,7 @@ export function ItemView({
       {item.kind === "card" ? (
         <CardView
           item={item}
+          followedUp={followedUp}
           serverDictation={serverDictation}
           onRate={(rating) => {
             record(rating);
@@ -289,12 +295,15 @@ export function ItemView({
 
 function CardView({
   item,
+  followedUp,
   serverDictation,
   onRate,
   onMarked,
   onFlag,
 }: {
   item: Extract<DeckItem, { kind: "card" }>;
+  /** Whether it has follow-up questions under way, to carry on with. */
+  followedUp: boolean;
   serverDictation: boolean;
   onRate: (rating: Rating) => void;
   /** Once the grader has marked an answer in the learner's own words, which it records. */
@@ -310,6 +319,34 @@ function CardView({
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
   const [marked, setMarked] = useState<Marked | null>(null);
+  const online = useConnection();
+  // A deck from an older Workshop doesn't say, so the server decides.
+  const offersFollowUps = (item.follow_ups ?? 1) > 0;
+  /** The follow-up questions under way, once the learner's gone deeper or come back to them. */
+  const [exchange, setExchange] = useState<Exchange | null>(null);
+  const [exchangeError, setExchangeError] = useState<string | null>(null);
+  /** The exchange the grader marked, to show with its marks. */
+  const [followedUpMarked, setFollowedUpMarked] = useState<Exchange | null>(null);
+  const [resuming, setResuming] = useState(followedUp);
+  const [deepening, setDeepening] = useState(false);
+  useEffect(() => {
+    if (!followedUp || !online || exchange) return;
+    let current = true;
+    gradingApi
+      .followUps(item.key)
+      .then(
+        (kept) => {
+          if (current && kept) setExchange(kept);
+        },
+        () => {},
+      )
+      .finally(() => {
+        if (current) setResuming(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [followedUp, online]);
   const mark = () => {
     setMarking(true);
     setMarkError(null);
@@ -324,12 +361,39 @@ function CardView({
       )
       .finally(() => setMarking(false));
   };
+  /** Starts the follow-up questions with the learner's answer. */
+  const goDeeper = async (answer: string, spoken: boolean) => {
+    try {
+      setExchange(await gradingApi.answerFollowUp(item.key, answer, spoken));
+    } catch (e) {
+      // The answer may have been kept even though the tutor couldn't ask its question.
+      const kept = await gradingApi.followUps(item.key).catch(() => null);
+      if (!kept) throw e;
+      setExchange(kept);
+      setExchangeError(errorMessage(e));
+    }
+    // So the deck on this device has it first, to carry on with after the app's closed.
+    void learning().sync();
+  };
+  const goDeeperWritten = () => {
+    setDeepening(true);
+    setMarkError(null);
+    goDeeper(written, false)
+      .catch((e: unknown) => setMarkError(errorMessage(e)))
+      .finally(() => setDeepening(false));
+  };
   return (
     <>
       <Markdown text={item.prompt} class="learn-prompt" />
       {revealed ? (
         <>
           {marked ? <MarkedView marked={marked} /> : null}
+          {followedUpMarked ? (
+            <details class="follow-ups-done">
+              <summary class="muted">What you said</summary>
+              <FollowUpTurns exchange={followedUpMarked} />
+            </details>
+          ) : null}
           <section class="learn-answer" aria-label="Answer">
             <Markdown text={item.answer} />
             {item.explanation ? <Markdown text={item.explanation} class="muted" /> : null}
@@ -396,6 +460,23 @@ function CardView({
             </>
           )}
         </>
+      ) : exchange ? (
+        <FollowUpsView
+          itemKey={item.key}
+          exchange={exchange}
+          error={exchangeError}
+          serverDictation={serverDictation}
+          onMarked={(reply, done) => {
+            setMarked(reply.marked);
+            setFollowedUpMarked(done);
+            setRevealed(true);
+          }}
+          onShowAnswer={() => setRevealed(true)}
+        />
+      ) : followedUp && resuming && online ? (
+        <p class="muted" role="status">
+          Loading your follow-up questions…
+        </p>
       ) : answering === "aloud" ? (
         <>
           <ExplainAloud
@@ -407,6 +488,7 @@ function CardView({
               setMarked(reply.marked);
               setRevealed(true);
             }}
+            {...(offersFollowUps ? { onDeeper: (heard: string) => goDeeper(heard, true) } : {})}
           />
           <button type="button" class="learn-link" onClick={() => setRevealed(true)}>
             Show answer
@@ -437,16 +519,50 @@ function CardView({
             </p>
           ) : null}
           <span class="learn-actions">
-            <button type="button" class="pill" onClick={() => setRevealed(true)}>
-              Show answer
-            </button>
-            <button type="submit" class="pill primary" disabled={marking || !written.trim()}>
+            {/* With follow-ups to offer, showing the answer is a link below, to leave room. */}
+            {offersFollowUps ? (
+              <button
+                type="button"
+                class="pill"
+                disabled={marking || deepening || !online || !written.trim()}
+                onClick={goDeeperWritten}
+              >
+                {deepening ? "Asking…" : "Go deeper"}
+              </button>
+            ) : (
+              <button type="button" class="pill" onClick={() => setRevealed(true)}>
+                Show answer
+              </button>
+            )}
+            <button
+              type="submit"
+              class="pill primary"
+              disabled={marking || deepening || !written.trim()}
+            >
               {marking ? "Marking…" : "Mark my answer"}
             </button>
           </span>
+          {offersFollowUps ? (
+            <>
+              <p class="muted explain-hint">
+                {online
+                  ? "Go deeper to answer the tutor's follow-up questions on it before it's marked."
+                  : "Going deeper, with the tutor's follow-up questions, needs the server."}
+              </p>
+              <button type="button" class="learn-link" onClick={() => setRevealed(true)}>
+                Show answer
+              </button>
+            </>
+          ) : null}
         </form>
       ) : (
         <>
+          {followedUp && !online ? (
+            <p class="muted" role="status">
+              Follow-up questions on this card are under way, but they need the server. Until it can
+              be reached, answer it as usual.
+            </p>
+          ) : null}
           <button type="button" class="pill primary wide" onClick={() => setRevealed(true)}>
             Show answer
           </button>

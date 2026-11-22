@@ -61,9 +61,9 @@ name = "Unit slip"
 description = "Mixed up units, such as seconds and milliseconds"
 
 # Text added to a coach role's instructions, to shape its style for this pack. The tutor gives
-# hints on coding problems, poses the twists their reviews are, and answers the learner's
-# questions and asks them follow-up questions in design sessions; the examiner
-# runs timed rounds; the grader marks written and spoken work and checks cards; the author
+# hints on coding problems, poses the twists their reviews are, answers the learner's questions
+# and asks them follow-up questions in design sessions, and asks follow-up questions on cards
+# answered in the learner's own words; the examiner runs timed rounds; the grader marks written and spoken work and checks cards; the author
 # writes new items (see docs/author.md).
 [prompts]
 tutor = "prompts/tutor.md"
@@ -133,7 +133,13 @@ A question and its answer, which you mark yourself after seeing the answer: Agai
 
 Sections: `## Answer` (required) and `## Explanation`.
 
+```toml
+follow_ups = 3    # optional: how many follow-up questions the tutor asks, from 0 to 3; 2 by default
+```
+
 If a card is wrong, flag it in the app with "This is wrong". It's left out of practice until you fix it and clear the flag, under Packs in the app, where the grader can also check it: it unflags a card it finds right, and proposes a fix for one it doesn't, which is written to the card's file, and committed if the pack is a git repo, once you approve it. You can also answer a card in your own words, typed or explained aloud, for the grader to mark; explained aloud, it's marked for how clearly you put it as well as whether it's right.
+
+Answered in your own words, a card can also go deeper. Choose "Go deeper" rather than having it marked, and the tutor asks a follow-up question about what you said, such as why it's so, what happens in an edge case, or what changes under a different condition, without giving the answer away. It sees the card's answer and explanation, so its questions go at what matters. Reply as you answered the card, typed or dictated, or explained aloud, switching if you like, and it asks another, up to the card's `follow_ups`. Then the grader marks the whole exchange against the card's answer and explanation, for how deeply you understand it as well as whether it's right, and for how clearly you put what you said aloud. That's the card's attempt, as a card marked in your own words is, and what it finds shallow or wrong goes in the mistake log, usually as a `concept-gap`. You can have it marked before the tutor's asked everything, or stop and rate the card yourself instead. Each answer and question is saved as it's given, so you can close the app part-way, and the card comes first when you next practise its track, where you left off. `follow_ups = 0` keeps a card from offering it, such as one whose answer is a fact with nothing behind it to probe. Follow-up questions need the server: offline, the card is answered as usual.
 
 ### Mental maths
 

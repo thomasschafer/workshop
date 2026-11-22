@@ -43,7 +43,15 @@ interface ItemBase {
 
 export type DeckItem = ItemBase &
   (
-    | { kind: "card"; answer: string; explanation: string | null }
+    | {
+        kind: "card";
+        answer: string;
+        explanation: string | null;
+        /** How many follow-up questions the tutor asks when the learner goes deeper; 0 if the
+         * card doesn't offer them. Decks saved on a device by an older Workshop don't have it,
+         * and offer them, leaving the server to say how many. */
+        follow_ups?: number;
+      }
     | { kind: "mental-maths"; instances: Instance[]; tolerance: Tolerance }
     | {
         kind: "probability";
@@ -103,6 +111,9 @@ export interface Deck {
   /** The skills recent mistakes point to, whose new items come first. Decks saved on a device
    * by an older Workshop don't have it. */
   focus?: string[];
+  /** Cards with follow-up questions under way, which come first, to carry on with. Decks saved
+   * on a device by an older Workshop don't have it. */
+  follow_ups?: string[];
   problems: string[];
 }
 

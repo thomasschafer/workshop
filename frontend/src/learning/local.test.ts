@@ -141,6 +141,43 @@ describe("queue", () => {
     ]);
   });
 
+  it("puts a card being followed up first, to carry on with", () => {
+    const seen = (days: number) => review(null, LATE_MONDAY - days * DAY_MS, "good");
+    const items = [
+      card("p/a"),
+      card("p/b"),
+      card("p/c"),
+      { ...card("p/new"), skills: ["heaps"] },
+      card("p/deeper"),
+    ];
+    const d = deck(items, {
+      schedules: { "p/a": seen(60), "p/b": seen(30), "p/c": seen(45) },
+      limits: { daily_reviews: 2, weekly_minutes: 60, retention: 0.9 },
+      focus: [],
+    });
+    const keys = (next: ReturnType<typeof queue>) => [...next.due, ...next.fresh].map((i) => i.key);
+    expect(keys(queue(d, "review", [], [], [], LATE_MONDAY, 0))).toEqual([
+      "p/a",
+      "p/c",
+      "p/new",
+      "p/deeper",
+    ]);
+    // Even past today's limit, as it's started already.
+    const due = { ...d, follow_ups: ["p/b"] };
+    expect(keys(queue(due, "review", [], [], [], LATE_MONDAY, 0))).toEqual([
+      "p/b",
+      "p/a",
+      "p/new",
+      "p/deeper",
+    ]);
+    // Before even the skills recent mistakes point to.
+    const fresh = { ...d, follow_ups: ["p/deeper"], focus: ["heaps"] };
+    expect(queue(fresh, "review", [], [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual([
+      "p/deeper",
+      "p/new",
+    ]);
+  });
+
   it("leaves out flagged items until the flag is cleared", () => {
     const d = deck([card("p/a"), card("p/b")], { flags: { "p/a": { at: 1, note: null } } });
     expect(queue(d, "review", [], [], [], LATE_MONDAY, 0).fresh.map((i) => i.key)).toEqual(["p/b"]);

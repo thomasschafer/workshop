@@ -177,7 +177,10 @@ export interface Queue {
   freshWaiting: number;
 }
 
-/** What there is to do in a track now: due reviews first, then new items. */
+/**
+ * What there is to do in a track now: due reviews first, then new items, with any card being
+ * followed up first of its kind.
+ */
 export function queue(
   deck: Deck,
   track: TrackId,
@@ -193,6 +196,9 @@ export function queue(
   // Left out, as flagged items are: retired ones are never offered.
   const offered = (item: DeckItem) =>
     !wrong.has(item.key) && standing[item.key]?.state !== "retired";
+  // Cards being followed up come first, so the learner carries on where they left off.
+  const underWay = new Set(deck.follow_ups ?? []);
+  const later = (item: DeckItem) => Number(!underWay.has(item.key));
   const { reviewsToday, newToday } = progress(deck, attempts, now, offset, track);
   const allowed = Math.max(0, deck.limits.daily_reviews - reviewsToday);
   // The daily limit is shared across tracks, as on the server, so it's spent on the most overdue
@@ -206,7 +212,10 @@ export function queue(
       const when = dueAt(schedule, standing[item.key], deck.limits.retention);
       return when <= now ? [{ item, when }] : [];
     })
-    .sort((a, b) => a.when - b.when || a.item.key.localeCompare(b.item.key));
+    .sort(
+      (a, b) =>
+        later(a.item) - later(b.item) || a.when - b.when || a.item.key.localeCompare(b.item.key),
+    );
   const within = dueEverywhere.slice(0, allowed);
   // Also shared across tracks but those kept apart, so each offers up to what's left of it, as
   // on the server.
@@ -214,7 +223,7 @@ export function queue(
   const fresh = deck.items
     .filter((item) => item.track === track && offered(item) && !scheduled[item.key])
     // Sorting is stable, so otherwise they keep the deck's order.
-    .sort((a, b) => Number(inFocus(deck, b)) - Number(inFocus(deck, a)));
+    .sort((a, b) => later(a) - later(b) || Number(inFocus(deck, b)) - Number(inFocus(deck, a)));
   return {
     due: within.filter(({ item }) => item.track === track).map(({ item }) => item),
     waiting: dueEverywhere.slice(allowed).filter(({ item }) => item.track === track).length,

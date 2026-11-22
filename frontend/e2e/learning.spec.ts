@@ -739,6 +739,162 @@ test("explains a card aloud, marked for what's right and how clearly it's put", 
   );
 });
 
+/** The card showing, by its key, from the deck the phone keeps. */
+async function cardShown(): Promise<string> {
+  const prompt = (await phone.locator(".learn-prompt").innerText()).replace(/\s+/g, " ").trim();
+  return phone.evaluate((prompt) => {
+    const saved = JSON.parse(localStorage.getItem("workshop:learning") ?? "null") as {
+      deck: Deck;
+    };
+    const card = saved.deck.items.find(
+      (item) =>
+        item.kind === "card" &&
+        prompt.startsWith((item.prompt.split("\n\n")[0] ?? "").replace(/\s+/g, " ").trim()),
+    );
+    if (!card) throw new Error(`no card in the deck asks ${JSON.stringify(prompt)}`);
+    return card.key;
+  }, prompt);
+}
+
+/** The cards the phone's deck says are being followed up. */
+async function followedUp(): Promise<string[]> {
+  return phone.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem("workshop:learning") ?? "null") as {
+      deck: { follow_ups?: string[] };
+    };
+    return saved.deck.follow_ups ?? [];
+  });
+}
+
+test("goes deeper on a card with the tutor's questions, carrying on after a reload, then marks it all", async () => {
+  await phone.goto("/practice/review");
+  const key = await cardShown();
+  await phone.getByRole("button", { name: "Answer in my own words" }).tap();
+  await phone.getByLabel("Your answer, in your own words").fill("It goes down one path");
+  await phone.getByRole("button", { name: "Go deeper" }).tap();
+  const deeper = phone.getByRole("region", { name: "Follow-up questions" });
+  await expect(deeper.getByRole("heading")).toHaveText("Follow-up question 1 of 2");
+  await expect(deeper.locator(".design-turn.coach")).toHaveText(
+    'Question 1 of 2: why is it that "It goes down one path"?',
+  );
+  // The answer isn't shown while the tutor's asking about it.
+  await expect(phone.getByRole("region", { name: "Answer" })).toHaveCount(0);
+
+  // A reply part-written is kept on the phone, and the card comes first again after a reload.
+  await deeper.getByLabel("Your answer").fill("because each level halves");
+  await expect.poll(followedUp).toEqual([key]);
+  await phone.reload();
+  expect(await cardShown()).toBe(key);
+  await expect(deeper.getByLabel("Your answer")).toHaveValue("because each level halves");
+  await deeper.getByRole("button", { name: "Answer", exact: true }).tap();
+  await expect(deeper.getByRole("heading")).toHaveText("Follow-up question 2 of 2");
+  await expect(deeper.locator(".design-turn.coach").last()).toContainText(
+    "because each level halves",
+  );
+
+  // The next is explained aloud, which is marked for clarity too.
+  await deeper.getByRole("button", { name: "Say it aloud" }).tap();
+  await holdToTalk(
+    phone,
+    deeper.getByRole("button", { name: "Hold to explain" }),
+    "the root is the smallest",
+    () => expect(deeper.locator(".dictate-hearing")).toContainText("smallest"),
+  );
+  await expect(deeper.getByLabel("What you said")).toHaveText("the root is the smallest");
+  await deeper.getByRole("button", { name: "Answer", exact: true }).tap();
+  await expect(deeper).toContainText("That's all its questions.");
+  await expect(deeper.locator(".follow-ups-aloud")).toHaveCount(1);
+  await deeper.getByRole("button", { name: "Mark my answers" }).tap();
+
+  const marked = phone.getByRole("region", { name: "Marked" });
+  await expect(marked).toContainText("60%");
+  await expect(marked.getByRole("region", { name: "Clarity" })).toContainText(
+    "How clearly you put it: 70%",
+  );
+  await expect(marked).toContainText("Shallow: the root is the smallest");
+  await expect(phone.getByRole("region", { name: "Answer" })).toBeVisible();
+  await phone.getByText("What you said").tap();
+  await expect(phone.locator(".follow-ups-done .design-turn")).toHaveCount(5);
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
+  await phone.getByRole("button", { name: "Next" }).tap();
+
+  // It's the card's attempt, with what was shallow in the mistake log, and the questions are over.
+  const deck = (await serverDeck()) as Deck & { follow_ups: string[] };
+  expect(deck.schedules[key]?.reviews).toBe(1);
+  expect(deck.follow_ups).toEqual([]);
+  const log = (await (await phone.request.get("/api/mistakes")).json()) as {
+    mistakes: { item: string; source: string; detail: string; suggested: string | null }[];
+  };
+  const shallow = log.mistakes.find((m) => m.detail === "Shallow: the root is the smallest");
+  expect(shallow).toMatchObject({ item: key, source: "grader", suggested: "concept-gap" });
+});
+
+test("keeps an answer when the tutor can't be reached, asks again, and can stop to rate it as usual", async () => {
+  await phone.goto("/practice/review");
+  const key = await cardShown();
+  await phone.getByRole("button", { name: "Explain it aloud" }).tap();
+  const explain = phone.getByRole("region", { name: "Explain it aloud" });
+  await holdToTalk(
+    phone,
+    explain.getByRole("button", { name: "Hold to explain" }),
+    "the tutor is away",
+    () => expect(explain.locator(".dictate-hearing")).toContainText("away"),
+  );
+  await explain.getByRole("button", { name: "Go deeper" }).tap();
+  const deeper = phone.getByRole("region", { name: "Follow-up questions" });
+  await expect(deeper.getByRole("alert")).toContainText("can't be reached");
+  // What was said is kept, explained aloud.
+  await expect(deeper.locator(".design-turn.learner")).toHaveText("the tutor is away (aloud)");
+  // Asked again, once it can be reached, it carries on.
+  await deeper.getByRole("button", { name: "Ask the tutor" }).tap();
+  await expect(deeper.locator(".design-turn.coach")).toHaveText(
+    'Question 1 of 2: why is it that "the tutor is away"?',
+  );
+  await expect(deeper.getByRole("alert")).toHaveCount(0);
+  // Stopped there, it's rated as usual, and the questions are over once that reaches the server.
+  await deeper.getByRole("button", { name: "Show answer and rate it myself" }).tap();
+  await phone.getByRole("button", { name: "Good" }).tap();
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  await expect.poll(followedUp).toEqual([]);
+  const opened = await phone.request.get(`/api/cards/${key}/follow-ups`);
+  expect(((await opened.json()) as { exchange: unknown }).exchange).toBeNull();
+});
+
+test("goes deeper only with the server, and offline answers a card being followed up as usual", async () => {
+  await phone.goto("/practice/review");
+  const key = await cardShown();
+  await phone.getByRole("button", { name: "Answer in my own words" }).tap();
+  await phone.getByLabel("Your answer, in your own words").fill("Equal ones stay put");
+  await phone.getByRole("button", { name: "Go deeper" }).tap();
+  const deeper = phone.getByRole("region", { name: "Follow-up questions" });
+  await expect(deeper.getByRole("heading")).toHaveText("Follow-up question 1 of 2");
+  await expect.poll(followedUp).toEqual([key]);
+
+  await setOffline(context, true);
+  await phone.reload();
+  expect(await cardShown()).toBe(key);
+  await expect(phone.getByRole("status").filter({ hasText: "under way" })).toContainText(
+    "they need the server",
+  );
+  // Answered in the learner's own words, it can't go deeper without the server.
+  await phone.getByRole("button", { name: "Answer in my own words" }).tap();
+  await expect(phone.getByRole("button", { name: "Go deeper" })).toBeDisabled();
+  await expect(
+    phone.getByText("Going deeper, with the tutor's follow-up questions, needs the server."),
+  ).toBeVisible();
+  await phone.getByRole("button", { name: "Show answer" }).tap();
+  await phone.getByRole("button", { name: "Hard" }).tap();
+  await expect(phone.locator(".learn-sync")).toHaveText("Offline · 1 to sync");
+
+  await setOffline(context, false);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  expect((await serverDeck()).schedules[key]?.reviews).toBe(1);
+  await expect.poll(followedUp).toEqual([]);
+});
+
 test("runs a timed round with the examiner, carrying on after a reload and a break, until time's up", async () => {
   await phone.goto("/");
   const toggle = phone.getByRole("switch", { name: /I've got a while/ });

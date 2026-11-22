@@ -1,7 +1,8 @@
 // A stand-in for the edit and discussion models, so end-to-end tests make no real model calls.
 // It reads the prompt on stdin and replies to the utterances the tests use, in the shape of
 // Claude Code's stream-json output.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const prompt = readFileSync(0, "utf8");
 // The system prompt, which the tests' config passes as the only argument.
@@ -143,6 +144,53 @@ if (prompt.includes("<twist>")) {
       feedback: full ? "That's it." : "Say how much it **remembers**.",
       ...(prompt.includes("explained this aloud")
         ? { clarity: { score: 0.8, feedback: "Clear." } }
+        : {}),
+    }),
+  ]);
+  process.exit(0);
+}
+
+// The tutor, asking a follow-up question on a card about what the learner said last. Told the
+// tutor is away, it can't be reached the first time, as when no model can be, and is the next.
+if (prompt.includes("Ask follow-up question")) {
+  const [, number, limit] = prompt.match(/Ask follow-up question (\d+) of (\d+)/) ?? [];
+  const said = (prompt.match(/^Learner(?: \(aloud\))?: .*$/gm) ?? []).map((line) =>
+    line.replace(/^Learner(?: \(aloud\))?: /, ""),
+  );
+  const last = said[said.length - 1] ?? "";
+  // Calls run in a directory of the home's own, so the home starts without the mark.
+  const away = join(process.cwd(), "tutor-was-away");
+  if (last.includes("tutor is away") && !existsSync(away)) {
+    writeFileSync(away, "");
+    process.stderr.write("The fake tutor can't be reached.\n");
+    process.exit(1);
+  }
+  await reply([`Question ${number} of ${limit}: why is it that "${last}"?`]);
+  process.exit(0);
+}
+
+// The grader, marking a card's follow-ups: each reply that doesn't say "because" is shallow.
+if (prompt.includes("follow-up questions a tutor asked")) {
+  const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";
+  const replies = (work.match(/^Learner(?: \(aloud\))?: .*$/gm) ?? []).slice(1);
+  const shallow = replies.filter((line) => !line.includes("because"));
+  await reply([
+    JSON.stringify({
+      score: shallow.length === 0 ? 0.9 : 0.6,
+      points: [
+        {
+          point: "Answers each follow-up question soundly",
+          met: shallow.length === 0 ? "yes" : "partly",
+          comment: "",
+        },
+      ],
+      findings: shallow.map((line) => ({
+        error_type: "concept-gap",
+        detail: `Shallow: ${line.replace(/^Learner(?: \(aloud\))?: /, "")}`,
+      })),
+      feedback: "Say **why** each time.",
+      ...(prompt.includes("explained this aloud")
+        ? { clarity: { score: 0.7, feedback: "Lead with the reason." } }
         : {}),
     }),
   ]);

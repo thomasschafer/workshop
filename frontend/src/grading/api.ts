@@ -6,6 +6,7 @@ import type {
   DesignMarked,
   DesignOpened,
   DesignSession,
+  Exchange,
   FlaggedCard,
   MarkedReply,
   Review,
@@ -56,6 +57,20 @@ export const gradingApi = {
       { id, work, text, spoken },
       { timeoutMs: 0 },
     ),
+  /** The follow-up questions under way on a card, if there are any. */
+  followUps: (key: string) =>
+    request<{ exchange: Exchange | null }>("GET", `/cards/${path(key)}/follow-ups`).then(
+      (r) => r.exchange,
+    ),
+  /**
+   * Answers a card, starting its follow-ups, or the tutor's question waiting, and has the tutor
+   * ask its next question; with `text` null, asks it again for one it couldn't ask before.
+   */
+  answerFollowUp: (key: string, text: string | null, spoken: boolean) =>
+    request<Exchange>("POST", `/cards/${path(key)}/follow-ups`, { text, spoken }, { timeoutMs: 0 }),
+  /** Has the grader mark a card's follow-ups, which ends them; `id` is the attempt's. */
+  finishFollowUps: (key: string, id: string) =>
+    request<MarkedReply>("POST", `/cards/${path(key)}/follow-ups/finish`, { id }, { timeoutMs: 0 }),
   flagged: () => request<{ cards: FlaggedCard[] }>("GET", "/cards/flagged").then((r) => r.cards),
   review: (key: string) =>
     request<{ review: Review; cleared: boolean }>("POST", `/cards/${path(key)}/review`, undefined, {

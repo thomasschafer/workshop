@@ -89,11 +89,13 @@ A timed round puts a coding problem, a probability question or a design prompt a
 
 Cards, coding plans and solutions, design notes and what you say to the coaches can all be dictated, and some can be explained aloud: the grader then marks how clearly you put it, as well as whether it's right.
 
+A card answered in your own words can go deeper: the tutor asks a few follow-up questions about what you said, such as why it's so or what happens in an edge case, and the grader marks the whole exchange for how deeply you understand it. Each answer is saved as you give it, so you can close the app part-way and carry on.
+
 ## Mistakes, goals and the grader
 
 Wrong answers, failed submissions and what the grader finds go into a mistake log, each tagged with a kind of mistake, such as an off-by-one or a misreading, which you can confirm or change; a pack can add kinds of its own. Practice, and Continue, lean towards the skills your recent mistakes are in. Each goal a pack defines has a page showing its skills against the goal's target, how it's changed over the last few weeks, how long is left, and what's weakest.
 
-The grader, through your discussion provider's first model unless you give it one of its own under Settings, Models, or `[models.grader]` in your config, marks written and spoken work against a rubric: design sessions, timed rounds, a coding problem's plan and how its solution works, and a card answered in your own words. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
+The grader, through your discussion provider's first model unless you give it one of its own under Settings, Models, or `[models.grader]` in your config, marks written and spoken work against a rubric: design sessions, timed rounds, a coding problem's plan and how its solution works, and a card answered in your own words, with any follow-up questions on it. Its score counts towards scheduling and mastery, and what it finds goes in the mistake log. It also checks cards you've flagged with "This is wrong", unflagging those that are right, and proposing a fix for those that aren't, which changes your pack once you approve it.
 
 The author writes new items for a pack of your own, for what you're weakest in and the mistakes you make most: one model writes them, a model from another provider solves each blind and reviews it, and each must pass its check. Run it with `workshop author`, or Top up under Packs in the app, or have the server run it every so often, with `every` under `[author]`; [docs/author.md](docs/author.md) describes it. Questions you've found elsewhere can be added to a pack as drafts, under Packs or with `workshop pack import`, for the author to make into items.
 
