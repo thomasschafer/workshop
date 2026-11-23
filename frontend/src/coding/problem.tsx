@@ -551,11 +551,6 @@ export function ProblemView({
         lastRun.current = summary;
       }}
       onReloaded={(fresh) => {
-        if (fresh.session.part > session.part) {
-          setNotice(
-            `Part ${session.part + 1} passed. Part ${fresh.session.part + 1} adds to it, and your code is kept for it.`,
-          );
-        }
         confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
         void updateCachedCodingSession(itemKey, fresh.session);
         setOpened(fresh);
@@ -763,7 +758,7 @@ function Statement({
         const heading = `Part ${at + 1}${changedBy > at ? `, changed by part ${changedBy + 1}` : ""}`;
         return at === current ? (
           <section key={at} class="coding-part-new" aria-label={`Part ${at + 1}, new`}>
-            <h2 class="coding-subheading">{partOf(at, opened.part_count)} · New</h2>
+            <h2 class="coding-subheading">Part {at + 1} · New</h2>
             <Markdown text={part.prompt} class="learn-prompt" />
           </section>
         ) : (
@@ -808,6 +803,12 @@ function UnderstandStep({ opened, session, change, onNext }: StepProps & { onNex
   const answer = last ? pythonValue(JSON.parse(last.returns)) : example.output;
   return (
     <main class="learn-content">
+      {session.part > 0 ? (
+        <p class="coding-part-passed" role="status">
+          Part {session.part} passed. Part {session.part + 1} adds to it, and your code is kept for
+          it.
+        </p>
+      ) : null}
       {opened.part_count > 1 ? (
         <Statement opened={opened} session={session} />
       ) : (

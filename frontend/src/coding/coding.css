@@ -274,3 +274,9 @@
 .learn-question code {
   overflow-wrap: anywhere;
 }
+
+.coding-part-passed {
+  margin: 0;
+  color: var(--ok);
+  font-weight: 600;
+}

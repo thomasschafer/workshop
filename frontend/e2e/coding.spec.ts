@@ -813,7 +813,9 @@ test("works through a problem in parts, keeping the code from one part to the ne
   await phone.getByRole("button", { name: "Submit" }).tap();
   // Passing part 1 shows part 2, new, with part 1 folded away and the code kept.
   await expect(bar).toHaveText("Part 2 of 3", { timeout: 30_000 });
-  await expect(phone.getByRole("status").filter({ hasText: "Part 1 passed" })).toBeVisible();
+  await expect(phone.locator(".coding-part-passed")).toHaveText(
+    "Part 1 passed. Part 2 adds to it, and your code is kept for it.",
+  );
   await expect(phone.locator(".step.current")).toHaveText("Understand");
   const fresh = phone.getByRole("region", { name: "Part 2, new" });
   await expect(fresh).toContainText("undo()");
