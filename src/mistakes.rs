@@ -69,6 +69,10 @@ pub fn from_attempt(item: &Item, attempt: &Attempt) -> Option<NewMistake> {
             Some("wrong-approach"),
         ),
         Content::Design { .. } => ("Marked as forgotten".to_owned(), Some("concept-gap")),
+        Content::Review(_) => (
+            "Missed what's wrong with the change".to_owned(),
+            Some("missed-defect"),
+        ),
     };
     Some(NewMistake {
         id: format!("attempt-{}", attempt.id),
@@ -397,6 +401,6 @@ mod tests {
             log.mistakes[0].label.as_deref(),
             Some(packs[0].item("two-dice-seven").unwrap().label().as_str())
         );
-        assert_eq!(log.error_types.len(), 8);
+        assert_eq!(log.error_types.len(), 9);
     }
 }

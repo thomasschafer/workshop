@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Api, ApiFields};
+use crate::project::{Project, ProjectFile};
 
 /// A language a pack's programs are written in. Learners write code in Python, Rust and
 /// Haskell, and read code in any of them; C++ is only for reading.
@@ -101,22 +102,36 @@ pub struct Case {
 /// It can come in parts, each adding to what the earlier ones asked for: the learner keeps their
 /// code from one part to the next, and the earlier parts' tests must still pass, unless a part
 /// says it changes what an earlier one asked.
+///
+/// A codebase item that asks for a fix or a refactor is one too, worked in a project of several
+/// files rather than from a starter (see [`crate::project`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Coding {
     /// What the learner may solve it in.
     pub languages: Vec<Language>,
-    /// What the learner starts with in each language, such as reading the input.
-    pub starter: Vec<Source>,
+    /// What the learner starts with.
+    pub work: Work,
     /// How the tests call the learner's code, in API mode; without it, programs read stdin.
     pub api: Option<Api>,
     /// Its parts, in order, at least one: a problem not in parts is one part.
     pub parts: Vec<Part>,
-    /// How many random inputs `workshop pack check` compares each reference and brute force on.
+    /// How many random inputs `workshop pack check` compares each reference and brute force on:
+    /// none for a project, which has no brute force.
     pub random_inputs: u32,
     /// How it's meant to be solved, all its parts, shown once it's solved and when it comes back
     /// for review.
     pub approach: String,
     pub notes: Option<String>,
+}
+
+/// What the learner works in.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Work {
+    /// A program, or in API mode a module, of one file, from a starter in each language, such as
+    /// one reading the input.
+    Program { starter: Vec<Source> },
+    /// A project someone else wrote, of several files, in Python.
+    Project(Project),
 }
 
 /// One of a problem's parts. The first is what the problem asks to begin with, and each after it
@@ -126,9 +141,8 @@ pub struct Part {
     /// What it asks, in Markdown: the item's prompt for the first part, and its own section for
     /// the rest.
     pub prompt: String,
-    /// Solutions to it and every part before it, known to be right, one in each of the
-    /// problem's languages.
-    pub reference: Vec<Source>,
+    /// Its solutions, and for a project, the tests it brings.
+    pub work: PartWork,
     /// What solutions to it are compared with on random inputs. The first part always has one;
     /// a later part needs one only for what its new requirements add.
     pub brute_force: Option<BruteForce>,
@@ -141,6 +155,34 @@ pub struct Part {
     /// Earlier parts, counting from 0, whose requirements this one changes, so their tests and
     /// brute force no longer apply from here on.
     pub replaces: Vec<usize>,
+}
+
+/// A part's solutions, as the problem's [`Work`] has them.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PartWork {
+    /// Solutions to it and every part before it, known to be right, one in each of the
+    /// problem's languages.
+    Program { reference: Vec<Source> },
+    /// In a project, the test files it brings.
+    Project {
+        /// Tests the learner sees and runs, added to their project as they reach the part.
+        given: Vec<ProjectFile>,
+        /// Tests kept from the learner, run when they submit.
+        hidden: Vec<ProjectFile>,
+        /// The project as a solution to it and every part before it leaves it, without its tests,
+        /// in order of the files' names.
+        reference: Vec<ProjectFile>,
+    },
+}
+
+impl PartWork {
+    /// Its solutions in each language; none for a project's.
+    pub fn programs(&self) -> &[Source] {
+        match self {
+            Self::Program { reference } => reference,
+            Self::Project { .. } => &[],
+        }
+    }
 }
 
 /// A slow solution that's obviously right, and a program making random inputs to compare others
@@ -171,13 +213,59 @@ impl Coding {
 
     pub fn reference_in(&self, part: usize, language: Language) -> Option<&Source> {
         self.parts[part]
-            .reference
+            .work
+            .programs()
             .iter()
             .find(|s| s.language == language)
     }
 
+    /// Its starters, one per language; none for a project.
+    pub fn starters(&self) -> &[Source] {
+        match &self.work {
+            Work::Program { starter } => starter,
+            Work::Project(_) => &[],
+        }
+    }
+
     pub fn starter_in(&self, language: Language) -> Option<&Source> {
-        self.starter.iter().find(|s| s.language == language)
+        self.starters().iter().find(|s| s.language == language)
+    }
+
+    /// The project it's worked in, for a codebase item.
+    pub fn project(&self) -> Option<&Project> {
+        match &self.work {
+            Work::Program { .. } => None,
+            Work::Project(project) => Some(project),
+        }
+    }
+
+    /// The test files the learner has once they're on `part`, in a project: its own, and those
+    /// each part up to it brings.
+    pub fn test_files(&self, part: usize) -> Vec<&ProjectFile> {
+        let Some(project) = self.project() else {
+            return Vec::new();
+        };
+        let given = self.parts[..=part].iter().flat_map(|p| match &p.work {
+            PartWork::Project { given, .. } => given.as_slice(),
+            PartWork::Program { .. } => &[],
+        });
+        project
+            .files
+            .iter()
+            .filter(|f| f.is_test())
+            .chain(given)
+            .collect()
+    }
+
+    /// The hidden test files that apply once the learner is on `part`, in a project.
+    pub fn hidden_files(&self, part: usize) -> Vec<&ProjectFile> {
+        self.applying(part)
+            .into_iter()
+            .flat_map(|p| match &self.parts[p].work {
+                PartWork::Project { hidden, .. } => hidden.as_slice(),
+                PartWork::Program { .. } => &[],
+            })
+            .collect()
     }
 
     /// The parts whose examples, tests and brute force apply once the learner is on `part`: it,
@@ -537,7 +625,7 @@ impl Coding {
         }
         let coding = Self {
             languages,
-            starter,
+            work: Work::Program { starter },
             api,
             parts,
             random_inputs,
@@ -643,7 +731,7 @@ impl Part {
         }
         Ok(Self {
             prompt,
-            reference,
+            work: PartWork::Program { reference },
             brute_force,
             examples,
             tests,
@@ -751,7 +839,7 @@ impl Reading {
 
 /// The items of a Markdown list, one per line starting with `- ` or `* `, with any lines that
 /// follow an item, indented, as part of it.
-pub(crate) fn list(text: &str) -> Vec<String> {
+pub fn list(text: &str) -> Vec<String> {
     let mut items: Vec<String> = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim_start();

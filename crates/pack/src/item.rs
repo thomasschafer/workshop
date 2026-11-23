@@ -9,6 +9,7 @@ use workshop_tracks::TrackId;
 use crate::code::{Coding, CodingFields, MAX_PARTS, PartText, Reading, ReadingFields};
 use crate::manifest::{Manifest, is_slug};
 use crate::number::{self, Tolerance};
+use crate::project::{self, CodebaseFields, Review};
 
 /// The relative tolerance for a probability answer, unless the item gives its own.
 const DEFAULT_ANSWER_TOLERANCE: f64 = 0.005;
@@ -28,6 +29,9 @@ pub enum Kind {
     Reading,
     /// A design prompt, marked against a rubric.
     Design,
+    /// A small project of someone else's code, with a task in it: fixing a bug, reviewing a
+    /// change, or refactoring then extending it.
+    Codebase,
 }
 
 impl Kind {
@@ -37,7 +41,7 @@ impl Kind {
             Self::Card => TrackId::Review,
             Self::MentalMaths => TrackId::MentalMaths,
             Self::Probability => TrackId::Probability,
-            Self::Coding | Self::Reading => TrackId::Coding,
+            Self::Coding | Self::Reading | Self::Codebase => TrackId::Coding,
             Self::Design => TrackId::SystemDesign,
         }
     }
@@ -55,7 +59,7 @@ impl Kind {
             Self::Card | Self::MentalMaths => 1,
             Self::Reading => 2,
             Self::Probability => 3,
-            Self::Coding => 20,
+            Self::Coding | Self::Codebase => 20,
             Self::Design => 30,
         }
     }
@@ -72,9 +76,9 @@ impl Kind {
     /// coding problem: solving one again that came easily teaches little, as spacing helps
     /// remembering facts far more than solving problems. Short items, such as cards and mental
     /// maths, take a minute and are what spacing is for, so an easy rating only sends them
-    /// further off.
+    /// further off. Work in a codebase is the same.
     pub fn retires_when_easy(self) -> bool {
-        self == Self::Coding
+        matches!(self, Self::Coding | Self::Codebase)
     }
 
     /// Whether an item of this kind has one fixed answer that the app marks itself: code to
@@ -108,6 +112,21 @@ impl Kind {
             ],
             Self::Reading => &[("Explanation", true)],
             Self::Design => &[("Rubric", true), ("Notes", false), ("Brief", false)],
+            // Which are required depends on the task, so the task checks them.
+            Self::Codebase => &[
+                ("Explanation", false),
+                ("Defects", false),
+                ("Hints", false),
+                ("Notes", false),
+                ("Part 2", false),
+                ("Part 2 hints", false),
+                ("Part 3", false),
+                ("Part 3 hints", false),
+                ("Part 4", false),
+                ("Part 4 hints", false),
+                ("Part 5", false),
+                ("Part 5 hints", false),
+            ],
         }
     }
 }
@@ -143,8 +162,11 @@ pub enum Content {
     },
     MentalMaths(MentalMaths),
     Probability(Probability),
+    /// A problem to solve in code: from a starter, or in a codebase, a fix or a refactor.
     Coding(Coding),
     Reading(Reading),
+    /// A change to a codebase to review.
+    Review(Review),
     Design {
         /// What a good answer covers, one point each.
         rubric: Vec<String>,
@@ -334,6 +356,22 @@ impl Item {
         manifest: &Manifest,
         read: impl Fn(&str) -> Result<String, String>,
     ) -> Result<Self, String> {
+        Self::parse_in(path, default_id, source, manifest, read, |dir| {
+            Err(format!("{dir}/ isn't in the item's directory"))
+        })
+    }
+
+    /// Reads an item from its file, as [`Item::parse`] does, with `list` giving the files
+    /// directly in a directory of the item's, by name, for an item with a directory of files,
+    /// such as a codebase's project.
+    pub fn parse_in(
+        path: &str,
+        default_id: &str,
+        source: &str,
+        manifest: &Manifest,
+        read: impl Fn(&str) -> Result<String, String>,
+        list: impl Fn(&str) -> Result<Vec<String>, String>,
+    ) -> Result<Self, String> {
         let (front, body) = split_front_matter(source)?;
         let mut table: toml::Table = toml::from_str(front).map_err(|err| err.to_string())?;
         let mut common = toml::Table::new();
@@ -423,6 +461,26 @@ impl Item {
                 Content::Coding(Coding::new(
                     fields, &prompt, approach, hints, notes, later, &read,
                 )?)
+            }
+            Kind::Codebase => {
+                let fields: CodebaseFields =
+                    kind_fields.try_into().map_err(|err| err.to_string())?;
+                let sections = project::Sections {
+                    explanation: section("Explanation"),
+                    hints: section("Hints"),
+                    notes: section("Notes"),
+                    defects: section("Defects"),
+                    later: (2..=MAX_PARTS)
+                        .map(|n| PartText {
+                            prompt: section(&format!("Part {n}")),
+                            hints: section(&format!("Part {n} hints")),
+                        })
+                        .collect(),
+                };
+                match project::parse(fields, &prompt, sections, &read, &list)? {
+                    project::Codebase::Coding(coding) => Content::Coding(coding),
+                    project::Codebase::Review(review) => Content::Review(review),
+                }
             }
             Kind::Reading => {
                 let fields: ReadingFields =
@@ -607,6 +665,7 @@ fn kind_name(kind: Kind) -> &'static str {
         Kind::Coding => "coding",
         Kind::Reading => "reading",
         Kind::Design => "design",
+        Kind::Codebase => "codebase",
     }
 }
 
@@ -1102,7 +1161,10 @@ mod tests {
         assert_eq!(coding.parts[0].hints, ["Count."]);
         assert_eq!(coding.parts[1].hints, ["Pairs are two."]);
         assert!(coding.parts[2].hints.is_empty());
-        assert_eq!(coding.parts[1].reference[0].text, "# two/reference.py");
+        assert_eq!(
+            coding.parts[1].work.programs()[0].text,
+            "# two/reference.py"
+        );
         assert_eq!(
             coding.parts[1].brute_force.as_ref().unwrap().inputs.file,
             "two/inputs.py"

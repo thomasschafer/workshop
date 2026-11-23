@@ -52,6 +52,11 @@ const BUILT_IN: &[(&str, &str, &str)] = &[
         "Didn't find out something a design had to do or handle, or assumed it without asking",
     ),
     (
+        "missed-defect",
+        "Missed defect",
+        "Reviewing a change, didn't find something wrong with it",
+    ),
+    (
         "too-slow",
         "Too slow",
         "Got there, or would have, but took too long, or the solution does",

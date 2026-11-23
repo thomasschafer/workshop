@@ -491,7 +491,8 @@ impl Solution {
             approach: coding.approach.clone(),
             notes: coding.notes.clone(),
             reference: coding.parts[coding.last()]
-                .reference
+                .work
+                .programs()
                 .iter()
                 .map(|source| Reference {
                     language: source.language,

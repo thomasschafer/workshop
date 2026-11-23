@@ -1,0 +1,63 @@
+diff --git a/loans.py b/loans.py
+index a7ac7d8..8c1a1d1 100644
+--- a/loans.py
++++ b/loans.py
+@@ -3,6 +3,8 @@
+ import datetime
+ 
+ LOAN_DAYS = 21
++RENEWAL_DAYS = 14
++MAX_RENEWALS = 2
+ 
+ 
+ class LoanError(Exception):
+@@ -14,6 +16,7 @@ class Loan:
+         self.book_id = book_id
+         self.member = member
+         self.due = due
++        self.renewals = 0
+ 
+ 
+ class Loans:
+@@ -35,6 +38,20 @@ class Loans:
+         self.out[book_id] = loan
+         return loan
+ 
++    def renew(self, book_id, member, today):
++        """Renews a loan for another `RENEWAL_DAYS` days, up to `MAX_RENEWALS` times, unless
++        it's overdue, or someone is waiting for the book."""
++        loan = self.out[book_id]
++        if loan.member != member:
++            raise LoanError("only the borrower can renew a loan")
++        if loan.renewals > MAX_RENEWALS:
++            raise LoanError("that loan can't be renewed again")
++        if loan.due < today:
++            raise LoanError("an overdue loan can't be renewed")
++        loan.due = today + datetime.timedelta(days=RENEWAL_DAYS)
++        loan.renewals += 1
++        return loan
++
+     def give_back(self, book_id):
+         del self.out[book_id]
+ 
+diff --git a/test_loans.py b/test_loans.py
+index c08314b..fde5316 100644
+--- a/test_loans.py
++++ b/test_loans.py
+@@ -48,3 +48,16 @@ def test_overdue():
+     loans.lend("b2", "ben", MARCH_1 + datetime.timedelta(days=2))
+     assert [loan.book_id for loan in loans.overdue(datetime.date(2026, 3, 25))] == ["b1", "b2"]
+     assert loans.overdue(datetime.date(2026, 3, 22)) == []
++
++
++def test_renews_for_two_weeks():
++    _, loans = library()
++    loans.lend("b1", "ana", MARCH_1)
++    assert loans.renew("b1", "ana", datetime.date(2026, 3, 22)).due == datetime.date(2026, 4, 5)
++
++
++def test_renews_twice():
++    _, loans = library()
++    loans.lend("b1", "ana", MARCH_1)
++    loans.renew("b1", "ana", MARCH_1)
++    assert loans.renew("b1", "ana", MARCH_1).renewals == 2

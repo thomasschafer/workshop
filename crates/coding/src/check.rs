@@ -51,6 +51,9 @@ impl workshop_pack::Programs for Checker {
             }
             let cancel = CancellationToken::new();
             let checked = match &item.content {
+                Content::Coding(coding) if coding.project().is_some() => {
+                    crate::project::check(&self.runtime, coding, &cancel).await
+                }
                 Content::Coding(coding) => check_coding(&self.runtime, coding, &cancel).await,
                 Content::Reading(reading) => check_reading(&self.runtime, reading, &cancel).await,
                 _ => Ok(Verdict::Passed("has no programs to run".to_owned())),
@@ -136,6 +139,7 @@ pub async fn check_coding(
                 let graded = grade::run_all(
                     runtime,
                     coding,
+                    part,
                     grade::own_examples(coding, part),
                     program.language,
                     &program.text,
@@ -164,7 +168,7 @@ pub async fn check_coding(
                     .expect("built for each part with a brute force")
             })
             .collect();
-        for reference in &coding.parts[part].reference {
+        for reference in coding.parts[part].work.programs() {
             let graded = grade::grade(
                 runtime,
                 coding,
@@ -199,9 +203,16 @@ pub async fn check_coding(
             }
         }
     }
-    for starter in &coding.starter {
-        match grade::build_solution(runtime, coding, starter.language, &starter.text, cancel)
-            .await?
+    for starter in coding.starters() {
+        match grade::build_solution(
+            runtime,
+            coding,
+            0,
+            starter.language,
+            grade::Code::Program(&starter.text),
+            cancel,
+        )
+        .await?
         {
             Ok(program) => {
                 if coding.api.is_some()
@@ -239,12 +250,13 @@ fn passed(coding: &Coding) -> String {
     let references = |part: &workshop_pack::Part| {
         format!(
             "{} {}",
-            if part.reference.len() == 1 {
+            if part.work.programs().len() == 1 {
                 "the reference passes"
             } else {
                 "the references pass"
             },
-            part.reference
+            part.work
+                .programs()
                 .iter()
                 .map(|r| r.language.name())
                 .collect::<Vec<_>>()
@@ -1082,7 +1094,10 @@ mod tests {
         // Redo that forgets to be cleared by a new change passes part 2's tests, but not
         // part 3's, nor the brute force's random calls.
         let mut forgetful = buffer.clone();
-        let reference = &mut forgetful.parts[2].reference[0].text;
+        let workshop_pack::PartWork::Program { reference } = &mut forgetful.parts[2].work else {
+            panic!("not a program");
+        };
+        let reference = &mut reference[0].text;
         *reference = reference.replace(
             "        self.make((\"insert\", text))\n        self.undone.clear()",
             "        self.make((\"insert\", text))",
@@ -1094,9 +1109,10 @@ mod tests {
         );
 
         let mut misnamed = buffer.clone();
-        misnamed.starter[0].text = misnamed.starter[0]
-            .text
-            .replace("class TextBuffer", "class Buffer");
+        let workshop_pack::Work::Program { starter } = &mut misnamed.work else {
+            panic!("not a program");
+        };
+        starter[0].text = starter[0].text.replace("class TextBuffer", "class Buffer");
         let verdict = check_coding(&runtime, &misnamed, &cancel).await.unwrap();
         assert!(
             matches!(&verdict, Verdict::Failed(why) if why.starts_with("the starter starter.py crashed when it's imported, and should define the class TextBuffer") && why.contains("There's no class TextBuffer")),

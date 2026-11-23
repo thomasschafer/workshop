@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use workshop_pack::code::MAX_SIZE;
-use workshop_pack::{Case, Coding, Language, Part, output};
+use workshop_pack::{Case, Coding, Language, Part, ProjectFile, output};
 use workshop_runner::{Ending, MAX_OUTPUT_BYTES, size};
 
 use crate::programs::{Built, Flavour, Program, Run, Runtime};
@@ -186,28 +186,73 @@ pub fn shortened(text: &str) -> String {
     }
 }
 
+/// What a solution is: a program's text, or the files of a project.
+#[derive(Debug, Clone, Copy)]
+pub enum Code<'a> {
+    Program(&'a str),
+    /// A project's files, its tests among them or not: its tests are always the item's own.
+    Project(&'a [ProjectFile]),
+}
+
+impl<'a> From<&'a str> for Code<'a> {
+    fn from(text: &'a str) -> Self {
+        Self::Program(text)
+    }
+}
+
+impl<'a> From<&'a String> for Code<'a> {
+    fn from(text: &'a String) -> Self {
+        Self::Program(text)
+    }
+}
+
+impl<'a> From<&'a [ProjectFile]> for Code<'a> {
+    fn from(files: &'a [ProjectFile]) -> Self {
+        Self::Project(files)
+    }
+}
+
 /// Builds a solution, or one of the item's own, or says why it can't be run: a program, or in
-/// API mode, a module, which Workshop's driver imports and calls.
+/// API mode, a module, which Workshop's driver imports and calls, or for a project, its files
+/// with the tests that apply once the learner is on `part`, which Workshop's test driver runs.
 pub async fn build_solution(
     runtime: &Runtime,
     coding: &Coding,
+    part: usize,
     language: Language,
-    code: &str,
+    code: Code<'_>,
     cancel: &CancellationToken,
 ) -> Result<Result<Program, Graded>> {
-    let built = match &coding.api {
-        None => {
+    let built = match (code, &coding.api) {
+        (Code::Program(code), None) => {
             runtime
                 .build(language, code, Flavour::Plain, cancel)
                 .await?
         }
-        Some(api) => {
+        (Code::Program(code), Some(api)) => {
             let driver = crate::api::driver(api, language)?;
             runtime
                 .build_with(
                     language,
                     &driver,
                     &[(crate::api::MODULE, code)],
+                    Flavour::Plain,
+                    cancel,
+                )
+                .await?
+        }
+        (Code::Project(files), _) => {
+            let modules = crate::project::modules(coding, part, files)?;
+            let modules: Vec<(&str, &str)> = modules
+                .iter()
+                .map(|(path, text)| (path.as_str(), text.as_str()))
+                .collect();
+            runtime
+                .build_named(
+                    language,
+                    crate::project::DRIVER_FILE,
+                    crate::project::DRIVER,
+                    &modules,
                     Flavour::Plain,
                     cancel,
                 )
@@ -293,17 +338,18 @@ pub fn own_examples(coding: &Coding, part: usize) -> Vec<(CaseRef, &Case)> {
 }
 
 /// Runs a solution on the examples that apply at `part`, all of them, whichever it gets wrong.
-pub async fn run_examples(
+pub async fn run_examples<'a>(
     runtime: &Runtime,
     coding: &Coding,
     part: usize,
     language: Language,
-    code: &str,
+    code: impl Into<Code<'a>>,
     cancel: &CancellationToken,
 ) -> Result<Graded> {
     run_all(
         runtime,
         coding,
+        part,
         examples(coding, part),
         language,
         code,
@@ -312,16 +358,19 @@ pub async fn run_examples(
     .await
 }
 
-/// Runs a solution on `cases`, all of them, whichever it gets wrong.
-pub async fn run_all(
+/// Runs a solution on `cases`, all of them, whichever it gets wrong, once the learner is on
+/// `part`.
+pub async fn run_all<'a>(
     runtime: &Runtime,
     coding: &Coding,
+    part: usize,
     cases: Vec<(CaseRef, &Case)>,
     language: Language,
-    code: &str,
+    code: impl Into<Code<'a>>,
     cancel: &CancellationToken,
 ) -> Result<Graded> {
-    let program = match build_solution(runtime, coding, language, code, cancel).await? {
+    let program = match build_solution(runtime, coding, part, language, code.into(), cancel).await?
+    {
         Ok(program) => program,
         Err(graded) => return Ok(graded),
     };
@@ -363,8 +412,9 @@ impl Oracle {
         let brute_force = match build_solution(
             runtime,
             coding,
+            part,
             brute.program.language,
-            &brute.program.text,
+            Code::Program(&brute.program.text),
             cancel,
         )
         .await?
@@ -535,13 +585,13 @@ pub fn random_inputs(count: u32) -> impl Iterator<Item = (u64, u32)> {
 /// oracles' own failures, such as a brute force that crashes, are errors in the item rather than
 /// the solution.
 #[allow(clippy::too_many_arguments)]
-pub async fn grade(
+pub async fn grade<'a>(
     runtime: &Runtime,
     coding: &Coding,
     oracles: &[&Oracle],
     part: usize,
     language: Language,
-    code: &str,
+    code: impl Into<Code<'a>>,
     random: u32,
     cancel: &CancellationToken,
 ) -> Result<Result<Graded, String>> {
@@ -553,7 +603,8 @@ pub async fn grade(
             part + 1
         );
     }
-    let program = match build_solution(runtime, coding, language, code, cancel).await? {
+    let program = match build_solution(runtime, coding, part, language, code.into(), cancel).await?
+    {
         Ok(program) => program,
         Err(graded) => return Ok(Ok(graded)),
     };
@@ -787,7 +838,7 @@ mod tests {
             }
         };
         // What the learner's code prints goes to stderr, so it isn't taken for a result.
-        let chatty = coding.parts[0].reference[0].text.replace(
+        let chatty = coding.parts[0].work.programs()[0].text.replace(
             "    def text(self) -> str:\n",
             "    def text(self) -> str:\n        print(\"debugging\")\n",
         );
@@ -799,7 +850,7 @@ mod tests {
         assert_eq!(results[0].run.stderr.trim(), "debugging");
 
         // Part 1's code, kept for part 2, runs part 1's example and fails part 2's.
-        let part_one = coding.parts[0].reference[0].text.clone();
+        let part_one = coding.parts[0].work.programs()[0].text.clone();
         let ran = examples(part_one.clone(), 1).await;
         let Graded::Ran { results, total } = &ran else {
             panic!("didn't run");
@@ -853,7 +904,7 @@ mod tests {
         let runtime = runtime(dir.path(), Duration::from_secs(30));
         let cancel = CancellationToken::new();
         let coding = text_buffer();
-        let reference = coding.parts[0].reference[0].text.clone();
+        let reference = coding.parts[0].work.programs()[0].text.clone();
         let meddling = format!(
             "import os, sys\nread = sys.stdin.read()\nprint('imported')\n{}",
             reference.replace(
@@ -892,11 +943,11 @@ mod tests {
         let cancel = CancellationToken::new();
         let coding = text_buffer();
         // Undo that forgets deletes of nothing passes the examples, but not every random call.
-        let careless = coding.parts[1].reference[0].text.replace(
+        let careless = coding.parts[1].work.programs()[0].text.replace(
             "        removed = self.remove(count)\n        self.done.append((\"delete\", removed))",
             "        removed = self.remove(count)\n        if removed:\n            self.done.append((\"delete\", removed))",
         );
-        assert_ne!(careless, coding.parts[1].reference[0].text);
+        assert_ne!(careless, coding.parts[1].work.programs()[0].text);
         let mut oracles = Vec::new();
         for part in coding.compared_with(1) {
             oracles.push(

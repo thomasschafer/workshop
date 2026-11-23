@@ -6,9 +6,10 @@ pub mod api;
 pub mod check;
 pub mod grade;
 pub mod programs;
+pub mod project;
 pub mod sandbox;
 
 pub use check::{Checker, Unconfined};
-pub use grade::{CaseRef, CaseResult, Graded, Oracle, OracleCase, grade, run_examples};
+pub use grade::{CaseRef, CaseResult, Code, Graded, Oracle, OracleCase, grade, run_examples};
 pub use programs::{Built, Flavour, Program, Run, Runtime, needs};
 pub use sandbox::Sandbox;

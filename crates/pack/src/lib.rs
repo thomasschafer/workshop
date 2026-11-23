@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod code;
+pub mod diff;
 pub mod drafts;
 pub mod error_types;
 mod item;
@@ -14,6 +15,7 @@ mod manifest;
 pub mod mental;
 pub mod number;
 pub mod output;
+pub mod project;
 pub mod script;
 pub mod simulate;
 
@@ -23,7 +25,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 pub use api::Api;
-pub use code::{BruteForce, Case, Coding, Language, Part, Question, Reading, ReadingCheck, Source};
+pub use code::{
+    BruteForce, Case, Coding, Language, Part, PartWork, Question, Reading, ReadingCheck, Source,
+    Work,
+};
 pub use drafts::Draft;
 pub use error_types::ErrorType;
 pub use item::{
@@ -31,6 +36,7 @@ pub use item::{
     replace_section,
 };
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
+pub use project::{Defect, Project, ProjectFile, Review, Task};
 
 /// How many questions a mental maths template must make without fault to pass its check.
 const MENTAL_MATHS_CHECKS: u64 = 200;
@@ -184,9 +190,10 @@ impl Pack {
                 ),
             };
             let read = |file: &str| read_item_file(&files, dir, file);
+            let list = |sub: &str| list_item_dir(&files, dir, sub);
             let parsed = std::str::from_utf8(bytes)
                 .map_err(|_| "it isn't UTF-8".to_owned())
-                .and_then(|source| Item::parse(path, default_id, source, &manifest, read));
+                .and_then(|source| Item::parse_in(path, default_id, source, &manifest, read, list));
             match parsed {
                 Ok(item) if items.iter().any(|other| other.id == item.id) => {
                     let other = items
@@ -296,6 +303,47 @@ fn read_item_file(
         format!("{file:?} isn't in the item's directory, where its front matter says it is")
     })?;
     String::from_utf8(bytes.clone()).map_err(|_| format!("{file:?} isn't UTF-8"))
+}
+
+/// The files directly in a directory of an item's own, by name. A directory inside it is a
+/// mistake, as an item's directories of files, such as a project, keep them in one place.
+fn list_item_dir(
+    files: &BTreeMap<String, Vec<u8>>,
+    dir: Option<&str>,
+    sub: &str,
+) -> Result<Vec<String>, String> {
+    let Some(dir) = dir else {
+        return Err(format!(
+            "it refers to {sub:?}, so it needs a directory of its own, with an item.md"
+        ));
+    };
+    if sub
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(format!(
+            "{sub:?} should be a path inside the item's directory"
+        ));
+    }
+    let prefix = format!("{dir}/{sub}/");
+    let mut names = Vec::new();
+    for path in files.keys() {
+        let Some(name) = path.strip_prefix(&prefix) else {
+            continue;
+        };
+        if name.contains('/') {
+            return Err(format!(
+                "{sub}/ should hold its files directly, and {sub}/{name} is in a directory inside it"
+            ));
+        }
+        names.push(name.to_owned());
+    }
+    if names.is_empty() {
+        return Err(format!(
+            "{sub}/ isn't in the item's directory, where its front matter says it is"
+        ));
+    }
+    Ok(names)
 }
 
 fn read_dir(root: &Path, dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
@@ -435,6 +483,28 @@ fn check_without_programs(item: &Item) -> Result<String, String> {
         Content::Coding(_) | Content::Reading(_) => {
             unreachable!("checked by running their programs")
         }
+        // Reading it applied the change, and found each defect where it says.
+        Content::Review(review) => Ok(format!(
+            "the change to {} applies, and its {} {} where {} say{}",
+            review
+                .changed
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
+            review.defects.len(),
+            if review.defects.len() == 1 {
+                "defect is"
+            } else {
+                "defects are"
+            },
+            if review.defects.len() == 1 {
+                "it"
+            } else {
+                "they"
+            },
+            if review.defects.len() == 1 { "s" } else { "" },
+        )),
         Content::Design { rubric, brief, .. } => Ok(format!(
             "a rubric of {} points, {}",
             rubric.len(),
@@ -522,7 +592,31 @@ mod tests {
                 "{count} reading items in {language:?}"
             );
         }
-        assert_eq!(report.skipped().len(), coding + reading);
+        // A task of each sort in a codebase: fixes and refactors run their projects, and a
+        // review is checked by applying its change.
+        for task in [Task::Fix, Task::Review, Task::Refactor] {
+            let count = pack
+                .items
+                .iter()
+                .filter(|i| match &i.content {
+                    Content::Coding(coding) => coding.project().is_some_and(|p| p.task == task),
+                    Content::Review(_) => task == Task::Review,
+                    _ => false,
+                })
+                .count();
+            assert_eq!(count, 1, "{count} codebase items to {task:?}");
+            assert!(
+                pack.items
+                    .iter()
+                    .all(|i| i.kind != Kind::Codebase || i.track == TrackId::Coding)
+            );
+        }
+        let run = pack
+            .items
+            .iter()
+            .filter(|i| i.kind == Kind::Codebase && matches!(i.content, Content::Coding(_)))
+            .count();
+        assert_eq!(report.skipped().len(), coding + reading + run);
     }
 
     #[tokio::test]
@@ -584,8 +678,8 @@ mod tests {
             panic!("not a coding item");
         };
         let part = &coding.parts[0];
-        assert_eq!(part.reference[0].language, Language::Python);
-        assert!(part.reference[0].text.starts_with("print(sum"));
+        assert_eq!(part.work.programs()[0].language, Language::Python);
+        assert!(part.work.programs()[0].text.starts_with("print(sum"));
         assert_eq!(part.examples[0].output, "3");
         assert_eq!(part.tests.len(), 1);
         assert_eq!(part.prompt, "Roll some dice.");

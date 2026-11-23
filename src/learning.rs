@@ -874,7 +874,7 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
             question: reading.question.clone(),
             explanation: reading.explanation.clone(),
         },
-        Content::Coding(_) | Content::Design { .. } => {
+        Content::Coding(_) | Content::Design { .. } | Content::Review(_) => {
             unreachable!("only short items are in the deck")
         }
     };

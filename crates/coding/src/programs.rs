@@ -396,11 +396,36 @@ impl Runtime {
         flavour: Flavour,
         cancel: &CancellationToken,
     ) -> Result<Built> {
+        let file = format!("main.{}", language.extension());
+        self.build_named(language, &file, source, modules, flavour, cancel)
+            .await
+    }
+
+    /// Builds a program from its source, in a file of this name, and modules of its own beside
+    /// it, as [`Runtime::build_with`] does. Only Python, which isn't compiled, can be named.
+    pub async fn build_named(
+        &self,
+        language: Language,
+        file: &str,
+        source: &str,
+        modules: &[(&str, &str)],
+        flavour: Flavour,
+        cancel: &CancellationToken,
+    ) -> Result<Built> {
+        let main = format!("main.{}", language.extension());
+        anyhow::ensure!(
+            file == main || language == Language::Python,
+            "only a Python program's file can be named, not {file:?}"
+        );
+        anyhow::ensure!(
+            file.ends_with(&format!(".{}", language.extension())) && !file.contains(['/', '\\']),
+            "{file:?} can't be the name of a program's file"
+        );
         let (compiler, tool) = match self.compiler(language, flavour, cancel).await? {
             Ok(compiler) => compiler,
             Err(missing) => return Ok(Built::Unavailable(missing)),
         };
-        let file = format!("main.{}", language.extension());
+        let file = file.to_owned();
         if let Some((name, _)) = modules
             .iter()
             .find(|(name, _)| *name == file || name.contains(['/', '\\']) || name == &"built")
@@ -408,7 +433,7 @@ impl Runtime {
             anyhow::bail!("{name:?} can't be the name of a program's module");
         }
         let compiled = format!("{compiler:?}");
-        let mut parts = vec![language.id(), compiled.as_str(), source];
+        let mut parts = vec![language.id(), compiled.as_str(), file.as_str(), source];
         for (name, text) in modules {
             parts.extend([*name, *text]);
         }

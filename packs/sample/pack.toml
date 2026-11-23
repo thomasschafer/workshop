@@ -2,7 +2,7 @@
 # docs/packs.md for the format.
 id = "sample"
 name = "Sample pack"
-description = "A few of each kind of item: review cards, mental maths, probability, coding problems and code to read."
+description = "A few of each kind of item: review cards, mental maths, probability, coding problems, code to read and work in a codebase."
 
 [[skills]]
 id = "algorithms.complexity"
@@ -27,6 +27,18 @@ name = "Dynamic programming"
 [[skills]]
 id = "data-structures"
 name = "Data structures"
+
+[[skills]]
+id = "debugging"
+name = "Debugging"
+
+[[skills]]
+id = "code-review"
+name = "Code review"
+
+[[skills]]
+id = "refactoring"
+name = "Refactoring"
 
 [[skills]]
 id = "systems.reliability"
