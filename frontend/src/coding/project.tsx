@@ -5,23 +5,8 @@ import type { EditorSettings } from "../hooks/useEditorSettings";
 import type { VersionedSaver } from "../saver";
 import { codingApi } from "./api";
 import { EditorPane, projectFile } from "./editorPane";
-import { newFileProblem, search } from "./steps";
+import { fileState, newFileProblem, search } from "./steps";
 import type { OpenedProject, ProjectFile } from "./types";
-
-/** Whether a project's file differs from how it's given: changed, added, or as it was. */
-export type FileState = "changed" | "added" | null;
-
-export function fileState(file: ProjectFile, text: string): FileState {
-  if (file.original === null) return "added";
-  return text === file.original ? null : "changed";
-}
-
-/** The file a project opens at: the one open last, or its first that isn't a test. */
-export function openAt(project: OpenedProject, file: string | null | undefined): string {
-  const files = project.files;
-  if (file && files.some((f) => f.path === file)) return file;
-  return (files.find((f) => !f.read_only) ?? files[0])?.path ?? "";
-}
 
 /**
  * A project's files, one at a time in the editor, with a menu to switch between them that

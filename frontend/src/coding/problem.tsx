@@ -44,13 +44,14 @@ import {
   updateCachedCodingDraft,
   updateCachedCodingSession,
 } from "./offline";
-import { openAt, ProjectFiles } from "./project";
+import { ProjectFiles } from "./project";
 import { ChangesView, ReviewView } from "./review";
 import {
   applying,
   describeCase,
   describeRun,
   lastCall,
+  openAt,
   partOf,
   printedTooMuch,
   pythonValue,

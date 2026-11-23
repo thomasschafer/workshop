@@ -6,6 +6,8 @@ import type {
   DiffLine,
   Mode,
   OpenedPart,
+  OpenedProject,
+  ProjectFile,
   Run,
   Session,
   StepName,
@@ -61,6 +63,21 @@ export const TASKS: Record<Task, string> = {
   review: "Review a change",
   refactor: "Refactor and extend",
 };
+
+/** Whether a project's file differs from how it's given: changed, added, or as it was. */
+export type FileState = "changed" | "added" | null;
+
+export function fileState(file: ProjectFile, text: string): FileState {
+  if (file.original === null) return "added";
+  return text === file.original ? null : "changed";
+}
+
+/** The file a project opens at: the one open last, or its first that isn't a test. */
+export function openAt(project: OpenedProject, file: string | null | undefined): string {
+  const files = project.files;
+  if (file && files.some((f) => f.path === file)) return file;
+  return (files.find((f) => !f.read_only) ?? files[0])?.path ?? "";
+}
 
 /** Which test a case in a project is, from its input, such as `test_loans.py::test_due`. */
 export function testOf(input: string): { file: string; name: string } | null {

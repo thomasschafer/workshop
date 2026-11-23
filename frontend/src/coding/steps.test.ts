@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   applying,
+  commentIsOn,
+  commentPlace,
   describeCase,
   describeRun,
+  fileState,
+  fold,
   formatSize,
   lastCall,
+  MOST_FOUND,
+  newFileProblem,
+  openAt,
   partOf,
   printedTooMuch,
   pythonLiteral,
@@ -12,10 +19,13 @@ import {
   reached,
   sameReturn,
   sameSitting,
+  search,
   showCalls,
   stepAfter,
   stepsFor,
   suggestedRating,
+  testLabel,
+  testOf,
 } from "./steps";
 import type { Session } from "./types";
 
@@ -156,5 +166,113 @@ describe("steps", () => {
     expect(sameSitting(here, { ...here, plan: "other" })).toBe(true);
     expect(sameSitting(here, { ...here, part: 2, plans: ["a", "b"] })).toBe(false);
     expect(sameSitting(here, { ...here, started_at: 6 })).toBe(false);
+  });
+});
+
+describe("work in a codebase", () => {
+  it("starts solving a project at its plan", () => {
+    expect(stepsFor("solve", true)).toEqual(["plan", "code", "test", "review"]);
+    expect(stepsFor("recall", true)).toEqual(["plan", "review"]);
+    expect(stepAfter("solve", "plan", true)).toBe("code");
+    expect(reached("solve", "code", "understand", true)).toBe(false);
+    expect(reached("solve", "code", "plan", true)).toBe(true);
+    expect(stepsFor("solve")[0]).toBe("understand");
+  });
+
+  it("names a project's tests from their cases", () => {
+    expect(testOf("test_loans.py::test_lends_for_three_weeks\n")).toEqual({
+      file: "test_loans.py",
+      name: "test_lends_for_three_weeks",
+    });
+    expect(testOf("1 2 3")).toBeNull();
+    expect(testOf("a::b::c")).toBeNull();
+    expect(testLabel("test_a_day_missed_ends_the_streak")).toBe("a day missed ends the streak");
+  });
+
+  it("searches a project's files, ignoring case", () => {
+    const files = [
+      {
+        path: "words.py",
+        text: "import re\n\ndef split_words(text):\n    return RE.split(text)\n",
+      },
+      { path: "stats.py", text: "from words import split_words\n" },
+    ];
+    expect(search(files, "re.split")).toEqual([
+      { path: "words.py", line: 4, text: "return RE.split(text)" },
+    ]);
+    expect(search(files, "split_words").map((f) => `${f.path}:${f.line}`)).toEqual([
+      "words.py:3",
+      "stats.py:1",
+    ]);
+    expect(search(files, "  ")).toEqual([]);
+    const many = [{ path: "x.py", text: "x\n".repeat(MOST_FOUND + 10) }];
+    expect(search(many, "x")).toHaveLength(MOST_FOUND);
+  });
+
+  it("checks a new file's name as the server does", () => {
+    expect(newFileProblem("clock.py", ["tracker.py"])).toBeNull();
+    expect(newFileProblem("tracker.py", ["tracker.py"])).toMatch(/already/);
+    expect(newFileProblem("test_clock.py", [])).toMatch(/Test files/);
+    expect(newFileProblem("lib/clock.py", [])).toMatch(/letters/);
+    expect(newFileProblem(".clock.py", [])).toMatch(/letters/);
+    expect(newFileProblem("notes.txt", [])).toMatch(/\.py/);
+  });
+
+  it("marks a project's files the learner has changed or added", () => {
+    const file = (original: string | null) => ({
+      path: "a.py",
+      code: { text: "x = 1\n", version: "v", path: "/p/a.py" },
+      original,
+      read_only: false,
+      uri: "file:///p/a.py",
+    });
+    expect(fileState(file("x = 1\n"), "x = 1\n")).toBeNull();
+    expect(fileState(file("x = 1\n"), "x = 2\n")).toBe("changed");
+    expect(fileState(file(null), "")).toBe("added");
+    const project = {
+      task: "fix" as const,
+      files: [{ ...file("t"), path: "test_a.py", read_only: true }, file("x")],
+      editor_mode: "python",
+      lsp: null,
+      empty_version: "e",
+    };
+    // The file open last, or else the first that isn't a test.
+    expect(openAt(project, "test_a.py")).toBe("test_a.py");
+    expect(openAt(project, "gone.py")).toBe("a.py");
+    expect(openAt(project, null)).toBe("a.py");
+  });
+
+  it("folds long stretches of a change kept the same", () => {
+    const kept = (n: number) => ({ kind: "kept" as const, old: n, new: n, text: `${n}` });
+    const lines = [
+      ...[1, 2, 3, 4, 5].map(kept),
+      { kind: "added" as const, old: null, new: 6, text: "new" },
+      ...[6, 7, 8, 9, 10, 11].map(kept),
+    ];
+    const shown = fold(lines, 2);
+    expect(shown[0]).toEqual({ folded: 3, from: 0 });
+    expect(shown.slice(1, 6).map((s) => ("line" in s ? s.line.text : null))).toEqual([
+      "4",
+      "5",
+      "new",
+      "6",
+      "7",
+    ]);
+    expect(shown[6]).toEqual({ folded: 4, from: 8 });
+    expect(fold(lines, 10).every((s) => "line" in s)).toBe(true);
+  });
+
+  it("places a review's comments", () => {
+    const comment = { id: "c", file: "loans.py", line: 47, old: false, text: "Off by one" };
+    expect(commentPlace(comment)).toBe("loans.py, line 47");
+    expect(commentPlace({ ...comment, old: true })).toBe("loans.py, old line 47");
+    expect(commentPlace({ ...comment, line: null })).toBe("loans.py");
+    expect(commentPlace({ ...comment, file: null, line: null })).toBe("The whole change");
+    const added = { kind: "added" as const, old: null, new: 47, text: "x" };
+    const removed = { kind: "removed" as const, old: 47, new: null, text: "y" };
+    expect(commentIsOn(comment, "loans.py", added)).toBe(true);
+    expect(commentIsOn(comment, "loans.py", removed)).toBe(false);
+    expect(commentIsOn({ ...comment, old: true }, "loans.py", removed)).toBe(true);
+    expect(commentIsOn(comment, "catalogue.py", added)).toBe(false);
   });
 });
