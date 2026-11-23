@@ -120,11 +120,12 @@ import Data.IORef (newIORef)
 import GHC
   ( GhcLink (LinkInMemory),
     GhcMode (CompManager),
-    InteractiveImport (IIModule),
+    InteractiveImport (IIDecl),
     LoadHowMuch (LoadAllTargets),
     SuccessFlag (Failed),
     compileExprRemote,
     defaultErrorHandler,
+    getLogger,
     getSession,
     getSessionDynFlags,
     guessTarget,
@@ -138,6 +139,7 @@ import GHC
     setContext,
     setSessionDynFlags,
     setTargets,
+    simpleImportDecl,
   )
 import GHC.Driver.Backend (backendGeneratesCode, interpreterBackend)
 import GHC.Driver.DynFlags
@@ -148,7 +150,7 @@ import GHC.Driver.DynFlags
 import GHC.Driver.Env (hscInterp)
 import GHC.Driver.Monad (Ghc (unGhc), Session (Session))
 import GHC.Runtime.Interpreter (evalIO)
-import GHC.Wasm.Prim (JSString, JSVal, fromJSString)
+import GHC.Wasm.Prim (JSString (..), JSVal, fromJSString)
 import System.IO (IOMode (WriteMode), hFlush, hPutStr, hSetEncoding, stderr, stdout, utf8, withFile)
 
 foreign import javascript "wrapper"
@@ -191,7 +193,8 @@ myMain libdirJs = do
                 liftIO $ ioError (userError "load returned Failed")
             )
             $ do
-              (dflags, _, _) <- parseDynamicFlags baseDflags (map noLoc (words flagsStr))
+              logger <- getLogger
+              (dflags, _, _) <- parseDynamicFlags logger baseDflags (map noLoc (words flagsStr))
               _ <- setSessionDynFlags dflags
               setTargets []
               void $ load LoadAllTargets
@@ -204,7 +207,7 @@ myMain libdirJs = do
                   ioError (userError "load returned Failed")
                 _ ->
                   when (backendGeneratesCode (backend dflags)) $ do
-                    setContext [IIModule (mkModuleName "Main")]
+                    setContext [IIDecl (simpleImportDecl (mkModuleName "Main"))]
                     hval <- compileExprRemote "Main.main"
                     env <- getSession
                     res <- liftIO $ try (evalIO (hscInterp env) hval)
