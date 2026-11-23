@@ -14,7 +14,7 @@ describe("matching a key press to a shortcut", () => {
   it("takes Cmd on a Mac and Ctrl elsewhere", () => {
     expect(matchShortcut(press("Enter", { metaKey: true }), true)).toBe("runSample");
     expect(matchShortcut(press("Enter", { ctrlKey: true }), false)).toBe("runSample");
-    // Ctrl on a Mac is for talking, and for Helix's keys.
+    // Ctrl on a Mac is for Helix's keys.
     expect(matchShortcut(press("Enter", { ctrlKey: true }), true)).toBeNull();
     expect(matchShortcut(press("Enter", { metaKey: true }), false)).toBeNull();
   });

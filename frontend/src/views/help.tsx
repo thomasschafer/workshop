@@ -46,8 +46,7 @@ export function Help({ onShortcuts }: { onShortcuts: () => void }) {
           ones. Tap Cancel on a card to drop it before it changes anything.
         </p>
         <p>
-          On a computer, you can hold Ctrl instead of the button: on its own, rather than with
-          another key as for a shortcut. There are{" "}
+          On a computer, there are{" "}
           <button type="button" class="text-button inline" onClick={onShortcuts}>
             keyboard shortcuts
           </button>{" "}

@@ -31,7 +31,6 @@ import { usePuzzleOffers } from "./hooks/usePuzzleOffers";
 import { useRun } from "./hooks/useRun";
 import { useSampleFinding } from "./hooks/useSampleFinding";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { useTalkKey } from "./hooks/useTalkKey";
 import { useUiStateSaver } from "./hooks/useUiStateSaver";
 import { getAocPuzzle, getHelpers, mergeAocPuzzle, putHelpers } from "./offline/db";
 import { findMissingModule, isUpToDate } from "./packages";
@@ -839,11 +838,9 @@ export function App({
 
   // The picker is the home screen until a puzzle is open, and can be reopened from the header.
   const showPicker = picking || puzzle === null;
-  // The talk button's state, and where it's hidden, apply to the Ctrl key just the same.
   // Only for the code, and in place of the controls, which lowering it brings back.
   const keyboardShown = ownKeyboard && keyboard.wanted && shownTab === "code" && !showPicker;
   const controlsHidden = showPicker || shownTab === "problem" || zen || keyboardShown;
-  useTalkKey(dictationMethod !== "keyboard" && !controlsHidden && sheet === null, talk);
 
   const problemView = puzzle ? (
     <ProblemView

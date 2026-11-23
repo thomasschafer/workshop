@@ -16,12 +16,6 @@ export function ShortcutsModal({ helixOn, onClose }: { helixOn: boolean; onClose
               <td>{description}</td>
             </tr>
           ))}
-          <tr>
-            <th>
-              <kbd>Ctrl</kbd>
-            </th>
-            <td>Hold, on its own, to talk</td>
-          </tr>
         </tbody>
       </table>
       <p class="muted small">
