@@ -23,16 +23,16 @@ let phone: Page;
 const token = () => readFileSync(join(CODING_HOME, "config", "token"), "utf8").trim();
 const ITEM = "/api/coding/items/sample/first-repeat";
 
-/** Replaces the problem's Python draft on the server, as typing it in full would. */
-async function writeCode(text: string): Promise<void> {
-  const opened = await phone.request.post(`${ITEM}/open`);
+/** Replaces a problem's Python draft on the server, as typing it in full would. */
+async function writeCode(text: string, item = ITEM): Promise<void> {
+  const opened = await phone.request.post(`${item}/open`);
   expect(opened.ok()).toBe(true);
   const { languages } = (await opened.json()) as {
     languages: { id: string; code: { version: string } }[];
   };
   const python = languages.find((l) => l.id === "python");
   if (!python) throw new Error("the problem has no Python draft");
-  const saved = await phone.request.put(`${ITEM}/code/python`, {
+  const saved = await phone.request.put(`${item}/code/python`, {
     data: { text, version: python.code.version },
   });
   expect(saved.ok()).toBe(true);
@@ -61,13 +61,13 @@ test.afterAll(async () => {
 
 test("offers the Coding track at home, starting with something quick", async () => {
   const coding = phone.locator(".track", { hasText: "Coding" });
-  await expect(coding).toContainText("21 new");
+  await expect(coding).toContainText("23 new");
   const next = phone.locator(".continue");
   await expect(next).toContainText("Adding to a global");
   await expect(next).toContainText("Coding · Something new");
   await coding.tap();
   await expect(phone).toHaveURL(/\/coding$/);
-  await expect(phone.locator(".coding-item")).toHaveCount(21);
+  await expect(phone.locator(".coding-item")).toHaveCount(23);
   await expect(phone.locator(".coding-item", { hasText: "Count the islands" })).toContainText(
     "Problem · New",
   );
@@ -763,4 +763,81 @@ test("saves coding problems for offline use, works through one offline, and sync
       { timeout: 15_000 },
     )
     .toBe("done");
+});
+
+/** A file of the sample pack's text buffer, a problem in parts in API mode. */
+const textBuffer = (file: string) =>
+  readFileSync(
+    join(
+      import.meta.dirname,
+      "..",
+      "..",
+      "packs",
+      "sample",
+      "items",
+      "stateful",
+      "text-buffer",
+      file,
+    ),
+    "utf8",
+  );
+
+/** Whether the page scrolls sideways, which nothing on a phone should make it. */
+const scrollsSideways = () =>
+  phone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+
+test("works through a problem in parts, keeping the code from one part to the next", async () => {
+  await phone.goto("/coding/sample/text-buffer");
+  const bar = phone.locator(".coding-part-bar");
+  await expect(bar).toHaveText("Part 1 of 3");
+  // In API mode, an example is calls, and understanding it is saying what the last returns.
+  const example = phone.getByRole("region", { name: "Example 1" });
+  await expect(example).toContainText('insert(" world")');
+  await phone.getByLabel(/What does text\(\) return/).fill("hello wo");
+  await phone.getByRole("button", { name: "Check" }).tap();
+  await expect(phone.getByRole("region", { name: "Answer" })).toContainText("Right");
+  expect(await scrollsSideways()).toBe(false);
+  await phone.getByRole("button", { name: "Next: plan" }).tap();
+  await phone.getByLabel("How will you solve it?").fill("A list of characters");
+  await phone.getByRole("button", { name: "Next: code" }).tap();
+  // The starter is the class to fill in.
+  const editor = phone.locator(".cm-content");
+  await expect(editor).toContainText("class TextBuffer");
+  await expect(editor).toContainText("def delete(self, count: int) -> None:");
+  expect(await scrollsSideways()).toBe(false);
+
+  const item = "/api/coding/items/sample/text-buffer";
+  await writeCode(textBuffer("reference.py"), item);
+  await phone.reload();
+  await expect(editor).toContainText("self.chars.extend(text)");
+  await phone.getByRole("button", { name: "Submit" }).tap();
+  // Passing part 1 shows part 2, new, with part 1 folded away and the code kept.
+  await expect(bar).toHaveText("Part 2 of 3", { timeout: 30_000 });
+  await expect(phone.getByRole("status").filter({ hasText: "Part 1 passed" })).toBeVisible();
+  await expect(phone.locator(".step.current")).toHaveText("Understand");
+  const fresh = phone.getByRole("region", { name: "Part 2, new" });
+  await expect(fresh).toContainText("undo()");
+  await expect(phone.locator(".coding-parts details summary")).toHaveText(["Part 1"]);
+  expect(await scrollsSideways()).toBe(false);
+
+  // Coming back, it's where it was left: part 2, with part 1's code.
+  await phone.reload();
+  await expect(bar).toHaveText("Part 2 of 3");
+  await phone.getByRole("button", { name: "Skip" }).tap();
+  await expect(phone.getByLabel(/change your code for part 2/)).toBeVisible();
+  await phone.getByLabel(/change your code for part 2/).fill("A stack of changes to reverse");
+  await phone.getByRole("button", { name: "Next: code" }).tap();
+  await expect(editor).toContainText("self.chars.extend(text)");
+  await expect(editor).not.toContainText("def undo");
+  // Part 1's example still passes; part 2's doesn't yet, and says what came back.
+  await phone.getByRole("button", { name: "Run examples" }).tap();
+  const results = phone.getByRole("region", { name: "Examples run" });
+  await expect(results).toContainText("1 of 2 examples right", { timeout: 20_000 });
+  await expect(results).toContainText("Part 2's example 1: Crashed");
+  await expect(results).toContainText("undo()  ✗ stopped here");
+  await expect(results).toContainText("TextBuffer has no undo to call");
+  expect(await scrollsSideways()).toBe(false);
+  // A hint for the part being worked on.
+  await phone.getByRole("button", { name: "A hint" }).tap();
+  await expect(phone.getByRole("list", { name: "Hints" })).toContainText("reverse it");
 });

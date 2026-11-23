@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { showCalls } from "../coding/steps";
 import { errorMessage } from "../errors";
 import { BriefView, MarkedView } from "../grading/marked";
 import { useConnection } from "../hooks/useConnection";
@@ -463,8 +464,14 @@ function RoundView({
           // The examples are fixed for the item, in order.
           <div key={at} class="round-example">
             <span class="muted">Example {at + 1}</span>
-            <pre>{example.input}</pre>
-            <pre>{example.output}</pre>
+            {opened.api ? (
+              <pre>{showCalls(opened.api, example.input, example.output)}</pre>
+            ) : (
+              <>
+                <pre>{example.input}</pre>
+                <pre>{example.output}</pre>
+              </>
+            )}
           </div>
         ))}
         {opened.source ? <p class="learn-source muted">Source: {opened.source}</p> : null}

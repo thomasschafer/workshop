@@ -23,6 +23,10 @@ export interface Session {
   mode: Mode;
   step: StepName;
   language: Language;
+  /** For a problem in parts, the part they're on, counting from 0. */
+  part: number;
+  /** For a problem in parts, how they planned each part before the one they're on. */
+  plans: string[];
   prediction: string | null;
   plan: string;
   passed: boolean;
@@ -58,12 +62,12 @@ export interface OfflineItem {
   key: string;
   label: string;
   track: OpenedTrack;
-  prompt: string;
   skills: string[];
   source: string | null;
   minutes: number;
-  examples: Case[];
-  hints: string[];
+  /** Every part, shown only as far as the session has reached. */
+  parts: OpenedPart[];
+  api: Api | null;
   languages: OfflineLanguage[];
   session: Session | null;
   previous_plan: string | null;
@@ -72,7 +76,8 @@ export interface OfflineItem {
     notes: string | null;
     reference: { language: Language; text: string }[];
   };
-  tests: Case[];
+  /** Each part's hidden tests. */
+  tests: Case[][];
   oracle_cases: OracleCase[];
   oracle_ready: boolean;
 }
@@ -83,9 +88,30 @@ export interface OfflineBundle {
   oracles_computing: boolean;
 }
 
+/**
+ * An input and what a right solution prints for it. In API mode, the input is the calls made,
+ * a JSON array a line, and the output what each returns, a JSON value a line.
+ */
 export interface Case {
   input: string;
   output: string;
+}
+
+/** How the tests call the learner's code, in API mode. */
+export interface Api {
+  /** The class they make, or with none, the module's functions are called. */
+  class: string | null;
+}
+
+/** One of a problem's parts, as far as the learner has reached. */
+export interface OpenedPart {
+  /** In Markdown: the item's prompt for the first part. */
+  prompt: string;
+  examples: Case[];
+  /** The pack's hints for the part, from gentlest to most telling. */
+  hints: string[];
+  /** Earlier parts, counting from 0, whose requirements it changes. */
+  replaces: number[];
 }
 
 /** Whether the Coding track has a language's programs, and installing them with mise. */
@@ -116,12 +142,14 @@ export interface Opened {
   key: string;
   label: string;
   track: OpenedTrack;
-  prompt: string;
   skills: string[];
   source: string | null;
   minutes: number;
-  examples: Case[];
-  hints: string[];
+  /** The parts the learner can see: those reached, or all of them once it's reviewed. */
+  parts: OpenedPart[];
+  /** How many parts it has, seen or not. */
+  part_count: number;
+  api: Api | null;
   languages: OpenedLanguage[];
   session: Session;
   previous_plan: string | null;
@@ -148,10 +176,11 @@ export interface Run {
   duration_ms: number;
 }
 
+/** Which case something ran on; `part` is only there for a problem in parts. */
 export type CaseRef =
-  | { kind: "example"; index: number }
-  | { kind: "test"; index: number }
-  | { kind: "random"; seed: number; size: number };
+  | { kind: "example"; part?: number; index: number }
+  | { kind: "test"; part?: number; index: number }
+  | { kind: "random"; part?: number; seed: number; size: number };
 
 export interface CaseResult {
   case: CaseRef;

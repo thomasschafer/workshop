@@ -34,6 +34,8 @@ const sampleSession = (plan: string, version = 1) => ({
   mode: "solve" as const,
   step: "plan" as const,
   language: "haskell" as const,
+  part: 0,
+  plans: [],
   prediction: null,
   plan,
   passed: false,

@@ -1,6 +1,7 @@
 // Types mirror timed rounds in crates/sessions/src/round.rs, and their routes in
 // src/server/rounds.rs.
 
+import type { Api } from "../coding/types";
 import type { Marked, SessionTurn } from "../grading/types";
 import type { Priority } from "../tracks/types";
 
@@ -55,8 +56,10 @@ export interface Opened {
   /** In Markdown. */
   prompt: string;
   source: string | null;
-  /** A coding problem's examples. */
+  /** A coding problem's examples, every part's for one in parts. */
   examples: { input: string; output: string }[];
+  /** How a coding problem's tests call the code, in API mode, which its examples are calls for. */
+  api: Api | null;
   minutes: number;
   /** The styles the examiner can take, from the item's pack. */
   styles: Style[];

@@ -8,12 +8,15 @@
 import type { VersionedFile } from "../api";
 import { getRecord, listRecords, putRecord } from "../offline/db";
 import { codingApi } from "./api";
+import { revealed } from "./steps";
 import type {
+  Api,
   Case,
   Language,
   OfflineItem,
   OfflineLanguage,
   Opened,
+  OpenedPart,
   OpenedTrack,
   OracleCase,
   Session,
@@ -23,12 +26,12 @@ export interface CachedCodingProblem {
   key: string;
   label: string;
   track: OpenedTrack;
-  prompt: string;
   skills: string[];
   source: string | null;
   minutes: number;
-  examples: Case[];
-  hints: string[];
+  /** Every part; UI must only show those the session has reached. */
+  parts: OpenedPart[];
+  api: Api | null;
   languages: OfflineLanguage[];
   emptyVersion: string;
   session: Session | null;
@@ -41,7 +44,8 @@ export interface CachedCodingProblem {
 
 export interface CachedCodingTests {
   key: string;
-  tests: Case[];
+  /** Each part's hidden tests. */
+  tests: Case[][];
   oracleCases: OracleCase[];
   oracleReady: boolean;
   updatedAt: number;
@@ -83,12 +87,11 @@ export async function syncCodingBundle(): Promise<BundleSyncSummary> {
       key: item.key,
       label: item.label,
       track: item.track,
-      prompt: item.prompt,
       skills: item.skills,
       source: item.source,
       minutes: item.minutes,
-      examples: item.examples,
-      hints: item.hints,
+      parts: item.parts,
+      api: item.api,
       languages,
       emptyVersion: bundle.empty_version,
       session: item.session,
@@ -157,7 +160,8 @@ export async function updateCachedCodingDraft(
 
 /**
  * Reconstructs an `Opened` coding problem from IndexedDB when offline.
- * Never leaks hidden tests; gates `solution` strictly behind `session.step === "review"`.
+ * Never leaks hidden tests; gates `solution` strictly behind `session.step === "review"`, and
+ * later parts behind the session reaching them.
  */
 export async function openCodingFromCache(
   key: string,
@@ -176,6 +180,8 @@ export async function openCodingFromCache(
       mode: recall ? "recall" : "solve",
       step: recall ? "plan" : "understand",
       language: firstLang,
+      part: 0,
+      plans: [],
       prediction: null,
       plan: "",
       passed: false,
@@ -195,12 +201,12 @@ export async function openCodingFromCache(
     key: cached.key,
     label: cached.label,
     track: cached.track,
-    prompt: cached.prompt,
     skills: cached.skills,
     source: cached.source,
     minutes: cached.minutes,
-    examples: cached.examples,
-    hints: cached.hints,
+    parts: cached.parts.slice(0, revealed(session, cached.parts.length)),
+    part_count: cached.parts.length,
+    api: cached.api,
     languages: cached.languages.map((lang) => ({
       id: lang.id,
       name: lang.name,

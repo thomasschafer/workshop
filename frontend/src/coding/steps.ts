@@ -1,5 +1,5 @@
 import type { Rating } from "../learning/types";
-import type { CaseRef, Mode, Run, Session, StepName, TwistKind } from "./types";
+import type { Api, CaseRef, Mode, Run, Session, StepName, TwistKind } from "./types";
 
 const STEPS: Record<Mode, StepName[]> = {
   solve: ["understand", "plan", "code", "test", "review"],
@@ -48,17 +48,145 @@ export function reached(mode: Mode, current: StepName, step: StepName): boolean 
 export function suggestedRating(session: Session): Rating | null {
   if (session.mode !== "solve") return null;
   if (!session.passed) return "again";
-  return session.submissions <= 1 && session.hints === 0 ? "good" : "hard";
+  // A problem in parts is submitted at least once a part.
+  return session.submissions <= session.part + 1 && session.hints === 0 ? "good" : "hard";
 }
 
 export function describeCase(ref: CaseRef): string {
+  const part = ref.part === undefined ? null : ref.part + 1;
   switch (ref.kind) {
     case "example":
-      return `Example ${ref.index + 1}`;
+      return part === null ? `Example ${ref.index + 1}` : `Part ${part}'s example ${ref.index + 1}`;
     case "test":
-      return `Hidden test ${ref.index + 1}`;
+      return part === null
+        ? `Hidden test ${ref.index + 1}`
+        : `Part ${part}'s hidden test ${ref.index + 1}`;
     case "random":
-      return `A random input of size ${ref.size}`;
+      return part === null
+        ? `A random input of size ${ref.size}`
+        : `A random input of size ${ref.size}, for part ${part}`;
+  }
+}
+
+/**
+ * How many of a problem's parts the learner can see, as the server says: those they've
+ * reached while solving it, and every part once it's reviewed or in a review of it.
+ */
+export function revealed(session: Session, count: number): number {
+  return session.mode === "solve" && session.step !== "review" ? session.part + 1 : count;
+}
+
+/** Where the learner is in a problem in parts, such as "Part 2 of 3". */
+export function partOf(part: number, count: number): string {
+  return `Part ${part + 1} of ${count}`;
+}
+
+/** A JSON value as Python writes it, as calls and what they return are shown in API mode. */
+export function pythonValue(value: unknown): string {
+  if (value === null) return "None";
+  if (value === true) return "True";
+  if (value === false) return "False";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(pythonValue).join(", ")}]`;
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}: ${pythonValue(item)}`).join(", ")}}`;
+  }
+  throw new Error(`${String(value)} isn't a value calls make or return`);
+}
+
+/** Each line of some JSON lines as a value, or as the line itself where it isn't JSON. */
+function values(lines: string): { value: unknown; json: boolean }[] {
+  return lines
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      try {
+        return { value: JSON.parse(line) as unknown, json: true };
+      } catch {
+        return { value: line, json: false };
+      }
+    });
+}
+
+/**
+ * The calls a case makes in API mode, shown as Python, a line each, with what each returned
+ * beside it, from `output`, unless it's null. A call that returned nothing has nothing beside
+ * it, and the first a run stopped at, with no result, says so.
+ */
+export function showCalls(api: Api, input: string, output: string | null): string {
+  const results = output === null ? null : values(output);
+  let next = 0;
+  let stopped = false;
+  return values(input)
+    .map(({ value, json }) => {
+      if (!json || !Array.isArray(value) || typeof value[0] !== "string") return String(value);
+      const [name, ...args] = value as [string, ...unknown[]];
+      const call = `${name}(${args.map(pythonValue).join(", ")})`;
+      if (name === api.class || results === null) return call;
+      const result = results[next++];
+      if (result === undefined) {
+        if (stopped) return call;
+        stopped = true;
+        return `${call}  ✗ stopped here`;
+      }
+      if (!result.json) return `${call} → ${String(result.value)}`;
+      return result.value === null ? call : `${call} → ${pythonValue(result.value)}`;
+    })
+    .join("\n");
+}
+
+/** The last call a case makes in API mode, as Python, and what it returns, as JSON. */
+export function lastCall(
+  api: Api,
+  input: string,
+  output: string,
+): { call: string; returns: string } | null {
+  const calls = values(input).filter(({ value }) => Array.isArray(value) && value[0] !== api.class);
+  const returned = output.split("\n").filter((line) => line.trim() !== "");
+  const last = calls[calls.length - 1];
+  const returns = returned[returned.length - 1];
+  if (last === undefined || returns === undefined || calls.length !== returned.length) return null;
+  const [name, ...args] = last.value as [string, ...unknown[]];
+  return { call: `${name}(${args.map(pythonValue).join(", ")})`, returns };
+}
+
+/** A value with its object's keys in order, so two can be compared by their JSON. */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Whether what the learner typed is what a call returns, given as JSON: written as Python or
+ * as JSON, and a string with or without its quotes.
+ */
+export function sameReturn(expected: string, typed: string): boolean {
+  let value: unknown;
+  try {
+    value = JSON.parse(expected);
+  } catch {
+    return false;
+  }
+  const text = typed.trim();
+  if (typeof value === "string" && (text === value || text === `'${value}'`)) return true;
+  const asJson = text
+    .replace(/\bNone\b/g, "null")
+    .replace(/\bTrue\b/g, "true")
+    .replace(/\bFalse\b/g, "false")
+    .replace(/'([^'"\\]*)'/g, '"$1"');
+  try {
+    return JSON.stringify(canonical(JSON.parse(asJson))) === JSON.stringify(canonical(value));
+  } catch {
+    return false;
   }
 }
 

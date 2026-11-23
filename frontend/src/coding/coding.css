@@ -210,3 +210,67 @@
 .coding-problem.zen .coding-work {
   position: relative;
 }
+
+/* A problem in parts: which part the learner is on, under the steps, and its parts, the one
+   being worked on marked as new and the earlier ones folded away. */
+.coding-part-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto;
+  padding: 4px 16px;
+  width: 100%;
+  max-width: 720px;
+  box-sizing: border-box;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.coding-part-marks {
+  display: flex;
+  gap: 4px;
+}
+
+.coding-part-mark {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.coding-part-mark.done {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.coding-part-mark.current {
+  background: var(--accent);
+}
+
+.coding-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coding-part-new {
+  padding: 4px 12px 8px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--changed);
+  overflow-wrap: anywhere;
+}
+
+.coding-part-new > .coding-subheading {
+  color: var(--accent);
+}
+
+.coding-parts .coding-statement > summary {
+  color: var(--muted);
+}
+
+.learn-question code {
+  overflow-wrap: anywhere;
+}

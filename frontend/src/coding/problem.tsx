@@ -34,9 +34,14 @@ import {
 import {
   describeCase,
   describeRun,
+  lastCall,
+  partOf,
   printedTooMuch,
+  pythonValue,
   reached,
   STEP_LABELS,
+  sameReturn,
+  showCalls,
   stepAfter,
   stepsFor,
   suggestedRating,
@@ -44,6 +49,8 @@ import {
 } from "./steps";
 import { TutorSheet } from "./tutor";
 import type {
+  Api,
+  Case,
   CaseResult,
   Finished as FinishedReply,
   Graded,
@@ -544,6 +551,11 @@ export function ProblemView({
         lastRun.current = summary;
       }}
       onReloaded={(fresh) => {
+        if (fresh.session.part > session.part) {
+          setNotice(
+            `Part ${session.part + 1} passed. Part ${fresh.session.part + 1} adds to it, and your code is kept for it.`,
+          );
+        }
         confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
         void updateCachedCodingSession(itemKey, fresh.session);
         setOpened(fresh);
@@ -606,6 +618,13 @@ export function ProblemView({
         reachable={(step) => reached(session.mode, session.step, step) && !done}
         onGo={goTo}
       />
+      {opened.part_count > 1 && session.mode === "solve" && !done ? (
+        <PartBar
+          part={session.part}
+          count={opened.part_count}
+          reviewing={session.step === "review"}
+        />
+      ) : null}
       {offlineBanner}
       {sessionConflict ? (
         <div class="banner" role="alert">
@@ -689,41 +708,131 @@ function TutorButton({ online, openTutor }: Pick<StepProps, "online" | "openTuto
   );
 }
 
-function Statement({ opened, open = true }: { opened: Opened; open?: boolean }) {
+/** Where the learner is in a problem in parts: which part, of how many, a mark for each. */
+function PartBar({ part, count, reviewing }: { part: number; count: number; reviewing: boolean }) {
   return (
-    <details class="coding-statement" open={open}>
-      <summary>The problem</summary>
-      <Markdown text={opened.prompt} class="learn-prompt" />
-      {opened.source ? <p class="learn-source muted">Source: {opened.source}</p> : null}
-    </details>
+    <p class="coding-part-bar" role="status">
+      <span class="coding-part-label">{reviewing ? `${count} parts` : partOf(part, count)}</span>
+      <span class="coding-part-marks" aria-hidden="true">
+        {Array.from({ length: count }, (_, at) => (
+          <span
+            key={at}
+            class={`coding-part-mark ${at < part ? "done" : at === part && !reviewing ? "current" : ""}`}
+          />
+        ))}
+      </span>
+    </p>
   );
 }
 
-/** Understanding the problem: working out by hand what the first example prints. */
+/** The part of a problem in parts the learner is on, if they're solving it, to mark as new. */
+function newPart(opened: Opened, session: Session): number | null {
+  return opened.part_count > 1 && session.mode === "solve" && session.step !== "review"
+    ? session.part
+    : null;
+}
+
+/**
+ * The problem: its prompt, or for one in parts, each part seen so far, the one being worked on
+ * marked as new and the earlier ones folded away.
+ */
+function Statement({
+  opened,
+  session,
+  open = true,
+}: {
+  opened: Opened;
+  session: Session;
+  open?: boolean;
+}) {
+  const current = newPart(opened, session);
+  const [first] = opened.parts;
+  if (opened.part_count === 1 && first) {
+    return (
+      <details class="coding-statement" open={open}>
+        <summary>The problem</summary>
+        <Markdown text={first.prompt} class="learn-prompt" />
+        {opened.source ? <p class="learn-source muted">Source: {opened.source}</p> : null}
+      </details>
+    );
+  }
+  return (
+    <div class="coding-parts">
+      {opened.parts.map((part, at) => {
+        const changedBy = opened.parts.findIndex((later) => later.replaces.includes(at));
+        const heading = `Part ${at + 1}${changedBy > at ? `, changed by part ${changedBy + 1}` : ""}`;
+        return at === current ? (
+          <section key={at} class="coding-part-new" aria-label={`Part ${at + 1}, new`}>
+            <h2 class="coding-subheading">{partOf(at, opened.part_count)} · New</h2>
+            <Markdown text={part.prompt} class="learn-prompt" />
+          </section>
+        ) : (
+          <details key={at} class="coding-statement" open={open && current === null && at === 0}>
+            <summary>{heading}</summary>
+            <Markdown text={part.prompt} class="learn-prompt" />
+          </details>
+        );
+      })}
+      {opened.source ? <p class="learn-source muted">Source: {opened.source}</p> : null}
+    </div>
+  );
+}
+
+/** A case's input and what it should print, or in API mode, its calls and what they return. */
+function CaseIo({ api, known }: { api: Api | null; known: Case }) {
+  if (api) return <pre class="coding-io">{showCalls(api, known.input, known.output)}</pre>;
+  return (
+    <>
+      <pre class="coding-io">{known.input}</pre>
+      <pre class="coding-io muted">{known.output}</pre>
+    </>
+  );
+}
+
+/**
+ * Understanding the problem, or the part of it being started: working out by hand what its
+ * first example prints, or in API mode, what its last call returns.
+ */
 function UnderstandStep({ opened, session, change, onNext }: StepProps & { onNext: () => void }) {
-  const example = opened.examples[0];
+  const part = opened.parts[session.part];
+  const example = part?.examples[0];
+  const api = opened.api;
+  const last = api && example ? lastCall(api, example.input, example.output) : null;
+  const same = (typed: string) =>
+    example ? (last ? sameReturn(last.returns, typed) : sameOutput(example.output, typed)) : false;
   const [prediction, setPrediction] = useState(session.prediction ?? "");
   const [checked, setChecked] = useState<boolean | null>(
-    session.prediction !== null && example ? sameOutput(example.output, session.prediction) : null,
+    session.prediction !== null && example ? same(session.prediction) : null,
   );
   if (!example) return null;
+  const answer = last ? pythonValue(JSON.parse(last.returns)) : example.output;
   return (
     <main class="learn-content">
-      <Markdown text={opened.prompt} class="learn-prompt" />
+      {opened.part_count > 1 ? (
+        <Statement opened={opened} session={session} />
+      ) : (
+        <Markdown text={part.prompt} class="learn-prompt" />
+      )}
       <section class="coding-example" aria-label="Example 1">
-        <h2 class="coding-subheading">For this input</h2>
-        <pre class="coding-io">{example.input}</pre>
+        <h2 class="coding-subheading">{api ? "For these calls" : "For this input"}</h2>
+        <pre class="coding-io">{api ? showCalls(api, example.input, null) : example.input}</pre>
       </section>
       <form
         class="learn-form"
         onSubmit={(event) => {
           event.preventDefault();
-          setChecked(sameOutput(example.output, prediction));
+          setChecked(same(prediction));
           change((s) => ({ ...s, prediction }), true);
         }}
       >
         <label class="learn-question" for="coding-prediction">
-          What should it print?
+          {last ? (
+            <>
+              What does <code>{last.call}</code> return, at the end?
+            </>
+          ) : (
+            "What should it print?"
+          )}
         </label>
         <textarea
           id="coding-prediction"
@@ -751,8 +860,8 @@ function UnderstandStep({ opened, session, change, onNext }: StepProps & { onNex
       </form>
       {checked !== null ? (
         <section class={`learn-answer ${checked ? "right" : "wrong"}`} aria-label="Answer">
-          <p class="learn-verdict">{checked ? "Right" : "It prints:"}</p>
-          {checked ? null : <pre class="coding-io">{example.output}</pre>}
+          <p class="learn-verdict">{checked ? "Right" : last ? "It returns:" : "It prints:"}</p>
+          {checked ? null : <pre class="coding-io">{answer}</pre>}
           <button type="button" class="pill primary wide" onClick={onNext}>
             Next: plan
           </button>
@@ -800,7 +909,7 @@ function PlanStep({
           {session.no_twist}
         </p>
       ) : null}
-      <Statement opened={opened} open />
+      <Statement opened={opened} session={session} open />
       <form
         class="learn-form"
         onSubmit={(event) => {
@@ -811,7 +920,9 @@ function PlanStep({
         <label class="learn-question" for="coding-plan">
           {recall
             ? "From memory: how would you solve it?"
-            : "How will you solve it? A few lines is plenty."}
+            : session.part > 0
+              ? `How will you change your code for part ${session.part + 1}? A few lines is plenty.`
+              : "How will you solve it? A few lines is plenty."}
         </label>
         <textarea
           id="coding-plan"
@@ -925,7 +1036,7 @@ function CodeStep({
       await draftSaver.current?.flush();
       const graded = await codingApi.run(itemKey, newId());
       setRan(graded);
-      onRan(summarise(graded));
+      onRan(summarise(graded, opened.api));
       change((s) => ({ ...s, runs: s.runs + 1 }), true);
     } catch (e) {
       setRunError(errorMessage(e));
@@ -958,7 +1069,9 @@ function CodeStep({
   };
 
   if (!language) return null;
-  const hints = opened.hints.slice(0, hintsShown);
+  // The hints for the part being worked on.
+  const partHints = opened.parts[session.part]?.hints ?? [];
+  const hints = partHints.slice(0, hintsShown);
   return (
     <main class="coding-work">
       {zen ? <ZenExit onExit={zen.onExit} /> : null}
@@ -967,6 +1080,7 @@ function CodeStep({
       ) : null}
       {testing ? (
         <TestResults
+          api={opened.api}
           busy={busy === "submitting"}
           submitted={submitted}
           error={runError}
@@ -997,15 +1111,24 @@ function CodeStep({
               </label>
             ) : null}
             <details class="coding-statement compact">
-              <summary>Problem</summary>
-              <Markdown text={opened.prompt} class="learn-prompt" />
-              {opened.examples.map((example, index) => (
-                <section key={example.input} aria-label={`Example ${index + 1}`}>
-                  <h3 class="coding-subheading">Example {index + 1}</h3>
-                  <pre class="coding-io">{example.input}</pre>
-                  <pre class="coding-io muted">{example.output}</pre>
-                </section>
-              ))}
+              <summary>
+                {opened.part_count > 1 ? partOf(session.part, opened.part_count) : "Problem"}
+              </summary>
+              <Statement opened={opened} session={session} open={false} />
+              {opened.parts.map((part, at) =>
+                part.examples.map((example, index) => {
+                  const name =
+                    opened.part_count > 1
+                      ? `Part ${at + 1}'s example ${index + 1}`
+                      : `Example ${index + 1}`;
+                  return (
+                    <section key={`${at}-${example.input}`} aria-label={name}>
+                      <h3 class="coding-subheading">{name}</h3>
+                      <CaseIo api={opened.api} known={example} />
+                    </section>
+                  );
+                }),
+              )}
               {session.plan.trim() ? (
                 <>
                   <h3 class="coding-subheading">Your plan</h3>
@@ -1013,7 +1136,7 @@ function CodeStep({
                 </>
               ) : null}
             </details>
-            {opened.hints.length > hintsShown ? (
+            {partHints.length > hintsShown ? (
               <button
                 type="button"
                 class="text-button"
@@ -1047,6 +1170,7 @@ function CodeStep({
           />
           {ran || runError ? (
             <ExampleResults
+              api={opened.api}
               ran={ran}
               error={runError}
               onDismiss={() => {
@@ -1104,7 +1228,7 @@ function CodeStep({
 }
 
 /** What running on the examples did, in a line, for the tutor. */
-function summarise(graded: Graded): string {
+function summarise(graded: Graded, api: Api | null): string {
   switch (graded.outcome) {
     case "build_failed":
       return `It didn't build:\n${graded.errors}`;
@@ -1113,22 +1237,24 @@ function summarise(graded: Graded): string {
     case "ran":
       return graded.results
         .map((r) => {
-          const head = `${describeCase(r.case)}: ${r.passed ? "passed" : describeRun(r.run)}\ninput:\n${r.input}`;
+          const verdict = `${describeCase(r.case)}: ${r.passed ? "passed" : describeRun(r.run)}`;
           const tooMuch = printedTooMuch(r.run);
-          const output = tooMuch
-            ? `\n${tooMuch}`
-            : `\nexpected:\n${r.expected}\ngot:\n${r.run.stdout}`;
-          return `${head}${output}${r.run.stderr ? `\nstderr:\n${r.run.stderr}` : ""}`;
+          const output = api
+            ? `\ncalls, and what they should return:\n${showCalls(api, r.input, r.expected)}\nwhat they returned:\n${showCalls(api, r.input, r.run.stdout)}`
+            : `\ninput:\n${r.input}${tooMuch ? `\n${tooMuch}` : `\nexpected:\n${r.expected}\ngot:\n${r.run.stdout}`}`;
+          return `${verdict}${output}${r.run.stderr ? `\nstderr:\n${r.run.stderr}` : ""}`;
         })
         .join("\n\n");
   }
 }
 
 function ExampleResults({
+  api,
   ran,
   error,
   onDismiss,
 }: {
+  api: Api | null;
   ran: Graded | null;
   error: string | null;
   onDismiss: () => void;
@@ -1156,14 +1282,14 @@ function ExampleResults({
       {ran?.outcome === "unavailable" ? <p class="error-text">{ran.reason}</p> : null}
       {ran?.outcome === "ran"
         ? ran.results.map((result) => (
-            <CaseView key={JSON.stringify(result.case)} result={result} />
+            <CaseView key={JSON.stringify(result.case)} api={api} result={result} />
           ))
         : null}
     </section>
   );
 }
 
-function CaseView({ result }: { result: CaseResult }) {
+function CaseView({ api, result }: { api: Api | null; result: CaseResult }) {
   const tooMuch = printedTooMuch(result.run);
   return (
     <article class={`coding-case ${result.passed ? "right" : "wrong"}`}>
@@ -1173,14 +1299,29 @@ function CaseView({ result }: { result: CaseResult }) {
       {result.passed ? null : (
         <>
           {tooMuch ? <p class="error-text">{tooMuch}</p> : null}
-          <h3 class="coding-subheading">Input</h3>
-          <pre class="coding-io">{result.input}</pre>
-          {tooMuch ? null : (
+          {api ? (
             <>
-              <h3 class="coding-subheading">Expected</h3>
-              <pre class="coding-io">{result.expected}</pre>
-              <h3 class="coding-subheading">Got</h3>
-              <pre class="coding-io">{result.run.stdout || "(nothing)"}</pre>
+              <h3 class="coding-subheading">Calls, and what they should return</h3>
+              <pre class="coding-io">{showCalls(api, result.input, result.expected)}</pre>
+              {tooMuch ? null : (
+                <>
+                  <h3 class="coding-subheading">What yours returned</h3>
+                  <pre class="coding-io">{showCalls(api, result.input, result.run.stdout)}</pre>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <h3 class="coding-subheading">Input</h3>
+              <pre class="coding-io">{result.input}</pre>
+              {tooMuch ? null : (
+                <>
+                  <h3 class="coding-subheading">Expected</h3>
+                  <pre class="coding-io">{result.expected}</pre>
+                  <h3 class="coding-subheading">Got</h3>
+                  <pre class="coding-io">{result.run.stdout || "(nothing)"}</pre>
+                </>
+              )}
             </>
           )}
           {result.run.stderr.trim() ? (
@@ -1194,6 +1335,7 @@ function CaseView({ result }: { result: CaseResult }) {
 
 /** Submitting: the hidden tests and the brute force's answers, and the first input it fails on. */
 function TestResults({
+  api,
   busy,
   submitted,
   error,
@@ -1202,6 +1344,7 @@ function TestResults({
   onSubmit,
   onGiveUp,
 }: {
+  api: Api | null;
   busy: boolean;
   submitted: Submitted | null;
   error: string | null;
@@ -1226,7 +1369,7 @@ function TestResults({
               : "It didn't run"}
           </h2>
           {submitted.failure ? (
-            <CaseView result={submitted.failure} />
+            <CaseView api={api} result={submitted.failure} />
           ) : (
             <pre class="coding-io error-text">{submitted.problem}</pre>
           )}
@@ -1277,11 +1420,26 @@ function ReviewStep({
     <main class="learn-content">
       {recall ? null : (
         <p class={`learn-verdict ${session.passed ? "right" : "wrong"}`}>
-          {session.passed ? "Solved: it passed every test." : "Not solved this time."}
+          {session.passed
+            ? opened.part_count > 1
+              ? `Solved: all ${opened.part_count} parts passed every test.`
+              : "Solved: it passed every test."
+            : opened.part_count > 1 && session.part > 0
+              ? `Not solved this time: you got through ${session.part} of ${opened.part_count} parts.`
+              : "Not solved this time."}
         </p>
       )}
+      {opened.part_count > 1 ? <Statement opened={opened} session={session} open={false} /> : null}
       <section aria-label="Your plan">
-        <h2 class="coding-subheading">Your plan</h2>
+        {session.plans.map((plan, at) => (
+          <div key={at}>
+            <h2 class="coding-subheading">Your plan for part {at + 1}</h2>
+            <p class="coding-plan-text">{plan.trim() || "(none written)"}</p>
+          </div>
+        ))}
+        <h2 class="coding-subheading">
+          {session.plans.length > 0 ? `Your plan for part ${session.part + 1}` : "Your plan"}
+        </h2>
         <p class="coding-plan-text">{session.plan.trim() || "(none written)"}</p>
         {recall && opened.previous_plan?.trim() ? (
           <>
@@ -1414,7 +1572,7 @@ function TwistStep({
   const keyboardShown = settings.ownKeyboard && keyboard.wanted;
   return (
     <main class="learn-content">
-      <Statement opened={opened} open={false} />
+      <Statement opened={opened} session={session} open={false} />
       <section class="coding-twist" aria-label="Twist">
         <h2 class="coding-subheading">{TWIST_KINDS[twist.kind]}</h2>
         <Markdown text={twist.prompt} class="learn-prompt" />
