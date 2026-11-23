@@ -47,7 +47,8 @@ run = "cargo build --release"
 
 [tasks.check-fast]
 description = "Run the checks that take seconds: formatting, lints, types and unit tests"
-depends = ["install"]
+# The server's tests serve the embedded frontend, so it must be built first, as in CI.
+depends = ["build-frontend"]
 run = [
   "cargo fmt --check",
   "cargo clippy --all-targets -- -D warnings",
@@ -57,7 +58,7 @@ run = [
 
 [tasks.check]
 description = "Run all the checks CI runs, including the browser tests"
-depends = ["check-fast", "build-frontend"]
+depends = ["check-fast"]
 run = "cargo build && cd frontend && npm run e2e && npm run e2e:webkit"
 
 [tasks.check-packages]
