@@ -38,6 +38,7 @@ import {
   lineNumbers,
   showDialog,
 } from "@codemirror/view";
+import { connection } from "./api";
 import { markCursor, minimalChange, unmarkCursor } from "./diff";
 import { errorMessage } from "./errors";
 import {
@@ -65,7 +66,10 @@ import {
 } from "./helix/view";
 import { adjustCapabilities, LanguageClient, languageServerCompletion, messageToShow } from "./lsp";
 import { applyWorkspaceEdit } from "./lspEdits";
+import { bundleForLanguage, isBundleCachedOnDevice } from "./onDevice/bundles";
+import type { WorkerHelperFile } from "./onDevice/ghcWorker";
 import { pinchToZoom } from "./pinch";
+import type { OnDeviceMode } from "./preferences";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
 import { LANGUAGES, syntaxHighlighter } from "./syntax";
 import { roundCodeScale } from "./zoom";
@@ -843,7 +847,53 @@ class SocketTransport implements Transport {
   }
 }
 
+class WorkerTransport implements Transport {
+  private readonly handlers = new Set<(value: string) => void>();
+
+  constructor(private readonly worker: Worker) {
+    worker.addEventListener("message", this.onMessage);
+  }
+
+  private readonly onMessage = (event: MessageEvent<unknown>) => {
+    if (typeof event.data !== "string") return;
+    for (const handler of this.handlers) handler(event.data);
+  };
+
+  send(message: string): void {
+    this.worker.postMessage(adjustCapabilities(message));
+  }
+
+  notify(method: string, params: unknown): void {
+    this.worker.postMessage(JSON.stringify({ jsonrpc: "2.0", method, params }));
+  }
+
+  subscribe(handler: (value: string) => void): void {
+    this.handlers.add(handler);
+  }
+
+  unsubscribe(handler: (value: string) => void): void {
+    this.handlers.delete(handler);
+  }
+
+  close(): void {
+    this.worker.removeEventListener("message", this.onMessage);
+    this.worker.terminate();
+  }
+}
+
 export type LanguageServerStatus = "connecting" | "ready" | "reconnecting" | "unavailable";
+export type LanguageServerBackend = "server" | "local";
+
+/** Optional on-device fallback/override configuration for a LanguageServerConnection. */
+export interface LocalLanguageServerOptions {
+  languageId: string;
+  mode: OnDeviceMode;
+  onBackend: (backend: LanguageServerBackend) => void;
+  createWorker?: () => Worker;
+}
+
+/** Bounded initial server-connect wait in Automatic mode before failing over to local WASM LSP. */
+export const AUTOMATIC_SERVER_TIMEOUT_MS = 4500;
 
 /** Why the language server can't be used, and how to put that right, if that's known. */
 export interface LanguageServerUnavailable {
@@ -866,25 +916,31 @@ export const MAX_CONNECTION_ATTEMPTS = 6;
 /** What the relay sends, just before closing the connection, when the server can't start. */
 const UNAVAILABLE = "workshop/unavailable";
 
+function defaultLspWorkerFactory(): Worker {
+  return new Worker(new URL("./onDevice/ghcLspWorker.ts", import.meta.url), { type: "module" });
+}
+
 /**
- * Keeps one language server client connected through Workshop's websocket relay, reconnecting
- * whenever the connection drops (for example when the server restarts or the phone sleeps).
- * Editors keep using the same client, so they pick the server back up without being recreated.
- *
- * A server that can't start is given up on, rather than tried again and again: at once if the
- * relay says why, and otherwise once connecting has failed a few times in a row.
+ * Keeps one language server client connected — either through Workshop's websocket relay or,
+ * when opted into on-device mode (or in Automatic mode when the server can't be reached), through
+ * a dedicated local WASM LSP Web Worker. Editors keep using the same client across reconnects and
+ * backend switches without being recreated.
  */
 export class LanguageServerConnection {
   readonly client: LanguageClient;
   private socket: WebSocket | null = null;
+  private workerTransport: WorkerTransport | null = null;
   private retryDelay = MIN_RECONNECT_MS;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private failoverTimer: ReturnType<typeof setTimeout> | undefined;
   /** Connections in a row that closed before the server was ready. */
   private failures = 0;
   /** What the relay said, if it said the server can't start. */
   private refused: LanguageServerUnavailable | null = null;
   private givenUp = false;
   private closed = false;
+  private backend: LanguageServerBackend = "server";
+  private helpers: WorkerHelperFile[] = [];
 
   constructor(
     rootUri: string,
@@ -896,6 +952,7 @@ export class LanguageServerConnection {
     private readonly onUnavailable: (why: LanguageServerUnavailable | null) => void,
     /** The relay's address on the server, for the language and the files it serves. */
     private readonly path = "/api/lsp",
+    private readonly local?: LocalLanguageServerOptions,
   ) {
     this.client = new LanguageClient({
       rootUri,
@@ -919,27 +976,73 @@ export class LanguageServerConnection {
       },
     });
     document.addEventListener("visibilitychange", this.onVisibility);
-    this.open();
+    void this.start();
+  }
+
+  private async hasLocalBundle(): Promise<boolean> {
+    if (!this.local || this.local.mode === "server") return false;
+    const bundle = bundleForLanguage(this.local.languageId);
+    if (!bundle) return false;
+    return isBundleCachedOnDevice(bundle);
+  }
+
+  private setBackend(next: LanguageServerBackend): void {
+    this.backend = next;
+    this.local?.onBackend(next);
+  }
+
+  private async start(): Promise<void> {
+    const canUseLocal = await this.hasLocalBundle();
+    if (this.closed) return;
+    if (this.local?.mode === "local" && canUseLocal) {
+      this.openLocal();
+      return;
+    }
+    const effectivelyOnline =
+      connection.isOnline && (typeof navigator === "undefined" || navigator.onLine !== false);
+    if (this.local?.mode === "automatic" && canUseLocal && !effectivelyOnline) {
+      this.openLocal();
+      return;
+    }
+    this.openServer(canUseLocal && this.local?.mode === "automatic");
   }
 
   private readonly onVisibility = () => {
     if (
       document.visibilityState === "visible" &&
+      this.backend === "server" &&
       this.socket === null &&
+      this.workerTransport === null &&
       !this.closed &&
       !this.givenUp
     ) {
       clearTimeout(this.retryTimer);
-      this.open();
+      void this.start();
     }
   };
 
-  private open(): void {
+  private openServer(allowLocalFailover: boolean): void {
+    this.closeWorker();
+    this.setBackend("server");
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${scheme}://${location.host}${this.path}`);
     this.socket = socket;
     let ready = false;
+    let failedOver = false;
     this.onStatus(this.retryDelay === MIN_RECONNECT_MS ? "connecting" : "reconnecting");
+
+    clearTimeout(this.failoverTimer);
+    if (allowLocalFailover) {
+      this.failoverTimer = setTimeout(() => {
+        if (this.closed || ready || this.socket !== socket) return;
+        failedOver = true;
+        socket.close();
+        this.socket = null;
+        if (this.client.connected) this.client.disconnect();
+        this.openLocal();
+      }, AUTOMATIC_SERVER_TIMEOUT_MS);
+    }
+
     socket.addEventListener("open", () => {
       // Until the server has initialised, the diagnostics on screen may be stale.
       this.client
@@ -949,24 +1052,37 @@ export class LanguageServerConnection {
           }),
         )
         .initializing.then(() => {
-          if (this.socket !== socket) return;
+          if (this.socket !== socket || failedOver) return;
+          clearTimeout(this.failoverTimer);
           ready = true;
           // Only now, as the relay accepts the connection before it starts the server.
           this.retryDelay = MIN_RECONNECT_MS;
           this.failures = 0;
+          this.client.sync();
           this.onStatus("ready");
         })
         .catch(() => {});
     });
     // A failed connection attempt also fires `close`, so retrying is handled there alone.
     socket.addEventListener("close", () => {
-      if (this.client.connected) {
+      clearTimeout(this.failoverTimer);
+      if (failedOver) return;
+      if (this.client.connected && this.backend === "server") {
         this.client.disconnect();
       }
-      this.socket = null;
+      if (this.socket === socket) this.socket = null;
       if (this.closed) return;
       if (this.refused !== null) {
+        if (allowLocalFailover) {
+          this.refused = null;
+          this.openLocal();
+          return;
+        }
         this.giveUp(this.refused);
+        return;
+      }
+      if (!ready && allowLocalFailover) {
+        this.openLocal();
         return;
       }
       if (!ready) this.failures++;
@@ -977,13 +1093,84 @@ export class LanguageServerConnection {
         });
         return;
       }
+      if (ready && allowLocalFailover) {
+        // Server dropped after being connected in Automatic mode: switch cleanly and stay sticky on local.
+        this.openLocal();
+        return;
+      }
       this.onStatus("reconnecting");
       // Hidden pages wait for `visibilitychange` instead of retrying in the background.
       if (document.visibilityState === "visible") {
-        this.retryTimer = setTimeout(() => this.open(), this.retryDelay);
+        this.retryTimer = setTimeout(() => this.openServer(allowLocalFailover), this.retryDelay);
         this.retryDelay = Math.min(this.retryDelay * 2, MAX_RECONNECT_MS);
       }
     });
+  }
+
+  private openLocal(): void {
+    clearTimeout(this.retryTimer);
+    clearTimeout(this.failoverTimer);
+    this.socket?.close();
+    this.socket = null;
+    this.closeWorker();
+    if (this.client.connected) this.client.disconnect();
+
+    this.setBackend("local");
+    this.givenUp = false;
+    this.refused = null;
+    this.client.unavailable = null;
+    this.onUnavailable(null);
+    this.onStatus("connecting");
+
+    const createWorker = this.local?.createWorker ?? defaultLspWorkerFactory;
+    let worker: Worker;
+    try {
+      worker = createWorker();
+    } catch (error) {
+      this.giveUp({
+        reason: `couldn't start the on-device language server: ${errorMessage(error)}`,
+        help: null,
+      });
+      return;
+    }
+
+    const transport = new WorkerTransport(worker);
+    this.workerTransport = transport;
+    worker.addEventListener("error", (ev) => {
+      if (this.workerTransport !== transport || this.closed) return;
+      this.closeWorker();
+      if (this.client.connected) this.client.disconnect();
+      this.giveUp({
+        reason: ev.message || "the on-device language server crashed",
+        help: null,
+      });
+    });
+
+    this.client
+      .connect(transport)
+      .initializing.then(() => {
+        if (this.workerTransport !== transport || this.closed) return;
+        if (this.helpers.length > 0) {
+          transport.notify("workshop/setHelpers", { helpers: this.helpers });
+        }
+        this.client.sync();
+        this.onStatus("ready");
+      })
+      .catch((error) => {
+        if (this.workerTransport !== transport || this.closed) return;
+        this.closeWorker();
+        this.giveUp({
+          reason: `couldn't initialize the on-device language server: ${errorMessage(error)}`,
+          help: null,
+        });
+      });
+  }
+
+  private closeWorker(): void {
+    if (this.workerTransport) {
+      this.workerTransport.close();
+      this.workerTransport = null;
+    }
   }
 
   private giveUp(why: LanguageServerUnavailable): void {
@@ -991,6 +1178,31 @@ export class LanguageServerConnection {
     this.client.unavailable = why.reason;
     this.onStatus("unavailable");
     this.onUnavailable(why);
+  }
+
+  /** Updates shared helper modules (such as `lib/Aoc.hs`) in the on-device LSP Worker. */
+  setHelpers(helpers: WorkerHelperFile[]): void {
+    this.helpers = helpers;
+    this.workerTransport?.notify("workshop/setHelpers", { helpers });
+  }
+
+  /** Manual switch from sticky on-device LSP back to the server HLS (e.g. from Problems sheet). */
+  reconnectServer(): void {
+    if (this.closed) return;
+    clearTimeout(this.retryTimer);
+    clearTimeout(this.failoverTimer);
+    this.givenUp = false;
+    this.refused = null;
+    this.failures = 0;
+    this.retryDelay = MIN_RECONNECT_MS;
+    this.client.unavailable = null;
+    this.onUnavailable(null);
+    this.closeWorker();
+    if (this.client.connected) this.client.disconnect();
+    void this.hasLocalBundle().then((canUseLocal) => {
+      if (this.closed) return;
+      this.openServer(canUseLocal && this.local?.mode === "automatic");
+    });
   }
 
   /** Connects afresh to a server that's been given up on, such as once it's been installed. */
@@ -1002,14 +1214,16 @@ export class LanguageServerConnection {
     this.retryDelay = MIN_RECONNECT_MS;
     this.client.unavailable = null;
     this.onUnavailable(null);
-    this.open();
+    void this.start();
   }
 
   close(): void {
     this.closed = true;
     clearTimeout(this.retryTimer);
+    clearTimeout(this.failoverTimer);
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.socket?.close();
+    this.closeWorker();
   }
 }
 

@@ -72,7 +72,14 @@ export function StatusLine({
           ) : (
             describeCounts(diagnostics)
           )}
-          {checks === "ready" && backend === "local" ? " · on device" : null}
+          {checks === "ready" && backend === "local" ? (
+            <>
+              {" · "}
+              <button type="button" class="status-count" onClick={onProblems}>
+                on device
+              </button>
+            </>
+          ) : null}
           {checks === "ready" && serverError ? (
             <>
               {" · "}

@@ -166,14 +166,34 @@ export function App({
   const stackHeightRef = useRef(0);
   const saver = useRef<VersionedSaver | null>(null);
   const notesSaver = useRef<VersionedSaver | null>(null);
-  const { lsp, lspStatus, lspError, lspUnavailable, dismissLspError, restartLsp, retryLsp } =
-    useLanguageServer(
-      boot.language.has_lsp
-        ? { rootUri: boot.language.root_uri, options: boot.language.lsp_options, path: "/api/lsp" }
-        : null,
-      boot,
-      editor,
-    );
+  const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
+  const [onDeviceMode, setOnDeviceMode] = useState(() => preferences.onDeviceMode.get());
+  useEffect(() => {
+    void refreshCachedBundles();
+  }, []);
+  const {
+    lsp,
+    lspStatus,
+    lspBackend,
+    lspError,
+    lspUnavailable,
+    dismissLspError,
+    restartLsp,
+    retryLsp,
+    reconnectServerLsp,
+  } = useLanguageServer(
+    boot.language.has_lsp
+      ? {
+          rootUri: boot.language.root_uri,
+          options: boot.language.lsp_options,
+          path: "/api/lsp",
+          languageId: boot.language.id,
+          mode: onDeviceMode,
+        }
+      : null,
+    `${boot.language.id}:${boot.language.root_uri}:${onDeviceMode}`,
+    editor,
+  );
   const fileUri = useRef<string | null>(null);
   const puzzleRef = useRef(puzzle);
   // Utterances are handled one at a time, in the order they were spoken. The handler is set
@@ -203,11 +223,6 @@ export function App({
   // The part being worked on: the next one to solve, or for a solved puzzle being worked through
   // again, the one the code has got to.
   const workingPart = part ?? (part2Started === true ? 2 : 1);
-  const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
-  const [onDeviceMode, setOnDeviceMode] = useState(() => preferences.onDeviceMode.get());
-  useEffect(() => {
-    void refreshCachedBundles();
-  }, []);
   const { run, setRun, doRun, cancelRun, doSubmit } = useRun({
     puzzleRef,
     part,
@@ -955,7 +970,7 @@ export function App({
           ) : null}
           <StatusLine
             checks={lsp ? lspStatus : null}
-            backend={lsp ? "server" : undefined}
+            backend={lsp ? lspBackend : undefined}
             unavailable={lspUnavailable}
             onRetry={retryLsp}
             serverError={lspError !== null}
@@ -1029,7 +1044,8 @@ export function App({
             server={
               lsp ? { error: lspError, onDismiss: dismissLspError, onRestart: restartLsp } : null
             }
-            backend={lsp ? "server" : undefined}
+            backend={lsp ? lspBackend : undefined}
+            onReconnectServer={lsp && lspBackend === "local" ? reconnectServerLsp : undefined}
             onGoto={(problem) => {
               editor.current?.gotoProblem(problem);
               setSheet(null);
@@ -1127,6 +1143,7 @@ export function App({
               languageId: boot.language.id,
               languageName: boot.language.name,
               hasLsp: boot.language.has_lsp,
+              lspBackend: lsp ? lspBackend : undefined,
               hasFormatter: boot.language.has_formatter,
             }}
             onInsertSnippet={(s) => {

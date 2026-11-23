@@ -22,6 +22,7 @@ export function ProblemsSheet({
   current,
   server,
   backend,
+  onReconnectServer,
   onGoto,
   onClose,
 }: {
@@ -31,6 +32,8 @@ export function ProblemsSheet({
   server: ServerHelp | null;
   /** Where the language server is running, shown quietly for diagnostics. */
   backend?: "server" | "local" | undefined;
+  /** Manually switches from sticky on-device LSP back to the server language server. */
+  onReconnectServer?: (() => void) | undefined;
   onGoto: (problem: Problem) => void;
   onClose: () => void;
 }) {
@@ -66,7 +69,22 @@ export function ProblemsSheet({
       </button>
       {backend ? (
         <p class="muted small">
-          Language server: {backend === "local" ? "on device" : "on server"}
+          Language server: {backend === "local" ? "on device (GHC 9.14 WASM)" : "on server"}
+          {backend === "local" && onReconnectServer ? (
+            <>
+              {" · "}
+              <button
+                type="button"
+                class="text-button inline"
+                onClick={() => {
+                  onReconnectServer();
+                  onClose();
+                }}
+              >
+                Reconnect to server
+              </button>
+            </>
+          ) : null}
         </p>
       ) : null}
       {server?.error ? (

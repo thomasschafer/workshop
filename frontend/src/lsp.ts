@@ -152,6 +152,11 @@ export class LanguageClient extends LSPClient {
     return this;
   }
 
+  override disconnect(): void {
+    this.sending = null;
+    super.disconnect();
+  }
+
   override notification<Params>(method: string, params: Params): void {
     if (this.sending === null) return;
     this.initializing.then(

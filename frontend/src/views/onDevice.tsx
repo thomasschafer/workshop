@@ -58,6 +58,7 @@ export interface OnDeviceProps {
   languageId: string;
   languageName: string;
   hasLsp: boolean;
+  lspBackend?: "server" | "local" | undefined;
   hasFormatter: boolean;
 }
 
@@ -72,6 +73,7 @@ export function OnDevicePage({
   languageId,
   languageName,
   hasLsp,
+  lspBackend,
   hasFormatter,
 }: OnDeviceProps) {
   const conn = useConnectionStatus();
@@ -295,7 +297,13 @@ export function OnDevicePage({
         <dt>Connection</dt>
         <dd>{connectionLabel}</dd>
         <dt>Language server</dt>
-        <dd>{hasLsp ? "On server" : "None for this language"}</dd>
+        <dd>
+          {!hasLsp
+            ? "None for this language"
+            : lspBackend === "local" && activeBundle
+              ? `On device (${activeBundle.engine})`
+              : "On server"}
+        </dd>
         <dt>Runner</dt>
         <dd>{runnerLabel}</dd>
         <dt>Formatter</dt>

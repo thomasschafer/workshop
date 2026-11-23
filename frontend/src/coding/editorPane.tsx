@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { CodeEditor, type Diagnostics, NO_DIAGNOSTICS } from "../editor";
 import type { EditorSettings } from "../hooks/useEditorSettings";
 import { useLanguageServer } from "../hooks/useLanguageServer";
+import * as preferences from "../preferences";
 import { type FileVersion, type SaveStatus, VersionedSaver } from "../saver";
 import { ConflictBanner } from "../views/frame";
 import { ProblemsSheet } from "../views/problems";
@@ -40,18 +41,30 @@ export function EditorPane({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [conflict, setConflict] = useState<FileVersion | null>(null);
   const [showProblems, setShowProblems] = useState(false);
-  const { lsp, lspStatus, lspError, lspUnavailable, dismissLspError, restartLsp, retryLsp } =
-    useLanguageServer(
-      language.lsp
-        ? {
-            rootUri: language.lsp.root_uri,
-            options: language.lsp.options,
-            path: `/api/coding/lsp/${language.id}`,
-          }
-        : null,
-      language.id,
-      editor,
-    );
+  const mode = preferences.onDeviceMode.get();
+  const {
+    lsp,
+    lspStatus,
+    lspBackend,
+    lspError,
+    lspUnavailable,
+    dismissLspError,
+    restartLsp,
+    retryLsp,
+    reconnectServerLsp,
+  } = useLanguageServer(
+    language.lsp
+      ? {
+          rootUri: language.lsp.root_uri,
+          options: language.lsp.options,
+          path: `/api/coding/lsp/${language.id}`,
+          languageId: language.id,
+          mode,
+        }
+      : null,
+    `${language.id}:${mode}`,
+    editor,
+  );
 
   useEffect(() => {
     const parent = host.current;
@@ -130,7 +143,7 @@ export function EditorPane({
       {conflict ? <ConflictBanner what="code" onResolve={resolve} /> : null}
       <StatusLine
         checks={lsp ? lspStatus : null}
-        backend={lsp ? "server" : undefined}
+        backend={lsp ? lspBackend : undefined}
         unavailable={lspUnavailable}
         onRetry={retryLsp}
         serverError={lspError !== null}
@@ -149,7 +162,8 @@ export function EditorPane({
           server={
             lsp ? { error: lspError, onDismiss: dismissLspError, onRestart: restartLsp } : null
           }
-          backend={lsp ? "server" : undefined}
+          backend={lsp ? lspBackend : undefined}
+          onReconnectServer={lsp && lspBackend === "local" ? reconnectServerLsp : undefined}
           onGoto={(problem) => {
             editor.current?.gotoProblem(problem);
             setShowProblems(false);
