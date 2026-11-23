@@ -56,6 +56,8 @@ pub struct App {
     pub(super) coding_toolchain_installs: BTreeMap<workshop_pack::Language, Installs>,
     /// Downloading Whisper's model for dictation.
     pub(super) speech_install: Installs,
+    /// Downloading optional on-device runtime bundles (such as GHC WASM).
+    pub(super) on_device_install: Installs,
     pub(super) dictation: Arc<crate::whisper::Dictation>,
     /// Notifies devices that asked, as puzzles unlock.
     pub notifier: Arc<workshop_push::Notifier>,
@@ -145,6 +147,7 @@ impl App {
                 .map(|language| (language, Installs::default()))
                 .collect(),
             speech_install: Installs::default(),
+            on_device_install: Installs::default(),
             dictation: Arc::default(),
             notifier: Arc::new(workshop_push::Notifier::load(&paths.data_dir)?),
             updates: Arc::new(crate::updates::Updates::load(

@@ -15,6 +15,18 @@ import { sameOutput } from "../learning/output";
 import { Markdown } from "../learning/practice";
 import type { Rating } from "../learning/types";
 import { outbox } from "../offline/outbox";
+import {
+  isLanguageCachedSync,
+  refreshCachedBundles,
+  subscribeCachedBundles,
+} from "../onDevice/bundles";
+import {
+  buildCodingExampleCases,
+  buildCodingSubmitCases,
+  localRunner,
+  resolveRunBackend,
+} from "../onDevice/runner";
+import * as preferences from "../preferences";
 import { HomeButton } from "../progress/page";
 import { LatestSaver, type VersionedSaver } from "../saver";
 import { TrackIcon } from "../tracks/icons";
@@ -27,6 +39,7 @@ import { codingApi } from "./api";
 import { EditorPane } from "./editorPane";
 import {
   getCachedCodingProblem,
+  getCachedCodingTests,
   openCodingFromCache,
   updateCachedCodingDraft,
   updateCachedCodingSession,
@@ -1046,23 +1059,74 @@ function CodeStep({
 }) {
   const [busy, setBusy] = useState<"running" | "submitting" | null>(null);
   const [ran, setRan] = useState<Graded | null>(null);
+  const [ranEngine, setRanEngine] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<Submitted | null>(null);
+  const [submittedEngine, setSubmittedEngine] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [hintsShown, setHintsShown] = useState(0);
+  const [bundleTick, setBundleTick] = useState(0);
   const language = opened.languages.find((l) => l.id === session.language) ?? opened.languages[0];
   const testing = session.step === "test";
+
+  useEffect(() => {
+    void refreshCachedBundles();
+    return subscribeCachedBundles(() => setBundleTick((t) => t + 1));
+  }, []);
+
+  const hasLocalRunner =
+    bundleTick >= 0 &&
+    opened.api === null &&
+    language !== undefined &&
+    isLanguageCachedSync(language.id);
+  const mode = preferences.onDeviceMode.get();
+  const canRun = online || hasLocalRunner;
 
   const keyboardShown = settings.ownKeyboard && keyboard.wanted && !testing;
 
   const runExamples = async () => {
+    if (!language) return;
     setBusy("running");
     setRunError(null);
-    try {
-      await draftSaver.current?.flush();
-      const graded = await codingApi.run(itemKey, newId());
+    const hasLocal = opened.api === null && (await localRunner().isAvailable(language.id));
+    const currentMode = preferences.onDeviceMode.get();
+    const effectivelyOnline =
+      online && (typeof navigator === "undefined" || navigator.onLine !== false);
+    const backend = resolveRunBackend(currentMode, effectivelyOnline, hasLocal);
+    const runLocally = async () => {
+      void draftSaver.current?.flush().catch(() => {});
+      const code = editor.current?.text() ?? language.code.text;
+      const cases = buildCodingExampleCases(opened.parts, session.part);
+      const { graded, engine } = await localRunner().runCoding({
+        languageId: language.id,
+        code,
+        cases,
+        stopOnFailure: false,
+        totalCases: cases.length,
+      });
       setRan(graded);
+      setRanEngine(engine);
       onRan(summarise(graded, opened.api));
       change((s) => ({ ...s, runs: s.runs + 1 }), true);
+    };
+    try {
+      if (backend === "local") {
+        await runLocally();
+        return;
+      }
+      try {
+        await draftSaver.current?.flush();
+        const graded = await codingApi.run(itemKey, newId());
+        setRan(graded);
+        setRanEngine(null);
+        onRan(summarise(graded, opened.api));
+        change((s) => ({ ...s, runs: s.runs + 1 }), true);
+      } catch (e) {
+        if (e instanceof ConnectionError && currentMode === "automatic" && hasLocal) {
+          await runLocally();
+          return;
+        }
+        throw e;
+      }
     } catch (e) {
       setRunError(errorMessage(e));
     } finally {
@@ -1071,11 +1135,127 @@ function CodeStep({
   };
 
   const submit = async () => {
+    if (!language) return;
     keyboard.show(false);
     setBusy("submitting");
     setRunError(null);
     setSubmitted(null);
+    setSubmittedEngine(null);
+    const hasLocal = opened.api === null && (await localRunner().isAvailable(language.id));
+    const effectivelyOnline =
+      online && (typeof navigator === "undefined" || navigator.onLine !== false);
+    const backend = resolveRunBackend(preferences.onDeviceMode.get(), effectivelyOnline, hasLocal);
     try {
+      if (backend === "local") {
+        void draftSaver.current?.flush().catch(() => {});
+        const cachedTests = await getCachedCodingTests(itemKey);
+        if (!cachedTests) {
+          setRunError(
+            "Hidden tests aren't cached offline yet. Sync the Coding offline bundle while online first.",
+          );
+          return;
+        }
+        const code = editor.current?.text() ?? language.code.text;
+        const cases = buildCodingSubmitCases(
+          opened.parts,
+          cachedTests.tests,
+          cachedTests.oracleCases,
+          session.part,
+        );
+        const { graded, timedOut, engine } = await localRunner().runCoding({
+          languageId: language.id,
+          code,
+          cases,
+          stopOnFailure: true,
+          totalCases: cases.length,
+        });
+        if (timedOut) {
+          // Local timeouts are inconclusive: never fail the submission or record a `too-slow` mistake.
+          setRunError("Too slow to verify on this device; submit on the server.");
+          return;
+        }
+
+        const passed =
+          graded.outcome === "ran" &&
+          graded.results.length === cases.length &&
+          graded.results.every((r) => r.passed);
+        const failure =
+          graded.outcome === "ran" ? (graded.results.find((r) => !r.passed) ?? null) : null;
+        const problem =
+          graded.outcome === "build_failed"
+            ? graded.errors
+            : graded.outcome === "unavailable"
+              ? graded.reason
+              : failure
+                ? describeRun(failure.run)
+                : null;
+        const ranCount =
+          graded.outcome === "ran" ? graded.results.filter((r) => r.passed).length : 0;
+
+        const now = Date.now();
+        const baseVersion = session.version ?? 1;
+        const advancingPart = passed && session.part < opened.part_count - 1;
+        const nextSession: Session = advancingPart
+          ? {
+              ...session,
+              submissions: session.submissions + 1,
+              plans: [...session.plans, session.plan],
+              part: session.part + 1,
+              plan: "",
+              prediction: null,
+              step: "understand",
+              updated_at: Math.max(now, session.updated_at),
+              version: baseVersion + 1,
+            }
+          : {
+              ...session,
+              submissions: session.submissions + 1,
+              passed,
+              step: passed ? "review" : "test",
+              updated_at: Math.max(now, session.updated_at),
+              version: baseVersion + 1,
+            };
+
+        await updateCachedCodingSession(itemKey, nextSession);
+        outbox().enqueueCodingEvent({
+          kind: "submitted",
+          id: newId(),
+          item: itemKey,
+          base_version: baseVersion,
+          passed,
+          part: session.part,
+          graded,
+          at: now,
+        });
+
+        const cachedProblem = await getCachedCodingProblem(itemKey);
+        const nextParts = cachedProblem
+          ? cachedProblem.parts.slice(0, revealed(nextSession, cachedProblem.parts.length))
+          : opened.parts;
+        const nextOpened: Opened = {
+          ...opened,
+          parts: nextParts,
+          session: nextSession,
+          solution:
+            nextSession.step === "review"
+              ? (cachedProblem?.solution ?? opened.solution)
+              : opened.solution,
+        };
+        const result: Submitted = {
+          passed,
+          problem,
+          failure,
+          ran: ranCount,
+          total: cases.length,
+          opened: nextOpened,
+        };
+        setSubmitted(result);
+        setSubmittedEngine(engine);
+        onRan(result.problem ?? "Passed every test.");
+        onReloaded(nextOpened);
+        return;
+      }
+
       // Saved first, so the server tests what's in the editor, at the step it's at.
       await Promise.all([
         change((s) => ({ ...s, step: "test" }), true),
@@ -1083,6 +1263,7 @@ function CodeStep({
       ]);
       const result = await codingApi.submit(itemKey, newId());
       setSubmitted(result);
+      setSubmittedEngine(null);
       onRan(result.problem ?? "Passed every test.");
       // The server moves a passing solution on to being reviewed.
       onReloaded(result.opened);
@@ -1108,10 +1289,12 @@ function CodeStep({
           api={opened.api}
           busy={busy === "submitting"}
           submitted={submitted}
+          engine={submittedEngine}
           error={runError}
-          online={online}
+          canSubmit={canRun}
           onBack={() => change((s) => ({ ...s, step: "code" }), true)}
           onSubmit={() => void submit()}
+          onCancel={() => localRunner().cancel()}
           onGiveUp={onGiveUp}
         />
       ) : (
@@ -1197,9 +1380,11 @@ function CodeStep({
             <ExampleResults
               api={opened.api}
               ran={ran}
+              engine={ranEngine}
               error={runError}
               onDismiss={() => {
                 setRan(null);
+                setRanEngine(null);
                 setRunError(null);
               }}
             />
@@ -1216,16 +1401,23 @@ function CodeStep({
               <button
                 type="button"
                 class="pill"
-                disabled={!online || busy !== null}
+                disabled={!canRun || busy !== null}
                 onClick={() => void runExamples()}
               >
                 {busy === "running"
                   ? "Running…"
-                  : online
-                    ? "Run examples"
+                  : canRun
+                    ? mode === "local" && hasLocalRunner
+                      ? "Run examples (on device)"
+                      : "Run examples"
                     : "Running needs the server"}
               </button>
-              {online ? (
+              {busy !== null && hasLocalRunner ? (
+                <button type="button" class="pill" onClick={() => localRunner().cancel()}>
+                  Stop
+                </button>
+              ) : null}
+              {canRun ? (
                 <button
                   type="button"
                   class="pill primary"
@@ -1276,11 +1468,13 @@ function summarise(graded: Graded, api: Api | null): string {
 function ExampleResults({
   api,
   ran,
+  engine,
   error,
   onDismiss,
 }: {
   api: Api | null;
   ran: Graded | null;
+  engine: string | null;
   error: string | null;
   onDismiss: () => void;
 }) {
@@ -1300,6 +1494,7 @@ function ExampleResults({
           Close
         </button>
       </span>
+      {engine ? <p class="muted small">Ran on device ({engine})</p> : null}
       {error ? <p class="error-text">{error}</p> : null}
       {ran?.outcome === "build_failed" ? (
         <pre class="coding-io error-text">{ran.errors}</pre>
@@ -1365,19 +1560,23 @@ function TestResults({
   api,
   busy,
   submitted,
+  engine,
   error,
-  online,
+  canSubmit,
   onBack,
   onSubmit,
+  onCancel,
   onGiveUp,
 }: {
   api: Api | null;
   busy: boolean;
   submitted: Submitted | null;
+  engine: string | null;
   error: string | null;
-  online: boolean;
+  canSubmit: boolean;
   onBack: () => void;
   onSubmit: () => void;
+  onCancel: () => void;
   onGiveUp: () => void;
 }) {
   return (
@@ -1395,6 +1594,7 @@ function TestResults({
               ? `Passed ${submitted.ran} of ${submitted.total}, then went wrong`
               : "It didn't run"}
           </h2>
+          {engine ? <p class="muted small">Ran on device ({engine})</p> : null}
           {submitted.failure ? (
             <CaseView api={api} result={submitted.failure} />
           ) : (
@@ -1409,9 +1609,15 @@ function TestResults({
         <button type="button" class="pill" onClick={onBack} disabled={busy}>
           Back to the code
         </button>
-        <button type="button" class="pill primary" onClick={onSubmit} disabled={busy || !online}>
-          {submitted || error ? "Submit again" : "Submit"}
-        </button>
+        {busy ? (
+          <button type="button" class="pill" onClick={onCancel}>
+            Stop
+          </button>
+        ) : (
+          <button type="button" class="pill primary" onClick={onSubmit} disabled={!canSubmit}>
+            {submitted || error ? "Submit again" : "Submit"}
+          </button>
+        )}
       </span>
       <button type="button" class="learn-link" onClick={onGiveUp} disabled={busy}>
         Give up and see how it's solved

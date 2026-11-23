@@ -85,6 +85,17 @@ impl Paths {
         self.cache_dir.join("packages").join(language)
     }
 
+    /// Where optional on-device runtime bundles (such as GHC WASM) are cached for serving to
+    /// phones. Can be overridden with `WORKSHOP_ON_DEVICE_DIR` for local bundle development.
+    pub fn on_device_dir(&self) -> PathBuf {
+        if let Some(dir) = std::env::var_os("WORKSHOP_ON_DEVICE_DIR")
+            && !dir.is_empty()
+        {
+            return PathBuf::from(dir);
+        }
+        self.cache_dir.join("on-device")
+    }
+
     /// A local log of utterances, model replies and errors, for tuning and troubleshooting.
     pub fn log_file(&self) -> PathBuf {
         self.data_dir.join("workshop.log")

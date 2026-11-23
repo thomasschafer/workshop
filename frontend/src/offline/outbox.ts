@@ -47,6 +47,7 @@ export type CodingOutboxPayload =
       item: string;
       base_version: number;
       passed: boolean;
+      part?: number | undefined;
       graded: Graded | null;
       at: number;
     }

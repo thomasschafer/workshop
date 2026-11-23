@@ -7,6 +7,7 @@ import "../learning/practice.css";
 import { newId, retirements } from "../learning/local";
 import { RetiredList } from "../learning/retired";
 import { getSnapshot, putSnapshot } from "../offline/db";
+import { refreshCachedBundles, subscribeCachedBundles } from "../onDevice/bundles";
 import { HomeButton, TrackTitle } from "../progress/page";
 import type { TrackId } from "../tracks/types";
 import "./coding.css";
@@ -39,8 +40,11 @@ export function CodingScreen({
   onTrack: (track: TrackId) => void;
 }) {
   const learning = useLearning();
+  const [, setBundleTick] = useState(0);
   useEffect(() => {
     void learning.sync();
+    void refreshCachedBundles();
+    return subscribeCachedBundles(() => setBundleTick((t) => t + 1));
   }, []);
   if (item === null) return <CodingList onHome={onHome} onOpen={onOpen} />;
   // Code to read is in the deck, so it works offline; problems need the server.

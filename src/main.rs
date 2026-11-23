@@ -18,6 +18,7 @@ mod learning;
 mod mistakes;
 mod models;
 mod notify;
+mod on_device;
 mod pack_files;
 mod packs;
 mod paths;

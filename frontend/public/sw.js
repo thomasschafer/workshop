@@ -150,16 +150,12 @@ async function cacheFirstAsset(request) {
 }
 
 /** Serves versioned on-device runtime bundles from their own dedicated cache, never pruned with
- * app assets. */
+ * app assets. Writes happen only through the client bundle installer after SHA-256 verification. */
 async function cacheFirstIn(cacheName, request) {
   const cache = await caches.open(cacheName);
   const kept = await cache.match(request);
   if (kept) return kept;
-  const response = await fetch(request);
-  if (response.ok) {
-    await cache.put(request, response.clone());
-  }
-  return response;
+  return fetch(request);
 }
 
 /** Removes only old `/assets/` entries beyond the current release plus `MAX_EXTRA_ASSETS`. */

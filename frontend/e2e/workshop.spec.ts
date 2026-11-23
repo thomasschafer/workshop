@@ -2832,11 +2832,12 @@ test("opens a cached Advent of Code puzzle offline, edits notes, shows On-device
   await phone.getByRole("button", { name: "Problem" }).tap();
   await expect(phone.locator(".pane.problem")).toContainText("Day 4: Counting Lines");
 
-  // Open Settings -> On-device and verify live diagnostics & cached puzzle count.
+  // Open Settings -> On-device and verify live diagnostics, runtime catalog & cached puzzle count.
   await phone.getByRole("button", { name: "Settings" }).tap();
   await phone.locator(".settings-row", { hasText: "On-device" }).getByRole("button").tap();
   await expect(phone.getByRole("dialog", { name: "On-device" })).toBeVisible();
   await expect(phone.locator(".on-device")).toContainText("On server");
+  await expect(phone.locator(".on-device")).toContainText("GHC 9.14 WASM");
   await expect(phone.locator(".on-device")).toContainText(/puzzle(s)? cached/);
   await phone.getByRole("dialog").getByRole("button", { name: "Close" }).tap();
 

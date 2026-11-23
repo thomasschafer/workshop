@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { errorMessage } from "../errors";
 import { useConnectionStatus } from "../hooks/useConnection";
 import { useLearning } from "../learning/practice";
@@ -13,6 +13,21 @@ import {
   storageDiagnostics,
 } from "../offline/db";
 import { type OutboxIssue, outbox } from "../offline/outbox";
+import {
+  BUNDLE_CATALOG,
+  type BundleSpec,
+  bundleForLanguage,
+  bundleTotalBytes,
+  type DeviceDownloadProgress,
+  installBundleToDevice,
+  isBundleCachedSync,
+  onDeviceApi,
+  refreshCachedBundles,
+  removeBundleFromDevice,
+  type ServerOnDeviceBundlesState,
+  subscribeCachedBundles,
+} from "../onDevice/bundles";
+import { localRunner, resolveRunBackend } from "../onDevice/runner";
 import { ON_DEVICE_MODES, type OnDeviceMode } from "../preferences";
 
 const MODE_LABELS: Record<OnDeviceMode, string> = {
@@ -40,6 +55,7 @@ function formatBytes(bytes: number | null): string {
 export interface OnDeviceProps {
   mode: OnDeviceMode;
   onMode: (mode: OnDeviceMode) => void;
+  languageId: string;
   languageName: string;
   hasLsp: boolean;
   hasFormatter: boolean;
@@ -47,9 +63,17 @@ export interface OnDeviceProps {
 
 /**
  * Diagnostics and controls for offline and on-device operation: connection status, which backend
- * handles checks/runs, persistent storage, cached puzzles/problems, and pending syncs.
+ * handles checks/runs, persistent storage, cached puzzles/problems, on-device runtime bundles, and
+ * pending syncs.
  */
-export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter }: OnDeviceProps) {
+export function OnDevicePage({
+  mode,
+  onMode,
+  languageId,
+  languageName,
+  hasLsp,
+  hasFormatter,
+}: OnDeviceProps) {
   const conn = useConnectionStatus();
   const learning = useLearning();
   const [outboxCount, setOutboxCount] = useState(() => outbox().pending);
@@ -61,6 +85,13 @@ export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter 
   const [showPuzzles, setShowPuzzles] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [serverBundles, setServerBundles] = useState<ServerOnDeviceBundlesState | null>(null);
+  const [cachedTick, setCachedTick] = useState(0);
+  const [deviceDownload, setDeviceDownload] = useState<{
+    bundleId: string;
+    progress: DeviceDownloadProgress | null;
+  } | null>(null);
+  const deviceAbort = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
     const [diag, aoc, coding, cachedHelpers] = await Promise.all([
@@ -68,20 +99,122 @@ export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter 
       listAocPuzzles(),
       listRecords("codingBundle"),
       listRecords<CachedHelpers>("helpers"),
+      refreshCachedBundles(),
     ]);
     setStorage(diag);
     setPuzzles(aoc.sort((a, b) => (a.year !== b.year ? b.year - a.year : a.day - b.day)));
     setCodingCount(coding.length);
     setHelpers(cachedHelpers);
-  }, []);
+    setCachedTick((t) => t + 1);
+    if (conn.online) {
+      onDeviceApi
+        .bundles()
+        .then(setServerBundles)
+        .catch(() => {});
+    }
+  }, [conn.online]);
 
   useEffect(() => {
     void refresh();
-    return outbox().subscribe(() => {
+    const unsubOutbox = outbox().subscribe(() => {
       setOutboxCount(outbox().pending);
       setIssues(outbox().issues());
     });
+    const unsubBundles = subscribeCachedBundles(() => setCachedTick((t) => t + 1));
+    return () => {
+      unsubOutbox();
+      unsubBundles();
+    };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!serverBundles?.download.installing) return;
+    const timer = setInterval(() => {
+      onDeviceApi
+        .bundles()
+        .then(setServerBundles)
+        .catch(() => {});
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [serverBundles?.download.installing]);
+
+  const downloadToServer = async (bundle: BundleSpec) => {
+    setMessage(null);
+    setServerBundles((prev) =>
+      prev
+        ? {
+            ...prev,
+            download: { ...prev.download, installing: true, progress: "Starting download…" },
+          }
+        : prev,
+    );
+    try {
+      const next = await onDeviceApi.downloadOnServer(bundle.id);
+      setServerBundles(next);
+      setMessage(
+        `${bundle.engine} is ready on the server. Tap "Install on this device" to cache it locally.`,
+      );
+    } catch (e) {
+      setMessage(`Server download failed: ${errorMessage(e)}`);
+      onDeviceApi
+        .bundles()
+        .then(setServerBundles)
+        .catch(() => {});
+    }
+  };
+
+  const cancelServerDownload = async () => {
+    try {
+      const next = await onDeviceApi.cancelServerDownload();
+      setServerBundles(next);
+    } catch (e) {
+      setMessage(`Couldn't cancel download: ${errorMessage(e)}`);
+    }
+  };
+
+  const installToDevice = async (bundle: BundleSpec) => {
+    setMessage(null);
+    const controller = new AbortController();
+    deviceAbort.current = controller;
+    setDeviceDownload({ bundleId: bundle.id, progress: null });
+    try {
+      await installBundleToDevice(
+        bundle,
+        (progress) => setDeviceDownload({ bundleId: bundle.id, progress }),
+        controller.signal,
+      );
+      await refresh();
+      setMessage(`${bundle.engine} installed and SHA-256 verified on this device.`);
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        setMessage(`Device install failed: ${errorMessage(e)}`);
+      } else {
+        setMessage("Device install cancelled.");
+      }
+    } finally {
+      if (deviceAbort.current === controller) deviceAbort.current = null;
+      setDeviceDownload(null);
+    }
+  };
+
+  const removeFromDevice = async (bundle: BundleSpec) => {
+    setMessage(null);
+    localRunner().dispose();
+    await removeBundleFromDevice(bundle.id);
+    await refresh();
+    setMessage(`Removed ${bundle.engine} from this device.`);
+  };
+
+  const removeFromServer = async (bundle: BundleSpec) => {
+    setMessage(null);
+    try {
+      const next = await onDeviceApi.deleteOnServer(bundle.id);
+      setServerBundles(next);
+      setMessage(`Removed ${bundle.engine} from the server cache.`);
+    } catch (e) {
+      setMessage(`Couldn't remove bundle from server: ${errorMessage(e)}`);
+    }
+  };
 
   const totalPending = learning.syncStatus.pending + outboxCount;
 
@@ -134,6 +267,13 @@ export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter 
         ? `Online (${conn.lastRttMs} ms)`
         : "Online";
 
+  // Reference cachedTick so the active runner label re-computes when bundles install or are removed.
+  const activeBundle = cachedTick >= 0 ? bundleForLanguage(languageId) : null;
+  const activeBundleCached = activeBundle !== null && isBundleCachedSync(activeBundle.id);
+  const runnerBackend = resolveRunBackend(mode, conn.online, activeBundleCached);
+  const runnerLabel =
+    runnerBackend === "local" && activeBundle ? `On device (${activeBundle.engine})` : "On server";
+
   return (
     <div class="on-device">
       <div class="snippets wrap">
@@ -157,10 +297,108 @@ export function OnDevicePage({ mode, onMode, languageName, hasLsp, hasFormatter 
         <dt>Language server</dt>
         <dd>{hasLsp ? "On server" : "None for this language"}</dd>
         <dt>Runner</dt>
-        <dd>On server</dd>
+        <dd>{runnerLabel}</dd>
         <dt>Formatter</dt>
         <dd>{hasFormatter ? "On server" : hasLsp ? "Language server" : "None"}</dd>
       </dl>
+
+      <h3 class="settings-heading">On-device runtimes</h3>
+      <ul class="on-device-list">
+        {BUNDLE_CATALOG.map((bundle) => {
+          const serverInfo = serverBundles?.bundles.find((b) => b.id === bundle.id) ?? null;
+          const onServer = serverInfo?.installed_on_server ?? false;
+          const onDevice = isBundleCachedSync(bundle.id);
+          const serverBusy = serverBundles?.download.installing ?? false;
+          const deviceBusy = deviceDownload?.bundleId === bundle.id;
+          const progress = deviceBusy ? deviceDownload.progress : null;
+          return (
+            <li key={bundle.id} class="on-device-bundle">
+              <div class="on-device-list-row">
+                <span>
+                  <strong>{bundle.engine}</strong> ({bundle.language})
+                </span>
+                <span class="muted small">
+                  {bundle.version} · {formatBytes(bundleTotalBytes(bundle))}
+                </span>
+              </div>
+              <p class="muted small">
+                {onDevice
+                  ? "Installed & SHA-256 verified on this device."
+                  : onServer
+                    ? "Ready on server; install on this device to run offline."
+                    : "Not downloaded yet."}
+              </p>
+              {serverBusy && serverBundles?.download.progress ? (
+                <p class="muted small" role="status">
+                  Server: {serverBundles.download.progress}
+                </p>
+              ) : null}
+              {progress ? (
+                <p class="muted small" role="status">
+                  {progress.stage === "downloading"
+                    ? `Downloading ${progress.file}: ${formatBytes(progress.receivedBytes)} of ${formatBytes(progress.totalBytes)}`
+                    : progress.stage === "verifying"
+                      ? `Verifying SHA-256 for ${progress.file}…`
+                      : `Saving ${progress.file} to device cache…`}
+                </p>
+              ) : null}
+              <div class="on-device-actions">
+                {!onServer ? (
+                  serverBusy ? (
+                    <button type="button" class="pill" onClick={() => void cancelServerDownload()}>
+                      Cancel download
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      class="pill"
+                      disabled={!conn.online || deviceBusy}
+                      onClick={() => void downloadToServer(bundle)}
+                    >
+                      Download to server
+                    </button>
+                  )
+                ) : null}
+                {onServer && !onDevice ? (
+                  deviceBusy ? (
+                    <button type="button" class="pill" onClick={() => deviceAbort.current?.abort()}>
+                      Cancel install
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      class="pill primary"
+                      disabled={!conn.online || serverBusy}
+                      onClick={() => void installToDevice(bundle)}
+                    >
+                      Install on this device
+                    </button>
+                  )
+                ) : null}
+                {onDevice ? (
+                  <button
+                    type="button"
+                    class="text-button"
+                    onClick={() => void removeFromDevice(bundle)}
+                  >
+                    Remove from device
+                  </button>
+                ) : null}
+                {onServer && conn.online ? (
+                  <button
+                    type="button"
+                    class="text-button"
+                    disabled={serverBusy || deviceBusy}
+                    onClick={() => void removeFromServer(bundle)}
+                  >
+                    Remove from server
+                  </button>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
 
       <h3 class="settings-heading">Offline storage</h3>
       <dl class="on-device-dl">

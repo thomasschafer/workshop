@@ -534,6 +534,8 @@ pub enum CodingEvent {
         base_version: u64,
         passed: bool,
         #[serde(default)]
+        part: Option<usize>,
+        #[serde(default)]
         graded: Option<workshop_coding::Graded>,
         at: i64,
     },
@@ -1076,14 +1078,14 @@ impl Problems {
             CodingEvent::Submitted {
                 base_version,
                 passed,
+                part,
                 graded,
                 at,
                 ..
             } => match self.record_submission_locked(
                 &found,
                 Some(base_version),
-                // Only the server's own run of the tests can pass a part.
-                Submitted { part: None, passed },
+                Submitted { part, passed },
                 at,
             ) {
                 Ok((saved, spent_ms)) => {
@@ -1730,21 +1732,30 @@ mod tests {
             problems.record_submission(&found, None, passed(0), NOW),
             Err(SessionWriteError::Conflict { current }) if current.part == 1
         ));
-        let offline = |id: &str, passed: bool| CodingEvent::Submitted {
+        let offline = |id: &str, passed: bool, part: Option<usize>| CodingEvent::Submitted {
             id: id.to_owned(),
             item: found.key(),
             base_version: moved.version,
             passed,
+            part,
             graded: None,
             at: NOW,
         };
-        let refused = problems.apply_event(&packs, &learning, offline("offline-pass", true));
+        let refused = problems.apply_event(&packs, &learning, offline("offline-pass", true, None));
         assert!(
             matches!(&refused.status, CodingEventStatus::Error { message } if message.contains("only the server's own run")),
             "{:?}",
             refused.status
         );
-        let failed = problems.apply_event(&packs, &learning, offline("offline-fail", false));
+        // A stale part conflicts instead of advancing the session.
+        let stale_part =
+            problems.apply_event(&packs, &learning, offline("offline-stale", true, Some(0)));
+        assert!(
+            matches!(&stale_part.status, CodingEventStatus::Conflict { current } if current.part == 1),
+            "{:?}",
+            stale_part.status
+        );
+        let failed = problems.apply_event(&packs, &learning, offline("offline-fail", false, None));
         let CodingEventStatus::Applied {
             session: Some(failed),
         } = failed.status
@@ -1754,6 +1765,30 @@ mod tests {
         assert_eq!(
             (failed.part, failed.step, failed.passed),
             (1, StepName::Test, false)
+        );
+        // A verified on-device pass carrying the current part advances to the next part.
+        let passed_on_device = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::Submitted {
+                id: "offline-pass-part1".to_owned(),
+                item: found.key(),
+                base_version: failed.version,
+                passed: true,
+                part: Some(1),
+                graded: None,
+                at: NOW,
+            },
+        );
+        let CodingEventStatus::Applied {
+            session: Some(advanced),
+        } = passed_on_device.status
+        else {
+            panic!("{:?}", passed_on_device.status);
+        };
+        assert_eq!(
+            (advanced.part, advanced.step, advanced.passed),
+            (2, StepName::Understand, false)
         );
     }
 
@@ -2068,6 +2103,7 @@ mod tests {
                 item: found.key(),
                 base_version: 2,
                 passed: false,
+                part: Some(0),
                 graded: Some(graded),
                 at: NOW + 10_000,
             },

@@ -43,6 +43,13 @@ pub(super) fn bad_request(message: impl Into<String>) -> ApiError {
     )
 }
 
+pub(super) fn not_found(message: impl Into<String>) -> ApiError {
+    ApiError(
+        StatusCode::NOT_FOUND,
+        serde_json::json!({ "error": message.into() }),
+    )
+}
+
 /// Parses an optional JSON body: empty bodies yield `T::default()`, non-empty invalid JSON fails
 /// with 400. Unlike `Option<Json<T>>`, this accepts empty bodies sent with
 /// `Content-Type: application/json`.

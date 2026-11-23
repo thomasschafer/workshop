@@ -73,17 +73,33 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
         environment: request.environment,
     })
     .await?;
-    let answers: Vec<String> = match outcome.phase {
+    let answers = match outcome.phase {
         Phase::Build => Vec::new(),
-        Phase::Run => outcome
-            .stdout
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(|l| answer(l).to_owned())
-            .collect(),
+        Phase::Run => parse_answers(&outcome.stdout),
     };
-    let warnings = answers
+    let warnings = answer_warnings(&answers);
+    Ok(RunResult {
+        phase: outcome.phase,
+        ending: outcome.ending,
+        stdout: outcome.stdout,
+        stderr: outcome.stderr,
+        duration_ms: outcome.duration_ms,
+        answers,
+        warnings,
+    })
+}
+
+pub fn parse_answers(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| answer(l).to_owned())
+        .collect()
+}
+
+pub fn answer_warnings(answers: &[String]) -> Vec<String> {
+    answers
         .iter()
         .take(2)
         .enumerate()
@@ -95,16 +111,7 @@ pub async fn run(request: RunRequest<'_>) -> Result<RunResult> {
                 i + 1
             )
         })
-        .collect();
-    Ok(RunResult {
-        phase: outcome.phase,
-        ending: outcome.ending,
-        stdout: outcome.stdout,
-        stderr: outcome.stderr,
-        duration_ms: outcome.duration_ms,
-        answers,
-        warnings,
-    })
+        .collect()
 }
 
 /// The answer a line of output gives. Advent of Code's answers are letters, digits and the odd
@@ -276,5 +283,24 @@ mod tests {
         .await;
         assert!(result.succeeded(), "{result:?}");
         assert_eq!(result.answers, vec!["from the environment"]);
+    }
+
+    #[test]
+    fn matches_shared_answers_fixture() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            stdout: String,
+            answers: Vec<String>,
+            warnings: Vec<String>,
+        }
+        let cases: Vec<Case> =
+            serde_json::from_str(include_str!("../crates/runner/tests/answers.json")).unwrap();
+        assert!(cases.len() >= 5);
+        for case in cases {
+            let answers = parse_answers(&case.stdout);
+            let warnings = answer_warnings(&answers);
+            assert_eq!(answers, case.answers, "stdout={:?}", case.stdout);
+            assert_eq!(warnings, case.warnings, "stdout={:?}", case.stdout);
+        }
     }
 }

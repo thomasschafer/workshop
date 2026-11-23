@@ -4,7 +4,12 @@ export type InputKind = "sample" | "real";
 
 export interface RunState {
   running: InputKind | null;
-  last: { input: InputKind; result: RunResult; source?: "server" | "local" } | null;
+  last: {
+    input: InputKind;
+    result: RunResult;
+    source?: "server" | "local" | undefined;
+    engine?: string | undefined;
+  } | null;
   error: string | null;
   submitting: boolean;
   submitted: SubmitOutcome | null;
@@ -156,7 +161,9 @@ export function RunSheet({
         <div class="run-result">
           <p class="muted">
             {last.input === "sample" ? "Sample" : "Real input"}: {describeEnding(last.result)} ·{" "}
-            {last.source === "local" ? "on device" : "on server"}
+            {last.source === "local"
+              ? `Ran on device (${last.engine ?? "GHC WASM"})`
+              : "Ran on server"}
           </p>
           {last.result.answers.length > 0 ? (
             <ol class="answers">

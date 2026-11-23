@@ -1,0 +1,45 @@
+[
+  {
+    "stdout": "42\n",
+    "answers": ["42"],
+    "warnings": []
+  },
+  {
+    "stdout": "\"fgij\"\n3.0\n1.5\n",
+    "answers": ["fgij", "3.0", "1.5"],
+    "warnings": [
+      "Part 2's answer, 3.0, looks like a decimal, but Advent of Code's answers are whole numbers. Is a division or a float type giving it?"
+    ]
+  },
+  {
+    "stdout": "  123n \n -10n\n",
+    "answers": ["123", "-10"],
+    "warnings": []
+  },
+  {
+    "stdout": "\"\"\n\"a\"b\"\n\"ab\nn\n-n\n12an\n1,2,3\n",
+    "answers": ["\"\"", "\"a\"b\"", "\"ab", "n", "-n", "12an", "1,2,3"],
+    "warnings": []
+  },
+  {
+    "stdout": "-2.5\n1e+21\n",
+    "answers": ["-2.5", "1e+21"],
+    "warnings": [
+      "Part 1's answer, -2.5, looks like a decimal, but Advent of Code's answers are whole numbers. Is a division or a float type giving it?",
+      "Part 2's answer, 1e+21, looks like a decimal, but Advent of Code's answers are whole numbers. Is a division or a float type giving it?"
+    ]
+  },
+  {
+    "stdout": "1.5e21\n2E-3\n",
+    "answers": ["1.5e21", "2E-3"],
+    "warnings": [
+      "Part 1's answer, 1.5e21, looks like a decimal, but Advent of Code's answers are whole numbers. Is a division or a float type giving it?",
+      "Part 2's answer, 2E-3, looks like a decimal, but Advent of Code's answers are whole numbers. Is a division or a float type giving it?"
+    ]
+  },
+  {
+    "stdout": "\n  \n3.0.1\ne5\n1.\n.5\n1e\n",
+    "answers": ["3.0.1", "e5", "1.", ".5", "1e"],
+    "warnings": []
+  }
+]

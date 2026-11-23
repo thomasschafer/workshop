@@ -33,6 +33,7 @@ import { useSampleFinding } from "./hooks/useSampleFinding";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useUiStateSaver } from "./hooks/useUiStateSaver";
 import { getAocPuzzle, getHelpers, mergeAocPuzzle, putHelpers } from "./offline/db";
+import { refreshCachedBundles } from "./onDevice/bundles";
 import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleTitle } from "./puzzle";
@@ -202,10 +203,19 @@ export function App({
   // The part being worked on: the next one to solve, or for a solved puzzle being worked through
   // again, the one the code has got to.
   const workingPart = part ?? (part2Started === true ? 2 : 1);
+  const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
+  const [onDeviceMode, setOnDeviceMode] = useState(() => preferences.onDeviceMode.get());
+  useEffect(() => {
+    void refreshCachedBundles();
+  }, []);
   const { run, setRun, doRun, cancelRun, doSubmit } = useRun({
     puzzleRef,
     part,
     workingPart,
+    languageId: boot.language.id,
+    onDeviceMode,
+    online,
+    editor,
     metaRef,
     metaSavers,
     saver,
@@ -237,8 +247,6 @@ export function App({
       }),
     [],
   );
-  const [keepScreenOn, setKeepScreenOn] = useState(() => preferences.keepScreenOn.get());
-  const [onDeviceMode, setOnDeviceMode] = useState(() => preferences.onDeviceMode.get());
   const settings = useEditorSettings(boot.editor, editor);
   const {
     lineWrapping,
@@ -1116,6 +1124,7 @@ export function App({
                 preferences.onDeviceMode.set(mode);
                 setOnDeviceMode(mode);
               },
+              languageId: boot.language.id,
               languageName: boot.language.name,
               hasLsp: boot.language.has_lsp,
               hasFormatter: boot.language.has_formatter,

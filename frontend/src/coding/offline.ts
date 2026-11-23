@@ -7,6 +7,7 @@
 
 import type { VersionedFile } from "../api";
 import { getRecord, listRecords, putRecord } from "../offline/db";
+import { isLanguageCachedSync } from "../onDevice/bundles";
 import { codingApi } from "./api";
 import { revealed } from "./steps";
 import type {
@@ -61,9 +62,10 @@ export interface BundleSyncSummary {
 /** Whether a cached coding problem can run locally or is edit/review-only offline. */
 export type OfflineCodingCapability = "runnable" | "edit_review";
 
-export function offlineCapability(_problem: CachedCodingProblem): OfflineCodingCapability {
-  // Phase 2 adds on-device WASM runners; until one is installed, cached coding problems support
-  // understanding, planning, editing with Helix + Workshop keyboard, recall, review and finishing.
+export function offlineCapability(problem: CachedCodingProblem): OfflineCodingCapability {
+  if (problem.api === null && problem.languages.some((lang) => isLanguageCachedSync(lang.id))) {
+    return "runnable";
+  }
   return "edit_review";
 }
 
@@ -120,6 +122,10 @@ export async function syncCodingBundle(): Promise<BundleSyncSummary> {
 
 export async function getCachedCodingProblem(key: string): Promise<CachedCodingProblem | null> {
   return getRecord<CachedCodingProblem>("codingBundle", key);
+}
+
+export async function getCachedCodingTests(key: string): Promise<CachedCodingTests | null> {
+  return getRecord<CachedCodingTests>("codingTests", key);
 }
 
 export async function listCachedCodingProblems(): Promise<CachedCodingProblem[]> {

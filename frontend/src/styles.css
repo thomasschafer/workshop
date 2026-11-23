@@ -2629,3 +2629,18 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
   border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
+
+.on-device-bundle {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.on-device-bundle .on-device-list-row {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+.on-device-bundle .on-device-actions {
+  margin-top: 6px;
+  margin-bottom: 2px;
+}

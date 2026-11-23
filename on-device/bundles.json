@@ -1,0 +1,45 @@
+{
+  "bundles": [
+    {
+      "id": "haskell-ghc-wasm",
+      "version": "9.14.0-20251031",
+      "language": "haskell",
+      "engine": "GHC 9.14 WASM",
+      "description": "GHC 9.14 compiler and bytecode runtime in WebAssembly.",
+      "packages": [
+        "base",
+        "containers",
+        "array",
+        "mtl",
+        "transformers",
+        "text",
+        "bytestring",
+        "deepseq",
+        "stm",
+        "binary",
+        "time",
+        "filepath",
+        "directory"
+      ],
+      "ghc_libdir": "/tmp/hslib/lib",
+      "ghc_lib_search_dir": "/tmp/hslib/lib/wasm32-wasi-ghc-9.14.0.20251031-inplace",
+      "main_so_path": "/tmp/libplayground001.so",
+      "files": [
+        {
+          "name": "bsdtar.wasm",
+          "url": "https://haskell-wasm.github.io/ghc-in-browser/bsdtar.wasm",
+          "size": 1240004,
+          "sha256": "e13ebb15ca0971f6629a6313bc043c532dd9be3a0e6bb0b7f8a395de835ad0c0",
+          "content_type": "application/wasm"
+        },
+        {
+          "name": "rootfs.tar.zst",
+          "url": "https://haskell-wasm.github.io/ghc-in-browser/rootfs.tar.zst",
+          "size": 49091550,
+          "sha256": "35f68f56fdb72111f150ba05ad31efed2f6fc77ee7026fb4b197ae7901a67adf",
+          "content_type": "application/zstd"
+        }
+      ]
+    }
+  ]
+}

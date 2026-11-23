@@ -19,6 +19,7 @@ mod learning;
 mod lsp;
 mod mistakes;
 mod notifications;
+mod on_device;
 mod packages;
 mod packs;
 mod puzzles;
@@ -37,7 +38,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::http::{StatusCode, Uri, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use rust_embed::RustEmbed;
 
 pub use author::run_on_schedule as run_author_on_schedule;
@@ -179,6 +180,16 @@ pub fn router(app: Shared) -> Router {
             "/speech/download/cancel",
             post(speech::cancel_speech_download),
         )
+        .route("/on-device/bundles", get(on_device::get_bundles))
+        .route(
+            "/on-device/bundles/{id}/download",
+            post(on_device::download_bundle),
+        )
+        .route(
+            "/on-device/bundles/cancel",
+            post(on_device::cancel_download),
+        )
+        .route("/on-device/bundles/{id}", delete(on_device::delete_bundle))
         .route(
             "/speech/transcribe",
             post(speech::transcribe).layer(DefaultBodyLimit::max(speech::RECORDING_LIMIT)),
@@ -221,6 +232,7 @@ pub fn router(app: Shared) -> Router {
         .route("/lsp/restart", post(lsp::restart));
     Router::new()
         .nest("/api", api)
+        .route("/on-device/{bundle}/{file}", get(on_device::serve_file))
         .fallback(static_asset)
         .layer(middleware::from_fn_with_state(
             app.gate.clone(),

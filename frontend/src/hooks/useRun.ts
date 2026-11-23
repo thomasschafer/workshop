@@ -1,8 +1,12 @@
 import type { RefObject } from "preact";
 import { useRef, useState } from "preact/hooks";
-import { api, type DayMeta, type Problem, type Puzzle } from "../api";
+import { api, ConnectionError, type DayMeta, type Problem, type Puzzle } from "../api";
+import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
 import { newId } from "../learning/local";
+import { getAocPuzzle, getHelpers, mergeAocPuzzle } from "../offline/db";
+import { localRunner, resolveRunBackend } from "../onDevice/runner";
+import type { OnDeviceMode } from "../preferences";
 import { sampleInput, withSuggestions } from "../samples";
 import type { LatestSaver, VersionedSaver } from "../saver";
 import { type InputKind, initialRunState, type RunState } from "../views/run";
@@ -13,6 +17,10 @@ interface Options {
   part: number | null;
   /** The part being worked on, whose sample is run. */
   workingPart: number;
+  languageId: string;
+  onDeviceMode: OnDeviceMode;
+  online: boolean;
+  editor: RefObject<CodeEditor | null>;
   metaRef: RefObject<DayMeta>;
   metaSavers: RefObject<Map<string, LatestSaver<DayMeta>>>;
   saver: RefObject<VersionedSaver | null>;
@@ -32,6 +40,10 @@ export function useRun({
   puzzleRef,
   part,
   workingPart,
+  languageId,
+  onDeviceMode,
+  online,
+  editor,
   metaRef,
   metaSavers,
   saver,
@@ -44,7 +56,11 @@ export function useRun({
   formatBeforeRun,
 }: Options) {
   const [run, setRun] = useState<RunState>(initialRunState);
-  const activeRun = useRef<{ id: string; controller: AbortController } | null>(null);
+  const activeRun = useRef<{
+    id: string;
+    controller: AbortController;
+    source: "server" | "local";
+  } | null>(null);
 
   /**
    * Runs the solution. From the Run sheet it first waits for edits still being made from
@@ -55,7 +71,9 @@ export function useRun({
     if (!p) return;
     setSheet("run");
     const runPart = workingPart;
-    if (input === "sample" && sampleInput(metaRef.current, runPart === 1 ? 0 : 1) === null) {
+    const chosenSample =
+      input === "sample" ? sampleInput(metaRef.current, runPart === 1 ? 0 : 1) : null;
+    if (input === "sample" && chosenSample === null) {
       setRun((r) => ({
         ...r,
         error: "Choose the sample input first: tap a code block in the puzzle.",
@@ -66,25 +84,109 @@ export function useRun({
     activeRun.current?.controller.abort();
     const runId = newId();
     const controller = new AbortController();
-    activeRun.current = { id: runId, controller };
+
+    // Decide server vs on-device up front from connection liveness + navigator.onLine.
+    const hasLocal = await localRunner().isAvailable(languageId);
+    const effectivelyOnline =
+      online && (typeof navigator === "undefined" || navigator.onLine !== false);
+    const backend = resolveRunBackend(onDeviceMode, effectivelyOnline, hasLocal);
+    activeRun.current = { id: runId, controller, source: backend };
+
+    const runLocally = async () => {
+      activeRun.current = { id: runId, controller, source: "local" };
+      // Flush locally buffered edits without failing when offline.
+      void saver.current?.flush().catch(() => {});
+      const code = editor.current?.text() ?? "";
+      let stdin: string;
+      if (input === "sample") {
+        stdin = chosenSample ?? "";
+      } else {
+        const cached = await getAocPuzzle(p.year, p.day);
+        if (cached?.input !== undefined) {
+          stdin = cached.input;
+        } else if (effectivelyOnline) {
+          const fetched = await api.input(p);
+          stdin = fetched.text;
+          void mergeAocPuzzle(p.year, p.day, { input: fetched.text });
+        } else {
+          setRun((r) => ({
+            ...r,
+            running: null,
+            error:
+              "This puzzle's real input isn't cached offline yet. Open it while online to save it.",
+          }));
+          return;
+        }
+      }
+      const cachedHelper = await getHelpers(languageId);
+      const helpers = cachedHelper
+        ? [
+            {
+              name: cachedHelper.file.split("/").pop() ?? cachedHelper.file,
+              text: cachedHelper.text,
+            },
+          ]
+        : undefined;
+      const { result, engine } = await localRunner().runAoc({
+        languageId,
+        code,
+        stdin,
+        helpers,
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted) {
+        setRun((r) => ({
+          ...r,
+          running: null,
+          last: { input, result, source: "local", engine },
+        }));
+      } else {
+        setRun((r) => ({ ...r, running: null }));
+      }
+    };
+
     try {
       if (waitForEdits) await queue.idle();
+      if (backend === "local") {
+        await runLocally();
+        return;
+      }
+
       await formatBeforeRun();
       try {
         // The run reads the code and the chosen sample from the server.
         await saver.current?.flush();
         await metaSavers.current.get(`${p.year}-${p.day}`)?.flush();
       } catch (e) {
+        if (e instanceof ConnectionError && onDeviceMode === "automatic" && hasLocal) {
+          await runLocally();
+          return;
+        }
         setRun((r) => ({ ...r, running: null, error: `Not run: ${errorMessage(e)}` }));
         return;
       }
-      const result = await api.run(p, input, runPart, runId, controller.signal);
-      setRun((r) => ({ ...r, running: null, last: { input, result } }));
+      try {
+        const result = await api.run(p, input, runPart, runId, controller.signal);
+        setRun((r) => ({ ...r, running: null, last: { input, result, source: "server" } }));
+      } catch (e) {
+        if (
+          !controller.signal.aborted &&
+          e instanceof ConnectionError &&
+          onDeviceMode === "automatic" &&
+          hasLocal
+        ) {
+          await runLocally();
+          return;
+        }
+        throw e;
+      }
     } catch (e) {
       if (controller.signal.aborted) {
-        // Best-effort server cancel scoped by runId so run_lock is released without killing a
-        // newer run if this cancel arrives late.
-        api.cancelRun(runId).catch(() => {});
+        if (activeRun.current?.source === "server") {
+          // Best-effort server cancel scoped by runId so run_lock is released without killing a
+          // newer run if this cancel arrives late.
+          api.cancelRun(runId).catch(() => {});
+        }
         setRun((r) => ({ ...r, running: null }));
       } else {
         setRun((r) => ({ ...r, running: null, error: errorMessage(e) }));
@@ -98,7 +200,11 @@ export function useRun({
     const current = activeRun.current;
     if (current) {
       current.controller.abort();
-      api.cancelRun(current.id).catch(() => {});
+      if (current.source === "local") {
+        localRunner().cancel();
+      } else {
+        api.cancelRun(current.id).catch(() => {});
+      }
     } else {
       api.cancelRun().catch(() => {});
     }

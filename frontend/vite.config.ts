@@ -12,20 +12,23 @@ import { defineConfig } from "vitest/config";
  */
 function workshopServiceWorker(): Plugin {
   let outDir = "dist";
+  let publicDir = "public";
   return {
     name: "workshop-service-worker",
     configResolved(config) {
       outDir = config.build.outDir;
+      publicDir = config.publicDir;
     },
     closeBundle() {
+      const swTemplate = join(publicDir, "sw.js");
       const swPath = join(outDir, "sw.js");
       const assetsDir = join(outDir, "assets");
-      if (!existsSync(swPath) || !existsSync(assetsDir)) return;
+      if (!existsSync(swTemplate) || !existsSync(swPath) || !existsSync(assetsDir)) return;
       const assets = readdirSync(assetsDir)
         .sort()
         .map((file) => `/assets/${file}`);
       const release = createHash("sha256").update(assets.join("\n")).digest("hex").slice(0, 12);
-      const source = readFileSync(swPath, "utf8");
+      const source = readFileSync(swTemplate, "utf8");
       const injected = source
         .replace('/*__RELEASE__*/ "dev"', JSON.stringify(release))
         .replace("/*__PRECACHE_ASSETS__*/ []", JSON.stringify(assets));
@@ -39,6 +42,7 @@ function workshopServiceWorker(): Plugin {
 
 export default defineConfig({
   plugins: [preact(), workshopServiceWorker()],
+  worker: { format: "es" },
   // End-to-end tests in e2e/ run with Playwright instead.
   test: { include: ["src/**/*.test.ts"] },
   build: {
