@@ -2,14 +2,17 @@
   "bundles": [
     {
       "id": "haskell-ghc-wasm",
-      "version": "9.14.0-20251031",
+      "version": "9.14-workshop.1",
       "language": "haskell",
       "engine": "GHC 9.14 WASM",
-      "description": "GHC 9.14 compiler and bytecode runtime in WebAssembly.",
+      "description": "GHC 9.14 compiler and bytecode runtime in WebAssembly with Workshop's default packages.",
       "packages": [
         "base",
         "containers",
+        "unordered-containers",
         "array",
+        "split",
+        "parsec",
         "mtl",
         "transformers",
         "text",
@@ -22,21 +25,21 @@
         "directory"
       ],
       "ghc_libdir": "/tmp/hslib/lib",
-      "ghc_lib_search_dir": "/tmp/hslib/lib/wasm32-wasi-ghc-9.14.0.20251031-inplace",
+      "ghc_lib_search_dir": "/tmp/hslib/lib/wasm32-wasi-ghc-9.14.1.20260731-a678",
       "main_so_path": "/tmp/libplayground001.so",
       "files": [
         {
           "name": "bsdtar.wasm",
-          "url": "https://haskell-wasm.github.io/bsdtar-wasm/bsdtar.wasm",
+          "url": "https://github.com/thomasschafer/workshop/releases/download/on-device-haskell-ghc-wasm-9.14-workshop.1/bsdtar.wasm",
           "size": 1240004,
           "sha256": "e13ebb15ca0971f6629a6313bc043c532dd9be3a0e6bb0b7f8a395de835ad0c0",
           "content_type": "application/wasm"
         },
         {
           "name": "rootfs.tar.zst",
-          "url": "https://haskell-wasm.github.io/ghc-in-browser/rootfs.tar.zst",
-          "size": 49091550,
-          "sha256": "35f68f56fdb72111f150ba05ad31efed2f6fc77ee7026fb4b197ae7901a67adf",
+          "url": "https://github.com/thomasschafer/workshop/releases/download/on-device-haskell-ghc-wasm-9.14-workshop.1/rootfs.tar.zst",
+          "size": 58317784,
+          "sha256": "2558e85b953227ab872aea2c3535a4e46db5a212fedaa342d208d850c460112e",
           "content_type": "application/zstd"
         }
       ]
