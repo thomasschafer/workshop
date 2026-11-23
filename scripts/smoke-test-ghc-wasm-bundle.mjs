@@ -64,7 +64,15 @@ const dyld = await dyldMain({
   isIserv: false,
 });
 
-const runPlayground = await dyld.exportFuncs.myMain(manifest.ghc_libdir);
+let runPlayground;
+try {
+  runPlayground = await dyld.exportFuncs.myMain(manifest.ghc_libdir);
+} catch (err) {
+  console.error("myMain failed!");
+  console.error("=== STDOUT ===\n" + stdout + dec.decode());
+  console.error("=== STDERR ===\n" + stderr + dec.decode());
+  throw err;
+}
 
 // Test 1: Run a solution using Data.Text + OverloadedStrings + unordered-containers + split + parsec!
 const sampleProgram = `{-# LANGUAGE OverloadedStrings #-}
@@ -85,7 +93,14 @@ main = do
 
 stdout = "";
 stderr = "";
-await runPlayground("-v0", sampleProgram);
+try {
+  await runPlayground("-v0", sampleProgram);
+} catch (err) {
+  console.error("Test 1 threw!");
+  console.error("=== STDOUT ===\n" + stdout + dec.decode());
+  console.error("=== STDERR ===\n" + stderr + dec.decode());
+  throw err;
+}
 stdout += dec.decode();
 stderr += dec.decode();
 console.log("Test 1 stdout:", stdout.trim());

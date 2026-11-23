@@ -91,11 +91,11 @@ done
 cp -a "$SRC_LIBDIR/package.conf.d/." "$PKG_DB/"
 
 # Copy only shared libraries (.so), dynamic interface files (.dyn_hi), and headers (.h)
-# to keep the compressed bundle compact (~50 MB) while supporting full GHCi bytecode loading.
+# to keep the compressed bundle compact (~55 MB) while supporting full GHCi bytecode loading.
 (
   cd "$SRC_LIBDIR/$GHC_LIB_SUBDIR"
-  find . -type f \( -name '*.so' -o -name '*.dyn_hi' -o -name '*.h' \) \
-    ! -name '*_thr*' ! -name '*_debug*' ! -name '*_p*' \
+  find -L . -type f \( -name '*.so' -o -name '*.dyn_hi' -o -name '*.h' \) \
+    ! -name 'libHSrts*_thr*' ! -name 'libHSrts*_debug*' ! -name 'libHSrts*_p*' \
     -print0 \
     | tar --null -T - -cf - \
     | tar -xf - -C "$TARGET_LIB_DIR"
@@ -113,7 +113,7 @@ cat >"$WORK/Playground.hs" <<'EOF'
 {-# LANGUAGE ScopedTypeVariables #-}
 module Playground where
 
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, displayException, throwIO, try)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (newIORef)
@@ -124,7 +124,6 @@ import GHC
     LoadHowMuch (LoadAllTargets),
     SuccessFlag (Failed),
     compileExprRemote,
-    defaultErrorHandler,
     getLogger,
     getSession,
     getSessionDynFlags,
@@ -142,16 +141,12 @@ import GHC
     simpleImportDecl,
   )
 import GHC.Driver.Backend (backendGeneratesCode, interpreterBackend)
-import GHC.Driver.DynFlags
-  ( DynFlags (backend, ghcLink, ghcMode),
-    defaultFatalMessager,
-    defaultFlushOut,
-  )
+import GHC.Driver.DynFlags (DynFlags (backend, ghcLink, ghcMode))
 import GHC.Driver.Env (hscInterp)
 import GHC.Driver.Monad (Ghc (unGhc), Session (Session))
 import GHC.Runtime.Interpreter (evalIO)
 import GHC.Wasm.Prim (JSString (..), JSVal, fromJSString)
-import System.IO (IOMode (WriteMode), hFlush, hPutStr, hSetEncoding, stderr, stdout, utf8, withFile)
+import System.IO (IOMode (WriteMode), hFlush, hPutStr, hPutStrLn, hSetEncoding, stderr, stdout, utf8, withFile)
 
 foreign import javascript "wrapper"
   mkRunPlayground :: (JSString -> JSString -> IO ()) -> IO JSVal
@@ -189,8 +184,10 @@ myMain libdirJs = do
           handleSourceError
             ( \se -> do
                 printException se
-                liftIO $ hFlush stderr
-                liftIO $ ioError (userError "load returned Failed")
+                liftIO $ do
+                  hPutStrLn stderr "user error (load returned Failed)"
+                  hFlush stderr
+                  ioError (userError "load returned Failed")
             )
             $ do
               logger <- getLogger
@@ -203,6 +200,7 @@ myMain libdirJs = do
               ok <- load LoadAllTargets
               case ok of
                 Failed -> liftIO $ do
+                  hPutStrLn stderr "user error (load returned Failed)"
                   hFlush stderr
                   ioError (userError "load returned Failed")
                 _ ->
@@ -213,9 +211,17 @@ myMain libdirJs = do
                     res <- liftIO $ try (evalIO (hscInterp env) hval)
                     liftIO $ hFlush stdout >> hFlush stderr
                     case res of
-                      Left (err :: SomeException) -> liftIO $ ioError (userError (show err))
+                      Left (err :: SomeException) -> liftIO $ do
+                        hPutStrLn stderr (displayException err)
+                        hFlush stderr
+                        throwIO err
                       Right () -> pure ()
-    defaultErrorHandler defaultFatalMessager defaultFlushOut $ unGhc action session
+    res <- try (unGhc action session)
+    hFlush stdout
+    hFlush stderr
+    case res of
+      Left (err :: SomeException) -> throwIO err
+      Right () -> pure ()
 EOF
 
 wasm32-wasi-ghc \
@@ -296,6 +302,8 @@ for conf in "$PKG_DB"/*.conf; do
 done
 
 wasm32-wasi-ghc-pkg --package-db="$PKG_DB" recache
+echo "==> Registered packages in bundle:"
+wasm32-wasi-ghc-pkg --package-db="$PKG_DB" list --simple-output
 
 echo "==> Packing reproducible rootfs.tar.zst"
 (
