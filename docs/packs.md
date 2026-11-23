@@ -16,6 +16,10 @@ my-pack/
       item.md
       reference.py
       ...
+    codebase/word-counts/  a project to work in, with its tests and a reference
+      item.md
+      project/
+      ...
     reading/lifetimes.md
   drafts/
     three-dice.md        a question waiting to be made into an item
@@ -116,11 +120,11 @@ Every item can have:
 
 | Field | |
 | --- | --- |
-| `kind` | `card`, `mental-maths`, `probability`, `coding`, `reading` or `design`. Required. |
+| `kind` | `card`, `mental-maths`, `probability`, `coding`, `codebase`, `reading` or `design`. Required. |
 | `skills` | The skills it practises, from `pack.toml`. Required. |
 | `id` | Lowercase letters and digits, in words joined by hyphens. Defaults to the file's name, or the directory's for an `item.md`. Your history is kept by id, so changing it starts the item afresh. |
 | `title` | What it's called in lists, if not the start of its prompt. |
-| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults to the pack's `track`, if it has one, and otherwise by kind. |
+| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults to the pack's `track`, if it has one, and otherwise by kind: work in a codebase is in the Coding track. |
 | `source` | Where it came from, in your own words, such as for questions imported from elsewhere. Workshop shows it but doesn't interpret it. |
 | `minutes` | Roughly how long it takes. Defaults by kind. A timed round of it lasts this long, and at least 10 minutes. |
 | `difficulty` | How hard it is, from 1, a warm-up, through 3, typical of its kind, to 5, among the hardest of its kind. Optional, and most useful for coding problems: the author writes new problems at the difficulty each skill has reached (see [docs/author.md](author.md)), and takes a problem without one as 3. |
@@ -358,6 +362,137 @@ A list of characters, a stack of changes to undo, and a stack of changes undone 
 A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed, dictated or explained aloud; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution, where they can explain their solution aloud for the grader to mark against the approach. A problem in parts goes through understanding, planning, coding and testing for each part: passing a part's tests, and the earlier parts' that still apply, moves the learner on to understanding the next, with their code as it is, and passing the last moves them on to reviewing the whole problem. Each step is saved as it's done, and the part with it, so coming back carries on at the same part and step. The tutor and the grader are told which part the learner is on, and see the parts up to it. The problem is one item for scheduling: it's rated once, at the end, suggested from how far they got and the help they took, so giving up part-way suggests Forgot and solving it again next time, and a problem passed with one submission a part and no hints suggests Good. When it comes back for review, it's a twist on it, on the whole problem for one in parts, which takes a few minutes rather than solving it again: the tutor poses a follow-up, given the problem, its approach and the learner's solution from last time, such as a new constraint, a far larger scale, a streaming version, a better complexity target or different edge cases, a different sort each time. The learner answers by explaining how they'd change their approach, typed, dictated or aloud, and can change their code too; the grader marks the answer, and its mark is the review's rating, which schedules the problem and feeds mastery, and what it finds goes in the mistake log. Each review's twist is kept once it's posed, so opening it again shows the same one. When there's no model to pose one, or the server or the model can't be reached, the review says so and recalls the approach instead: writing down how to solve it, then comparing that with the item's approach. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
 
 Rating a problem easy retires it, as does answering its twist in full with nothing wrong: it's never offered again, for review or as new, and counts towards its skills as known for good. Retired problems are listed at the end of the Coding track, where any can be brought back, due straight away; a retired problem done again anyway, and rated anything but easy, is brought back too. Cards and mental maths never retire: they're short, and what spaced review helps most, so rating one easy only sends it further off. Code to read and probability questions can be retired by choice, as below.
+
+### Work in a codebase
+
+Much of programming is working in code someone else wrote. A codebase item gives the learner a small project of several files, in Python, and a task in it: `fix` a bug, from its symptom; `review` a change, finding what's wrong with it; or `refactor` code that's hard to test, so given tests can give it what they need, then extend it. It's a directory with an `item.md` and the project's files in a directory of their own. In the Coding track by default.
+
+```
+items/codebase/word-counts/
+  item.md
+  project/                  the project as the learner starts it
+    words.py
+    stats.py
+    report.py
+    test_stats.py           its own tests, which the learner reads and runs
+  checks/
+    test_punctuation.py     hidden tests
+  fixed/
+    words.py                the reference: the files a solution changes or adds
+```
+
+A project keeps its files in one directory, without directories inside it, and has at most 10 files and 600 lines in all, so it can be read on a phone. Its tests are its `test_*.py` files, and each `def test_…():` at a file's top level is a test, which passes if it returns and fails if it raises, such as with a plain `assert`. Give an `assert` a message where the values matter, as in `assert total == 3, total`, as the learner is shown what a failing test says. Tests are always the item's: the learner reads and runs them, but can't change them, and they're run as the item has them. Tests can use files only in their temporary directory, such as through `tempfile`, as a program runs in the sandbox. Each test runs in a fresh process, with the project's directory to import from.
+
+#### Fixing a bug
+
+````markdown
++++
+kind = "codebase"
+task = "fix"
+title = "Word counts that are one too many"
+skills = ["debugging"]
+
+project = "project"
+tests = ["checks/test_punctuation.py"]   # hidden tests, kept from the learner
+reference = "fixed"                      # the files the reference fix changes or adds
++++
+This small tool reports on a text. Its tests pass, but people using it say the counts are
+sometimes one too many: "The cat sat." has 4 words, it says.
+
+Find out why, and fix it, changing as little as you can.
+
+## Explanation
+
+`split_words` splits the text wherever there's something that isn't part of a word, and where
+the text ends with punctuation, `re.split` gives an empty string at that end, which is counted.
+The fix is to leave out empty words in `split_words`, so every caller gets only real words.
+
+## Hints
+
+- Try `split_words` on "The cat sat." in your head, or add a test for it.
+````
+
+The prompt is the symptom, as someone using the code would report it. `## Explanation` (required) is what the bug was and how it's fixed, shown once it's solved, beside the reference fix's changes and the learner's own. `## Hints` and `## Notes` are as a coding problem's. The reference directory has only the files the fix changes or adds, laid over the project; its tests can't be among them, as a fix changes the code.
+
+`workshop pack check` runs the project as it's given on its own tests and the hidden ones, which must fail one at least, so there's a bug for them to find, and the project with the reference fix on every test, which must pass them all.
+
+#### Reviewing a change
+
+````markdown
++++
+kind = "codebase"
+task = "review"
+title = "Reviewing loan renewals"
+skills = ["code-review"]
+
+project = "project"
+change = "change.diff"
++++
+This change lets a member renew a loan: another two weeks, at most twice, and not while someone
+is waiting for the book.
+
+Review it as you would a colleague's change: say what's wrong, and where.
+
+## Defects
+
+- `loans.py:47`: The renewal limit is off by one: `>` lets a loan be renewed a third time.
+- `loans.py:44-53`: Renewing never checks the book's reservations.
+
+## Notes
+
+The tests only renew twice, so the limit is never reached.
+````
+
+`change` is a unified diff against the project, such as `git diff` writes, of one or more of its files; it can add a file, or delete one. `## Defects` (required) lists what's planted in the change, each starting with where it is, in backticks: a file and a line, or a range of lines, as numbered in the file once the change is made, then what's wrong. `## Notes` is optional: anything else a fair review might say, for the grader to mark by, such as a problem that's right to point out though it isn't one of the defects. A review has no tests, reference or hints, and nothing runs.
+
+`workshop pack check` applies the change to the project, which fails if any of its lines of context or lines removed aren't where its hunks say, and checks each defect is in a file the project has once it's changed, at lines it has.
+
+#### Refactoring, then extending
+
+A refactor is in parts, as a problem in parts is (see [Problems in parts](#problems-in-parts)): the first is the refactoring, and each after it adds a feature, with the learner's code kept from one part to the next. The project's own tests are what it does already, and the first part's `given` tests are new ones that need the refactoring, such as by giving the code a clock, or its input, rather than letting it ask the system. Given tests are added to the learner's project as they reach the part.
+
+````markdown
++++
+kind = "codebase"
+task = "refactor"
+title = "Testing habit streaks"
+skills = ["refactoring"]
+
+project = "project"
+given = ["clock/test_tracker_clock.py"]    # tests the learner sees, added for this part
+tests = ["clock/test_tracker_hidden.py"]   # hidden tests
+reference = "clock/solution"               # the project as refactored, laid over the project
+
+[[parts]]
+given = ["longest/test_longest.py"]
+tests = ["longest/test_longest_hidden.py"]
+reference = "longest/solution"             # what differs from the project, every part up to it done
++++
+`Tracker` reads the log from a file, and asks the system's clock what day it is, so a test can
+only ever check today. Refactor it so a test can give it the log's lines and the day, as the
+new tests in `test_tracker_clock.py` do. The existing tests must still pass.
+
+## Part 2
+
+Add `longest(habit)`, the most days in a row the habit has ever been done.
+
+## Explanation
+
+Separate what talks to the outside world from the logic: reading the file and asking the clock
+become things a `Tracker` is given, with defaults that do what it did before.
+````
+
+A refactor has at least two parts, and at most five. Every earlier part's tests still apply at a later part, so a part can't change what an earlier one asked for. Test files, given or hidden, are named `test_*.py`, and each has a name of its own across the project and every part. `## Explanation` covers every part, as a problem in parts' approach does, and each part can have hints, as `## Part 2 hints`.
+
+`workshop pack check` checks each part's reference on every test that applies at that part, its own and the earlier parts', which must all pass; the project as it's given on its own tests, which must pass, as they're what it does already, and on the first part's given tests, which must fail one at least, as they need the refactoring; and each part's tests on the reference before it, which must fail one at least, so each part asks for more than the last.
+
+#### How it's worked through
+
+A fix or a refactor is solved as a coding problem is, in steps, without the first: there's code to read rather than an example to work out, so it starts with planning, such as where the bug might be. In the editor, a menu switches between the project's files, saying which the learner has changed or added and which are tests, to read but not change, and searches across them; a file can be added, as a refactor may want. Which file is open is saved with the session, so coming back opens it again. Running runs the tests the learner can see, each shown by name with why it failed, and submitting runs the hidden ones too, showing the first that fails. The tutor sees the project as the learner has it, what they've changed and which file they're in. Reviewing it shows the learner's changes beside the reference's, and the explanation. It's scheduled as a coding problem is, rated at the end and retired when rated easy, except that when it comes back for review it's a recall rather than a twist: writing down what was wrong and how it was put right, or how it was refactored, then comparing that with the explanation. Solving it again starts from the project as it's given.
+
+A review is read a file at a time, as a diff folded around its changes, which wraps rather than scrolling sideways. Tapping a line starts a comment on it, typed or dictated, and the change as a whole can have comments too. Each comment, and which file is open, is saved as it's written. Once it's submitted, the grader marks the comments against the defects, crediting each one found, in any words, and noting a comment that says something is wrong that isn't, but not one about style. The score is the share of the defects found, with one found in part counting half, less a tenth for each false alarm. That's an attempt rated from the score, as a design session's is, and each defect missed goes in the mistake log as a `missed-defect`, with each false alarm as a mistake of its own. The learner then sees every defect, which they found, and the notes. A review comes back as the same change, to review afresh.
+
+Work in a codebase needs the server, which keeps its files and runs it, so it isn't saved for offline use, and it isn't done as a timed round.
 
 ### Retiring items with a fixed answer
 
