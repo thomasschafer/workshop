@@ -87,7 +87,7 @@ main :: IO ()
 main = do
   let parts = splitOn "," "a,b,a,c"
   let counts = HM.fromListWith (+) [(T.pack p, 1 :: Int) | p <- parts]
-  let parsed = parse (string "val=" *> many1 digit) "" "val=42"
+  let parsed = parse (string "val=" *> many1 digit) "" ("val=42" :: String)
   putStrLn $ "a=" ++ show (HM.lookupDefault 0 "a" counts) ++ " parsed=" ++ show parsed
 `;
 
