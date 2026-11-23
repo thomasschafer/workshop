@@ -354,7 +354,6 @@ class HelixView implements PluginValue, Host {
     // browser, which can't now that the code isn't where the keyboard types. On the tap's last
     // event, as the ones before it move the focus on.
     this.view.contentDOM.addEventListener("click", (event) => {
-      if (this.tapTaken()) return;
       const pos = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos !== null) {
         this.view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: "select.pointer" });
@@ -367,17 +366,6 @@ class HelixView implements PluginValue, Host {
     window.addEventListener("blur", this.releaseKeyboardFocus);
     document.addEventListener("visibilitychange", this.releaseKeyboardFocus);
     return field;
-  }
-
-  /**
-   * When a list's row was last picked by a tap. The list goes as the finger comes down, and the
-   * code takes its place under the finger, where the tap's click would then move the cursor.
-   */
-  pickedAt = 0;
-
-  /** Whether a tap now is the end of one that's already picked from a list. */
-  private tapTaken(): boolean {
-    return Date.now() - this.pickedAt < 700;
   }
 
   private readonly releaseKeyboardFocus = (): void => {
@@ -1223,7 +1211,6 @@ class StatusPanel {
       this.extra.append(
         renderPicker(editor, (index) => {
           if (editor.picker) editor.picker.selected = index;
-          this.helix.pickedAt = Date.now();
           run(this.helix, this.helix.handler.handle("ret" as Key));
         }),
       );
@@ -1293,13 +1280,21 @@ function span(className: string, text: string): HTMLElement {
   return el;
 }
 
-/** Something in the status line to tap or click, which keeps the focus, and a keyboard, where they are. */
-function button(className: string, text: string, onPress: () => void): HTMLElement {
-  const el = span(className, text);
-  el.setAttribute("role", "button");
+/**
+ * Runs `onPress` when `el` is tapped or clicked, keeping the focus, and a keyboard, where they
+ * are. On the click, which a finger dragging to scroll never makes, rather than as it comes down.
+ */
+function onTap(el: HTMLElement, onPress: () => void): void {
   // Safari only clicks if the press itself wasn't prevented, so just the focus is kept.
   el.addEventListener("mousedown", (e) => e.preventDefault());
   el.addEventListener("click", onPress);
+}
+
+/** Something in the status line to tap or click. */
+function button(className: string, text: string, onPress: () => void): HTMLElement {
+  const el = span(className, text);
+  el.setAttribute("role", "button");
+  onTap(el, onPress);
   return el;
 }
 
@@ -1364,11 +1359,7 @@ function renderPicker(editor: HelixEditor, pick: (index: number) => void): HTMLE
       span("cm-helix-picker-label", item.label),
       span("cm-helix-picker-detail", item.detail),
     );
-    // On pressing, so the focus, and a phone's keyboard, stay where they are.
-    row.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      pick(start + i);
-    });
+    onTap(row, () => pick(start + i));
     list.append(row);
   });
   box.append(list);

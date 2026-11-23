@@ -1836,12 +1836,14 @@ test("compares typing on Workshop's keyboard, keeping every touch on the server"
     readdirSync(benchDir)
       .flatMap((session) => {
         try {
-          return readFileSync(join(benchDir, session, "results.jsonl"), "utf8").split("\n");
+          // Only whole lines, as the last may still be being written.
+          return readFileSync(join(benchDir, session, "results.jsonl"), "utf8")
+            .split("\n")
+            .slice(0, -1);
         } catch {
           return [];
         }
       })
-      .filter((line) => line !== "")
       .map((line) => JSON.parse(line))
       .filter((result) => result.bench === "typing");
   await expect.poll(() => saved().length).toBe(TYPING_PHRASES.length);
@@ -1899,6 +1901,13 @@ test("asks the language server from Helix's own prompt and lists, on Workshop's 
   await expect(phone.locator(".cm-helix-picker")).toContainText("References (2/2)");
   await expect(rows).toHaveText([/def part1.*line \d+/, /print\(part1\(data\)\).*line \d+/]);
   await expect(phone.locator(".cm-lsp-reference-panel")).toHaveCount(0);
+  // Rows a finger can tap, which a finger coming down to scroll the list doesn't pick.
+  for (const row of await rows.all()) {
+    expect((await row.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  }
+  await rows.nth(1).dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true });
+  await phone.waitForTimeout(300);
+  await expect(phone.locator(".cm-helix-picker")).toContainText("References (2/2)");
   await rows.nth(1).tap();
   await expect(cursorLine()).toContainText("print(part1(data))");
 
@@ -2685,6 +2694,8 @@ test("says quietly why the language server can't start, and keeps editing the co
     });
   } finally {
     rmSync(fails, { force: true });
+    // So no server started while it was told to fail is kept for the tests after.
+    await computer.request.post("/api/lsp/restart");
     await context.close();
   }
 });
@@ -2847,7 +2858,8 @@ test("opens a cached Advent of Code puzzle offline, edits notes, shows On-device
   }
   await phone.getByRole("button", { name: "2017", exact: true }).tap();
   await phone.locator(".day", { hasText: /^4$/ }).tap();
-  await expect(phone.locator(".problem")).toContainText("Day 4: Counting Lines");
+  await phone.getByRole("button", { name: "Problem" }).tap();
+  await expect(phone.locator(".pane.problem")).toContainText("Day 4: Counting Lines");
 
   // Open Settings -> On-device and verify live diagnostics & cached puzzle count.
   await phone.getByRole("button", { name: "Settings" }).tap();
@@ -2872,10 +2884,10 @@ test("opens a cached Advent of Code puzzle offline, edits notes, shows On-device
   await expect(phone.locator(".day.cached", { hasText: /^4$/ })).toBeVisible();
   await phone.locator(".day", { hasText: /^4$/ }).tap();
   await phone.getByRole("button", { name: "Problem" }).tap();
-  await expect(phone.locator(".problem")).toContainText("Day 4: Counting Lines", {
+  await expect(phone.locator(".pane.problem")).toContainText("Day 4: Counting Lines", {
     timeout: 15_000,
   });
-  await expect(phone.locator(".problem")).toContainText("Cached copy");
+  await expect(phone.locator(".pane.problem")).toContainText("Cached copy");
   await phone.getByRole("button", { name: "Show your puzzle input" }).tap();
   await expect(phone.locator(".input-text")).toBeVisible();
 
