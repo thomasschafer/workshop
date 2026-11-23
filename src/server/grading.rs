@@ -97,9 +97,19 @@ pub(super) async fn mark(
     } else {
         None
     };
+    // A plan for a problem in parts is for the part the learner is on.
+    let part = match (body.work, &item.content) {
+        (Work::Plan, Content::Coding(coding)) if coding.in_parts() => app
+            .problems
+            .session(&key)?
+            .filter(|session| session.mode == crate::coding::Mode::Solve)
+            .map(|session| session.part),
+        _ => None,
+    };
     let answer = Answer {
         spoken: body.spoken,
         code: code.as_ref().map(|(name, text)| (*name, text.as_str())),
+        part,
         ..Answer::written(&body.text)
     };
     let error_types = crate::mistakes::error_types(&packs);

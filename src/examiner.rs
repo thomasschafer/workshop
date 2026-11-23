@@ -66,9 +66,14 @@ pub fn clock_text(round: &Round) -> String {
 /// The examiner's prompt: the problem, the reference, a design prompt's brief, the clock, the
 /// learner's working and the conversation so far.
 pub fn prompt(item: &Item, round: &Round) -> Result<String> {
+    // A round is of the whole problem, every part of one in parts.
+    let problem = match &item.content {
+        Content::Coding(coding) => coding.statement(coding.last()),
+        _ => item.prompt.clone(),
+    };
     let mut out = format!(
         "<problem>\n{}\n</problem>\n\n<reference>\n{}\n</reference>\n\n",
-        item.prompt.trim(),
+        problem.trim(),
         reference(item)?
     );
     let brief = match (item.kind, &round.brief) {

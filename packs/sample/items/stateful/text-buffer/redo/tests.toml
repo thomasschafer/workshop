@@ -1,0 +1,41 @@
+[[example]]
+calls = [
+  { call = "insert", args = ["cat"] },
+  { call = "insert", args = ["s"] },
+  { call = "undo" },
+  { call = "undo" },
+  { call = "redo" },
+  { call = "text", returns = "cat" },
+  { call = "redo" },
+  { call = "text", returns = "cats" },
+]
+
+[[test]]
+calls = [
+  { call = "redo" },
+  { call = "insert", args = ["a"] },
+  { call = "redo" },
+  { call = "text", returns = "a" },
+]
+
+[[test]]
+calls = [
+  { call = "insert", args = ["ab"] },
+  { call = "undo" },
+  { call = "insert", args = ["c"] },
+  { call = "redo" },
+  { call = "text", returns = "c" },
+]
+
+[[test]]
+calls = [
+  { call = "insert", args = ["abc"] },
+  { call = "delete", args = [2] },
+  { call = "undo" },
+  { call = "undo" },
+  { call = "redo" },
+  { call = "redo" },
+  { call = "text", returns = "a" },
+  { call = "undo" },
+  { call = "text", returns = "abc" },
+]

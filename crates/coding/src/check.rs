@@ -4,9 +4,11 @@
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
-use workshop_pack::{Coding, Content, Item, Language, Reading, ReadingCheck, Verdict, output};
+use workshop_pack::{
+    BruteForce, Coding, Content, Item, Language, Reading, ReadingCheck, Verdict, output,
+};
 
-use crate::grade::{self, Graded, Oracle, describe};
+use crate::grade::{self, CaseRef, Graded, Oracle, describe};
 use crate::programs::{Built, Flavour, Run, Runtime};
 use workshop_runner::{Ending, MAX_OUTPUT_BYTES, size};
 
@@ -61,23 +63,29 @@ impl workshop_pack::Programs for Checker {
 /// Says which of a coding item's examples and tests expect more output than a program can print
 /// before it's cut off, as no solution could pass them.
 fn expects_too_much(coding: &Coding) -> Option<String> {
-    let examples = coding
-        .examples
+    let long: Vec<String> = coding
+        .parts
         .iter()
         .enumerate()
-        .map(|(i, case)| ("example", i, case));
-    let tests = coding
-        .tests
-        .iter()
-        .enumerate()
-        .map(|(i, case)| ("test", i, case));
-    let long: Vec<String> = examples
-        .chain(tests)
-        .filter(|(_, _, case)| !grade::fits(&case.output))
-        .map(|(kind, i, case)| {
+        .flat_map(|(p, part)| {
+            let which = coding.in_parts().then_some(p);
+            let examples = part
+                .examples
+                .iter()
+                .enumerate()
+                .map(move |(index, case)| (CaseRef::Example { part: which, index }, case));
+            let tests = part
+                .tests
+                .iter()
+                .enumerate()
+                .map(move |(index, case)| (CaseRef::Test { part: which, index }, case));
+            examples.chain(tests)
+        })
+        .filter(|(_, case)| !grade::fits(&case.output))
+        .map(|(which, case)| {
             format!(
-                "{kind} {} expects {} of output",
-                i + 1,
+                "{} expects {} of output",
+                which.describe(),
                 size(case.output.len())
             )
         })
@@ -92,76 +100,130 @@ fn expects_too_much(coding: &Coding) -> Option<String> {
     })
 }
 
+/// Checks a coding item, part by part: at each, its reference solutions must pass every example
+/// and test that applies, its own and the earlier parts' that it doesn't replace, and agree with
+/// every brute force that applies on random inputs. Each brute force must pass its part's own
+/// examples, and its inputs program must vary with its seed. Then each starter must
+/// build, and in API mode, be a module the driver can import.
 pub async fn check_coding(
     runtime: &Runtime,
     coding: &Coding,
     cancel: &CancellationToken,
 ) -> Result<Verdict> {
-    let oracle = match Oracle::build(runtime, coding, cancel).await? {
-        Ok(oracle) => oracle,
-        Err(problem) => return Ok(unavailable_or_failed(runtime, coding, problem)),
-    };
-    // The brute force is what everything else is compared with, so it has to be right too, on
-    // the examples at least: the tests can be too big for it to finish.
-    let brute = &coding.brute_force;
-    let graded = grade::run_examples(runtime, coding, brute.language, &brute.text, cancel).await?;
-    if let Some(problem) = graded.problem() {
-        return Ok(Verdict::Failed(format!(
-            "the brute force, {}, is wrong: {problem}",
-            brute.file
-        )));
-    }
+    let mut oracles: Vec<Option<Oracle>> = Vec::new();
     let mut skipped = Vec::new();
-    for reference in &coding.reference {
-        let graded = grade::grade(
-            runtime,
-            coding,
-            &oracle,
-            reference.language,
-            &reference.text,
-            coding.random_inputs,
-            cancel,
-        )
-        .await?;
-        match graded {
-            Err(problem) => return Ok(Verdict::Failed(problem)),
-            Ok(Graded::Unavailable { reason }) => {
-                skipped.push(format!("{}: {reason}", reference.file));
+    for part in 0..coding.parts.len() {
+        let at = |problem: String| {
+            if coding.in_parts() {
+                format!("part {}: {problem}", part + 1)
+            } else {
+                problem
             }
-            Ok(graded) => {
-                // A build that fails says why itself, which may be the toolchain rather than
-                // the solution, such as a missing linker.
+        };
+        let oracle = match &coding.parts[part].brute_force {
+            None => None,
+            Some(brute) => {
+                let oracle = match Oracle::build(runtime, coding, part, cancel).await? {
+                    Ok(oracle) => oracle,
+                    Err(problem) => {
+                        return Ok(unavailable_or_failed(runtime, brute, at(problem)));
+                    }
+                };
+                // The brute force is what everything else is compared with, so it has to be
+                // right too, on its part's examples at least: the tests can be too big for it
+                // to finish, and a later part's brute force need only do what that part adds.
+                let program = &brute.program;
+                let graded = grade::run_all(
+                    runtime,
+                    coding,
+                    grade::own_examples(coding, part),
+                    program.language,
+                    &program.text,
+                    cancel,
+                )
+                .await?;
                 if let Some(problem) = graded.problem() {
-                    let what = if matches!(graded, Graded::BuildFailed { .. }) {
-                        ":"
-                    } else {
-                        " is wrong:"
-                    };
-                    return Ok(Verdict::Failed(format!(
-                        "{}{what} {problem}",
-                        reference.file
-                    )));
+                    return Ok(Verdict::Failed(at(format!(
+                        "the brute force, {}, is wrong: {problem}",
+                        program.file
+                    ))));
+                }
+                if let Some(problem) = inputs_vary(runtime, &oracle, cancel).await? {
+                    return Ok(Verdict::Failed(at(problem)));
+                }
+                Some(oracle)
+            }
+        };
+        oracles.push(oracle);
+        let compared: Vec<&Oracle> = coding
+            .compared_with(part)
+            .into_iter()
+            .map(|p| {
+                oracles[p]
+                    .as_ref()
+                    .expect("built for each part with a brute force")
+            })
+            .collect();
+        for reference in &coding.parts[part].reference {
+            let graded = grade::grade(
+                runtime,
+                coding,
+                &compared,
+                part,
+                reference.language,
+                &reference.text,
+                coding.random_inputs,
+                cancel,
+            )
+            .await?;
+            match graded {
+                Err(problem) => return Ok(Verdict::Failed(at(problem))),
+                Ok(Graded::Unavailable { reason }) => {
+                    skipped.push(format!("{}: {reason}", reference.file));
+                }
+                Ok(graded) => {
+                    // A build that fails says why itself, which may be the toolchain rather
+                    // than the solution, such as a missing linker.
+                    if let Some(problem) = graded.problem() {
+                        let what = if matches!(graded, Graded::BuildFailed { .. }) {
+                            ":"
+                        } else {
+                            " is wrong:"
+                        };
+                        return Ok(Verdict::Failed(at(format!(
+                            "{}{what} {problem}",
+                            reference.file
+                        ))));
+                    }
                 }
             }
         }
     }
     for starter in &coding.starter {
-        match runtime
-            .build(starter.language, &starter.text, Flavour::Plain, cancel)
+        match grade::build_solution(runtime, coding, starter.language, &starter.text, cancel)
             .await?
         {
-            Built::Ready(_) => {}
-            Built::Failed { errors, .. } => {
+            Ok(program) => {
+                if coding.api.is_some()
+                    && let Some(problem) = imports(runtime, coding, &program, cancel).await?
+                {
+                    return Ok(Verdict::Failed(format!(
+                        "the starter {} {problem}",
+                        starter.file
+                    )));
+                }
+            }
+            Err(Graded::BuildFailed { errors }) => {
                 return Ok(Verdict::Failed(format!(
                     "the starter {} doesn't build, and should, unfinished as it is:\n{errors}",
                     starter.file
                 )));
             }
-            Built::Unavailable(reason) => skipped.push(format!("{}: {reason}", starter.file)),
+            Err(Graded::Unavailable { reason }) => {
+                skipped.push(format!("{}: {reason}", starter.file));
+            }
+            Err(Graded::Ran { .. }) => unreachable!("building doesn't run anything"),
         }
-    }
-    if let Some(problem) = inputs_vary(runtime, &oracle, cancel).await? {
-        return Ok(Verdict::Failed(problem));
     }
     if !skipped.is_empty() {
         return Ok(Verdict::Skipped(format!(
@@ -169,28 +231,70 @@ pub async fn check_coding(
             skipped.join("; ")
         )));
     }
-    Ok(Verdict::Passed(format!(
-        "{} {} {} examples, {} tests and {} random inputs against the brute force",
-        if coding.reference.len() == 1 {
-            "the reference passes"
-        } else {
-            "the references pass"
-        },
-        coding
-            .reference
-            .iter()
-            .map(|r| r.language.name())
-            .collect::<Vec<_>>()
-            .join(" and "),
-        coding.examples.len(),
-        coding.tests.len(),
+    Ok(Verdict::Passed(passed(coding)))
+}
+
+/// What a coding item that passes its check passed.
+fn passed(coding: &Coding) -> String {
+    let references = |part: &workshop_pack::Part| {
+        format!(
+            "{} {}",
+            if part.reference.len() == 1 {
+                "the reference passes"
+            } else {
+                "the references pass"
+            },
+            part.reference
+                .iter()
+                .map(|r| r.language.name())
+                .collect::<Vec<_>>()
+                .join(" and "),
+        )
+    };
+    if !coding.in_parts() {
+        let part = &coding.parts[0];
+        return format!(
+            "{} {} examples, {} tests and {} random inputs against the brute force",
+            references(part),
+            part.examples.len(),
+            part.tests.len(),
+            coding.random_inputs,
+        );
+    }
+    format!(
+        "in each of its {} parts, {} every example and test that applies, and {} random inputs against each brute force that applies",
+        coding.parts.len(),
+        references(&coding.parts[coding.last()]),
         coding.random_inputs,
-    )))
+    )
+}
+
+/// Says if a module in API mode can't be imported by the driver, or doesn't define what the
+/// tests call, by running it with no calls.
+async fn imports(
+    runtime: &Runtime,
+    coding: &Coding,
+    program: &crate::programs::Program,
+    cancel: &CancellationToken,
+) -> Result<Option<String>> {
+    let run = runtime.run(program, &[], "", cancel).await?;
+    Ok((!run.succeeded()).then(|| {
+        let api = coding
+            .api
+            .as_ref()
+            .expect("only modules in API mode are imported");
+        format!(
+            "{} when it's imported, and should define {}, unfinished as it is:\n{}",
+            describe(&run),
+            api.describe(),
+            grade::shortened(run.stderr.trim_end())
+        )
+    }))
 }
 
 /// A program that can't be built here is skipped; one that's broken is a failure.
-fn unavailable_or_failed(runtime: &Runtime, coding: &Coding, problem: String) -> Verdict {
-    let unavailable = [&coding.brute_force, &coding.inputs].iter().any(|source| {
+fn unavailable_or_failed(runtime: &Runtime, brute: &BruteForce, problem: String) -> Verdict {
+    let unavailable = [&brute.program, &brute.inputs].iter().any(|source| {
         runtime
             .find(source.language, crate::programs::needs(source.language))
             .is_none()
@@ -839,6 +943,158 @@ mod tests {
         );
     }
 
+    fn runtime(dir: &std::path::Path, sandbox: Sandbox) -> Runtime {
+        Runtime {
+            scratch: dir.to_owned(),
+            environments: Default::default(),
+            build_timeout: Duration::from_secs(60),
+            run_timeout: Duration::from_secs(30),
+            sandbox,
+            tools: Default::default(),
+        }
+    }
+
+    /// Reads a problem from its files, by their paths within its directory.
+    fn problem(files: &[(&str, &str)]) -> Coding {
+        let mut all: std::collections::BTreeMap<String, Vec<u8>> = files
+            .iter()
+            .map(|(path, text)| (format!("items/it/{path}"), text.as_bytes().to_vec()))
+            .collect();
+        all.insert(
+            "pack.toml".to_owned(),
+            b"id = \"example\"\nname = \"Example\"\n[[skills]]\nid = \"sums\"\nname = \"Sums\"\n"
+                .to_vec(),
+        );
+        let pack = Pack::from_files(all).unwrap();
+        assert!(pack.problems.is_empty(), "{:?}", pack.problems);
+        let Content::Coding(coding) = &pack.item("it").unwrap().content else {
+            panic!("not a coding item");
+        };
+        coding.clone()
+    }
+
+    const SUMS: &str = "import sys\nprint(sum(map(int, sys.stdin.read().split())))\n";
+    const SUMS_OR_MOST: &str = "import sys\nwords = sys.stdin.read().split()\nif words and words[0] == 'most':\n    print(max(map(int, words[1:])))\nelse:\n    print(sum(map(int, words)))\n";
+    const SUM_INPUTS: &str = "import random, sys\nrng = random.Random(int(sys.argv[1]))\nprint(' '.join(str(rng.randint(-9, 9)) for _ in range(rng.randint(1, 3 * int(sys.argv[2])))))\n";
+    const MOST_INPUTS: &str = "import random, sys\nrng = random.Random(int(sys.argv[1]))\nprint('most', ' '.join(str(rng.randint(-9, 9)) for _ in range(rng.randint(1, 3 * int(sys.argv[2])))))\n";
+
+    /// A problem in two parts: adding up numbers, then, for input starting with `most`, the
+    /// largest instead.
+    fn sums_in_parts(second: &str, brute: &str, front: &str) -> Coding {
+        let item = format!(
+            "+++\nkind = \"coding\"\nskills = [\"sums\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ninputs = \"inputs.py\"\ntests = \"tests.toml\"\nrandom_inputs = 20\n\n[[parts]]\nreference = [\"two/reference.py\"]\nbrute_force = \"two/brute.py\"\ninputs = \"two/inputs.py\"\ntests = \"two/tests.toml\"\n{front}+++\nAdd up the numbers.\n\n## Part 2\n\nGiven `most` first, print the largest.\n\n## Approach\n\nsum, or max.\n"
+        );
+        problem(&[
+            ("item.md", &item),
+            (
+                "tests.toml",
+                "[[example]]\ninput = \"1 2\"\noutput = \"3\"\n[[test]]\ninput = \"-4\"\noutput = \"-4\"\n",
+            ),
+            ("reference.py", SUMS),
+            ("brute.py", SUMS),
+            ("inputs.py", SUM_INPUTS),
+            ("starter.py", "print(0)\n"),
+            (
+                "two/tests.toml",
+                "[[example]]\ninput = \"most 1 5 2\"\noutput = \"5\"\n[[test]]\ninput = \"most -3\"\noutput = \"-3\"\n",
+            ),
+            ("two/reference.py", second),
+            ("two/brute.py", brute),
+            ("two/inputs.py", MOST_INPUTS),
+        ])
+    }
+
+    /// Each part's reference must pass what applies then: its own tests and the earlier parts',
+    /// unless it replaces them, and every brute force that applies.
+    #[tokio::test]
+    async fn checks_every_part_of_a_problem_in_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(
+            dir.path(),
+            Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
+        );
+        let cancel = CancellationToken::new();
+        let most = "import sys\nprint(max(map(int, sys.stdin.read().split()[1:])))\n";
+        let check = |coding: Coding| {
+            let runtime = &runtime;
+            let cancel = &cancel;
+            async move { check_coding(runtime, &coding, cancel).await.unwrap() }
+        };
+        let verdict = check(sums_in_parts(SUMS_OR_MOST, most, "")).await;
+        assert!(
+            matches!(&verdict, Verdict::Passed(why) if why.starts_with("in each of its 2 parts, the reference passes Python every example and test that applies")),
+            "{verdict:?}"
+        );
+        // Part 2's reference forgets what part 1 asked for, so part 1's example fails.
+        let verdict = check(sums_in_parts(most, most, "")).await;
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.starts_with("part 2: two/reference.py is wrong: it printed the wrong answer on part 1's example 1")),
+            "{verdict:?}"
+        );
+        // Unless part 2 replaces part 1.
+        let verdict = check(sums_in_parts(most, most, "replaces = [1]\n")).await;
+        assert!(matches!(&verdict, Verdict::Passed(_)), "{verdict:?}");
+        // A wrong brute force is found on its part's examples.
+        let verdict = check(sums_in_parts(SUMS_OR_MOST, SUMS, "")).await;
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.starts_with("part 2: the brute force, two/brute.py, is wrong: it crashed on part 2's example 1")),
+            "{verdict:?}"
+        );
+        // Agreeing on the tests isn't enough: it's compared with part 2's brute force too.
+        let negatives = "import sys\nwords = sys.stdin.read().split()\nif words and words[0] == 'most':\n    print(max(max(map(int, words[1:])), -3))\nelse:\n    print(sum(map(int, words)))\n";
+        let verdict = check(sums_in_parts(negatives, most, "")).await;
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.contains("compared with part 2's brute force")),
+            "{verdict:?}"
+        );
+    }
+
+    /// In API mode, every part is checked as a module the driver calls, and a starter must be
+    /// a module defining what the tests call.
+    #[tokio::test]
+    async fn checks_a_problem_in_api_mode_part_by_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(
+            dir.path(),
+            Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
+        );
+        let cancel = CancellationToken::new();
+        let pack = Pack::sample();
+        let Content::Coding(buffer) = &pack.item("text-buffer").unwrap().content else {
+            panic!("not a coding item");
+        };
+        assert_eq!(buffer.parts.len(), 3);
+        let verdict = check_coding(&runtime, buffer, &cancel).await.unwrap();
+        assert!(
+            matches!(&verdict, Verdict::Passed(why) if why.contains("3 parts")),
+            "{verdict:?}"
+        );
+
+        // Redo that forgets to be cleared by a new change passes part 2's tests, but not
+        // part 3's, nor the brute force's random calls.
+        let mut forgetful = buffer.clone();
+        let reference = &mut forgetful.parts[2].reference[0].text;
+        *reference = reference.replace(
+            "        self.make((\"insert\", text))\n        self.undone.clear()",
+            "        self.make((\"insert\", text))",
+        );
+        let verdict = check_coding(&runtime, &forgetful, &cancel).await.unwrap();
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.starts_with("part 3: redo/reference.py is wrong:")),
+            "{verdict:?}"
+        );
+
+        let mut misnamed = buffer.clone();
+        misnamed.starter[0].text = misnamed.starter[0]
+            .text
+            .replace("class TextBuffer", "class Buffer");
+        let verdict = check_coding(&runtime, &misnamed, &cancel).await.unwrap();
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.starts_with("the starter starter.py crashed when it's imported, and should define the class TextBuffer") && why.contains("There's no class TextBuffer")),
+            "{verdict:?}"
+        );
+    }
+
     /// Running out of time or memory stops a Haskell program too, but isn't an exception the
     /// code raised.
     #[tokio::test]
@@ -950,8 +1206,8 @@ mod tests {
             let Content::Coding(coding) = &mut item.content else {
                 panic!("not a coding item");
             };
-            coding.examples[0].output = example;
-            coding.tests[1].output = test;
+            coding.parts[0].examples[0].output = example;
+            coding.parts[0].tests[1].output = test;
             item
         };
         let fits = "1\n".repeat(1000);

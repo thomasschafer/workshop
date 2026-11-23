@@ -14,10 +14,10 @@ futures-util.workspace = true
 rhai.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

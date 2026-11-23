@@ -152,7 +152,15 @@ pub struct Session {
     pub step: StepName,
     /// The language they're solving it in.
     pub language: Language,
-    /// What they worked out the first example prints, while understanding it.
+    /// For a problem in parts, the part they're on, counting from 0. Passing a part's tests
+    /// moves them on to the next, with their code as it is.
+    #[serde(default)]
+    pub part: usize,
+    /// For a problem in parts, how they planned each part before the one they're on.
+    #[serde(default)]
+    pub plans: Vec<String>,
+    /// What they worked out the first example prints, while understanding it, or for a part
+    /// after the first, the part's first example.
     #[serde(default)]
     pub prediction: Option<String>,
     /// How they mean to solve it, typed or dictated, or for a twist, their answer to it.
@@ -186,6 +194,8 @@ impl Session {
             mode,
             step: mode.steps()[0],
             language,
+            part: 0,
+            plans: Vec::new(),
             prediction: None,
             plan: String::new(),
             passed: false,
@@ -204,6 +214,8 @@ impl Session {
         self.mode == other.mode
             && self.step == other.step
             && self.language == other.language
+            && self.part == other.part
+            && self.plans == other.plans
             && self.prediction == other.prediction
             && self.plan == other.plan
             && self.passed == other.passed
@@ -223,7 +235,51 @@ impl Session {
         }
     }
 
+    /// What they planned, for the attempt to keep: the plan, or for a problem in parts, each
+    /// part's in turn.
+    pub fn response(&self) -> String {
+        if self.plans.is_empty() {
+            return self.plan.clone();
+        }
+        self.plans
+            .iter()
+            .chain(std::iter::once(&self.plan))
+            .enumerate()
+            .map(|(i, plan)| format!("Part {}: {}", i + 1, plan.trim()))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// The parts the learner can see: those they've reached, while solving it, and every part
+    /// once it's being reviewed, or in a review of a problem solved before.
+    pub fn revealed(&self, coding: &Coding) -> usize {
+        match (self.mode, self.step) {
+            (Mode::Solve, StepName::Review) | (Mode::Recall | Mode::Twist, _) => coding.last(),
+            (Mode::Solve, _) => self.part,
+        }
+    }
+
     fn check(&self, coding: &Coding) -> Result<(), String> {
+        if self.part > coding.last() {
+            return Err(format!(
+                "this problem has {} parts, so there's no part {}",
+                coding.parts.len(),
+                self.part + 1
+            ));
+        }
+        if self.plans.len() != self.part {
+            return Err(format!(
+                "on part {}, there's a plan for each of the {} before it",
+                self.part + 1,
+                self.part
+            ));
+        }
+        if self.part > 0 && self.mode != Mode::Solve {
+            return Err(format!(
+                "only solving a problem goes through its parts, not {} it",
+                self.mode.describe()
+            ));
+        }
         if !self.mode.steps().contains(&self.step) {
             return Err(format!(
                 "{} isn't a step when {} a problem",
@@ -285,14 +341,16 @@ pub struct Opened {
     /// The track it's in, for the way back to it: the Coding track, or another, such as a
     /// pack's own.
     pub track: OpenedTrack,
-    /// In Markdown.
-    pub prompt: String,
     pub skills: Vec<String>,
     pub source: Option<String>,
     pub minutes: u32,
-    pub examples: Vec<Case>,
-    /// The pack's hints, from gentlest to most telling, which the app shows one at a time.
-    pub hints: Vec<String>,
+    /// Its parts as far as the learner can see them: the first, and each they've reached since,
+    /// or all of them once it's being reviewed.
+    pub parts: Vec<OpenedPart>,
+    /// How many parts it has, seen or not.
+    pub part_count: usize,
+    /// How the tests call the code, in API mode.
+    pub api: Option<OpenedApi>,
     pub languages: Vec<OpenedLanguage>,
     pub session: Session,
     /// How they planned to solve it last time, for comparing with when recalling it.
@@ -300,6 +358,50 @@ pub struct Opened {
     pub solution: Option<Solution>,
     /// For a twist, the twist, once it's been posed.
     pub twist: Option<OpenedTwist>,
+}
+
+/// One of a problem's parts, as the learner sees it.
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenedPart {
+    /// What it asks, in Markdown: the item's prompt for the first part.
+    pub prompt: String,
+    /// In API mode, the calls each makes and what they return, as JSON, a line each.
+    pub examples: Vec<Case>,
+    /// The pack's hints for it, from gentlest to most telling, which the app shows one at a
+    /// time.
+    pub hints: Vec<String>,
+    /// Earlier parts, counting from 0, whose requirements it changes.
+    pub replaces: Vec<usize>,
+}
+
+impl OpenedPart {
+    /// The first `count` of a problem's parts.
+    pub fn first(coding: &Coding, count: usize) -> Vec<Self> {
+        coding.parts[..count]
+            .iter()
+            .map(|part| Self {
+                prompt: part.prompt.clone(),
+                examples: part.examples.clone(),
+                hints: part.hints.clone(),
+                replaces: part.replaces.clone(),
+            })
+            .collect()
+    }
+}
+
+/// How the tests call the learner's code, in API mode.
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenedApi {
+    /// The class they make, or with none, the module's functions are called.
+    pub class: Option<String>,
+}
+
+impl OpenedApi {
+    pub fn of(coding: &Coding) -> Option<Self> {
+        coding.api.as_ref().map(|api| Self {
+            class: api.class.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -348,7 +450,25 @@ pub struct OpenedLsp {
 pub struct Solution {
     pub approach: String,
     pub notes: Option<String>,
+    /// Solutions to the whole problem, its last part's for a problem in parts.
     pub reference: Vec<Reference>,
+}
+
+impl Solution {
+    pub fn of(coding: &Coding) -> Self {
+        Self {
+            approach: coding.approach.clone(),
+            notes: coding.notes.clone(),
+            reference: coding.parts[coding.last()]
+                .reference
+                .iter()
+                .map(|source| Reference {
+                    language: source.language,
+                    text: source.text.clone(),
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -626,6 +746,11 @@ impl Problems {
                 current: Box::new(before),
             });
         }
+        if (session.part, &session.plans) != (before.part, &before.plans) {
+            return Err(SessionWriteError::Invalid(
+                "a part is only moved on from by passing its tests".to_owned(),
+            ));
+        }
         session.started_at = before.started_at;
         session.updated_at = now.max(before.updated_at);
         session.version = before.version + 1;
@@ -680,12 +805,20 @@ impl Problems {
         }
         let mut next = before.clone();
         next.submissions += 1;
-        next.passed = passed;
-        next.step = if passed {
-            StepName::Review
+        if passed && next.part < found.coding.last() {
+            // On to the next part, keeping their code, to understand and plan what it adds.
+            next.plans.push(std::mem::take(&mut next.plan));
+            next.part += 1;
+            next.prediction = None;
+            next.step = StepName::Understand;
         } else {
-            StepName::Test
-        };
+            next.passed = passed;
+            next.step = if passed {
+                StepName::Review
+            } else {
+                StepName::Test
+            };
+        }
         next.updated_at = now.max(before.updated_at);
         next.version = before.version + 1;
         self.write_session(&key, &next)?;
@@ -693,7 +826,8 @@ impl Problems {
     }
 
     /// Records a submission outcome (from either a live server submit or an offline `Submitted`
-    /// event) through the same versioned session writer.
+    /// event) through the same versioned session writer. Passing a part before the last moves
+    /// the session on to the next part.
     pub fn record_submission(
         &self,
         found: &Found<'_>,
@@ -950,7 +1084,18 @@ impl Problems {
                 let matching_session = session_opt
                     .as_ref()
                     .filter(|s| started_at.is_none_or(|at| s.started_at == at));
-                let response = plan.or_else(|| matching_session.map(|s| s.plan.clone()));
+                // The plans of earlier parts are the server's, as only it moves a session on
+                // from one part to the next; the current part's may be newer on the device.
+                let response = match (matching_session, plan) {
+                    (Some(session), plan) => Some(
+                        Session {
+                            plan: plan.unwrap_or_else(|| session.plan.clone()),
+                            ..session.clone()
+                        }
+                        .response(),
+                    ),
+                    (None, plan) => plan,
+                };
                 let spent_ms = if duration_ms > 0 {
                     duration_ms.clamp(0, workshop_sessions::MAX_STEP_GAP_MS)
                 } else {
@@ -1128,18 +1273,7 @@ impl Problems {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let solution = (session.step == StepName::Review).then(|| Solution {
-            approach: coding.approach.clone(),
-            notes: coding.notes.clone(),
-            reference: coding
-                .reference
-                .iter()
-                .map(|source| Reference {
-                    language: source.language,
-                    text: source.text.clone(),
-                })
-                .collect(),
-        });
+        let solution = (session.step == StepName::Review).then(|| Solution::of(coding));
         let twist = match session.mode {
             Mode::Twist => self
                 .twists(&found.key())?
@@ -1154,12 +1288,12 @@ impl Problems {
             key: found.key(),
             label: item.label(),
             track: OpenedTrack::of(found),
-            prompt: item.prompt.clone(),
             skills: item.skills.clone(),
             source: item.source.clone(),
             minutes: item.minutes,
-            examples: coding.examples.clone(),
-            hints: coding.hints.clone(),
+            parts: OpenedPart::first(coding, session.revealed(coding) + 1),
+            part_count: coding.parts.len(),
+            api: OpenedApi::of(coding),
             languages,
             session,
             previous_plan: attempts
@@ -1567,9 +1701,10 @@ mod tests {
         let opened = problems.open(&config, &found, session, &failed).unwrap();
         assert_eq!(opened.previous_plan.as_deref(), Some(""));
         assert!(opened.solution.is_none());
-        assert_eq!(opened.examples.len(), 2);
+        assert_eq!(opened.parts[0].examples.len(), 2);
+        assert_eq!((opened.parts.len(), opened.part_count), (1, 1));
         assert_eq!(opened.languages.len(), 2);
-        assert!(opened.hints.len() >= 2);
+        assert!(opened.parts[0].hints.len() >= 2);
         let rust = &opened.languages[1];
         assert_eq!(rust.id, Language::Rust);
         assert!(
@@ -1643,7 +1778,7 @@ mod tests {
         let none = BTreeMap::new();
         let track = track(&planned, &none).unwrap();
         assert_eq!(track.name, "Coding");
-        assert_eq!(track.summary, "21 new");
+        assert_eq!(track.summary, "23 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::New);
         // The quickest first: code to read, rather than a problem.
@@ -1663,7 +1798,7 @@ mod tests {
         problems.save_session(&found, session, NOW).unwrap();
         let sessions = problems.sessions().unwrap();
         let track = super::track(&planned, &sessions).unwrap();
-        assert_eq!(track.summary, "1 in progress · 21 new");
+        assert_eq!(track.summary, "1 in progress · 23 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::Unfinished);
         assert_eq!(next.title, "Count the islands");
@@ -1677,7 +1812,7 @@ mod tests {
             .unwrap();
         assert_eq!(islands.status, Status::InProgress);
         assert_eq!(islands.step, Some(StepName::Code));
-        assert_eq!(overview.items.len(), 21);
+        assert_eq!(overview.items.len(), 23);
         assert!(
             overview
                 .items
@@ -1772,7 +1907,10 @@ mod tests {
         let graded = workshop_coding::Graded::Ran {
             total: 3,
             results: vec![workshop_coding::CaseResult {
-                case: workshop_coding::CaseRef::Test { index: 0 },
+                case: workshop_coding::CaseRef::Test {
+                    part: None,
+                    index: 0,
+                },
                 input: "1 1\n0\n".into(),
                 expected: "0\n".into(),
                 run: workshop_coding::Run {

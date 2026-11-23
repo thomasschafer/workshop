@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use workshop_tracks::TrackId;
 
-use crate::code::{Coding, CodingFields, Reading, ReadingFields};
+use crate::code::{Coding, CodingFields, MAX_PARTS, PartText, Reading, ReadingFields};
 use crate::manifest::{Manifest, is_slug};
 use crate::number::{self, Tolerance};
 
@@ -91,7 +91,21 @@ impl Kind {
             Self::Card => &[("Answer", true), ("Explanation", false)],
             Self::MentalMaths => &[("Method", false)],
             Self::Probability => &[("Solution", true), ("Simulation", true)],
-            Self::Coding => &[("Approach", true), ("Hints", false), ("Notes", false)],
+            // A problem in parts has a section saying what each part after the first adds, and
+            // can have its hints, up to `MAX_PARTS`.
+            Self::Coding => &[
+                ("Approach", true),
+                ("Hints", false),
+                ("Notes", false),
+                ("Part 2", false),
+                ("Part 2 hints", false),
+                ("Part 3", false),
+                ("Part 3 hints", false),
+                ("Part 4", false),
+                ("Part 4 hints", false),
+                ("Part 5", false),
+                ("Part 5 hints", false),
+            ],
             Self::Reading => &[("Explanation", true)],
             Self::Design => &[("Rubric", true), ("Notes", false), ("Brief", false)],
         }
@@ -397,12 +411,17 @@ impl Item {
             }
             Kind::Coding => {
                 let fields: CodingFields = kind_fields.try_into().map_err(|err| err.to_string())?;
+                let approach = section("Approach").expect("required");
+                let hints = section("Hints");
+                let notes = section("Notes");
+                let later = (2..=MAX_PARTS)
+                    .map(|n| PartText {
+                        prompt: section(&format!("Part {n}")),
+                        hints: section(&format!("Part {n} hints")),
+                    })
+                    .collect();
                 Content::Coding(Coding::new(
-                    fields,
-                    section("Approach").expect("required"),
-                    section("Hints"),
-                    section("Notes"),
-                    &read,
+                    fields, &prompt, approach, hints, notes, later, &read,
                 )?)
             }
             Kind::Reading => {
@@ -1008,7 +1027,10 @@ mod tests {
         let Content::Coding(problem) = &coding.content else {
             panic!("not coding");
         };
-        assert_eq!(problem.hints, ["Start at zero.", "Add each number."]);
+        assert_eq!(
+            problem.parts[0].hints,
+            ["Start at zero.", "Add each number."]
+        );
         assert_eq!(problem.random_inputs, 100);
         let design = parse(
             "+++\nkind = \"design\"\nskills = [\"arithmetic\"]\nminutes = 25\n+++\nDesign a calculator service.\n\n## Rubric\n\n- Handles precision\n- Scales reads\n",
@@ -1034,6 +1056,180 @@ mod tests {
             brief.as_deref(),
             Some("- Used by schools\n- 50 sums a second")
         );
+    }
+
+    /// A problem in parts: `parts` is its `[[parts]]`, and `body` what follows its prompt.
+    fn in_parts(front: &str, parts: &str, body: &str) -> Result<Item, String> {
+        let source = format!(
+            "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\n{front}{parts}+++\nKeep a tally.\n\n{body}## Approach\n\nA map of counts.\n"
+        );
+        Item::parse("items/x/item.md", "x", &source, &manifest(), |file| {
+            match file {
+            "reference.py" | "starter.py" | "brute.py" | "inputs.py" | "two/reference.py"
+            | "two/brute.py" | "two/inputs.py" | "three/reference.py" => Ok(format!("# {file}")),
+            "tests.toml" => Ok("[[example]]\ninput = \"a\"\noutput = \"1\"\n[[test]]\ninput = \"b\"\noutput = \"1\"\n".to_owned()),
+            "two/tests.toml" | "three/tests.toml" => Ok("[[example]]\ninput = \"a a\"\noutput = \"2\"\n[[test]]\ninput = \"\"\noutput = \"0\"\n".to_owned()),
+            "api.toml" => Ok("[[example]]\ncalls = [{ call = \"add\", args = [\"a\"] }, { call = \"count\", args = [\"a\"], returns = 1 }]\n[[test]]\nnew = [2]\ncalls = [{ call = \"count\", args = [\"b\"], returns = 0 }]\n".to_owned()),
+            _ => Err(format!("{file:?} isn't in the item's directory")),
+        }
+        })
+    }
+
+    const TWO: &str = "[[parts]]\nreference = [\"two/reference.py\"]\ntests = \"two/tests.toml\"\nbrute_force = \"two/brute.py\"\ninputs = \"two/inputs.py\"\n";
+    const THREE: &str = "[[parts]]\nreference = [\"three/reference.py\"]\ntests = \"three/tests.toml\"\nreplaces = [1]\n";
+
+    #[test]
+    fn reads_a_problem_in_parts() {
+        let item = in_parts(
+            "",
+            &format!("{TWO}{THREE}"),
+            "## Part 2\n\nNow count pairs.\n\n## Part 2 hints\n\n- Pairs are two.\n\n## Part 3\n\nNow forget the first.\n\n## Hints\n\n- Count.\n\n",
+        )
+        .unwrap();
+        assert_eq!(item.prompt, "Keep a tally.");
+        let Content::Coding(coding) = &item.content else {
+            panic!("not coding");
+        };
+        assert!(coding.in_parts());
+        assert_eq!(coding.last(), 2);
+        let prompts: Vec<&str> = coding.parts.iter().map(|p| p.prompt.as_str()).collect();
+        assert_eq!(
+            prompts,
+            ["Keep a tally.", "Now count pairs.", "Now forget the first."]
+        );
+        assert_eq!(coding.parts[0].hints, ["Count."]);
+        assert_eq!(coding.parts[1].hints, ["Pairs are two."]);
+        assert!(coding.parts[2].hints.is_empty());
+        assert_eq!(coding.parts[1].reference[0].text, "# two/reference.py");
+        assert_eq!(
+            coding.parts[1].brute_force.as_ref().unwrap().inputs.file,
+            "two/inputs.py"
+        );
+        assert!(coding.parts[2].brute_force.is_none());
+        assert_eq!(coding.parts[2].replaces, [0]);
+        assert_eq!(
+            coding
+                .reference_in(1, crate::Language::Python)
+                .unwrap()
+                .file,
+            "two/reference.py"
+        );
+        // Each part's tests apply from then on, unless a later part replaces them.
+        assert_eq!(coding.applying(0), [0]);
+        assert_eq!(coding.applying(1), [0, 1]);
+        assert_eq!(coding.applying(2), [1, 2]);
+        assert_eq!(
+            coding.statement(1),
+            "## Part 1\n\nKeep a tally.\n\n## Part 2\n\nNow count pairs."
+        );
+        // A problem in one part is just its prompt.
+        let one = in_parts("", "", "").unwrap();
+        let Content::Coding(one) = &one.content else {
+            panic!("not coding");
+        };
+        assert_eq!(one.statement(0), "Keep a tally.");
+        assert_eq!(one.applying(0), [0]);
+    }
+
+    #[test]
+    fn reads_a_problem_in_api_mode() {
+        let item = in_parts("[api]\nclass = \"Tally\"\n", "", "");
+        // The ordinary tests.toml has inputs and outputs, which API mode doesn't.
+        assert!(item.unwrap_err().contains("unknown field `input`"));
+        let item = Item::parse(
+            "items/x/item.md",
+            "x",
+            "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ntests = \"api.toml\"\ninputs = \"inputs.py\"\n\n[api]\nclass = \"Tally\"\n+++\nKeep a tally.\n\n## Approach\n\nA map.\n",
+            &manifest(),
+            |file| match file {
+                "api.toml" => Ok("[[example]]\ncalls = [{ call = \"add\", args = [\"a\"] }, { call = \"count\", args = [\"a\"], returns = 1 }]\n[[test]]\nnew = [2]\ncalls = [{ call = \"count\", args = [\"b\"], returns = 0 }]\n".to_owned()),
+                _ => Ok(String::new()),
+            },
+        )
+        .unwrap();
+        let Content::Coding(coding) = &item.content else {
+            panic!("not coding");
+        };
+        assert_eq!(
+            coding.api,
+            Some(crate::Api {
+                class: Some("Tally".to_owned())
+            })
+        );
+        let example = &coding.parts[0].examples[0];
+        assert_eq!(
+            example.input,
+            "[\"Tally\"]\n[\"add\",\"a\"]\n[\"count\",\"a\"]\n"
+        );
+        assert_eq!(example.output, "null\n1\n");
+        assert_eq!(
+            coding.parts[0].tests[0].input,
+            "[\"Tally\",2]\n[\"count\",\"b\"]\n"
+        );
+        // Results are compared as values.
+        assert!(coding.same_output("null\n1\n", "null\n1.0\n"));
+        assert!(!coding.same_output("null\n1\n", "1\n"));
+    }
+
+    #[test]
+    fn says_what_is_wrong_with_a_problem_in_parts() {
+        let part_two = "## Part 2\n\nNow pairs.\n\n";
+        let cases: &[(&str, &str, &str, &str)] = &[
+            ("", TWO, "", "needs a `## Part 2` section"),
+            ("", "", part_two, "no part 2"),
+            (
+                "",
+                TWO,
+                "## Part 2\n\nPairs.\n\n## Part 3 hints\n\n- No.\n\n",
+                "`## Part 3 hints` section, but no part 3",
+            ),
+            (
+                "",
+                &format!(
+                    "{TWO}[[parts]]\nreference = [\"three/reference.py\"]\ntests = \"three/tests.toml\"\nreplaces = [3]\n"
+                ),
+                "## Part 2\n\nPairs.\n\n## Part 3\n\nMore.\n\n",
+                "from 1 to 2, not 3",
+            ),
+            (
+                "",
+                "[[parts]]\nreference = [\"two/reference.py\"]\ntests = \"two/tests.toml\"\nbrute_force = \"two/brute.py\"\n",
+                part_two,
+                "together, or neither",
+            ),
+            (
+                "",
+                "[[parts]]\nreference = [\"missing.py\"]\ntests = \"two/tests.toml\"\n",
+                part_two,
+                "in part 2: \"missing.py\" isn't in",
+            ),
+            (
+                "",
+                "[[parts]]\nreference = []\ntests = \"two/tests.toml\"\n",
+                part_two,
+                "in part 2: a coding item needs a reference solution",
+            ),
+            ("", &TWO.repeat(5), "", "at most 5 parts"),
+            (
+                "[api]\nclass = \"Two words\"\n",
+                "",
+                "",
+                "a name the code can define",
+            ),
+        ];
+        for (front, parts, body, says) in cases {
+            let err = in_parts(front, parts, body).unwrap_err();
+            assert!(err.contains(says), "{parts} {body}: {err}");
+        }
+        let rust = Item::parse(
+            "items/x/item.md",
+            "x",
+            "+++\nkind = \"coding\"\nskills = [\"dice\"]\nlanguages = [\"python\", \"rust\"]\nreference = [\"reference.py\", \"reference.rs\"]\nstarter = [\"starter.py\", \"starter.rs\"]\nbrute_force = \"brute.py\"\ntests = \"tests.toml\"\ninputs = \"inputs.py\"\napi = {}\n+++\nQ\n\n## Approach\n\nA\n",
+            &manifest(),
+            |_| Ok(String::new()),
+        )
+        .unwrap_err();
+        assert!(rust.contains("API mode is for Python only"), "{rust}");
     }
 
     fn coding(languages: &str, reference: &str, starter: &str) -> String {

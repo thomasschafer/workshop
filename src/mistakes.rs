@@ -124,10 +124,14 @@ pub fn from_submission(
             CaseRef::Test { .. } | CaseRef::Random { .. } => "missed-edge-case",
         }
     };
-    let on = match &failure.case {
-        CaseRef::Example { index } => format!("example {}", index + 1),
-        CaseRef::Test { index } => format!("hidden test {}", index + 1),
+    let what = match &failure.case {
+        CaseRef::Example { index, .. } => format!("example {}", index + 1),
+        CaseRef::Test { index, .. } => format!("hidden test {}", index + 1),
         CaseRef::Random { size, .. } => format!("a random input of size {size}"),
+    };
+    let on = match failure.case.part() {
+        Some(part) => format!("part {}'s {what}", part + 1),
+        None => what,
     };
     Some(NewMistake {
         id,

@@ -1,0 +1,27 @@
+# Examples are shown to the learner, and tests kept from them until they submit. Each is a
+# Stock made afresh, and the calls made on it, with what each returns.
+
+[[example]]
+calls = [
+  { call = "add", args = ["pens", 5] },
+  { call = "sell", args = ["pens", 2], returns = true },
+  { call = "sell", args = ["pens", 4], returns = false },
+  { call = "count", args = ["pens"], returns = 3 },
+]
+
+[[test]]
+calls = [
+  { call = "count", args = ["ink"], returns = 0 },
+  { call = "sell", args = ["ink", 1], returns = false },
+  { call = "count", args = ["ink"], returns = 0 },
+]
+
+[[test]]
+calls = [
+  { call = "add", args = ["tape", 2] },
+  { call = "add", args = ["tape", 3] },
+  { call = "add", args = ["cups", 1] },
+  { call = "sell", args = ["tape", 5], returns = true },
+  { call = "count", args = ["tape"], returns = 0 },
+  { call = "count", args = ["cups"], returns = 1 },
+]

@@ -1,0 +1,31 @@
+# Examples are shown to the learner, and tests kept from them until they submit. Each is a
+# TextBuffer made afresh, and the calls made on it, with what each returns.
+
+[[example]]
+calls = [
+  { call = "insert", args = ["hello"] },
+  { call = "insert", args = [" world"] },
+  { call = "delete", args = [3] },
+  { call = "text", returns = "hello wo" },
+]
+
+[[test]]
+calls = [{ call = "text", returns = "" }]
+
+[[test]]
+calls = [
+  { call = "insert", args = ["ab"] },
+  { call = "delete", args = [5] },
+  { call = "text", returns = "" },
+  { call = "insert", args = ["c"] },
+  { call = "text", returns = "c" },
+]
+
+[[test]]
+calls = [
+  { call = "insert", args = [""] },
+  { call = "delete", args = [0] },
+  { call = "insert", args = ["xyz"] },
+  { call = "delete", args = [0] },
+  { call = "text", returns = "xyz" },
+]

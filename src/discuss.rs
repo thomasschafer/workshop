@@ -35,6 +35,8 @@ pub struct Turn {
 /// A coding problem's tutor's view of where the learner is.
 pub struct TutorContext<'a> {
     pub problem: &'a str,
+    /// For a problem in parts, the part they're on, counting from 0, and how many there are.
+    pub part: Option<(usize, usize)>,
     pub step: &'a str,
     pub language: &'a str,
     pub plan: &'a str,
@@ -45,11 +47,14 @@ pub struct TutorContext<'a> {
 
 /// The tutor's prompt: the problem, where the learner is with it, and the conversation.
 pub fn tutor_prompt(context: &TutorContext, turns: &[Turn]) -> String {
-    let mut out = format!(
-        "<problem>\n{}\n</problem>\n\nThey are at the {} step.\n\n",
-        context.problem.trim(),
-        context.step
-    );
+    let mut out = format!("<problem>\n{}\n</problem>\n\n", context.problem.trim());
+    if let Some((part, parts)) = context.part {
+        out.push_str(&format!(
+            "The problem comes in {parts} parts, each adding to the last, and they're on part {} of {parts}: its requirements are what's new, and their code is what they wrote for the parts before it, which must keep working. They haven't seen the parts after it.\n\n",
+            part + 1
+        ));
+    }
+    out.push_str(&format!("They are at the {} step.\n\n", context.step));
     let sections = [
         ("plan", context.plan),
         ("errors", context.errors),
@@ -175,6 +180,7 @@ mod tests {
         let prompt = tutor_prompt(
             &TutorContext {
                 problem: "Count the islands.",
+                part: None,
                 step: "plan",
                 language: "Python",
                 plan: "Look at every square",

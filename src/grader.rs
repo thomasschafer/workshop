@@ -84,6 +84,9 @@ pub struct Answer<'a> {
     /// For a design session or a round of a design prompt, the brief the learner's questions
     /// were answered from, which they never saw: what they asked is marked too.
     pub brief: Option<&'a str>,
+    /// For a plan for a coding problem in parts, the part it's for, counting from 0: the
+    /// question is then the parts up to it. Otherwise a problem in parts is asked as a whole.
+    pub part: Option<usize>,
 }
 
 impl<'a> Answer<'a> {
@@ -95,6 +98,7 @@ impl<'a> Answer<'a> {
             note: None,
             twist: None,
             brief: None,
+            part: None,
         }
     }
 }
@@ -233,7 +237,27 @@ pub fn mark_prompt(
     error_types: &[ErrorType],
 ) -> Result<String> {
     let (rubric, reference) = rubric(item, work, &answer)?;
-    let mut out = format!("<question>\n{}\n</question>\n\n", item.prompt.trim());
+    let question = match (&item.content, answer.part) {
+        (Content::Coding(coding), part) => {
+            let through = part.unwrap_or(coding.last());
+            if through > coding.last() {
+                bail!("{} has no part {}", item.label(), through + 1);
+            }
+            coding.statement(through)
+        }
+        (_, Some(_)) => bail!("only a coding problem comes in parts"),
+        (_, None) => item.prompt.clone(),
+    };
+    let mut out = format!("<question>\n{}\n</question>\n\n", question.trim());
+    if let (Content::Coding(coding), Some(part)) = (&item.content, answer.part)
+        && coding.in_parts()
+    {
+        out.push_str(&format!(
+            "The question comes in {} parts, each adding to the last, and the learner is on part {}: their work is for what it adds, building on their solution to the parts before it, so mark it as that. They haven't seen the parts after it, which the reference covers too.\n\n",
+            coding.parts.len(),
+            part + 1
+        ));
+    }
     if let Some((twist, _)) = answer.twist {
         out.push_str(&format!(
             "<twist>\n{}\n</twist>\n\nThe learner solved the question before, and is answering this twist on it: mark their answer to the twist.\n\n",
@@ -823,6 +847,7 @@ mod tests {
             note: None,
             twist: None,
             brief: None,
+            part: None,
         };
         let prompt = mark_prompt(problem, Work::Explanation, answer, &types).unwrap();
         assert!(prompt.contains("explained this aloud"));

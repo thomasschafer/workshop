@@ -2,6 +2,7 @@
 //! Python, Rust and C++, so a learner's solution can be run on examples and graded when it's
 //! submitted, and a pack's own solutions and code checked by `workshop pack check`.
 
+pub mod api;
 pub mod check;
 pub mod grade;
 pub mod programs;

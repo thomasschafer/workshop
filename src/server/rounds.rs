@@ -111,8 +111,11 @@ pub(super) struct Opened {
     /// In Markdown.
     prompt: String,
     source: Option<String>,
-    /// A coding problem's examples, to work from.
+    /// A coding problem's examples, to work from: every part's, for one in parts.
     examples: Vec<Case>,
+    /// How a coding problem's tests call the code, in API mode, which its examples are calls
+    /// for.
+    api: Option<crate::coding::OpenedApi>,
     /// How long a round of it lasts.
     minutes: u32,
     /// The styles the examiner can take, from the item's pack.
@@ -154,14 +157,24 @@ fn style<'a>(pack: &'a Pack, round: &Round) -> Option<&'a ExaminerStyle> {
 }
 
 fn opened(pack: &Pack, key: String, item: &Item, round: Option<Round>) -> Opened {
-    let examples = match &item.content {
-        Content::Coding(coding) => coding.examples.clone(),
-        _ => Vec::new(),
+    // A round is of the whole problem, every part of one in parts.
+    let (prompt, examples, api) = match &item.content {
+        Content::Coding(coding) => (
+            coding.statement(coding.last()),
+            coding
+                .parts
+                .iter()
+                .flat_map(|part| part.examples.clone())
+                .collect(),
+            crate::coding::OpenedApi::of(coding),
+        ),
+        _ => (item.prompt.clone(), Vec::new(), None),
     };
     Opened {
         label: item.label(),
         kind: item.kind,
-        prompt: item.prompt.clone(),
+        prompt,
+        api,
         source: item.source.clone(),
         examples,
         minutes: round

@@ -5,6 +5,7 @@
 //! simulation must agree with its exact answer, and a mental maths template must make questions
 //! with answers, for example.
 
+pub mod api;
 pub mod code;
 pub mod drafts;
 pub mod error_types;
@@ -21,7 +22,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-pub use code::{Case, Coding, Language, Question, Reading, ReadingCheck, Source};
+pub use api::Api;
+pub use code::{BruteForce, Case, Coding, Language, Part, Question, Reading, ReadingCheck, Source};
 pub use drafts::Draft;
 pub use error_types::ErrorType;
 pub use item::{
@@ -506,7 +508,7 @@ mod tests {
             .iter()
             .filter(|i| i.kind == Kind::Reading)
             .count();
-        assert!((6..=8).contains(&coding), "{coding} coding items");
+        assert!((6..=10).contains(&coding), "{coding} coding items");
         assert!((12..=16).contains(&reading), "{reading} reading items");
         // Code to read in each language.
         for language in Language::ALL {
@@ -581,10 +583,14 @@ mod tests {
         let Content::Coding(coding) = &pack.item("roll").unwrap().content else {
             panic!("not a coding item");
         };
-        assert_eq!(coding.reference[0].language, Language::Python);
-        assert!(coding.reference[0].text.starts_with("print(sum"));
-        assert_eq!(coding.examples[0].output, "3");
-        assert_eq!(coding.tests.len(), 1);
+        let part = &coding.parts[0];
+        assert_eq!(part.reference[0].language, Language::Python);
+        assert!(part.reference[0].text.starts_with("print(sum"));
+        assert_eq!(part.examples[0].output, "3");
+        assert_eq!(part.tests.len(), 1);
+        assert_eq!(part.prompt, "Roll some dice.");
+        assert!(!coding.in_parts());
+        assert_eq!(coding.api, None);
         assert_eq!(coding.approach, "Add them up.");
         let report = pack.check(&NotRun).await;
         assert!(report.passed());

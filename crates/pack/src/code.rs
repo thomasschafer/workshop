@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::api::{Api, ApiFields};
+
 /// A language a pack's programs are written in. Learners write code in Python, Rust and
 /// Haskell, and read code in any of them; C++ is only for reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -93,42 +95,133 @@ pub struct Case {
     pub output: String,
 }
 
-/// A problem to solve in code. Programs read their input on stdin and print their answer.
+/// A problem to solve in code. Programs read their input on stdin and print their answer, or in
+/// API mode, define a class or functions that the tests call.
+///
+/// It can come in parts, each adding to what the earlier ones asked for: the learner keeps their
+/// code from one part to the next, and the earlier parts' tests must still pass, unless a part
+/// says it changes what an earlier one asked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Coding {
     /// What the learner may solve it in.
     pub languages: Vec<Language>,
-    /// Solutions known to be right, at least one, and one in each of `languages`.
-    pub reference: Vec<Source>,
     /// What the learner starts with in each language, such as reading the input.
     pub starter: Vec<Source>,
-    /// A slow solution that's obviously right, compared with others on random inputs.
-    pub brute_force: Source,
-    /// Prints a random input, given a seed and a size from 1 to `MAX_SIZE` as its arguments.
-    pub inputs: Source,
+    /// How the tests call the learner's code, in API mode; without it, programs read stdin.
+    pub api: Option<Api>,
+    /// Its parts, in order, at least one: a problem not in parts is one part.
+    pub parts: Vec<Part>,
+    /// How many random inputs `workshop pack check` compares each reference and brute force on.
+    pub random_inputs: u32,
+    /// How it's meant to be solved, all its parts, shown once it's solved and when it comes back
+    /// for review.
+    pub approach: String,
+    pub notes: Option<String>,
+}
+
+/// One of a problem's parts. The first is what the problem asks to begin with, and each after it
+/// adds requirements.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Part {
+    /// What it asks, in Markdown: the item's prompt for the first part, and its own section for
+    /// the rest.
+    pub prompt: String,
+    /// Solutions to it and every part before it, known to be right, one in each of the
+    /// problem's languages.
+    pub reference: Vec<Source>,
+    /// What solutions to it are compared with on random inputs. The first part always has one;
+    /// a later part needs one only for what its new requirements add.
+    pub brute_force: Option<BruteForce>,
     /// Cases the learner sees and can run while coding.
     pub examples: Vec<Case>,
     /// Cases kept from the learner, run when they submit.
     pub tests: Vec<Case>,
-    /// How many random inputs `workshop pack check` compares the reference and brute force on.
-    pub random_inputs: u32,
-    /// How it's meant to be solved, shown once it's solved and when it comes back for review.
-    pub approach: String,
-    /// Nudges towards the approach, from gentlest to most telling.
+    /// Nudges towards what this part adds, from gentlest to most telling.
     pub hints: Vec<String>,
-    pub notes: Option<String>,
+    /// Earlier parts, counting from 0, whose requirements this one changes, so their tests and
+    /// brute force no longer apply from here on.
+    pub replaces: Vec<usize>,
+}
+
+/// A slow solution that's obviously right, and a program making random inputs to compare others
+/// with it on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BruteForce {
+    pub program: Source,
+    /// Prints a random input, given a seed and a size from 1 to `MAX_SIZE` as its arguments.
+    pub inputs: Source,
 }
 
 /// The largest size the inputs program is asked for.
 pub const MAX_SIZE: u32 = 10;
 
+/// The most parts a problem can have.
+pub const MAX_PARTS: usize = 5;
+
 impl Coding {
-    pub fn reference_in(&self, language: Language) -> Option<&Source> {
-        self.reference.iter().find(|s| s.language == language)
+    /// The last part, counting from 0.
+    pub fn last(&self) -> usize {
+        self.parts.len() - 1
+    }
+
+    /// Whether it comes in more than one part.
+    pub fn in_parts(&self) -> bool {
+        self.parts.len() > 1
+    }
+
+    pub fn reference_in(&self, part: usize, language: Language) -> Option<&Source> {
+        self.parts[part]
+            .reference
+            .iter()
+            .find(|s| s.language == language)
     }
 
     pub fn starter_in(&self, language: Language) -> Option<&Source> {
         self.starter.iter().find(|s| s.language == language)
+    }
+
+    /// The parts whose examples, tests and brute force apply once the learner is on `part`: it,
+    /// and every part before it that no part up to it replaces.
+    pub fn applying(&self, part: usize) -> Vec<usize> {
+        (0..=part)
+            .filter(|earlier| {
+                !self.parts[earlier + 1..=part]
+                    .iter()
+                    .any(|later| later.replaces.contains(earlier))
+            })
+            .collect()
+    }
+
+    /// The parts whose brute force solutions are compared with once the learner is on `part`:
+    /// those applying then that have one.
+    pub fn compared_with(&self, part: usize) -> Vec<usize> {
+        self.applying(part)
+            .into_iter()
+            .filter(|&p| self.parts[p].brute_force.is_some())
+            .collect()
+    }
+
+    /// What the problem asks, up to and including `through`, for the tutor and the grader: the
+    /// prompt, or for a problem in parts, each part under a heading of its own.
+    pub fn statement(&self, through: usize) -> String {
+        if !self.in_parts() {
+            return self.parts[0].prompt.clone();
+        }
+        self.parts[..=through]
+            .iter()
+            .enumerate()
+            .map(|(i, part)| format!("## Part {}\n\n{}", i + 1, part.prompt.trim()))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// Whether a solution's output is what was expected: the same lines, or in API mode, the
+    /// same values.
+    pub fn same_output(&self, expected: &str, actual: &str) -> bool {
+        match self.api {
+            Some(_) => crate::api::same_results(expected, actual),
+            None => crate::output::same(expected, actual),
+        }
     }
 }
 
@@ -253,15 +346,37 @@ pub(crate) struct CodingFields {
     tests: String,
     inputs: String,
     random_inputs: Option<u32>,
+    api: Option<ApiFields>,
+    #[serde(default)]
+    parts: Vec<PartFields>,
+}
+
+/// A part after the first, as the front matter's `[[parts]]` has it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PartFields {
+    reference: Vec<String>,
+    tests: String,
+    brute_force: Option<String>,
+    inputs: Option<String>,
+    /// Earlier parts it changes, counting from 1.
+    #[serde(default)]
+    replaces: Vec<usize>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TestsFile {
     #[serde(default)]
-    example: Vec<Case>,
+    example: Vec<toml::Value>,
     #[serde(default)]
-    test: Vec<Case>,
+    test: Vec<toml::Value>,
+}
+
+/// A part's own sections of the item: what it asks, and its hints.
+pub(crate) struct PartText {
+    pub prompt: Option<String>,
+    pub hints: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -315,11 +430,15 @@ fn one_per_language(
 }
 
 impl Coding {
+    /// Reads a coding item. `later` is the item's sections for each part after the first that
+    /// it could have, from part 2 up to `MAX_PARTS`.
     pub(crate) fn new(
         fields: CodingFields,
+        prompt: &str,
         approach: String,
         hints: Option<String>,
         notes: Option<String>,
+        later: Vec<PartText>,
         read: ReadFile<'_>,
     ) -> Result<Self, String> {
         if fields.languages.is_empty() {
@@ -338,22 +457,19 @@ impl Coding {
             }
             languages.push(language);
         }
-        let reference = one_per_language("reference solution", &fields.reference, read)?;
+        let api = fields.api.map(Api::new).transpose()?;
+        if api.is_some()
+            && let Some(other) = languages
+                .iter()
+                .find(|l| !crate::api::LANGUAGES.contains(l))
+        {
+            return Err(format!(
+                "API mode is for Python only, as its tests call the code by name; solve it in {} with a program that reads stdin instead",
+                other.name()
+            ));
+        }
         let starter = one_per_language("starter", &fields.starter, read)?;
-        if reference.is_empty() {
-            return Err("a coding item needs a reference solution".to_owned());
-        }
-        for language in &languages {
-            for (what, sources) in [("reference solution", &reference), ("starter", &starter)] {
-                if !sources.iter().any(|s| s.language == *language) {
-                    return Err(format!(
-                        "it can be solved in {}, so it needs a {what} in {} too",
-                        language.name(),
-                        language.name()
-                    ));
-                }
-            }
-        }
+        every_language(&languages, "starter", &starter)?;
         if let Some(extra) = starter.iter().find(|s| !languages.contains(&s.language)) {
             return Err(format!(
                 "{:?} is a starter in {}, which isn't in its languages",
@@ -361,6 +477,91 @@ impl Coding {
                 extra.language.name()
             ));
         }
+        let random_inputs = fields.random_inputs.unwrap_or(100);
+        if !(1..=MAX_RANDOM_INPUTS).contains(&random_inputs) {
+            return Err(format!(
+                "random_inputs should be from 1 to {MAX_RANDOM_INPUTS}"
+            ));
+        }
+        if fields.parts.len() >= MAX_PARTS {
+            return Err(format!(
+                "a problem has at most {MAX_PARTS} parts, the first and {} in [[parts]]",
+                MAX_PARTS - 1
+            ));
+        }
+        let first = PartFields {
+            reference: fields.reference,
+            tests: fields.tests,
+            brute_force: Some(fields.brute_force),
+            inputs: Some(fields.inputs),
+            replaces: Vec::new(),
+        };
+        let mut first_hints = hints;
+        let mut later = later.into_iter();
+        let mut parts = Vec::new();
+        for (index, part) in std::iter::once(first).chain(fields.parts).enumerate() {
+            let (prompt, hints) = if index == 0 {
+                (prompt.to_owned(), first_hints.take())
+            } else {
+                let text = later
+                    .next()
+                    .expect("a part's sections for each part allowed");
+                let prompt = text.prompt.ok_or_else(|| {
+                    format!(
+                        "part {} needs a `## Part {}` section, saying what it adds",
+                        index + 1,
+                        index + 1
+                    )
+                })?;
+                (prompt, text.hints)
+            };
+            let part = Part::new(part, index, prompt, hints, &languages, api.as_ref(), read)
+                .map_err(|err| {
+                    if index == 0 {
+                        err
+                    } else {
+                        format!("in part {}: {err}", index + 1)
+                    }
+                })?;
+            parts.push(part);
+        }
+        for (offset, text) in later.enumerate() {
+            let n = parts.len() + offset + 1;
+            for (section, what) in [(&text.prompt, ""), (&text.hints, " hints")] {
+                if section.is_some() {
+                    return Err(format!(
+                        "there's a `## Part {n}{what}` section, but no part {n}: add one to [[parts]] for each part after the first"
+                    ));
+                }
+            }
+        }
+        Ok(Self {
+            languages,
+            starter,
+            api,
+            parts,
+            random_inputs,
+            approach,
+            notes,
+        })
+    }
+}
+
+impl Part {
+    fn new(
+        fields: PartFields,
+        index: usize,
+        prompt: String,
+        hints: Option<String>,
+        languages: &[Language],
+        api: Option<&Api>,
+        read: ReadFile<'_>,
+    ) -> Result<Self, String> {
+        let reference = one_per_language("reference solution", &fields.reference, read)?;
+        if reference.is_empty() {
+            return Err("a coding item needs a reference solution".to_owned());
+        }
+        every_language(languages, "reference solution", &reference)?;
         let tests_text = read(&fields.tests)?;
         let tests: TestsFile = toml::from_str(&tests_text)
             .map_err(|err| format!("in {}: {}", fields.tests, err.message()))?;
@@ -376,25 +577,78 @@ impl Coding {
                 fields.tests
             ));
         }
-        let random_inputs = fields.random_inputs.unwrap_or(100);
-        if !(1..=MAX_RANDOM_INPUTS).contains(&random_inputs) {
-            return Err(format!(
-                "random_inputs should be from 1 to {MAX_RANDOM_INPUTS}"
-            ));
+        let cases = |what: &str, values: Vec<toml::Value>| {
+            values
+                .into_iter()
+                .enumerate()
+                .map(|(i, value)| {
+                    match api {
+                        Some(api) => api.case(value),
+                        None => value.try_into::<Case>().map_err(|err| err.to_string()),
+                    }
+                    .map_err(|err| format!("in {}, {what} {}: {err}", fields.tests, i + 1))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
+        let examples = cases("example", tests.example)?;
+        let tests = cases("test", tests.test)?;
+        let brute_force = match (fields.brute_force, fields.inputs) {
+            (Some(program), Some(inputs)) => {
+                let program = source(&program, read)?;
+                if api.is_some() && !crate::api::LANGUAGES.contains(&program.language) {
+                    return Err(format!(
+                        "{} is called by the tests, as solutions are in API mode, so write it in Python",
+                        program.file
+                    ));
+                }
+                Some(BruteForce {
+                    program,
+                    inputs: source(&inputs, read)?,
+                })
+            }
+            (None, None) => None,
+            _ => {
+                return Err(
+                    "give a brute_force and the inputs to compare it on together, or neither"
+                        .to_owned(),
+                );
+            }
+        };
+        let mut replaces = Vec::new();
+        for n in fields.replaces {
+            if !(1..=index).contains(&n) {
+                return Err(format!(
+                    "replaces lists the earlier parts this one changes, counting from 1, so from 1 to {index}, not {n}"
+                ));
+            }
+            if !replaces.contains(&(n - 1)) {
+                replaces.push(n - 1);
+            }
         }
         Ok(Self {
-            languages,
+            prompt,
             reference,
-            starter,
-            brute_force: source(&fields.brute_force, read)?,
-            inputs: source(&fields.inputs, read)?,
-            examples: tests.example,
-            tests: tests.test,
-            random_inputs,
-            approach,
+            brute_force,
+            examples,
+            tests,
             hints: hints.map(|text| list(&text)).unwrap_or_default(),
-            notes,
+            replaces,
         })
+    }
+}
+
+/// Says if any of `languages` has no program among `sources`.
+fn every_language(languages: &[Language], what: &str, sources: &[Source]) -> Result<(), String> {
+    match languages
+        .iter()
+        .find(|language| !sources.iter().any(|s| s.language == **language))
+    {
+        Some(language) => Err(format!(
+            "it can be solved in {}, so it needs a {what} in {} too",
+            language.name(),
+            language.name()
+        )),
+        None => Ok(()),
     }
 }
 

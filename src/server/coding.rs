@@ -26,8 +26,8 @@ use super::puzzles::{SaveText, saved};
 use super::setup::{Needs, install_programs};
 use super::state::{ActiveRun, Shared, lock};
 use crate::coding::{
-    Found, Mode, Opened, OpenedLsp, OpenedTrack, Overview, Reference, SUBMIT_RANDOM_INPUTS,
-    Session, SessionWriteError, Solution, find,
+    Found, Mode, Opened, OpenedApi, OpenedLsp, OpenedPart, OpenedTrack, Overview,
+    SUBMIT_RANDOM_INPUTS, Session, SessionWriteError, Solution, find,
 };
 use crate::discuss::{self, Turn};
 use crate::language::LanguageProfile;
@@ -229,6 +229,7 @@ pub(super) async fn run(
     let graded = workshop_coding::run_examples(
         &runtime,
         found.coding,
+        session.part,
         session.language,
         &code.text,
         &running.cancel,
@@ -251,33 +252,48 @@ pub(super) struct Submitted {
     opened: Opened,
 }
 
-/// The problem's brute force and inputs program, built, kept while they don't change.
+/// A part's brute force and inputs program, built, kept while they don't change.
 async fn oracle(
     app: &Shared,
     found: &Found<'_>,
+    part: usize,
     runtime: &workshop_coding::Runtime,
     cancel: &CancellationToken,
 ) -> Result<Arc<Oracle>, ApiError> {
+    let brute = found.coding.parts[part]
+        .brute_force
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("part {} has no brute force", part + 1))?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (&found.coding.brute_force.text, &found.coding.inputs.text).hash(&mut hasher);
-    let key = format!("{}#{:x}", found.key(), hasher.finish());
+    (&brute.program.text, &brute.inputs.text).hash(&mut hasher);
+    // The driver a brute force is called through in API mode is part of what it is.
+    found
+        .coding
+        .api
+        .as_ref()
+        .map(|api| &api.class)
+        .hash(&mut hasher);
+    let prefix = format!("{}#{part}#", found.key());
+    let key = format!("{prefix}{:x}", hasher.finish());
     let mut oracles = app.oracles.lock().await;
     if let Some(oracle) = oracles.get(&key) {
         return Ok(oracle.clone());
     }
-    let oracle = Oracle::build(runtime, found.coding, cancel)
+    let oracle = Oracle::build(runtime, found.coding, part, cancel)
         .await?
         .map_err(|problem| {
             anyhow::anyhow!("the problem's own programs can't be run here: {problem}")
         })?;
     let oracle = Arc::new(oracle);
-    oracles.retain(|other, _| !other.starts_with(&format!("{}#", found.key())));
+    oracles.retain(|other, _| !other.starts_with(&prefix));
     oracles.insert(key, oracle.clone());
     Ok(oracle)
 }
 
-/// Runs the code saved on everything: the examples, random inputs compared with the brute
-/// force, and the hidden tests. Passing moves the problem on to being reviewed.
+/// Runs the code saved on everything that applies to the part the learner is on: the examples,
+/// random inputs compared with the brute forces, and the hidden tests, of that part and of the
+/// earlier parts it doesn't replace. Passing moves the problem on to the next part, or once
+/// it's the last, to being reviewed.
 pub(super) async fn submit(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
@@ -289,11 +305,16 @@ pub(super) async fn submit(
     let body: RunIdBody = optional_json(body)?;
     let running = start_running(&app, body.run_id)?;
     let runtime = crate::coding::runtime(&app.config, &app.paths).await?;
-    let oracle = oracle(&app, &found, &runtime, &running.cancel).await?;
+    let mut oracles = Vec::new();
+    for part in found.coding.compared_with(session.part) {
+        oracles.push(oracle(&app, &found, part, &runtime, &running.cancel).await?);
+    }
+    let oracles: Vec<&Oracle> = oracles.iter().map(Arc::as_ref).collect();
     let graded = workshop_coding::grade(
         &runtime,
         found.coding,
-        &oracle,
+        &oracles,
+        session.part,
         session.language,
         &code.text,
         SUBMIT_RANDOM_INPUTS.min(found.coding.random_inputs),
@@ -386,7 +407,7 @@ pub(super) async fn finish(
                 answered_at: now,
                 duration_ms: spent,
                 rating: body.rating,
-                response: Some(session.plan.clone()),
+                response: Some(session.response()),
                 seed: None,
             },
             &[],
@@ -508,7 +529,7 @@ async fn pose(
         runner,
         &spec,
         &crate::twist::Asking {
-            problem: &found.item.prompt,
+            problem: &found.coding.statement(found.coding.last()),
             approach: &found.coding.approach,
             solution: solution
                 .as_ref()
@@ -682,9 +703,12 @@ pub(super) async fn tutor(
         .session(&key)?
         .ok_or_else(|| bad_request("Start the problem before asking about it."))?;
     let step = format!("{:?}", session.step).to_lowercase();
+    let revealed = session.revealed(found.coding);
     let prompt = discuss::tutor_prompt(
         &discuss::TutorContext {
-            problem: &found.item.prompt,
+            problem: &found.coding.statement(revealed),
+            part: (found.coding.in_parts() && session.mode == Mode::Solve)
+                .then_some((session.part, found.coding.parts.len())),
             step: &step,
             language: session.language.name(),
             plan: &session.plan,
@@ -842,17 +866,18 @@ pub(super) struct OfflineItem {
     key: String,
     label: String,
     track: OpenedTrack,
-    prompt: String,
     skills: Vec<String>,
     source: Option<String>,
     minutes: u32,
-    examples: Vec<Case>,
-    hints: Vec<String>,
+    /// Every part, which the app shows only as far as the session has reached.
+    parts: Vec<OpenedPart>,
+    api: Option<OpenedApi>,
     languages: Vec<OfflineLanguage>,
     session: Option<Session>,
     previous_plan: Option<String>,
     solution: Solution,
-    tests: Vec<Case>,
+    /// Each part's hidden tests.
+    tests: Vec<Vec<Case>>,
     oracle_cases: Vec<OracleCase>,
     oracle_ready: bool,
 }
@@ -868,8 +893,10 @@ fn oracle_cache_path(app: &Shared, found: &Found<'_>, count: u32) -> PathBuf {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (
         found.key(),
-        &found.coding.brute_force.text,
-        &found.coding.inputs.text,
+        found.coding.parts[0]
+            .brute_force
+            .as_ref()
+            .map(|brute| (&brute.program.text, &brute.inputs.text)),
         count,
     )
         .hash(&mut hasher);
@@ -949,31 +976,19 @@ pub(super) async fn offline_bundle(State(app): State<Shared>) -> ApiResult<Offli
                 key: key.clone(),
                 label: item.label(),
                 track: OpenedTrack::of(&found),
-                prompt: item.prompt.clone(),
                 skills: item.skills.clone(),
                 source: item.source.clone(),
                 minutes: item.minutes,
-                examples: coding.examples.clone(),
-                hints: coding.hints.clone(),
+                parts: OpenedPart::first(coding, coding.parts.len()),
+                api: OpenedApi::of(coding),
                 languages,
                 session: sessions.get(&key).cloned(),
                 previous_plan: attempts
                     .iter()
                     .rev()
                     .find_map(|attempt| attempt.response.clone()),
-                solution: Solution {
-                    approach: coding.approach.clone(),
-                    notes: coding.notes.clone(),
-                    reference: coding
-                        .reference
-                        .iter()
-                        .map(|source| Reference {
-                            language: source.language,
-                            text: source.text.clone(),
-                        })
-                        .collect(),
-                },
-                tests: coding.tests.clone(),
+                solution: Solution::of(coding),
+                tests: coding.parts.iter().map(|part| part.tests.clone()).collect(),
                 oracle_cases,
                 oracle_ready,
             });
@@ -1020,7 +1035,7 @@ mod tests {
         let item = "/api/coding/items/sample/first-repeat";
         let overview =
             json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await;
-        assert_eq!(overview["items"].as_array().unwrap().len(), 21);
+        assert_eq!(overview["items"].as_array().unwrap().len(), 23);
 
         let opened = send(&router, request("POST", &format!("{item}/open"), None)).await;
         assert_eq!(opened.status(), StatusCode::OK);
@@ -1141,6 +1156,164 @@ mod tests {
         )
         .await;
         assert_eq!(solve["session"]["mode"], "solve");
+    }
+
+    /// The text of one of the sample's files.
+    fn sample_file(path: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("packs/sample/items/stateful")
+            .join(path);
+        std::fs::read_to_string(&path).unwrap()
+    }
+
+    /// A problem in parts shows each part once the one before it passes, keeping the learner's
+    /// code, and carries on where it was left when it's opened again.
+    #[tokio::test]
+    async fn works_through_a_problem_in_parts_keeping_the_code() {
+        let (_dir, router) = test_app().await;
+        let item = "/api/coding/items/sample/text-buffer";
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(opened["part_count"], 3);
+        assert_eq!(opened["parts"].as_array().unwrap().len(), 1);
+        assert_eq!(opened["api"]["class"], "TextBuffer");
+        assert_eq!(opened["session"]["part"], 0);
+        // Later parts aren't sent until they're reached.
+        assert!(!opened.to_string().contains("undo()"), "{opened}");
+        let starter = opened["languages"][0]["code"].clone();
+        assert!(
+            starter["text"]
+                .as_str()
+                .unwrap()
+                .contains("class TextBuffer")
+        );
+
+        let mut session = opened["session"].clone();
+        session["step"] = "code".into();
+        session["plan"] = "A list of characters".into();
+        send(
+            &router,
+            request("PUT", &format!("{item}/session"), Some(session)),
+        )
+        .await;
+        let save = |text: String, version: serde_json::Value| {
+            let router = &router;
+            async move {
+                let body = serde_json::json!({ "text": text, "version": version });
+                json(
+                    send(
+                        router,
+                        request("PUT", &format!("{item}/code/python"), Some(body)),
+                    )
+                    .await,
+                )
+                .await
+            }
+        };
+        let part_one = sample_file("text-buffer/reference.py");
+        let code = save(part_one.clone(), starter["version"].clone()).await;
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], true, "{submitted}");
+        // On to part 2, to understand and plan what it adds, with the code as it was.
+        let session = &submitted["opened"]["session"];
+        assert_eq!(session["part"], 1);
+        assert_eq!(session["step"], "understand");
+        assert_eq!(
+            session["plans"],
+            serde_json::json!(["A list of characters"])
+        );
+        assert_eq!(session["plan"], "");
+        assert_eq!(session["passed"], false);
+        let parts = submitted["opened"]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[1]["prompt"].as_str().unwrap().contains("undo()"));
+        assert_eq!(submitted["opened"]["solution"], serde_json::Value::Null);
+        assert_eq!(
+            submitted["opened"]["languages"][0]["code"]["text"],
+            part_one.trim_end().to_owned() + "\n"
+        );
+
+        // Opened again, as on another device, it carries on at part 2.
+        let reopened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(reopened["session"]["part"], 1);
+        assert_eq!(reopened["parts"].as_array().unwrap().len(), 2);
+        // The app can't move itself on to another part.
+        let mut skipping = reopened["session"].clone();
+        skipping["part"] = 2.into();
+        skipping["plans"] = serde_json::json!(["a", "b"]);
+        let refused = send(
+            &router,
+            request("PUT", &format!("{item}/session"), Some(skipping)),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+
+        // Part 1's code runs part 1's example, and fails part 2's.
+        let ran = json(send(&router, request("POST", &format!("{item}/run"), None)).await).await;
+        assert_eq!(ran["results"][0]["passed"], true);
+        assert_eq!(ran["results"][1]["case"]["part"], 1);
+        assert_eq!(ran["results"][1]["passed"], false);
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], false);
+        assert_eq!(submitted["failure"]["case"]["part"], 1);
+        assert_eq!(submitted["opened"]["session"]["part"], 1);
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        assert!(
+            log["mistakes"][0]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("part 2's example 1"),
+            "{log}"
+        );
+
+        // The last part's solution passes part 2, then part 3, and it's reviewed.
+        let mut session = submitted["opened"]["session"].clone();
+        session["step"] = "code".into();
+        session["plan"] = "A stack of changes".into();
+        send(
+            &router,
+            request("PUT", &format!("{item}/session"), Some(session)),
+        )
+        .await;
+        let whole = sample_file("text-buffer/redo/reference.py");
+        let code = save(whole.clone(), code["version"].clone()).await;
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["opened"]["session"]["part"], 2, "{submitted}");
+        save(whole, code["version"].clone()).await;
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        let session = &submitted["opened"]["session"];
+        assert_eq!(session["step"], "review", "{submitted}");
+        assert_eq!(session["passed"], true);
+        assert_eq!(session["submissions"], 4);
+        let solution = &submitted["opened"]["solution"];
+        assert!(
+            solution["reference"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("def redo")
+        );
+
+        let finish =
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a91", "rating": "hard" });
+        send(
+            &router,
+            request("POST", &format!("{item}/finish"), Some(finish)),
+        )
+        .await;
+        // Its review is of the whole problem, every part shown, with every part's plan.
+        let review =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(review["session"]["mode"], "twist");
+        assert_eq!(review["parts"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            review["previous_plan"],
+            "Part 1: A list of characters\n\nPart 2: A stack of changes\n\nPart 3: "
+        );
     }
 
     #[tokio::test]

@@ -1,0 +1,25 @@
+[[example]]
+calls = [
+  { call = "add", args = ["pens", 5] },
+  { call = "add", args = ["ink", 1] },
+  { call = "sell", args = ["pens", 7], returns = 5 },
+  { call = "low", args = [2], returns = ["ink", "pens"] },
+]
+
+[[test]]
+calls = [
+  { call = "sell", args = ["ink", 3], returns = 0 },
+  { call = "low", args = [5], returns = [] },
+  { call = "count", args = ["ink"], returns = 0 },
+]
+
+[[test]]
+calls = [
+  { call = "add", args = ["tape", 4] },
+  { call = "add", args = ["cups", 9] },
+  { call = "add", args = ["ink", 2] },
+  { call = "sell", args = ["tape", 1], returns = 1 },
+  { call = "low", args = [3], returns = ["ink"] },
+  { call = "low", args = [4], returns = ["ink", "tape"] },
+  { call = "count", args = ["tape"], returns = 3 },
+]

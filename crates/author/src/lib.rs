@@ -695,18 +695,33 @@ fn blind_prompt(item: &Item) -> String {
                 .map_or_else(|_| item.prompt.clone(), |i| i.prompt);
             out.push_str(&prompt);
         }
+        // Every part of a problem in parts, as the learner sees each in turn.
+        Content::Coding(coding) => out.push_str(coding.statement(coding.last()).trim()),
         _ => out.push_str(item.prompt.trim()),
     }
     out.push_str("\n</question>\n");
     match &item.content {
         Content::Coding(coding) => {
-            out.push_str("\nExamples:\n");
-            for example in &coding.examples {
+            if let Some(api) = &coding.api {
                 out.push_str(&format!(
-                    "<input>\n{}\n</input>\n<output>\n{}\n</output>\n",
-                    example.input.trim_end(),
-                    example.output.trim_end()
+                    "\nThe tests call {}. Each example's input is the calls it makes, one a line, as a JSON array of the name called and its arguments, where a call to the class makes a new one; its output is what each other call returns, one a line, as JSON.\n",
+                    api.describe()
                 ));
+            }
+            out.push_str("\nExamples:\n");
+            for (p, part) in coding.parts.iter().enumerate() {
+                for example in &part.examples {
+                    let label = if coding.in_parts() {
+                        format!(" part=\"{}\"", p + 1)
+                    } else {
+                        String::new()
+                    };
+                    out.push_str(&format!(
+                        "<input{label}>\n{}\n</input>\n<output>\n{}\n</output>\n",
+                        example.input.trim_end(),
+                        example.output.trim_end()
+                    ));
+                }
             }
             out.push_str("\nGive the approach you'd take, and its cost, as the answer.\n");
         }

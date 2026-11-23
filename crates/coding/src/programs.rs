@@ -382,12 +382,37 @@ impl Runtime {
         flavour: Flavour,
         cancel: &CancellationToken,
     ) -> Result<Built> {
+        self.build_with(language, source, &[], flavour, cancel)
+            .await
+    }
+
+    /// Builds a program from its source and modules of its own beside it, each a file name and
+    /// its text, such as a driver and the learner's module it imports.
+    pub async fn build_with(
+        &self,
+        language: Language,
+        source: &str,
+        modules: &[(&str, &str)],
+        flavour: Flavour,
+        cancel: &CancellationToken,
+    ) -> Result<Built> {
         let (compiler, tool) = match self.compiler(language, flavour, cancel).await? {
             Ok(compiler) => compiler,
             Err(missing) => return Ok(Built::Unavailable(missing)),
         };
         let file = format!("main.{}", language.extension());
-        let key = fingerprint(&[language.id(), &format!("{compiler:?}"), source]);
+        if let Some((name, _)) = modules
+            .iter()
+            .find(|(name, _)| *name == file || name.contains(['/', '\\']) || name == &"built")
+        {
+            anyhow::bail!("{name:?} can't be the name of a program's module");
+        }
+        let compiled = format!("{compiler:?}");
+        let mut parts = vec![language.id(), compiled.as_str(), source];
+        for (name, text) in modules {
+            parts.extend([*name, *text]);
+        }
+        let key = fingerprint(&parts);
         let dir = self.scratch.join(&key);
         let (command, reads) = match language {
             Language::Python => (vec![tool.program.clone(), file.clone()], tool.reads.clone()),
@@ -416,6 +441,9 @@ impl Runtime {
         std::fs::create_dir_all(&staging)
             .with_context(|| format!("creating {}", staging.display()))?;
         std::fs::write(staging.join(&file), source)?;
+        for (name, text) in modules {
+            std::fs::write(staging.join(name), text)?;
+        }
         if let Some(mut args) = compiler {
             args.push(file.clone());
             let reads: Vec<&Path> = tool.reads.iter().map(PathBuf::as_path).collect();
