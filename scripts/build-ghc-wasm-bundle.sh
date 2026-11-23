@@ -229,7 +229,6 @@ echo "==> Cross-compiling extra Workshop packages: ${EXTRA_PACKAGES[*]}"
 wasm32-wasi-cabal update
 mkdir -p "$WORK/build"
 cat >"$WORK/build/cabal.project" <<'EOF'
-packages: .
 shared: True
 library-for-ghci: False
 package *
@@ -237,10 +236,12 @@ package *
   documentation: False
 EOF
 
-wasm32-wasi-cabal install \
-  --project-dir="$WORK/build" \
-  --lib \
+wasm32-wasi-cabal \
   --store-dir="$WORK/store" \
+  install \
+  --project-file="$WORK/build/cabal.project" \
+  --lib \
+  --package-env="$WORK/ghc.env" \
   --installdir="$WORK/install" \
   "${EXTRA_PACKAGES[@]}"
 
@@ -263,7 +264,7 @@ done
 for pkg_dir in "$STORE_GHC_DIR"/*; do
   base="$(basename "$pkg_dir")"
   case "$base" in
-    package.db|incoming) continue ;;
+    package.db|incoming|lib) continue ;;
   esac
   if [ -d "$pkg_dir/lib" ]; then
     mkdir -p "$TARGET_LIB_DIR/$base"
@@ -281,6 +282,7 @@ done
 for conf in "$PKG_DB"/*.conf; do
   [ -e "$conf" ] || continue
   sed -i \
+    -e "s|$STORE_GHC_DIR/lib|\${pkgroot}/../$GHC_LIB_SUBDIR|g" \
     -e "s|$STORE_GHC_DIR/\([^/[:space:]]*\)/lib|\${pkgroot}/../$GHC_LIB_SUBDIR/\1|g" \
     -e "s|$STORE_GHC_DIR|\${pkgroot}/../$GHC_LIB_SUBDIR|g" \
     "$conf"
