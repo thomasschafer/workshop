@@ -20,7 +20,7 @@ fi
 OUT_DIR="$(mkdir -p "$1" && cd "$1" && pwd)"
 VERSION="${2:-9.14.0-workshop.1}"
 
-UPSTREAM_BSDTAR_URL="https://haskell-wasm.github.io/ghc-in-browser/bsdtar.wasm"
+UPSTREAM_BSDTAR_URL="https://haskell-wasm.github.io/bsdtar-wasm/bsdtar.wasm"
 UPSTREAM_BSDTAR_SHA256="e13ebb15ca0971f6629a6313bc043c532dd9be3a0e6bb0b7f8a395de835ad0c0"
 
 EXTRA_PACKAGES=(
