@@ -301,17 +301,26 @@ done
 
 # Rewrite store paths in newly merged .conf files to ${pkgroot}-relative paths so in-browser GHC
 # locates both .dyn_hi (import-dirs) and .so (dynamic-library-dirs) inside /tmp/hslib/lib.
+# Note: ${pkgroot} expands to the parent of package.conf.d (/tmp/hslib/lib).
 for conf in "$PKG_DB"/*.conf; do
   [ -e "$conf" ] || continue
   sed -i \
-    -e "s|^dynamic-library-dirs:.*$STORE_GHC_DIR.*|dynamic-library-dirs: \${pkgroot}/../$GHC_LIB_SUBDIR|g" \
-    -e "s|$STORE_GHC_DIR/lib|\${pkgroot}/../$GHC_LIB_SUBDIR|g" \
-    -e "s|$STORE_GHC_DIR/\([^/[:space:]]*\)/lib|\${pkgroot}/../$GHC_LIB_SUBDIR/\1|g" \
-    -e "s|$STORE_GHC_DIR|\${pkgroot}/../$GHC_LIB_SUBDIR|g" \
+    -e "s|$STORE_GHC_DIR/lib|\${pkgroot}/$GHC_LIB_SUBDIR|g" \
+    -e "s|$STORE_GHC_DIR/\([^/[:space:]]*\)/lib|\${pkgroot}/$GHC_LIB_SUBDIR/\1|g" \
+    -e "s|$STORE_GHC_DIR|\${pkgroot}/$GHC_LIB_SUBDIR|g" \
     "$conf"
 done
 
+# Ensure dynamic-library-dirs also points at ${pkgroot}/$GHC_LIB_SUBDIR where every .so lives.
+for conf in "$STORE_GHC_DIR"/package.db/*.conf; do
+  [ -e "$conf" ] || continue
+  target_conf="$PKG_DB/$(basename "$conf")"
+  sed -i -E "s|^dynamic-library-dirs:.*|dynamic-library-dirs: \${pkgroot}/$GHC_LIB_SUBDIR|g" "$target_conf"
+done
+
 wasm32-wasi-ghc-pkg --package-db="$PKG_DB" recache
+echo "==> Verifying extra package .conf paths:"
+grep -E '^(name|import-dirs|dynamic-library-dirs):|wasm32-wasi-ghc' "$PKG_DB"/split-*.conf "$PKG_DB"/unordered-containers-*.conf || true
 echo "==> Registered packages in bundle:"
 wasm32-wasi-ghc-pkg --package-db="$PKG_DB" list --simple-output
 
