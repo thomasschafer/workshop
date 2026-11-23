@@ -42,14 +42,15 @@ jobs:
           FLAVOUR: ${{ inputs.ghc_wasm_flavour }}
         run: |
           curl -fsSL https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta/-/raw/master/bootstrap.sh | sh
-          echo "$HOME/.ghc-wasm/env" >> "$GITHUB_ENV"
+          "$HOME/.ghc-wasm/add_to_github_path.sh"
 
       - name: Build 10-package GHC WASM bundle
         run: |
-          # shellcheck source=/dev/null
-          . "$HOME/.ghc-wasm/env"
           chmod +x scripts/build-ghc-wasm-bundle.sh
           scripts/build-ghc-wasm-bundle.sh dist-bundle "${{ inputs.version }}"
+
+      - name: Smoke-test built bundle with dyld.mjs
+        run: node scripts/smoke-test-ghc-wasm-bundle.mjs dist-bundle
 
       - uses: actions/upload-artifact@v6
         with:
@@ -62,10 +63,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="on-device-haskell-ghc-wasm-${{ inputs.version }}"
-          gh release create "$tag" \
-            dist-bundle/bsdtar.wasm \
-            dist-bundle/rootfs.tar.zst \
-            dist-bundle/SHA256SUMS \
-            dist-bundle/bundle-manifest.json \
-            --title "On-device Haskell GHC WASM ${{ inputs.version }}" \
-            --notes "Reproducible on-device runtime bundle built from workflow run ${{ github.run_id }}."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" \
+              dist-bundle/bsdtar.wasm \
+              dist-bundle/rootfs.tar.zst \
+              dist-bundle/SHA256SUMS \
+              dist-bundle/bundle-manifest.json \
+              --clobber
+          else
+            gh release create "$tag" \
+              dist-bundle/bsdtar.wasm \
+              dist-bundle/rootfs.tar.zst \
+              dist-bundle/SHA256SUMS \
+              dist-bundle/bundle-manifest.json \
+              --title "On-device Haskell GHC WASM ${{ inputs.version }}" \
+              --notes "Reproducible on-device runtime bundle built from workflow run ${{ github.run_id }}."
+          fi
