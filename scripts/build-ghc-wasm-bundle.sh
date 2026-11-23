@@ -91,10 +91,10 @@ done
 cp -a "$SRC_LIBDIR/package.conf.d/." "$PKG_DB/"
 
 # Copy only shared libraries (.so), dynamic interface files (.dyn_hi), and headers (.h)
-# to keep the compressed bundle compact (~55 MB) while supporting full GHCi bytecode loading.
+# to keep the compressed bundle compact (~56 MB) while supporting full GHCi bytecode loading.
 (
   cd "$SRC_LIBDIR/$GHC_LIB_SUBDIR"
-  find -L . -type f \( -name '*.so' -o -name '*.dyn_hi' -o -name '*.h' \) \
+  find . -type f \( -name '*.so' -o -name '*.dyn_hi' -o -name '*.h' \) \
     ! -name 'libHSrts*_thr*' ! -name 'libHSrts*_debug*' ! -name 'libHSrts*_p*' \
     -print0 \
     | tar --null -T - -cf - \
@@ -246,9 +246,9 @@ library
 EOF
 cat >"$WORK/build/cabal.project" <<'EOF'
 packages: .
-shared: True
-library-for-ghci: False
 package *
+  shared: True
+  library-for-ghci: False
   ghc-options: -dynamic-too
   documentation: False
 EOF
@@ -262,6 +262,15 @@ echo "==> Merging built shared libraries and package registrations into rootfs"
 STORE_GHC_DIR="$(find "$WORK/store" -maxdepth 1 -type d -name 'ghc-*' | head -n 1)"
 if [ -z "$STORE_GHC_DIR" ]; then
   echo "error: no store directory found under $WORK/store" >&2
+  exit 1
+fi
+
+if [ -z "$(find "$STORE_GHC_DIR" -name '*.dyn_hi' -print -quit)" ]; then
+  echo "error: cabal did not produce any .dyn_hi files under $STORE_GHC_DIR" >&2
+  exit 1
+fi
+if [ -z "$(find "$STORE_GHC_DIR" -name '*.so' -print -quit)" ]; then
+  echo "error: cabal did not produce any .so files under $STORE_GHC_DIR" >&2
   exit 1
 fi
 
@@ -283,7 +292,7 @@ for pkg_dir in "$STORE_GHC_DIR"/*; do
     mkdir -p "$TARGET_LIB_DIR/$base"
     (
       cd "$pkg_dir/lib"
-      find . -type f \( -name '*.dyn_hi' -o -name '*.h' -o -name '*.so' \) -print0 \
+      find . -type f \( -name '*.dyn_hi' -o -name '*.h' \) -print0 \
         | tar --null -T - -cf - \
         | tar -xf - -C "$TARGET_LIB_DIR/$base"
     )
@@ -295,6 +304,7 @@ done
 for conf in "$PKG_DB"/*.conf; do
   [ -e "$conf" ] || continue
   sed -i \
+    -e "s|^dynamic-library-dirs:.*$STORE_GHC_DIR.*|dynamic-library-dirs: \${pkgroot}/../$GHC_LIB_SUBDIR|g" \
     -e "s|$STORE_GHC_DIR/lib|\${pkgroot}/../$GHC_LIB_SUBDIR|g" \
     -e "s|$STORE_GHC_DIR/\([^/[:space:]]*\)/lib|\${pkgroot}/../$GHC_LIB_SUBDIR/\1|g" \
     -e "s|$STORE_GHC_DIR|\${pkgroot}/../$GHC_LIB_SUBDIR|g" \
