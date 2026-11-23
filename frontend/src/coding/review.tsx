@@ -542,6 +542,7 @@ function CommentBox({
   const [text, setText] = useState(initial);
   const field = useRef<HTMLTextAreaElement>(null);
   useEffect(() => field.current?.focus(), []);
+  const id = `comment-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <form
       class="diff-comment-box"
@@ -551,11 +552,11 @@ function CommentBox({
         setText("");
       }}
     >
-      <label class="visually-hidden" for={`comment-${label}`}>
+      <label class="visually-hidden" for={id}>
         {label}
       </label>
       <textarea
-        id={`comment-${label}`}
+        id={id}
         ref={field}
         rows={3}
         value={text}

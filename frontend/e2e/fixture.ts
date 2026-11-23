@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-const SERVERS = 4;
+const SERVERS = 5;
 const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
 const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
@@ -37,6 +37,10 @@ export const CODING_HOME = `${CHECKOUT_HOME}-coding`;
 /** A fourth, with a pack of its own in a git repo, for the author, importing and fixing cards. */
 export const AUTHOR_PORT = port(3);
 export const AUTHOR_HOME = `${CHECKOUT_HOME}-author`;
+
+/** A fifth, for work in a codebase from the sample pack, whose files and reviews are its own. */
+export const CODEBASE_PORT = port(4);
+export const CODEBASE_HOME = `${CHECKOUT_HOME}-codebase`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -265,6 +269,20 @@ export function createLearningHome(): void {
     model: "fake",
     // The tests start more new items than a day's default allows.
     extra: "[learning]\ndaily_new = 100\n",
+  });
+}
+
+/** A home for work in a codebase, with the sample pack. */
+export function createCodebaseHome(): void {
+  writeHome({
+    home: CODEBASE_HOME,
+    port: CODEBASE_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
+    model: "fake",
   });
 }
 

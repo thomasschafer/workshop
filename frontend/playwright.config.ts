@@ -3,9 +3,12 @@ import { defineConfig, devices } from "@playwright/test";
 import {
   AUTHOR_HOME,
   AUTHOR_PORT,
+  CODEBASE_HOME,
+  CODEBASE_PORT,
   CODING_HOME,
   CODING_PORT,
   createAuthorHome,
+  createCodebaseHome,
   createCodingHome,
   createHome,
   createLearningHome,
@@ -22,6 +25,7 @@ if (process.env.WORKSHOP_E2E_HOME_READY === undefined) {
   createLearningHome();
   createCodingHome();
   createAuthorHome();
+  createCodebaseHome();
   process.env.WORKSHOP_E2E_HOME_READY = "1";
 }
 
@@ -61,6 +65,7 @@ export default defineConfig({
     { home: LEARNING_HOME, port: LEARNING_PORT },
     { home: CODING_HOME, port: CODING_PORT },
     { home: AUTHOR_HOME, port: AUTHOR_PORT },
+    { home: CODEBASE_HOME, port: CODEBASE_PORT },
   ].map(({ home, port }) => ({
     command: `${binary} serve`,
     env: {

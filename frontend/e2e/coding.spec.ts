@@ -61,13 +61,13 @@ test.afterAll(async () => {
 
 test("offers the Coding track at home, starting with something quick", async () => {
   const coding = phone.locator(".track", { hasText: "Coding" });
-  await expect(coding).toContainText("23 new");
+  await expect(coding).toContainText("26 new");
   const next = phone.locator(".continue");
   await expect(next).toContainText("Adding to a global");
   await expect(next).toContainText("Coding · Something new");
   await coding.tap();
   await expect(phone).toHaveURL(/\/coding$/);
-  await expect(phone.locator(".coding-item")).toHaveCount(23);
+  await expect(phone.locator(".coding-item")).toHaveCount(26);
   await expect(phone.locator(".coding-item", { hasText: "Count the islands" })).toContainText(
     "Problem · New",
   );
