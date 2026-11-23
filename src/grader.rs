@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_learning::{MistakeSource, NewMistake, Rating};
-use workshop_pack::{Content, ErrorType, Item};
+use workshop_pack::{Content, ErrorType, Item, Task};
 use workshop_provider::{CallSpec, ProviderRunner};
 
 pub const TIMEOUT: Duration = Duration::from_secs(180);
@@ -54,6 +54,8 @@ pub enum Work {
     /// questions about it, marked for how deeply they understand it as well as whether it's
     /// right.
     FollowUps,
+    /// Review comments on a change to a codebase, against the defects planted in it.
+    Review,
 }
 
 impl Work {
@@ -62,7 +64,7 @@ impl Work {
     pub fn is_attempt(self) -> bool {
         matches!(
             self,
-            Self::Design | Self::Card | Self::Round | Self::FollowUps
+            Self::Design | Self::Card | Self::Round | Self::FollowUps | Self::Review
         )
     }
 }
@@ -87,6 +89,8 @@ pub struct Answer<'a> {
     /// For a plan for a coding problem in parts, the part it's for, counting from 0: the
     /// question is then the parts up to it. Otherwise a problem in parts is asked as a whole.
     pub part: Option<usize>,
+    /// For an explanation of work in a codebase, the learner's changes to it, as a diff.
+    pub changes: Option<&'a str>,
 }
 
 impl<'a> Answer<'a> {
@@ -99,6 +103,7 @@ impl<'a> Answer<'a> {
             twist: None,
             brief: None,
             part: None,
+            changes: None,
         }
     }
 }
@@ -160,6 +165,44 @@ fn own_rubric(
         (Work::Design, Content::Design { rubric, notes, .. }) => {
             Ok((rubric.clone(), notes.clone()))
         }
+        (Work::Plan | Work::Explanation, Content::Coding(coding))
+            if let Some(project) = coding.project() =>
+        {
+            let points: &[&str] = match (project.task, work) {
+                (Task::Fix, Work::Plan) => &[
+                    "Finds where the bug is, from the symptom, or a sound way to find it",
+                    "Says why it happens: the cause, not only the symptom",
+                    "Plans a small fix to the cause, that leaves the rest working",
+                ],
+                (Task::Fix, _) => &[
+                    "Says what the bug was, and why it gave the symptom",
+                    "Explains why the fix puts the cause right, everywhere it shows",
+                    "Says how it's known to work, such as which tests show it",
+                ],
+                (_, Work::Plan) => &[
+                    "Says what makes the code hard to test, or hard to change for what's asked",
+                    "Plans changes that let tests give it what it needs, keeping what it does",
+                    "Keeps the existing behaviour, and its tests, working",
+                ],
+                _ => &[
+                    "Says what the changes separate, and why that makes the code testable",
+                    "Explains how what it did before still works",
+                    "Says how the change made the extension easier",
+                ],
+            };
+            Ok((
+                points.iter().map(|&point| point.to_owned()).collect(),
+                Some(coding.approach.clone()),
+            ))
+        }
+        (Work::Review, Content::Review(review)) => Ok((
+            review
+                .defects
+                .iter()
+                .map(|defect| format!("Finds that {} ({})", defect.description, defect.location()))
+                .collect(),
+            review.notes.clone(),
+        )),
         (Work::Plan, Content::Coding(coding)) => Ok((
             vec![
                 "Chooses a method that solves the problem correctly".to_owned(),
@@ -249,6 +292,29 @@ pub fn mark_prompt(
         (_, None) => item.prompt.clone(),
     };
     let mut out = format!("<question>\n{}\n</question>\n\n", question.trim());
+    // Work in a codebase is marked knowing the project, as it's given.
+    match &item.content {
+        Content::Coding(coding) if let Some(project) = coding.project() => {
+            let through = answer.part.unwrap_or(coding.last());
+            let files = project
+                .files
+                .iter()
+                .filter(|f| !f.is_test())
+                .chain(coding.test_files(through));
+            out.push_str(&format!(
+                "The question is set in a project someone else wrote, as it's given:\n\n<project>\n{}</project>\n\n",
+                workshop_pack::project::as_text(files)
+            ));
+        }
+        Content::Review(review) => {
+            out.push_str(&format!(
+                "The project, before the change:\n\n<project>\n{}</project>\n\nThe change the learner reviewed:\n\n<change>\n{}</change>\n\nThe rubric's points are the defects planted in the change, each with where it is, by its line in the changed file. Each review comment says where it's about, by a file and a line in the changed file, or a line of the old file it removes, or says nothing of where, for the change as a whole. Credit a point when a comment finds that defect, in any words, even if it's about a nearby line or gives no line, and partly when it notices something wrong there but not what. A comment that finds a real problem that isn't a point is fine, and so is one on style or naming: neither is a finding. Each finding is a false alarm: a comment saying something is wrong that isn't, such as a misread of what the code does. Don't list a defect that was missed as a finding; it's kept as a mistake already.\n\n",
+                workshop_pack::project::as_text(review.files.iter()),
+                review.diff()
+            ));
+        }
+        _ => {}
+    }
     if let (Content::Coding(coding), Some(part)) = (&item.content, answer.part)
         && coding.in_parts()
     {
@@ -278,6 +344,12 @@ pub fn mark_prompt(
         out.push_str(&format!(
             "<reference>\n{}\n</reference>\n\nThe reference is how it's meant to be answered, for you to mark against; {hidden}.\n\n",
             reference.trim()
+        ));
+    }
+    if let Some(changes) = answer.changes {
+        out.push_str(&format!(
+            "<changes>\n{}\n</changes>\n\nThese are the learner's changes to the project, which the work explains.\n\n",
+            changes.trim_end()
         ));
     }
     if let Some((language, code)) = answer.code {
@@ -381,6 +453,9 @@ pub struct Marked {
     /// For a design whose questions were answered from a brief, what the learner asked.
     #[serde(default)]
     pub questioning: Option<Questioning>,
+    /// For a review of a change, the defects in it the learner didn't find.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missed: Vec<String>,
 }
 
 /// What a learner found out about a design's requirements by asking, and what they didn't.
@@ -399,6 +474,12 @@ pub struct Questioning {
 
 /// The kind of mistake a requirement missed in a design is kept as.
 pub const MISSED_REQUIREMENT: &str = "missed-requirement";
+
+/// The kind of mistake a defect missed in a review is kept as.
+pub const MISSED_DEFECT: &str = "missed-defect";
+
+/// How much each false alarm in a review takes off its score.
+pub const FALSE_ALARM_COST: f64 = 0.1;
 
 /// How clearly something explained aloud was put.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -446,8 +527,15 @@ impl Marked {
                     Some(MISSED_REQUIREMENT.to_owned()),
                 )
             });
+        let defects = self.missed.iter().map(|defect| {
+            (
+                format!("Missed in a review: {defect}"),
+                Some(MISSED_DEFECT.to_owned()),
+            )
+        });
         findings
             .chain(missed)
+            .chain(defects)
             .enumerate()
             .map(|(n, (detail, suggested))| NewMistake {
                 id: format!("grade-{id}-{n}"),
@@ -531,6 +619,45 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType], answer: &Answer<'_>)
         feedback: raw.feedback,
         clarity,
         questioning,
+        missed: Vec::new(),
+    })
+}
+
+/// A review's marking, scored from what it found rather than as the grader weighs it, so it's
+/// the same however the grader would weigh it: the share of the defects found, with one found
+/// in part counting half, less [`FALSE_ALARM_COST`] for each false alarm. The defects not found
+/// at all are kept, for the mistake log.
+pub fn score_review(marked: Marked, review: &workshop_pack::Review) -> Result<Marked> {
+    if marked.points.len() != review.defects.len() {
+        bail!(
+            "the grader marked {} points, and the change has {} defects",
+            marked.points.len(),
+            review.defects.len()
+        );
+    }
+    let found: f64 = marked
+        .points
+        .iter()
+        .map(|point| match point.met {
+            Met::Yes => 1.0,
+            Met::Partly => 0.5,
+            Met::No => 0.0,
+        })
+        .sum();
+    let score = (found / review.defects.len() as f64
+        - FALSE_ALARM_COST * marked.findings.len() as f64)
+        .clamp(0.0, 1.0);
+    let missed = marked
+        .points
+        .iter()
+        .zip(&review.defects)
+        .filter(|(point, _)| point.met == Met::No)
+        .map(|(_, defect)| format!("{} ({})", defect.description, defect.location()))
+        .collect();
+    Ok(Marked {
+        score,
+        missed,
+        ..marked
     })
 }
 
@@ -552,7 +679,11 @@ pub async fn mark(
     }
     let prompt = mark_prompt(item, work, answer, error_types)?;
     let reply = runner.call_aside(spec, &prompt, TIMEOUT).await?;
-    parse_marked(&reply.text, error_types, &answer)
+    let marked = parse_marked(&reply.text, error_types, &answer)?;
+    match &item.content {
+        Content::Review(review) => score_review(marked, review),
+        _ => Ok(marked),
+    }
 }
 
 /// The grader's review of a card.
@@ -822,6 +953,7 @@ mod tests {
             feedback: String::new(),
             clarity: None,
             questioning: None,
+            missed: Vec::new(),
         };
         // Answered fully, with nothing wrong, it's easy; otherwise as any other work.
         assert_eq!(marked(1.0, Vec::new()).twist_rating(), Rating::Easy);
@@ -848,6 +980,7 @@ mod tests {
             twist: None,
             brief: None,
             part: None,
+            changes: None,
         };
         let prompt = mark_prompt(problem, Work::Explanation, answer, &types).unwrap();
         assert!(prompt.contains("explained this aloud"));
@@ -1004,5 +1137,123 @@ mod tests {
             apply_fix(source, wrong.fix.as_ref().unwrap()),
             "+++\nkind = \"card\"\nskills = [\"a\"]\n+++\nQ\n\n## Answer\n\nO(log n).\n"
         );
+    }
+
+    #[test]
+    fn marks_a_review_against_the_defects_planted_in_the_change() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let item = pack.item("loan-renewals").unwrap();
+        let Content::Review(review) = &item.content else {
+            panic!("not a review");
+        };
+        let comments = "- On loans.py, line 47: allows a third renewal\n";
+        let prompt = mark_prompt(item, Work::Review, Answer::written(comments), &types).unwrap();
+        // Each defect is a point, with where it is, and the grader sees the change.
+        assert!(
+            prompt.contains("- Finds that The renewal limit is off by one"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("(loans.py:47)"), "{prompt}");
+        assert!(
+            prompt.contains("<change>\n--- a/loans.py\n+++ b/loans.py\n"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("<file path=\"catalogue.py\">"), "{prompt}");
+        assert!(prompt.contains("Each finding is a false alarm"), "{prompt}");
+        assert!(
+            prompt.contains(&format!("<work>\n{}\n</work>", comments.trim())),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("isn't one of the planted defects"),
+            "{prompt}"
+        );
+        assert!(Work::Review.is_attempt());
+
+        let reply = r#"{"score": 1, "points": [{"point": "a", "met": "yes"}, {"point": "b", "met": "partly"}, {"point": "c", "met": "no"}], "findings": [], "feedback": "Good start."}"#;
+        let marked = parse_marked(reply, &types, &Answer::written(comments)).unwrap();
+        // Scored from what it found, whatever the grader said.
+        let scored = score_review(marked.clone(), review).unwrap();
+        assert!((scored.score - 0.5).abs() < 1e-9);
+        assert_eq!(scored.missed.len(), 1);
+        assert!(
+            scored.missed[0].contains("reservations"),
+            "{:?}",
+            scored.missed
+        );
+        assert!(
+            scored.missed[0].ends_with("(loans.py:44-53)"),
+            "{:?}",
+            scored.missed
+        );
+        let mistakes = scored.mistakes("attempt", "sample/loan-renewals", 1);
+        assert_eq!(mistakes.len(), 1);
+        assert_eq!(mistakes[0].suggested.as_deref(), Some(MISSED_DEFECT));
+        assert!(mistakes[0].detail.starts_with("Missed in a review:"));
+        // Each false alarm takes a little off, and is a mistake of its own.
+        let alarmed = Marked {
+            findings: vec![Finding {
+                error_type: Some("misread".to_owned()),
+                detail: "Thinks renew skips the borrower check".to_owned(),
+            }],
+            ..marked.clone()
+        };
+        let scored = score_review(alarmed, review).unwrap();
+        assert!((scored.score - 0.4).abs() < 1e-9);
+        assert_eq!(
+            scored.mistakes("attempt", "sample/loan-renewals", 1).len(),
+            2
+        );
+        // Every defect must be marked.
+        let short = Marked {
+            points: marked.points[..2].to_vec(),
+            ..marked
+        };
+        assert!(score_review(short, review).is_err());
+    }
+
+    #[test]
+    fn marks_work_in_a_project_knowing_the_project() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let fix = pack.item("word-counts").unwrap();
+        let prompt =
+            mark_prompt(fix, Work::Plan, Answer::written("It's split_words"), &types).unwrap();
+        assert!(
+            prompt.contains("- Says why it happens: the cause, not only the symptom"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("<file path=\"words.py\">"), "{prompt}");
+        assert!(prompt.contains("<file path=\"test_stats.py\">"), "{prompt}");
+        // The hidden tests are the problem's, not the learner's to see.
+        assert!(!prompt.contains("test_punctuation"), "{prompt}");
+        let answer = Answer {
+            changes: Some("--- a/words.py\n+++ b/words.py\n"),
+            ..Answer::written("Empty words were counted")
+        };
+        let prompt = mark_prompt(fix, Work::Explanation, answer, &types).unwrap();
+        assert!(prompt.contains("<changes>\n--- a/words.py"), "{prompt}");
+        assert!(
+            prompt.contains("- Says what the bug was, and why it gave the symptom"),
+            "{prompt}"
+        );
+
+        let refactor = pack.item("habit-streaks").unwrap();
+        let answer = Answer {
+            part: Some(0),
+            ..Answer::written("Pass in the clock")
+        };
+        let prompt = mark_prompt(refactor, Work::Plan, answer, &types).unwrap();
+        assert!(
+            prompt.contains("- Says what makes the code hard to test"),
+            "{prompt}"
+        );
+        // Only the tests of the parts reached.
+        assert!(
+            prompt.contains("<file path=\"test_tracker_clock.py\">"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("test_longest"), "{prompt}");
     }
 }

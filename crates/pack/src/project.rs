@@ -64,6 +64,19 @@ impl ProjectFile {
     }
 }
 
+/// Files as a model reads them, each in a tag of its own with its name.
+pub fn as_text<'a>(files: impl Iterator<Item = &'a ProjectFile>) -> String {
+    files
+        .map(|file| {
+            format!(
+                "<file path=\"{}\">\n{}\n</file>\n",
+                file.path,
+                file.text.trim_end()
+            )
+        })
+        .collect()
+}
+
 /// Whether a file's name makes it one of a project's tests: `test_*.py`.
 pub fn is_test_file(path: &str) -> bool {
     path.starts_with("test_") && path.ends_with(".py")
@@ -132,7 +145,7 @@ impl Review {
 }
 
 /// A defect planted in a change, and where it is in the project as the change leaves it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Defect {
     pub file: String,
     /// The first and last lines it's on, counting from 1.
@@ -416,6 +429,7 @@ fn project_part(
     }
     let mut reference: BTreeMap<String, String> = project
         .iter()
+        .filter(|f| !f.is_test())
         .map(|f| (f.path.clone(), f.text.clone()))
         .collect();
     for file in changed {

@@ -701,6 +701,31 @@ fn blind_prompt(item: &Item) -> String {
     }
     out.push_str("\n</question>\n");
     match &item.content {
+        Content::Coding(coding) if let Some(project) = coding.project() => {
+            let files = project.files.iter().chain(
+                coding
+                    .test_files(coding.last())
+                    .into_iter()
+                    .filter(|f| project.file(&f.path).is_none()),
+            );
+            out.push_str(&format!(
+                "\nThe question is set in this project, whose test files are run as its tests:\n\n<project>\n{}</project>\n",
+                workshop_pack::project::as_text(files)
+            ));
+            out.push_str(match project.task {
+                workshop_pack::Task::Fix => {
+                    "\nSay what the bug is, why it gives the symptom, and how you'd fix it, as the answer.\n"
+                }
+                _ => "\nSay how you'd refactor it and then extend it, part by part, as the answer.\n",
+            });
+        }
+        Content::Review(review) => {
+            out.push_str(&format!(
+                "\nThe project, before the change:\n\n<project>\n{}</project>\n\nThe change:\n\n<change>\n{}</change>\n\nReview the change: list each thing wrong with it, with the file and line in the changed file, as the answer.\n",
+                workshop_pack::project::as_text(review.files.iter()),
+                review.diff()
+            ));
+        }
         Content::Coding(coding) => {
             if let Some(api) = &coding.api {
                 out.push_str(&format!(

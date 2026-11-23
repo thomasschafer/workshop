@@ -108,6 +108,18 @@ pub fn router(app: Shared) -> Router {
             "/coding/items/{pack}/{item}/code/{language}",
             put(coding::save_code),
         )
+        .route(
+            "/coding/items/{pack}/{item}/files/{file}",
+            put(coding::save_file),
+        )
+        .route(
+            "/coding/reviews/{pack}/{item}/session",
+            put(coding::save_review),
+        )
+        .route(
+            "/coding/reviews/{pack}/{item}/submit",
+            post(coding::submit_review),
+        )
         .route("/coding/items/{pack}/{item}/run", post(coding::run))
         .route("/coding/items/{pack}/{item}/submit", post(coding::submit))
         .route("/coding/items/{pack}/{item}/finish", post(coding::finish))

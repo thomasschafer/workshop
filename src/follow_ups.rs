@@ -353,6 +353,7 @@ mod tests {
             feedback: String::new(),
             clarity: None,
             questioning: None,
+            missed: Vec::new(),
         }
     }
 

@@ -1,6 +1,7 @@
 mod aoc;
 mod author;
 mod calendar;
+mod code_review;
 mod coding;
 mod commands;
 mod config;

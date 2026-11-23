@@ -12,6 +12,11 @@
 //! recall instead: writing down how to solve it, then comparing that with the item's approach.
 //! A problem the learner couldn't solve last time is solved again instead, and they can always
 //! choose to.
+//!
+//! A codebase item's fix or refactor is solved the same way, in a project of several files
+//! rather than from a starter, without understanding it from an example first, as the project
+//! is there to read. It comes back as a recall, of what was wrong and how it was put right.
+//! A change to review is the `review` module's.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,7 +25,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_learning::{Attempt, Rating, TrackPlan};
-use workshop_pack::{Case, Coding, Content, Item, Kind, Language, Pack};
+use workshop_pack::diff::{self, Line};
+use workshop_pack::{Case, Coding, Content, Item, Kind, Language, Pack, ProjectFile, Task};
 use workshop_toolchain::toolchain::Toolchain;
 use workshop_tracks::{Priority, Step, Track, TrackIcon, TrackId};
 
@@ -36,6 +42,9 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How many random inputs a submission is compared with the brute force on.
 pub const SUBMIT_RANDOM_INPUTS: u32 = 30;
+
+/// The most files a learner's project can have, with any they add.
+const MAX_PROJECT_FILES: usize = 20;
 
 /// The Coding track's directory in Workshop's data, for problems' sessions, twists and drafts.
 fn coding_dir(data_dir: &Path) -> PathBuf {
@@ -121,7 +130,21 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn steps(self) -> &'static [StepName] {
+    /// The steps of going through a problem this way: for a project, solving it starts with
+    /// planning, as there's code to read rather than an example to work out.
+    pub fn steps_for(self, coding: &Coding) -> &'static [StepName] {
+        match (self, coding.project()) {
+            (Self::Solve, Some(_)) => &[
+                StepName::Plan,
+                StepName::Code,
+                StepName::Test,
+                StepName::Review,
+            ],
+            _ => self.steps(),
+        }
+    }
+
+    fn steps(self) -> &'static [StepName] {
         match self {
             Self::Solve => &[
                 StepName::Understand,
@@ -180,6 +203,9 @@ pub struct Session {
     /// model to pose one.
     #[serde(default)]
     pub no_twist: Option<String>,
+    /// For a project, the file open in the editor, so it's open again on coming back.
+    #[serde(default)]
+    pub file: Option<String>,
     /// When it was started, and last saved, in milliseconds since 1970.
     pub started_at: i64,
     pub updated_at: i64,
@@ -189,10 +215,10 @@ pub struct Session {
 }
 
 impl Session {
-    fn new(mode: Mode, language: Language, now: i64) -> Self {
+    fn new(mode: Mode, coding: &Coding, language: Language, now: i64) -> Self {
         Self {
             mode,
-            step: mode.steps()[0],
+            step: mode.steps_for(coding)[0],
             language,
             part: 0,
             plans: Vec::new(),
@@ -203,6 +229,7 @@ impl Session {
             submissions: 0,
             hints: 0,
             no_twist: None,
+            file: None,
             started_at: now,
             updated_at: now,
             version: 1,
@@ -223,6 +250,7 @@ impl Session {
             && self.submissions == other.submissions
             && self.hints == other.hints
             && self.no_twist == other.no_twist
+            && self.file == other.file
     }
 
     /// The same review as a recall instead of a twist, saying why.
@@ -302,7 +330,7 @@ impl Session {
                 self.mode.describe()
             ));
         }
-        if !self.mode.steps().contains(&self.step) {
+        if !self.mode.steps_for(coding).contains(&self.step) {
             return Err(format!(
                 "{} isn't a step when {} a problem",
                 self.step.describe(),
@@ -315,7 +343,28 @@ impl Session {
                 self.language.name()
             ));
         }
-        Ok(())
+        match (&self.file, coding.project()) {
+            (Some(_), None) => Err("only a project has files to open".to_owned()),
+            (Some(file), Some(_)) if !diff::is_project_path(file) => {
+                Err(format!("{file:?} isn't a file a project can have"))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Where the learner is with something they've started in the Coding track: a problem, at a
+/// step, or a change being reviewed, which has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Started {
+    pub updated_at: i64,
+    pub step: Option<StepName>,
+    pub mode: Option<Mode>,
+}
+
+impl Started {
+    fn describe(self) -> &'static str {
+        self.step.map_or("reviewing the change", StepName::describe)
     }
 }
 
@@ -361,6 +410,8 @@ pub struct Listed {
     /// The step it's at, if it's in progress.
     pub step: Option<StepName>,
     pub mode: Option<Mode>,
+    /// For work in a codebase, what's asked.
+    pub task: Option<Task>,
 }
 
 /// A problem, as the app shows it: everything but its hidden tests, and its solution only once
@@ -382,7 +433,11 @@ pub struct Opened {
     pub part_count: usize,
     /// How the tests call the code, in API mode.
     pub api: Option<OpenedApi>,
+    /// The languages a program can be written in; none for a project, whose files are in
+    /// `project`.
     pub languages: Vec<OpenedLanguage>,
+    /// For a codebase item, the project being worked in.
+    pub project: Option<OpenedProject>,
     pub session: Session,
     /// How they planned to solve it last time, for comparing with when recalling it.
     pub previous_plan: Option<String>,
@@ -469,6 +524,102 @@ pub struct OpenedLanguage {
     pub lsp: Option<OpenedLsp>,
 }
 
+/// A project being worked in, as the learner has it.
+#[derive(Debug, Serialize)]
+pub struct OpenedProject {
+    pub task: Task,
+    /// In order of their names.
+    pub files: Vec<OpenedFile>,
+    /// Syntax highlighting, from Python's profile.
+    pub editor_mode: String,
+    /// The language server, started in the project's directory, if Python has one.
+    pub lsp: Option<OpenedProjectLsp>,
+    /// The version of a file that isn't there yet, for adding one.
+    pub empty_version: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenedFile {
+    pub path: String,
+    pub code: VersionedFile,
+    /// The file as the project is given, unless the learner added it.
+    pub original: Option<String>,
+    /// Whether it's a file of tests, which are the item's own: read and run, never changed.
+    pub read_only: bool,
+    pub uri: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenedProjectLsp {
+    pub root_uri: String,
+    pub language_id: String,
+    pub options: Option<serde_json::Value>,
+}
+
+/// What a file's change is, line by line, for one that's changed.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileChange {
+    pub path: String,
+    pub lines: Vec<Line>,
+    pub added: usize,
+    pub removed: usize,
+}
+
+impl FileChange {
+    /// The files that differ from `before` to `after`, in order of their names, with each file's
+    /// lines, or none if it hasn't changed.
+    pub fn between(before: &[&ProjectFile], after: &[ProjectFile]) -> Vec<Self> {
+        let mut paths: Vec<&str> = before
+            .iter()
+            .map(|f| f.path.as_str())
+            .chain(after.iter().map(|f| f.path.as_str()))
+            .collect();
+        paths.sort_unstable();
+        paths.dedup();
+        paths
+            .into_iter()
+            .filter_map(|path| {
+                let old = before
+                    .iter()
+                    .find(|f| f.path == path)
+                    .map(|f| f.text.as_str());
+                let new = after
+                    .iter()
+                    .find(|f| f.path == path)
+                    .map(|f| f.text.as_str());
+                let lines = diff::lines(old.unwrap_or(""), new.unwrap_or(""));
+                let (added, removed) = diff::counts(&lines);
+                (added + removed > 0).then(|| Self {
+                    path: path.to_owned(),
+                    lines,
+                    added,
+                    removed,
+                })
+            })
+            .collect()
+    }
+
+    /// The changes as a unified diff, for a model to read.
+    pub fn unified(changes: &[Self], before: &[&ProjectFile], after: &[ProjectFile]) -> String {
+        changes
+            .iter()
+            .map(|change| {
+                diff::unified(
+                    &change.path,
+                    before
+                        .iter()
+                        .find(|f| f.path == change.path)
+                        .map(|f| f.text.as_str()),
+                    after
+                        .iter()
+                        .find(|f| f.path == change.path)
+                        .map(|f| f.text.as_str()),
+                )
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct OpenedLsp {
     pub root_uri: String,
@@ -483,6 +634,14 @@ pub struct Solution {
     pub notes: Option<String>,
     /// Solutions to the whole problem, its last part's for a problem in parts.
     pub reference: Vec<Reference>,
+    /// For a project, how the reference changes it, and how the learner did.
+    pub project: Option<ProjectChanges>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectChanges {
+    pub reference: Vec<FileChange>,
+    pub yours: Vec<FileChange>,
 }
 
 impl Solution {
@@ -499,6 +658,7 @@ impl Solution {
                     text: source.text.clone(),
                 })
                 .collect(),
+            project: None,
         }
     }
 }
@@ -612,9 +772,11 @@ pub enum SessionWriteError {
     Other(#[from] anyhow::Error),
 }
 
-/// The problems' sessions and code drafts, kept in Workshop's data directory.
+/// The problems' sessions and code drafts, kept in Workshop's data directory, and the changes
+/// being reviewed.
 pub struct Problems {
     data_dir: PathBuf,
+    pub reviews: crate::code_review::Reviews,
     saved: workshop_sessions::Saved<Session>,
     /// Every twist posed for each problem.
     twists: workshop_sessions::Saved<crate::twist::Posed>,
@@ -658,6 +820,7 @@ impl Problems {
         Self {
             saved: workshop_sessions::Saved::new(dir.join("sessions")),
             twists: workshop_sessions::Saved::new(dir.join("twists")),
+            reviews: crate::code_review::Reviews::new(&dir),
             data_dir: data_dir.to_owned(),
             save_lock: std::sync::Mutex::new(()),
             session_lock: std::sync::Mutex::new(()),
@@ -752,6 +915,36 @@ impl Problems {
     /// Every session in progress, by item.
     pub fn sessions(&self) -> Result<BTreeMap<String, Session>> {
         self.saved.all()
+    }
+
+    /// Everything started in the Coding track and not finished, by item: problems, and
+    /// changes being reviewed.
+    pub fn started(&self) -> Result<BTreeMap<String, Started>> {
+        let mut started: BTreeMap<String, Started> = self
+            .sessions()?
+            .into_iter()
+            .map(|(key, session)| {
+                (
+                    key,
+                    Started {
+                        updated_at: session.updated_at,
+                        step: Some(session.step),
+                        mode: Some(session.mode),
+                    },
+                )
+            })
+            .collect();
+        for (key, review) in self.reviews.sessions()? {
+            started.insert(
+                key,
+                Started {
+                    updated_at: review.updated_at,
+                    step: None,
+                    mode: None,
+                },
+            );
+        }
+        Ok(started)
     }
 
     fn write_session(&self, key: &str, session: &Session) -> Result<()> {
@@ -860,7 +1053,7 @@ impl Problems {
             next.plans.push(std::mem::take(&mut next.plan));
             next.part += 1;
             next.prediction = None;
-            next.step = StepName::Understand;
+            next.step = Mode::Solve.steps_for(found.coding)[0];
         } else {
             next.passed = passed;
             next.step = if passed {
@@ -951,13 +1144,21 @@ impl Problems {
                 .last()
                 .is_some_and(|last| last.rating != Rating::Again);
         let session = if !review {
-            Session::new(Mode::Solve, found.coding.languages[0], now)
+            // A project is solved afresh from the project as it's given.
+            if found.coding.project().is_some() {
+                self.reset_project(found)?;
+            }
+            Session::new(Mode::Solve, found.coding, found.coding.languages[0], now)
+        } else if found.coding.project().is_some() {
+            // There are no twists on work in a codebase: it's recalled, what was wrong and how
+            // it was put right.
+            Session::new(Mode::Recall, found.coding, found.coding.languages[0], now)
         } else {
             // In the language they last wrote it in, as the twist is on their solution.
             let language = self
                 .last_draft(found)?
                 .map_or(found.coding.languages[0], |(language, _)| language);
-            let twist = Session::new(Mode::Twist, language, now);
+            let twist = Session::new(Mode::Twist, found.coding, language, now);
             match no_twist {
                 Some(why) => twist.recall_instead(why),
                 None => twist,
@@ -1019,7 +1220,7 @@ impl Problems {
                     if let Some(existing) = self.session_for(&found)? {
                         return Ok(existing);
                     }
-                    let mut session = Session::new(mode, language, started_at);
+                    let mut session = Session::new(mode, found.coding, language, started_at);
                     session.no_twist = no_twist;
                     session
                         .check(found.coding)
@@ -1310,6 +1511,226 @@ impl Problems {
         save_versioned(&self.save_lock, &path, text, version)
     }
 
+    /// Where a project's files are, as the learner has them. Its language server is started
+    /// there, so it sees the project as a whole.
+    pub fn project_dir(&self, key: &str) -> PathBuf {
+        let (pack, item) = key.split_once('/').expect("keys are pack/item");
+        self.root(Language::Python)
+            .join("projects")
+            .join(pack)
+            .join(item)
+    }
+
+    /// Puts a project back as it's given, for solving it afresh.
+    fn reset_project(&self, found: &Found<'_>) -> Result<()> {
+        let dir = self.project_dir(&found.key());
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err).with_context(|| format!("removing {}", dir.display())),
+        }
+    }
+
+    /// A project's files as the learner has them once they're on `part`, in order of their
+    /// names: the project's own, as they've changed them, any they've added, and the tests that
+    /// apply then, which are always the item's.
+    pub fn project_files(
+        &self,
+        found: &Found<'_>,
+        part: usize,
+    ) -> Result<Vec<(String, VersionedFile)>> {
+        let project = found
+            .coding
+            .project()
+            .context("only a codebase item has a project")?;
+        let dir = self.project_dir(&found.key());
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        for file in project.files.iter().filter(|f| !f.is_test()) {
+            let path = dir.join(&file.path);
+            if !path.exists() {
+                workshop_common::files::write_atomic(&path, file.text.as_bytes())?;
+            }
+        }
+        // Tests are the item's, so they're written each time, and those of parts not reached
+        // yet, such as from an earlier sitting, are taken away.
+        let tests = found.coding.test_files(part);
+        for entry in std::fs::read_dir(&dir)? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            if workshop_pack::project::is_test_file(&name) && !tests.iter().any(|t| t.path == name)
+            {
+                std::fs::remove_file(dir.join(&name))?;
+            }
+        }
+        for test in &tests {
+            let path = dir.join(&test.path);
+            if std::fs::read_to_string(&path).ok().as_deref() != Some(test.text.as_str()) {
+                workshop_common::files::write_atomic(&path, test.text.as_bytes())?;
+            }
+        }
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // Only what a project can have, as a language server or Python may leave caches.
+            if !entry.file_type()?.is_file() || !diff::is_project_path(&name) {
+                continue;
+            }
+            files.push((name, read_versioned(&entry.path())?));
+        }
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(files)
+    }
+
+    /// A project's files as they are, for running them.
+    pub fn project_solution(&self, found: &Found<'_>, part: usize) -> Result<Vec<ProjectFile>> {
+        Ok(self
+            .project_files(found, part)?
+            .into_iter()
+            .map(|(path, file)| ProjectFile {
+                path,
+                text: file.text,
+            })
+            .collect())
+    }
+
+    /// Why a file of a project can't be saved, if it can't: it isn't a name a project can have,
+    /// it's a file of tests, which are the item's own, it's Workshop's, or it's one more file
+    /// than a project can have.
+    pub fn unsaveable(&self, found: &Found<'_>, path: &str) -> Option<String> {
+        if found.coding.project().is_none() {
+            return Some("only a codebase item has files to save".to_owned());
+        }
+        if !diff::is_project_path(path) {
+            return Some(format!(
+                "{path:?} can't be a file in the project: name it with letters, digits, _, - and ."
+            ));
+        }
+        if workshop_pack::project::is_test_file(path) {
+            return Some(format!(
+                "{path} is a file of tests, which are the problem's own, so it can't be changed"
+            ));
+        }
+        if path == workshop_coding::project::DRIVER_FILE {
+            return Some(format!("{path} is Workshop's own"));
+        }
+        let dir = self.project_dir(&found.key());
+        if !dir.join(path).exists() {
+            let count = std::fs::read_dir(&dir).map_or(0, |entries| entries.count());
+            if count >= MAX_PROJECT_FILES {
+                return Some(format!(
+                    "the project has {count} files already, the most it can have"
+                ));
+            }
+        }
+        None
+    }
+
+    /// Saves a file of a project, or adds one, unless it's [`Problems::unsaveable`].
+    pub fn save_project_file(
+        &self,
+        found: &Found<'_>,
+        path: &str,
+        text: &str,
+        version: &str,
+    ) -> Result<VersionedFile, SaveError> {
+        if let Some(why) = self.unsaveable(found, path) {
+            return Err(SaveError::Other(anyhow::anyhow!(why)));
+        }
+        let file = self.project_dir(&found.key()).join(path);
+        save_versioned(&self.save_lock, &file, text, version)
+    }
+
+    /// The project as the app shows it, once the learner is on `part`.
+    fn opened_project(
+        &self,
+        config: &Config,
+        found: &Found<'_>,
+        part: usize,
+    ) -> Result<OpenedProject> {
+        let project = found
+            .coding
+            .project()
+            .context("only a codebase item has a project")?;
+        let profile = config.languages.get(Language::Python.id());
+        let files = self
+            .project_files(found, part)?
+            .into_iter()
+            .map(|(path, code)| {
+                let given = found
+                    .coding
+                    .test_files(part)
+                    .into_iter()
+                    .chain(project.files.iter())
+                    .find(|f| f.path == path)
+                    .map(|f| f.text.clone());
+                OpenedFile {
+                    read_only: workshop_pack::project::is_test_file(&path),
+                    uri: crate::server::file_uri(&code.path),
+                    original: given,
+                    path,
+                    code,
+                }
+            })
+            .collect();
+        Ok(OpenedProject {
+            task: project.task,
+            files,
+            editor_mode: profile.map_or_else(
+                || Language::Python.id().to_owned(),
+                |profile| profile.editor_mode.clone(),
+            ),
+            lsp: profile
+                .filter(|p| p.lsp.is_some())
+                .map(|profile| OpenedProjectLsp {
+                    root_uri: crate::server::file_uri(&self.project_dir(&found.key())),
+                    language_id: profile.lsp_language_id.clone(),
+                    options: profile.lsp_options.clone(),
+                }),
+            empty_version: workshop_common::files::version_of(""),
+        })
+    }
+
+    /// How the reference changes a project, and how the learner has, without its tests.
+    fn project_changes(&self, found: &Found<'_>, part: usize) -> Result<Option<ProjectChanges>> {
+        let Some(project) = found.coding.project() else {
+            return Ok(None);
+        };
+        let original: Vec<&ProjectFile> = project.files.iter().filter(|f| !f.is_test()).collect();
+        let reference = match &found.coding.parts[found.coding.last()].work {
+            workshop_pack::PartWork::Project { reference, .. } => reference.as_slice(),
+            workshop_pack::PartWork::Program { .. } => &[],
+        };
+        let yours: Vec<ProjectFile> = self
+            .project_solution(found, part)?
+            .into_iter()
+            .filter(|f| !f.is_test())
+            .collect();
+        Ok(Some(ProjectChanges {
+            reference: FileChange::between(&original, reference),
+            yours: FileChange::between(&original, &yours),
+        }))
+    }
+
+    /// The learner's changes to a project so far, as a unified diff, for the tutor and the
+    /// grader.
+    pub fn project_diff(&self, found: &Found<'_>, part: usize) -> Result<String> {
+        let project = found
+            .coding
+            .project()
+            .context("only a codebase item has a project")?;
+        let original: Vec<&ProjectFile> = project.files.iter().filter(|f| !f.is_test()).collect();
+        let yours: Vec<ProjectFile> = self
+            .project_solution(found, part)?
+            .into_iter()
+            .filter(|f| !f.is_test())
+            .collect();
+        Ok(FileChange::unified(
+            &FileChange::between(&original, &yours),
+            &original,
+            &yours,
+        ))
+    }
+
     /// Everything the app needs to show a problem at its current step.
     pub fn open(
         &self,
@@ -1320,9 +1741,14 @@ impl Problems {
     ) -> Result<Opened> {
         let item = found.item;
         let coding = found.coding;
+        let project = coding
+            .project()
+            .map(|_| self.opened_project(config, found, session.part))
+            .transpose()?;
         let languages = coding
             .languages
             .iter()
+            .filter(|_| project.is_none())
             .map(|&language| {
                 let code = self.draft(found, language)?;
                 let profile = config.languages.get(language.id());
@@ -1346,7 +1772,13 @@ impl Problems {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let solution = (session.step == StepName::Review).then(|| Solution::of(coding));
+        let solution = match session.step {
+            StepName::Review => Some(Solution {
+                project: self.project_changes(found, session.part)?,
+                ..Solution::of(coding)
+            }),
+            _ => None,
+        };
         let twist = match session.mode {
             Mode::Twist => self
                 .twists(&found.key())?
@@ -1368,6 +1800,7 @@ impl Problems {
             part_count: coding.parts.len(),
             api: OpenedApi::of(coding),
             languages,
+            project,
             session,
             previous_plan: attempts
                 .iter()
@@ -1419,7 +1852,7 @@ fn haskell_cradle() -> String {
 /// as a pack's own.
 pub fn overview(
     planned: &Planned,
-    sessions: &BTreeMap<String, Session>,
+    sessions: &BTreeMap<String, Started>,
     flags: &BTreeMap<String, workshop_learning::Flag>,
     track: &TrackId,
 ) -> Overview {
@@ -1447,8 +1880,13 @@ pub fn overview(
                 skills: item.skills.clone(),
                 minutes: item.minutes,
                 status,
-                step: session.map(|s| s.step),
-                mode: session.map(|s| s.mode),
+                step: session.and_then(|s| s.step),
+                mode: session.and_then(|s| s.mode),
+                task: match &item.content {
+                    Content::Coding(coding) => coding.project().map(|p| p.task),
+                    Content::Review(_) => Some(Task::Review),
+                    _ => None,
+                },
                 key,
             }
         })
@@ -1468,7 +1906,8 @@ fn coding_items<'a>(
         pack.items
             .iter()
             .filter(move |item| {
-                item.track == *track && matches!(item.kind, Kind::Coding | Kind::Reading)
+                item.track == *track
+                    && matches!(item.kind, Kind::Coding | Kind::Reading | Kind::Codebase)
             })
             .map(move |item| (format!("{}/{}", pack.manifest.id, item.id), item))
     })
@@ -1477,7 +1916,7 @@ fn coding_items<'a>(
 /// The Coding track on the home screen, if there's anything in it.
 pub fn track(
     planned: &Planned,
-    sessions: &BTreeMap<String, Session>,
+    sessions: &BTreeMap<String, Started>,
 ) -> Option<Track<Destination>> {
     let plan = planned.plans.get(&TrackId::Coding)?;
     let items: BTreeMap<String, &Item> = coding_items(planned, &TrackId::Coding).collect();
@@ -1496,12 +1935,12 @@ pub fn track(
 /// such as a pack's own track. Its code to read is practised with its other short items.
 pub fn problem_step(
     planned: &Planned,
-    sessions: &BTreeMap<String, Session>,
+    sessions: &BTreeMap<String, Started>,
     track: &TrackId,
 ) -> Option<Step<Destination>> {
     let plan = planned.plans.get(track)?;
     let problems: BTreeMap<String, &Item> = coding_items(planned, track)
-        .filter(|(_, item)| item.kind == Kind::Coding)
+        .filter(|(_, item)| matches!(item.kind, Kind::Coding | Kind::Codebase))
         .collect();
     next_step(planned, sessions, plan, &problems)
 }
@@ -1510,7 +1949,7 @@ pub fn problem_step(
 /// one that's due, then something new.
 fn next_step(
     planned: &Planned,
-    sessions: &BTreeMap<String, Session>,
+    sessions: &BTreeMap<String, Started>,
     plan: &TrackPlan,
     items: &BTreeMap<String, &Item>,
 ) -> Option<Step<Destination>> {
@@ -1530,17 +1969,18 @@ fn next_step(
     if let Some((key, session)) = unfinished {
         return Some(Step {
             title: label(key),
-            reason: format!("Where you left off, {}", session.step.describe()),
+            reason: format!("Where you left off, {}", session.describe()),
             priority: Priority::Unfinished,
             destination: open(key),
         });
     }
     if let Some(key) = plan.due.iter().find(|key| items.contains_key(*key)) {
-        let recall = items.get(key).is_some_and(|item| item.kind == Kind::Coding);
-        let why = if recall {
-            "Due for review: a quick follow-up on it"
-        } else {
-            "Due today"
+        let why = match items.get(key).map(|item| (item.kind, &item.content)) {
+            Some((Kind::Coding, _)) => "Due for review: a quick follow-up on it",
+            Some((Kind::Codebase, Content::Coding(_))) => {
+                "Due for review: recalling what you changed, and why"
+            }
+            _ => "Due today",
         };
         return Some(Step {
             title: label(key),
@@ -1951,7 +2391,7 @@ mod tests {
         let none = BTreeMap::new();
         let track = track(&planned, &none).unwrap();
         assert_eq!(track.name, "Coding");
-        assert_eq!(track.summary, "23 new");
+        assert_eq!(track.summary, "26 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::New);
         // The quickest first: code to read, rather than a problem.
@@ -1969,9 +2409,9 @@ mod tests {
         let mut session = problems.start(&found, &[], false, None, NOW).unwrap();
         session.step = StepName::Code;
         problems.save_session(&found, session, NOW).unwrap();
-        let sessions = problems.sessions().unwrap();
+        let sessions = problems.started().unwrap();
         let track = super::track(&planned, &sessions).unwrap();
-        assert_eq!(track.summary, "1 in progress · 23 new");
+        assert_eq!(track.summary, "1 in progress · 26 new");
         let next = track.next.unwrap();
         assert_eq!(next.priority, Priority::Unfinished);
         assert_eq!(next.title, "Count the islands");
@@ -1985,13 +2425,75 @@ mod tests {
             .unwrap();
         assert_eq!(islands.status, Status::InProgress);
         assert_eq!(islands.step, Some(StepName::Code));
-        assert_eq!(overview.items.len(), 23);
+        assert_eq!(overview.items.len(), 26);
         assert!(
             overview
                 .items
                 .iter()
                 .any(|item| item.kind == Kind::Reading && item.status == Status::New)
         );
+    }
+
+    #[test]
+    fn keeps_a_projects_files_and_which_is_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let packs = vec![Pack::sample()];
+        let found = find(&packs, "sample", "habit-streaks").unwrap();
+        let problems = Problems::new(dir.path());
+        let session = problems.start(&found, &[], false, None, NOW).unwrap();
+        assert_eq!((session.mode, session.step), (Mode::Solve, StepName::Plan));
+        let open = Session {
+            file: Some("tracker.py".to_owned()),
+            ..session.clone()
+        };
+        let (saved, _) = problems.save_session(&found, open, NOW + 1).unwrap();
+        assert_eq!(saved.file.as_deref(), Some("tracker.py"));
+        let nowhere = Session {
+            file: Some("../tracker.py".to_owned()),
+            ..saved.clone()
+        };
+        assert!(problems.save_session(&found, nowhere, NOW + 2).is_err());
+        // Only the tests of the parts reached are there, and they're always the item's own.
+        let files = problems.project_files(&found, 0).unwrap();
+        let names: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "log.py",
+                "test_tracker.py",
+                "test_tracker_clock.py",
+                "tracker.py"
+            ]
+        );
+        let dir = problems.project_dir(&found.key());
+        std::fs::write(dir.join("test_tracker.py"), "def test_x():\n    pass\n").unwrap();
+        std::fs::write(dir.join("test_longest.py"), "def test_y():\n    pass\n").unwrap();
+        let files = problems.project_files(&found, 0).unwrap();
+        assert!(files.iter().all(|(path, _)| path != "test_longest.py"));
+        let (_, tests) = files
+            .iter()
+            .find(|(path, _)| path == "test_tracker.py")
+            .unwrap();
+        assert!(tests.text.contains("def test_reads_the_log"));
+        assert!(
+            problems
+                .project_files(&found, 1)
+                .unwrap()
+                .iter()
+                .any(|(path, _)| path == "test_longest.py")
+        );
+        assert!(problems.unsaveable(&found, "test_tracker.py").is_some());
+        assert!(problems.unsaveable(&found, "clock.py").is_none());
+
+        // A program has no files to open.
+        let program = find(&packs, "sample", "islands").unwrap();
+        let session = problems.start(&program, &[], false, None, NOW).unwrap();
+        let open = Session {
+            file: Some("main.py".to_owned()),
+            ..session
+        };
+        assert!(problems.save_session(&program, open, NOW + 1).is_err());
+        assert!(problems.unsaveable(&program, "main.py").is_some());
     }
 
     #[test]

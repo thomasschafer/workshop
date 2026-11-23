@@ -84,18 +84,29 @@ pub(super) async fn mark(
             "A card's follow-ups are marked when they're finished, with what was said.",
         ));
     }
-    // An explanation of a solution is marked with the solution it explains.
-    let code = if body.work == Work::Explanation {
+    if body.work == Work::Review {
+        return Err(bad_request(
+            "A review is marked when it's submitted, with its comments.",
+        ));
+    }
+    // An explanation of a solution is marked with the solution it explains: its code, or in a
+    // project, the learner's changes to it.
+    let (code, changes) = if body.work == Work::Explanation {
         let found = crate::coding::find(&packs, &pack.manifest.id, &item.id)
             .map_err(|err| bad_request(format!("{err:#}")))?;
         let session = app
             .problems
             .session_for(&found)?
             .ok_or_else(|| bad_request("Start the problem before explaining it."))?;
-        let draft = app.problems.draft(&found, session.language)?;
-        Some((session.language.name(), draft.text))
+        match found.coding.project() {
+            Some(_) => (None, Some(app.problems.project_diff(&found, session.part)?)),
+            None => {
+                let draft = app.problems.draft(&found, session.language)?;
+                (Some((session.language.name(), draft.text)), None)
+            }
+        }
     } else {
-        None
+        (None, None)
     };
     // A plan for a problem in parts is for the part the learner is on.
     let part = match (body.work, &item.content) {
@@ -112,6 +123,7 @@ pub(super) async fn mark(
     let answer = Answer {
         spoken: body.spoken,
         code: code.as_ref().map(|(name, text)| (*name, text.as_str())),
+        changes: changes.as_deref(),
         part,
         ..Answer::written(&body.text)
     };

@@ -53,7 +53,7 @@ pub(super) async fn home(
     };
     // Advent of Code stays usable whatever is wrong with the packs.
     let learning = app.learning.planned(clock).and_then(|planned| {
-        let problems = app.problems.sessions()?;
+        let problems = app.problems.started()?;
         let tracks = app
             .learning
             .tracks(&planned, clock, &app.design_sessions.all()?, &problems);

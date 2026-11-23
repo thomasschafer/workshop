@@ -459,6 +459,7 @@ pub(super) async fn end(
                 .to_owned(),
             clarity: None,
             questioning: None,
+            missed: Vec::new(),
         }
     };
     let now = now_ms();

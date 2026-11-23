@@ -678,7 +678,7 @@ impl Learning {
         planned: &Planned,
         clock: Clock,
         designs: &BTreeMap<String, workshop_sessions::design::Session>,
-        problems: &BTreeMap<String, crate::coding::Session>,
+        problems: &BTreeMap<String, crate::coding::Started>,
     ) -> Tracks {
         let tracks = planned
             .names
@@ -752,13 +752,16 @@ fn shorts(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| item.kind.is_short())
 }
 
-/// The items there's practice of: the short ones, coding problems and design prompts.
+/// The items there's practice of: the short ones, coding problems, work in a codebase and design
+/// prompts.
 fn practised(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| {
         item.kind.is_short()
             || matches!(
                 item.kind,
-                workshop_pack::Kind::Coding | workshop_pack::Kind::Design
+                workshop_pack::Kind::Coding
+                    | workshop_pack::Kind::Codebase
+                    | workshop_pack::Kind::Design
             )
     })
 }
@@ -1290,7 +1293,7 @@ mod tests {
         );
         // A problem started is carried on with from the track, and isn't the Coding track's.
         problems.start(&found, &[], false, None, NOW).unwrap();
-        let sessions = problems.sessions().unwrap();
+        let sessions = problems.started().unwrap();
         let tracks = learning.tracks(&planned, clock(NOW), &BTreeMap::new(), &sessions);
         let next = tracks
             .tracks

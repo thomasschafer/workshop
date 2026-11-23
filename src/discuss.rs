@@ -41,8 +41,21 @@ pub struct TutorContext<'a> {
     pub language: &'a str,
     pub plan: &'a str,
     pub code: &'a str,
+    /// For a codebase item, the project they're working in.
+    pub project: Option<&'a TutorProject>,
     pub errors: &'a str,
     pub last_run: &'a str,
+}
+
+/// A project the learner is working in, as the tutor sees it.
+pub struct TutorProject {
+    pub task: workshop_pack::Task,
+    /// Its files as the learner has them.
+    pub files: String,
+    /// What they've changed, as a unified diff.
+    pub changes: String,
+    /// The file open in their editor.
+    pub open: Option<String>,
 }
 
 /// The tutor's prompt: the problem, where the learner is with it, and the conversation.
@@ -55,6 +68,28 @@ pub fn tutor_prompt(context: &TutorContext, turns: &[Turn]) -> String {
         ));
     }
     out.push_str(&format!("They are at the {} step.\n\n", context.step));
+    if let Some(project) = context.project {
+        let task = match project.task {
+            workshop_pack::Task::Fix => "find and fix a bug from its symptom, with a small change",
+            workshop_pack::Task::Refactor => "refactor code that's hard to test, then extend it",
+            workshop_pack::Task::Review => "review a change",
+        };
+        out.push_str(&format!(
+            "The problem is set in a project someone else wrote, and their task is to {task}. Its test files are the problem's own, which they can read and run but not change; hidden tests decide it.\n\n<project>\n{}\n</project>\n\n",
+            project.files.trim_end()
+        ));
+        if project.changes.trim().is_empty() {
+            out.push_str("They haven't changed anything yet.\n\n");
+        } else {
+            out.push_str(&format!(
+                "<changes>\n{}\n</changes>\n\nThose are their changes to the project so far.\n\n",
+                project.changes.trim_end()
+            ));
+        }
+        if let Some(open) = &project.open {
+            out.push_str(&format!("They have {open} open.\n\n"));
+        }
+    }
     let sections = [
         ("plan", context.plan),
         ("errors", context.errors),
@@ -185,6 +220,7 @@ mod tests {
                 language: "Python",
                 plan: "Look at every square",
                 code: "",
+                project: None,
                 errors: "",
                 last_run: "",
             },
@@ -202,5 +238,54 @@ mod tests {
         assert!(system.starts_with("You are a patient tutor"));
         assert!(system.ends_with("adds:\n\nAsk about edge cases."));
         assert!(!tutor_system_prompt(None).contains("adds:"));
+    }
+
+    #[test]
+    fn shows_the_tutor_the_project_and_what_the_learner_changed() {
+        let project = TutorProject {
+            task: workshop_pack::Task::Fix,
+            files: "<file path=\"words.py\">\ndef split_words(text): ...\n</file>\n".to_owned(),
+            changes: "--- a/words.py\n+++ b/words.py\n".to_owned(),
+            open: Some("words.py".to_owned()),
+        };
+        fn context(project: Option<&TutorProject>) -> TutorContext<'_> {
+            TutorContext {
+                problem: "Counts are one too many.",
+                part: None,
+                step: "code",
+                language: "Python",
+                plan: "",
+                code: "",
+                project,
+                errors: "",
+                last_run: "",
+            }
+        }
+        let prompt = tutor_prompt(&context(Some(&project)), &[]);
+        assert!(
+            prompt.contains("find and fix a bug from its symptom"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("<project>\n<file path=\"words.py\">"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("<changes>\n--- a/words.py"), "{prompt}");
+        assert!(prompt.contains("They have words.py open."), "{prompt}");
+        let untouched = TutorProject {
+            changes: String::new(),
+            open: None,
+            ..project
+        };
+        let prompt = tutor_prompt(&context(Some(&untouched)), &[]);
+        assert!(
+            prompt.contains("They haven't changed anything yet."),
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains("<project>") || !prompt.contains("open."),
+            "{prompt}"
+        );
+        assert!(!tutor_prompt(&context(None), &[]).contains("<project>"));
     }
 }

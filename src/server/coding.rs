@@ -25,6 +25,7 @@ use super::learning::Where;
 use super::puzzles::{SaveText, saved};
 use super::setup::{Needs, install_programs};
 use super::state::{ActiveRun, Shared, lock};
+use crate::code_review::{OpenedReview, ReviewError, ReviewMarked, ReviewSession};
 use crate::coding::{
     Found, Mode, Opened, OpenedApi, OpenedLsp, OpenedPart, OpenedTrack, Overview,
     SUBMIT_RANDOM_INPUTS, Session, SessionWriteError, Solution, find,
@@ -71,7 +72,7 @@ pub(super) async fn overview(
     let planned = app.learning.planned(clock)?;
     Ok(Json(crate::coding::overview(
         &planned,
-        &app.problems.sessions()?,
+        &app.problems.started()?,
         &app.learning.store().flags()?,
         &query.track.unwrap_or(TrackId::Coding),
     )))
@@ -85,14 +86,30 @@ pub(super) struct OpenQuery {
     solve: bool,
 }
 
+/// A problem to solve, or a change to review, as it's opened.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub(super) enum OpenedItem {
+    Problem(Box<Opened>),
+    Review(Box<OpenedReview>),
+}
+
 /// Starts a problem, or carries on with it where it was left. A review is a twist, if there's
-/// a model to pose one, which the app then asks for.
+/// a model to pose one, which the app then asks for. A change to review is started, or carried
+/// on with, as a review of its own.
 pub(super) async fn open(
     State(app): State<Shared>,
     Path((pack, item)): Path<(String, String)>,
     Query(query): Query<OpenQuery>,
-) -> ApiResult<Opened> {
+) -> ApiResult<OpenedItem> {
     let packs = packs(&app)?;
+    if let Some(review) = crate::code_review::find(&packs, &pack, &item) {
+        let session = app.problems.reviews.start(&review, now_ms())?;
+        let track = crate::code_review::track(&review);
+        return Ok(Json(OpenedItem::Review(Box::new(
+            app.problems.reviews.open(&review, track, session),
+        ))));
+    }
     let found = found(&packs, &pack, &item)?;
     let attempts = app.learning.store().attempts(&found.key())?;
     let no_twist = app.twist_target(None).err().map(|err| {
@@ -101,12 +118,142 @@ pub(super) async fn open(
     let session = app
         .problems
         .start(&found, &attempts, query.solve, no_twist, now_ms())?;
-    Ok(Json(app.problems.open(
+    Ok(Json(OpenedItem::Problem(Box::new(app.problems.open(
         &app.config,
         &found,
         session,
         &attempts,
-    )?))
+    )?))))
+}
+
+/// The change to review with this key, or a 404.
+fn review<'a>(
+    packs: &'a [Pack],
+    pack: &str,
+    item: &str,
+) -> Result<crate::code_review::Found<'a>, ApiError> {
+    crate::code_review::find(packs, pack, item).ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            serde_json::json!({ "error": format!("there's no change to review {pack}/{item}") }),
+        )
+    })
+}
+
+/// Saves a review's comments, and the file open.
+pub(super) async fn save_review(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+    Json(session): Json<ReviewSession>,
+) -> ApiResult<ReviewSession> {
+    let packs = packs(&app)?;
+    let found = review(&packs, &pack, &item)?;
+    let now = now_ms();
+    let (saved, spent) =
+        app.problems
+            .reviews
+            .save(&found, session, now)
+            .map_err(|err| match err {
+                ReviewError::Conflict { current } => ApiError(
+                    StatusCode::CONFLICT,
+                    serde_json::json!({
+                        "error": "This review changed on another device.",
+                        "current": current,
+                    }),
+                ),
+                err @ (ReviewError::NotStarted | ReviewError::Invalid(_)) => {
+                    bad_request(format!("{err:#}"))
+                }
+                ReviewError::Other(err) => err.into(),
+            })?;
+    app.learning.store().record_time(&found.key(), now, spent)?;
+    Ok(Json(saved))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SubmitReviewBody {
+    /// Made by the app, for the attempt it records, so submitting twice records one.
+    id: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct ReviewSubmitted {
+    #[serde(flatten)]
+    review: ReviewMarked,
+    #[serde(flatten)]
+    finished: Finished,
+}
+
+/// Has the grader mark a review's comments against the defects planted in the change. That's
+/// an attempt, rated from the score, and each defect missed, and each false alarm, goes in the
+/// mistake log. The review is then over.
+pub(super) async fn submit_review(
+    State(app): State<Shared>,
+    Path((pack, item)): Path<(String, String)>,
+    Json(body): Json<SubmitReviewBody>,
+) -> ApiResult<ReviewSubmitted> {
+    let packs = packs(&app)?;
+    let found = review(&packs, &pack, &item)?;
+    let key = found.key();
+    // Sent again, as after a lost reply, it's the review already marked.
+    if let Some(marked) = app.problems.reviews.marked(&key, &body.id)? {
+        return Ok(Json(ReviewSubmitted {
+            review: marked,
+            finished: finished(&app, &key)?,
+        }));
+    }
+    let session = app
+        .problems
+        .reviews
+        .session(&key)?
+        .ok_or_else(|| bad_request("Start the review before submitting it."))?;
+    let work = crate::code_review::work(&session.comments);
+    if work.is_empty() {
+        return Err(bad_request(
+            "Write a comment first: what's wrong with the change, and where.",
+        ));
+    }
+    let error_types = crate::mistakes::error_types(&packs);
+    let (runner, spec) =
+        app.grader_target(found.pack.prompt_add_ons.get("grader").map(String::as_str))?;
+    let marked = crate::grader::mark(
+        runner,
+        &spec,
+        found.item,
+        crate::grader::Work::Review,
+        crate::grader::Answer::written(&work),
+        &error_types,
+    )
+    .await
+    .map_err(|err| bad_request(format!("{err:#}")))?;
+    let now = now_ms();
+    let spent = workshop_sessions::spent(session.updated_at, now);
+    app.learning.record_marked(
+        Attempt {
+            id: body.id.clone(),
+            item: key.clone(),
+            answered_at: now,
+            duration_ms: spent,
+            rating: marked.rating(),
+            response: Some(work),
+            seed: None,
+        },
+        &marked.mistakes(&body.id, &key, now),
+        now,
+    )?;
+    let review = ReviewMarked {
+        attempt: body.id,
+        marked,
+        defects: found.review.defects.clone(),
+        notes: found.review.notes.clone(),
+        comments: session.comments,
+    };
+    app.problems.reviews.finish(&key, &review)?;
+    Ok(Json(ReviewSubmitted {
+        review,
+        finished: finished(&app, &key)?,
+    }))
 }
 
 pub(super) async fn save_session(
@@ -143,6 +290,30 @@ pub(super) async fn save_code(
     let saved = saved(
         app.problems
             .save_draft(&found, language, &body.text, &body.version),
+    )?;
+    let now = now_ms();
+    let spent = app.problems.touch(&found.key(), now)?;
+    app.learning.store().record_time(&found.key(), now, spent)?;
+    Ok(saved)
+}
+
+/// Saves a file of a project, or adds one, once the problem's started.
+pub(super) async fn save_file(
+    State(app): State<Shared>,
+    Path((pack, item, file)): Path<(String, String, String)>,
+    Json(body): Json<SaveText>,
+) -> ApiResult<VersionedFile> {
+    let packs = packs(&app)?;
+    let found = found(&packs, &pack, &item)?;
+    if app.problems.session_for(&found)?.is_none() {
+        return Err(bad_request("Start the problem before changing its files."));
+    }
+    if let Some(why) = app.problems.unsaveable(&found, &file) {
+        return Err(bad_request(why));
+    }
+    let saved = saved(
+        app.problems
+            .save_project_file(&found, &file, &body.text, &body.version),
     )?;
     let now = now_ms();
     let spent = app.problems.touch(&found.key(), now)?;
@@ -207,13 +378,31 @@ fn write_error(err: SessionWriteError) -> ApiError {
     }
 }
 
+/// What's being worked on: a program's draft, or a project's files.
+enum Draft {
+    Program(VersionedFile),
+    Project(Vec<workshop_pack::ProjectFile>),
+}
+
+impl Draft {
+    fn code(&self) -> workshop_coding::Code<'_> {
+        match self {
+            Self::Program(file) => workshop_coding::Code::Program(&file.text),
+            Self::Project(files) => workshop_coding::Code::Project(files),
+        }
+    }
+}
+
 /// The draft being worked on, and the session it's for.
-fn current(app: &Shared, found: &Found<'_>) -> Result<(Session, VersionedFile), ApiError> {
+fn current(app: &Shared, found: &Found<'_>) -> Result<(Session, Draft), ApiError> {
     let session = app
         .problems
         .session_for(found)?
         .ok_or_else(|| bad_request("Start the problem before running it."))?;
-    let code = app.problems.draft(found, session.language)?;
+    let code = match found.coding.project() {
+        Some(_) => Draft::Project(app.problems.project_solution(found, session.part)?),
+        None => Draft::Program(app.problems.draft(found, session.language)?),
+    };
     Ok((session, code))
 }
 
@@ -234,7 +423,7 @@ pub(super) async fn run(
         found.coding,
         session.part,
         session.language,
-        &code.text,
+        code.code(),
         &running.cancel,
     )
     .await?;
@@ -324,7 +513,7 @@ pub(super) async fn submit(
         &oracles,
         session.part,
         session.language,
-        &code.text,
+        code.code(),
         SUBMIT_RANDOM_INPUTS.min(found.coding.random_inputs),
         &running.cancel,
     )
@@ -696,6 +885,9 @@ pub(super) struct TutorBody {
     errors: String,
     #[serde(default)]
     last_run: String,
+    /// For a project, the file open in the editor.
+    #[serde(default)]
+    file: Option<String>,
 }
 
 /// Asks the tutor for a hint, streamed as it's written, as the discussion coach's replies are.
@@ -719,6 +911,19 @@ pub(super) async fn tutor(
         .ok_or_else(|| bad_request("Start the problem before asking about it."))?;
     let step = format!("{:?}", session.step).to_lowercase();
     let revealed = session.revealed(found.coding);
+    // In a project, the tutor sees the project as the learner has it, and what they've changed.
+    let project = match found.coding.project() {
+        Some(project) => {
+            let files = app.problems.project_solution(&found, session.part)?;
+            Some(discuss::TutorProject {
+                task: project.task,
+                files: workshop_pack::project::as_text(files.iter()),
+                changes: app.problems.project_diff(&found, session.part)?,
+                open: body.file.clone(),
+            })
+        }
+        None => None,
+    };
     let prompt = discuss::tutor_prompt(
         &discuss::TutorContext {
             problem: &found.coding.statement(revealed),
@@ -728,6 +933,7 @@ pub(super) async fn tutor(
             language: session.language.name(),
             plan: &session.plan,
             code: &body.code,
+            project: project.as_ref(),
             errors: &body.errors,
             last_run: &body.last_run,
         },
@@ -936,9 +1142,13 @@ pub(super) async fn offline_bundle(State(app): State<Shared>) -> ApiResult<Offli
 
     for pack in &packs {
         for item in &pack.items {
+            // Work in a codebase needs the server, to run its project and keep its files.
             let Content::Coding(coding) = &item.content else {
                 continue;
             };
+            if coding.project().is_some() {
+                continue;
+            }
             let found = Found { pack, item, coding };
             let key = found.key();
             let attempts = app.learning.store().attempts(&key)?;
@@ -1050,7 +1260,7 @@ mod tests {
         let item = "/api/coding/items/sample/first-repeat";
         let overview =
             json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await;
-        assert_eq!(overview["items"].as_array().unwrap().len(), 23);
+        assert_eq!(overview["items"].as_array().unwrap().len(), 26);
 
         let opened = send(&router, request("POST", &format!("{item}/open"), None)).await;
         assert_eq!(opened.status(), StatusCode::OK);
@@ -1753,5 +1963,516 @@ mod tests {
         )
         .await;
         assert_eq!(unstarted.status(), StatusCode::BAD_REQUEST);
+        // A change to review has no code to run.
+        let review = send(
+            &router,
+            request("POST", "/api/coding/items/sample/loan-renewals/run", None),
+        )
+        .await;
+        assert_eq!(review.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// The text of one of the sample's codebase items' files.
+    fn codebase_file(path: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("packs/sample/items/working-in-code")
+            .join(path);
+        std::fs::read_to_string(&path).unwrap()
+    }
+
+    /// A project's file as the app has it.
+    fn file<'a>(opened: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
+        opened["project"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == path)
+            .unwrap_or_else(|| panic!("no {path} in {opened}"))
+    }
+
+    async fn save_file(
+        router: &axum::Router,
+        item: &str,
+        path: &str,
+        text: &str,
+        version: &serde_json::Value,
+    ) -> axum::response::Response {
+        let body = serde_json::json!({ "text": text, "version": version });
+        send(
+            router,
+            request("PUT", &format!("{item}/files/{path}"), Some(body)),
+        )
+        .await
+    }
+
+    /// A fix is worked in its project, file by file, which opens where it was left; it's
+    /// decided by the hidden tests, reviewed against the reference fix, and comes back as a
+    /// recall.
+    #[tokio::test]
+    async fn fixes_a_bug_in_a_project() {
+        let (_dir, router) = test_app().await;
+        let item = "/api/coding/items/sample/word-counts";
+        let overview =
+            json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await;
+        let listed = overview["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["key"] == "sample/word-counts")
+            .unwrap();
+        assert_eq!(
+            (listed["kind"].as_str(), listed["task"].as_str()),
+            (Some("codebase"), Some("fix"))
+        );
+
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        // There's code to read, rather than an example to work out, so it starts with a plan.
+        assert_eq!(opened["session"]["step"], "plan");
+        assert_eq!(opened["languages"], serde_json::json!([]));
+        assert_eq!(opened["project"]["task"], "fix");
+        let paths: Vec<&str> = opened["project"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            ["report.py", "stats.py", "test_stats.py", "words.py"]
+        );
+        assert_eq!(file(&opened, "test_stats.py")["read_only"], true);
+        assert_eq!(file(&opened, "words.py")["read_only"], false);
+        assert_eq!(
+            file(&opened, "words.py")["original"],
+            codebase_file("word-counts/project/words.py")
+        );
+        // The hidden tests, and the fix, are never sent.
+        let text = opened.to_string();
+        assert!(!text.contains("test_punctuation"), "{text}");
+        assert!(!text.contains("if word]"), "{text}");
+        assert_eq!(
+            opened["parts"][0]["examples"][0]["input"],
+            "test_stats.py::test_splits_on_spaces_and_punctuation\n"
+        );
+
+        // Which file is open is kept with the session.
+        let mut session = opened["session"].clone();
+        session["step"] = "code".into();
+        session["file"] = "stats.py".into();
+        let saved = json(
+            send(
+                &router,
+                request("PUT", &format!("{item}/session"), Some(session)),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(saved["session"]["file"], "stats.py");
+        let reopened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(reopened["session"]["file"], "stats.py");
+
+        // Its tests are the problem's own, so they can't be changed; a file can be added.
+        let tests = file(&opened, "test_stats.py");
+        let refused = save_file(
+            &router,
+            item,
+            "test_stats.py",
+            "",
+            &tests["code"]["version"],
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        let added = save_file(
+            &router,
+            item,
+            "notes.py",
+            "# Looking at split_words\n",
+            &opened["project"]["empty_version"],
+        )
+        .await;
+        assert_eq!(added.status(), StatusCode::OK);
+        let bad = save_file(
+            &router,
+            item,
+            ".hidden",
+            "",
+            &opened["project"]["empty_version"],
+        )
+        .await;
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+
+        // The project's own tests pass as it's given, and a hidden one finds the bug.
+        let ran = json(send(&router, request("POST", &format!("{item}/run"), None)).await).await;
+        assert_eq!(ran["outcome"], "ran", "{ran}");
+        assert!(
+            ran["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["passed"] == true),
+            "{ran}"
+        );
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], false);
+        assert_eq!(submitted["failure"]["case"]["kind"], "test");
+        assert_eq!(
+            submitted["failure"]["input"],
+            "test_punctuation.py::test_ends_with_a_full_stop\n"
+        );
+        assert!(
+            submitted["failure"]["run"]["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("failed"),
+            "{submitted}"
+        );
+
+        let words = file(&opened, "words.py");
+        let fixed = codebase_file("word-counts/fixed/words.py");
+        let saved = save_file(&router, item, "words.py", &fixed, &words["code"]["version"]).await;
+        assert_eq!(saved.status(), StatusCode::OK);
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], true, "{submitted}");
+        let opened = &submitted["opened"];
+        assert_eq!(opened["session"]["step"], "review");
+        // Reviewed against the reference fix, beside the learner's own changes.
+        let solution = &opened["solution"]["project"];
+        assert_eq!(solution["reference"][0]["path"], "words.py");
+        assert_eq!(solution["reference"][0]["added"], 2);
+        let yours: Vec<&str> = solution["yours"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(yours, ["notes.py", "words.py"]);
+        assert!(
+            opened["solution"]["approach"]
+                .as_str()
+                .unwrap()
+                .contains("empty string")
+        );
+
+        let finish =
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8b01", "rating": "good" });
+        let finished = send(
+            &router,
+            request("POST", &format!("{item}/finish"), Some(finish)),
+        )
+        .await;
+        assert_eq!(finished.status(), StatusCode::OK);
+        // Due again, it's recalled: there are no twists on work in a codebase.
+        let again = json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(
+            (
+                again["session"]["mode"].as_str(),
+                again["session"]["step"].as_str()
+            ),
+            (Some("recall"), Some("plan"))
+        );
+        assert_eq!(again["session"]["no_twist"], serde_json::Value::Null);
+        // Solved again, it starts from the project as it's given.
+        let afresh = json(
+            send(
+                &router,
+                request("POST", &format!("{item}/open?solve=true"), None),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(afresh["session"]["mode"], "solve");
+        assert_eq!(
+            file(&afresh, "words.py")["code"]["text"],
+            codebase_file("word-counts/project/words.py")
+        );
+        assert!(
+            afresh["project"]["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|f| f["path"] != "notes.py")
+        );
+    }
+
+    /// A refactor is in parts: the next part's given tests arrive once the first passes.
+    #[tokio::test]
+    async fn refactors_then_extends_a_project_in_parts() {
+        let (_dir, router) = test_app().await;
+        let item = "/api/coding/items/sample/habit-streaks";
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(opened["part_count"], 2);
+        assert_eq!(opened["project"]["task"], "refactor");
+        let paths: Vec<&str> = opened["project"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "log.py",
+                "test_tracker.py",
+                "test_tracker_clock.py",
+                "tracker.py"
+            ]
+        );
+        assert_eq!(file(&opened, "test_tracker_clock.py")["read_only"], true);
+
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], false);
+        assert!(
+            submitted["failure"]["input"]
+                .as_str()
+                .unwrap()
+                .starts_with("test_tracker_clock.py::"),
+            "{submitted}"
+        );
+
+        for path in ["log.py", "tracker.py"] {
+            let version = &file(&opened, path)["code"]["version"];
+            let text = codebase_file(&format!("habit-streaks/clock/solution/{path}"));
+            assert_eq!(
+                save_file(&router, item, path, &text, version)
+                    .await
+                    .status(),
+                StatusCode::OK
+            );
+        }
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], true, "{submitted}");
+        let opened = &submitted["opened"];
+        assert_eq!(
+            (
+                opened["session"]["part"].as_i64(),
+                opened["session"]["step"].as_str()
+            ),
+            (Some(1), Some("plan"))
+        );
+        assert!(
+            opened["project"]["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["path"] == "test_longest.py")
+        );
+        assert_eq!(opened["parts"][1]["examples"].as_array().unwrap().len(), 2);
+        // The code is kept for the next part.
+        assert_eq!(
+            file(opened, "tracker.py")["code"]["text"],
+            codebase_file("habit-streaks/clock/solution/tracker.py")
+        );
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], false);
+        assert!(
+            submitted["failure"]["input"]
+                .as_str()
+                .unwrap()
+                .starts_with("test_longest"),
+            "{submitted}"
+        );
+    }
+
+    const REVIEW_MARKED: &str = r#"{"score": 0.9, "points": [{"point": "Off by one", "met": "yes", "comment": "Found it"}, {"point": "From today", "met": "partly", "comment": "Close"}, {"point": "Reservations", "met": "no", "comment": ""}], "findings": [{"error_type": "misread", "detail": "Said renew raises when the member is the borrower"}], "feedback": "Check what renewing does to someone waiting."}"#;
+
+    /// A review is saved comment by comment, and the grader marks it against the planted
+    /// defects: an attempt rated from what it found, with each defect missed in the mistake log.
+    #[tokio::test]
+    async fn reviews_a_change_against_its_defects() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("review-marked.json"), REVIEW_MARKED).unwrap();
+        let model = crate::server::testing::fake_discussion_model(
+            dir.path(),
+            &[("<change>", "review-marked.json")],
+        );
+        let router = crate::server::testing::test_app_in(dir.path(), &model);
+        let item = "/api/coding/items/sample/loan-renewals";
+        let reviews = "/api/coding/reviews/sample/loan-renewals";
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(opened["kind"], "review");
+        assert_eq!(opened["files"][0]["path"], "loans.py");
+        assert_eq!(opened["files"][0]["changed"], true);
+        // What's planted isn't sent until it's marked.
+        assert!(!opened.to_string().contains("off by one"), "{opened}");
+        let added = opened["files"][0]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["kind"] == "added")
+            .count();
+        assert_eq!(added, 17);
+
+        let empty = send(
+            &router,
+            request(
+                "POST",
+                &format!("{reviews}/submit"),
+                Some(serde_json::json!({ "id": "x" })),
+            ),
+        )
+        .await;
+        assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+
+        let mut session = opened["session"].clone();
+        session["file"] = "loans.py".into();
+        session["comments"] = serde_json::json!([
+            { "id": "a", "file": "loans.py", "line": 47, "text": "Allows a third renewal" },
+            { "id": "b", "text": "Renewing early gives less time" },
+        ]);
+        let saved = json(
+            send(
+                &router,
+                request("PUT", &format!("{reviews}/session"), Some(session.clone())),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(saved["version"], 2);
+        let stale = send(
+            &router,
+            request("PUT", &format!("{reviews}/session"), Some(session.clone())),
+        )
+        .await;
+        assert_eq!(stale.status(), StatusCode::CONFLICT);
+        session["version"] = 2.into();
+        session["comments"][0]["line"] = 999.into();
+        let bad = send(
+            &router,
+            request("PUT", &format!("{reviews}/session"), Some(session)),
+        )
+        .await;
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        // Opened again, it's where it was left.
+        let reopened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(reopened["session"]["comments"], saved["comments"]);
+        assert_eq!(reopened["session"]["file"], "loans.py");
+        let overview =
+            json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await;
+        let listed = overview["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["key"] == "sample/loan-renewals")
+            .unwrap();
+        assert_eq!(
+            (listed["status"].as_str(), listed["task"].as_str()),
+            (Some("in_progress"), Some("review"))
+        );
+
+        let submit = serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8b02" });
+        let marked = json(
+            send(
+                &router,
+                request("POST", &format!("{reviews}/submit"), Some(submit.clone())),
+            )
+            .await,
+        )
+        .await;
+        // Scored from what it found, half for one found in part, less one false alarm.
+        let score = marked["marked"]["score"].as_f64().unwrap();
+        assert!((score - 0.4).abs() < 1e-9, "{marked}");
+        assert_eq!(marked["defects"].as_array().unwrap().len(), 3);
+        assert_eq!(marked["defects"][0]["file"], "loans.py");
+        assert!(marked["notes"].as_str().unwrap().contains("KeyError"));
+        assert!(marked["due"].as_i64().unwrap() > crate::learning::now_ms());
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        let mistakes = log["mistakes"].as_array().unwrap();
+        assert!(
+            mistakes.iter().any(|m| m["suggested"] == "missed-defect"
+                && m["detail"].as_str().unwrap().contains("reservations")),
+            "{log}"
+        );
+        assert!(
+            mistakes.iter().any(|m| m["suggested"] == "misread"),
+            "{log}"
+        );
+        assert!(
+            !mistakes
+                .iter()
+                .any(|m| m["detail"].as_str().unwrap().contains("third time")),
+            "{log}"
+        );
+        // Sent again, as after a lost reply, it's the same marking.
+        let resent = json(
+            send(
+                &router,
+                request("POST", &format!("{reviews}/submit"), Some(submit)),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(resent["marked"], marked["marked"]);
+        let overview =
+            json(send(&router, request("GET", "/api/coding?utc_offset=0", None)).await).await;
+        let listed = overview["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["key"] == "sample/loan-renewals")
+            .unwrap();
+        assert_eq!(listed["status"], "done");
+        // Opened again, it's a fresh review.
+        let again = json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_eq!(again["session"]["comments"], serde_json::json!([]));
+    }
+
+    /// The tutor sees the project as the learner has it, what they've changed, and which file
+    /// they're in.
+    #[tokio::test]
+    async fn the_tutor_sees_the_project_and_the_learners_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("hint.txt"),
+            "Look at what re.split gives at the ends.",
+        )
+        .unwrap();
+        let model = crate::server::testing::fake_discussion_model(
+            dir.path(),
+            &[("They have words.py open", "hint.txt")],
+        );
+        let router = crate::server::testing::test_app_in(dir.path(), &model);
+        let item = "/api/coding/items/sample/word-counts";
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        let words = file(&opened, "words.py");
+        let changed = codebase_file("word-counts/project/words.py")
+            .replace("text.lower()", "text.casefold()");
+        save_file(
+            &router,
+            item,
+            "words.py",
+            &changed,
+            &words["code"]["version"],
+        )
+        .await;
+        let body = serde_json::json!({
+            "model": "fake",
+            "turns": [{ "speaker": "user", "text": "Where should I look?" }],
+            "file": "words.py",
+        });
+        let reply = send(
+            &router,
+            request("POST", &format!("{item}/tutor"), Some(body)),
+        )
+        .await;
+        assert_eq!(reply.status(), StatusCode::OK);
+        let text = String::from_utf8(
+            axum::body::to_bytes(reply.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(text.contains("re.split gives"), "{text}");
     }
 }
