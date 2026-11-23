@@ -263,7 +263,7 @@ Rather than a program that reads its input and prints its answer, a problem in A
 class = "TextBuffer"
 ```
 
-A starter is then the class or functions to fill in, with nothing reading stdin, and it must define what the tests call, unfinished as it is. Each case in `tests.toml` is the calls it makes, in order, each with its arguments and what it returns. A call without `returns` returns nothing, `None` in Python, and that's checked too. `new` is what the class is made with, before the calls, nothing if it's left out; every case makes its own.
+A starter is then the class or functions to fill in, with nothing reading stdin, and it must define everything the first part's examples and tests call, unfinished as it is; `workshop pack check` looks for each without calling it. Each case in `tests.toml` is the calls it makes, in order, each with its arguments and what it returns. A call without `returns` returns nothing, `None` in Python, and that's checked too. `new` is what the class is made with, before the calls, nothing if it's left out; every case makes its own.
 
 ```toml
 [[example]]
@@ -278,7 +278,7 @@ new = ["start"]
 calls = [{ call = "text", returns = "start" }]
 ```
 
-Arguments and results can be strings, numbers, booleans, and lists and tables of them. Results are compared as values, so `3` and `3.0` are the same, as are tables with their keys in another order; a tuple comes back as a list. What the learner's code prints goes to stderr, so it can't be taken for a result. The app shows the calls as Python, such as `text() → "hel"`, and when a solution is wrong, what each call returned beside what it should have.
+Arguments and results can be strings, numbers, booleans, and lists and tables of them. Results are compared as values, so `3` and `3.0` are the same, as are tables with their keys in another order; a tuple comes back as a list. The driver reads the calls before importing the learner's code, and writes results where that code can't, so what it reads or prints, which goes to stderr, can't change what's compared. The app shows the calls as Python, such as `text() → "hel"`, and when a solution is wrong, what each call returned beside what it should have.
 
 The brute force is a module too, defining the same class or functions, in Python, and the inputs program prints calls rather than an input to read: one JSON array a line, the name called, then its arguments, where calling the class makes a new one. So the inputs program for the example above might print:
 
@@ -304,7 +304,7 @@ replaces = [1]                  # optional: earlier parts whose requirements thi
 
 What each part adds is a section of its own, `## Part 2`, `## Part 3` and so on, and it can have hints of its own, as `## Part 2 hints`; `## Hints` are the first part's. A problem has at most five parts.
 
-Every earlier part's examples and tests still apply at a later part, and its brute force is still compared with, unless a part changes what an earlier one asked for, and says so with `replaces`, counting parts from 1. From then on, the replaced part's tests and brute force don't apply, so the replacing part's tests should cover whatever of it still holds. A part's brute force and inputs need only cover what it adds, as the earlier parts' still apply; a part with no brute force is checked on its tests and the earlier parts' brute forces.
+Every earlier part's examples and tests still apply at a later part, and its brute force is still compared with, unless a part changes what an earlier one asked for, and says so with `replaces`, counting parts from 1. From then on, the replaced part's tests and brute force don't apply, so the replacing part's tests should cover whatever of it still holds. A part's brute force and inputs need only cover what it adds, as the earlier parts' still apply; a part with no brute force is checked on its tests and the earlier parts' brute forces, so a part that replaces every earlier part with a brute force needs one of its own. In API mode, the random calls must include some that return something, so there's something to compare.
 
 The learner sees a part only once they reach it. They keep their code from one part to the next, so how they built the earlier parts makes the change easy or doesn't, which is the point. `## Approach` covers the whole problem, every part, and is what the review compares with.
 
