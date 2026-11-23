@@ -90,12 +90,14 @@ for meta in settings llvm-passes llvm-targets template-hsc.h; do
 done
 cp -a "$SRC_LIBDIR/package.conf.d/." "$PKG_DB/"
 
-# Copy only shared libraries (.so), dynamic interface files (.dyn_hi), and headers (.h)
-# to keep the compressed bundle compact (~56 MB) while supporting full GHCi bytecode loading.
+# Copy only shared libraries (.so), dynamic interface files (.dyn_hi), and headers (.h),
+# excluding profiling/debug/threaded variants so the bundle stays ~56 MiB (~360 MiB unpacked)
+# and fits comfortably inside mobile Chrome's dual-worker memory budget.
 (
   cd "$SRC_LIBDIR/$GHC_LIB_SUBDIR"
   find . -type f \( -name '*.so' -o -name '*.dyn_hi' -o -name '*.h' \) \
-    ! -name 'libHSrts*_thr*' ! -name 'libHSrts*_debug*' ! -name 'libHSrts*_p*' \
+    ! -name '*_p-ghc*.so' ! -name '*_p_dyn.hi' \
+    ! -name 'libHSrts*_thr*' ! -name 'libHSrts*_debug*' ! -name 'libHSrts*_p*' ! -name 'libHSrts*_l*' \
     -print0 \
     | tar --null -T - -cf - \
     | tar -xf - -C "$TARGET_LIB_DIR"
