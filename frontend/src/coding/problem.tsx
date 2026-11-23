@@ -32,6 +32,7 @@ import {
   updateCachedCodingSession,
 } from "./offline";
 import {
+  applying,
   describeCase,
   describeRun,
   lastCall,
@@ -39,8 +40,10 @@ import {
   printedTooMuch,
   pythonValue,
   reached,
+  revealed,
   STEP_LABELS,
   sameReturn,
+  sameSitting,
   showCalls,
   stepAfter,
   stepsFor,
@@ -226,7 +229,10 @@ export function ProblemView({
               sessionRef.current = bumped;
               setSession(bumped);
             }
-            setOpened((current) => (current ? { ...current, solution: saved.solution } : saved));
+            // Moving on to the review shows the solution, and every part.
+            setOpened((current) =>
+              current ? { ...current, solution: saved.solution, parts: saved.parts } : saved,
+            );
           } catch (err) {
             if (err instanceof ApiError && err.status === 409) {
               const current = (err.body as { current?: Session } | null)?.current;
@@ -288,7 +294,7 @@ export function ProblemView({
         const adopted =
           unsaved &&
           unsaved.at > fresh.session.updated_at &&
-          unsaved.session.mode === fresh.session.mode
+          sameSitting(unsaved.session, fresh.session)
             ? { ...unsaved.session, version: fresh.session.version ?? unsaved.session.version }
             : fresh.session;
         if (adopted !== fresh.session) saver.schedule(adopted);
@@ -325,7 +331,7 @@ export function ProblemView({
             const adopted =
               unsaved &&
               unsaved.at > offlineOpened.session.updated_at &&
-              unsaved.session.mode === offlineOpened.session.mode
+              sameSitting(unsaved.session, offlineOpened.session)
                 ? unsaved.session
                 : offlineOpened.session;
             setOpened(offlineOpened);
@@ -354,6 +360,7 @@ export function ProblemView({
       .then(
         (fresh) => {
           confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
+          localExpectedVersion.current = confirmedVersion.current;
           void updateCachedCodingSession(itemKey, fresh.session);
           setOpened(fresh);
           sessionRef.current = fresh.session;
@@ -384,7 +391,15 @@ export function ProblemView({
     let cancelled = false;
     void getCachedCodingProblem(itemKey).then((cached) => {
       if (!cancelled && cached) {
-        setOpened((current) => (current ? { ...current, solution: cached.solution } : current));
+        setOpened((current) =>
+          current && sessionRef.current
+            ? {
+                ...current,
+                solution: cached.solution,
+                parts: cached.parts.slice(0, revealed(sessionRef.current, cached.parts.length)),
+              }
+            : current,
+        );
       }
     });
     return () => {
@@ -552,6 +567,7 @@ export function ProblemView({
       }}
       onReloaded={(fresh) => {
         confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
+        localExpectedVersion.current = confirmedVersion.current;
         void updateCachedCodingSession(itemKey, fresh.session);
         setOpened(fresh);
         sessionRef.current = fresh.session;
@@ -615,7 +631,7 @@ export function ProblemView({
       />
       {opened.part_count > 1 && session.mode === "solve" && !done ? (
         <PartBar
-          part={session.part}
+          part={session.passed ? opened.part_count : session.part}
           count={opened.part_count}
           reviewing={session.step === "review"}
         />
@@ -623,39 +639,47 @@ export function ProblemView({
       {offlineBanner}
       {sessionConflict ? (
         <div class="banner" role="alert">
-          <span>This problem was edited on another device.</span>
+          <span>
+            {sameSitting(sessionConflict, session)
+              ? "This problem was edited on another device."
+              : "This problem moved on on another device."}
+          </span>
+          {sameSitting(sessionConflict, session) ? (
+            <button
+              type="button"
+              class="text-button"
+              onClick={() => {
+                confirmedVersion.current = sessionConflict.version ?? confirmedVersion.current;
+                outbox().clearConflict(itemKey);
+                setSessionConflict(null);
+                if (sessionRef.current) {
+                  // What's typed here wins; what only the server's tests change stays theirs.
+                  const next = {
+                    ...sessionRef.current,
+                    plans: sessionConflict.plans,
+                    passed: sessionConflict.passed,
+                    submissions: sessionConflict.submissions,
+                    version: sessionConflict.version ?? sessionRef.current.version,
+                  };
+                  sessionRef.current = next;
+                  setSession(next);
+                  saver.schedule(next);
+                  void saver.flush().catch(() => {});
+                }
+              }}
+            >
+              Keep mine
+            </button>
+          ) : null}
           <button
             type="button"
             class="text-button"
             onClick={() => {
-              confirmedVersion.current = sessionConflict.version ?? confirmedVersion.current;
-              outbox().clearConflict(itemKey);
-              setSessionConflict(null);
-              if (sessionRef.current) {
-                const next = {
-                  ...sessionRef.current,
-                  version: sessionConflict.version ?? sessionRef.current.version,
-                };
-                sessionRef.current = next;
-                setSession(next);
-                saver.schedule(next);
-                void saver.flush().catch(() => {});
-              }
-            }}
-          >
-            Keep mine
-          </button>
-          <button
-            type="button"
-            class="text-button"
-            onClick={() => {
-              confirmedVersion.current = sessionConflict.version ?? confirmedVersion.current;
               outbox().clearConflict(itemKey);
               writeUnsaved(itemKey, null);
-              void updateCachedCodingSession(itemKey, sessionConflict);
-              sessionRef.current = sessionConflict;
-              setSession(sessionConflict);
               setSessionConflict(null);
+              // Opened again, with the parts and code as they now are.
+              void load();
             }}
           >
             Load theirs
@@ -775,7 +799,7 @@ function Statement({
 
 /** A case's input and what it should print, or in API mode, its calls and what they return. */
 function CaseIo({ api, known }: { api: Api | null; known: Case }) {
-  if (api) return <pre class="coding-io">{showCalls(api, known.input, known.output)}</pre>;
+  if (api) return <pre class="coding-io calls">{showCalls(api, known.input, known.output)}</pre>;
   return (
     <>
       <pre class="coding-io">{known.input}</pre>
@@ -1116,8 +1140,8 @@ function CodeStep({
                 {opened.part_count > 1 ? partOf(session.part, opened.part_count) : "Problem"}
               </summary>
               <Statement opened={opened} session={session} open={false} />
-              {opened.parts.map((part, at) =>
-                part.examples.map((example, index) => {
+              {applying(opened.parts, session.part).map((at) =>
+                (opened.parts[at]?.examples ?? []).map((example, index) => {
                   const name =
                     opened.part_count > 1
                       ? `Part ${at + 1}'s example ${index + 1}`
@@ -1241,7 +1265,7 @@ function summarise(graded: Graded, api: Api | null): string {
           const verdict = `${describeCase(r.case)}: ${r.passed ? "passed" : describeRun(r.run)}`;
           const tooMuch = printedTooMuch(r.run);
           const output = api
-            ? `\ncalls, and what they should return:\n${showCalls(api, r.input, r.expected)}\nwhat they returned:\n${showCalls(api, r.input, r.run.stdout)}`
+            ? `\ncalls, and what they should return:\n${showCalls(api, r.input, r.expected)}\nwhat they returned:\n${showCalls(api, r.input, r.run.stdout, r.expected)}`
             : `\ninput:\n${r.input}${tooMuch ? `\n${tooMuch}` : `\nexpected:\n${r.expected}\ngot:\n${r.run.stdout}`}`;
           return `${verdict}${output}${r.run.stderr ? `\nstderr:\n${r.run.stderr}` : ""}`;
         })
@@ -1303,11 +1327,13 @@ function CaseView({ api, result }: { api: Api | null; result: CaseResult }) {
           {api ? (
             <>
               <h3 class="coding-subheading">Calls, and what they should return</h3>
-              <pre class="coding-io">{showCalls(api, result.input, result.expected)}</pre>
+              <pre class="coding-io calls">{showCalls(api, result.input, result.expected)}</pre>
               {tooMuch ? null : (
                 <>
                   <h3 class="coding-subheading">What yours returned</h3>
-                  <pre class="coding-io">{showCalls(api, result.input, result.run.stdout)}</pre>
+                  <pre class="coding-io calls">
+                    {showCalls(api, result.input, result.run.stdout, result.expected)}
+                  </pre>
                 </>
               )}
             </>

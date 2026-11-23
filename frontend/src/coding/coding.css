@@ -280,3 +280,15 @@
   color: var(--ok);
   font-weight: 600;
 }
+
+/* Calls in API mode wrap rather than scroll, so a phone shows them whole, without a scroll
+   inside a scroll. */
+.coding-io.calls {
+  max-height: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coding-problem.zen > .coding-part-bar {
+  display: none;
+}

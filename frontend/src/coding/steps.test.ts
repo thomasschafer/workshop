@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  applying,
   describeCase,
   describeRun,
   formatSize,
   lastCall,
   partOf,
   printedTooMuch,
+  pythonLiteral,
   pythonValue,
   reached,
   sameReturn,
+  sameSitting,
   showCalls,
   stepAfter,
   stepsFor,
@@ -109,6 +112,11 @@ describe("steps", () => {
       'TextBuffer()\ninsert("hi", 2)\ntext()  ✗ stopped here\nlines()',
     );
     expect(showCalls({ class: null }, '["area",2,3]\n', "6\n")).toBe("area(2, 3) → 6");
+    // Beside what was expected, a forgotten return shows as None, the first call that differs
+    // is marked, and results beyond the calls are shown.
+    expect(showCalls(buffer, input, 'null\nnull\n["x"]\n7\n', 'null\n"hi"\n["y"]\n')).toBe(
+      'TextBuffer()\ninsert("hi", 2)\ntext() → None  ✗\nlines() → ["x"]\n(more than was called) 7',
+    );
     expect(pythonValue(1.5)).toBe("1.5");
     expect(lastCall(buffer, input, 'null\n"hi"\n[]\n')).toEqual({
       call: "lines()",
@@ -129,5 +137,24 @@ describe("steps", () => {
     expect(sameReturn("3", "4")).toBe(false);
     expect(sameReturn('"3"', "three")).toBe(false);
     expect(sameReturn("false", "True")).toBe(false);
+    // Words inside a string are the string's.
+    expect(sameReturn('"True or None"', "'True or None'")).toBe(true);
+    expect(sameReturn('["it\'s"]', '["it\'s"]')).toBe(true);
+    expect(sameReturn("[1,2]", "(1, 2)")).toBe(true);
+    expect(pythonLiteral("[1, 'a', {'k': None}]")).toEqual([1, "a", { k: null }]);
+    expect(pythonLiteral("print(1)")).toBeUndefined();
+    expect(pythonLiteral("[1, 2")).toBeUndefined();
+  });
+
+  it("know which parts' tests apply, and when two sessions are one sitting", () => {
+    const part = (replaces: number[]) => ({ prompt: "", examples: [], hints: [], replaces });
+    const parts = [part([]), part([]), part([0])];
+    expect(applying(parts, 0)).toEqual([0]);
+    expect(applying(parts, 1)).toEqual([0, 1]);
+    expect(applying(parts, 2)).toEqual([1, 2]);
+    const here = session({ started_at: 5, part: 1, plans: ["a"] });
+    expect(sameSitting(here, { ...here, plan: "other" })).toBe(true);
+    expect(sameSitting(here, { ...here, part: 2, plans: ["a", "b"] })).toBe(false);
+    expect(sameSitting(here, { ...here, started_at: 6 })).toBe(false);
   });
 });

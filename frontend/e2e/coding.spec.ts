@@ -842,4 +842,62 @@ test("works through a problem in parts, keeping the code from one part to the ne
   // A hint for the part being worked on.
   await phone.getByRole("button", { name: "A hint" }).tap();
   await expect(phone.getByRole("list", { name: "Hints" })).toContainText("reverse it");
+
+  // Giving up part-way reviews the whole problem: every part, and how far they got.
+  await phone.getByRole("button", { name: "Submit" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Test", { timeout: 30_000 });
+  await phone.getByRole("button", { name: /Give up/ }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Review");
+  await expect(phone.locator(".learn-verdict")).toHaveText(
+    "Not solved this time: you got through 1 of 3 parts.",
+  );
+  await expect(phone.locator(".coding-parts details summary")).toHaveText([
+    "Part 1",
+    "Part 2",
+    "Part 3",
+  ]);
+  await expect(phone.getByRole("region", { name: "Your plan" })).toContainText(
+    "Your plan for part 1",
+  );
+  await expect(phone.getByRole("region", { name: "Approach" })).toContainText("second stack");
+  await expect(phone.locator(".rating.again")).toHaveClass(/suggested/);
+  expect(await scrollsSideways()).toBe(false);
+  await phone.getByRole("button", { name: "Forgot" }).tap();
+  await expect(phone.getByRole("button", { name: "More coding" })).toBeVisible();
+});
+
+test("shows only what applies once a part changes an earlier one", async () => {
+  await phone.goto("/coding/sample/stock");
+  await phone.getByRole("button", { name: "Skip" }).tap();
+  await phone.getByRole("button", { name: "Next: code" }).tap();
+  await writeCode(
+    readFileSync(
+      join(
+        import.meta.dirname,
+        "..",
+        "..",
+        "packs",
+        "sample",
+        "items",
+        "stateful",
+        "stock",
+        "reference.py",
+      ),
+      "utf8",
+    ),
+    "/api/coding/items/sample/stock",
+  );
+  await phone.reload();
+  await phone.getByRole("button", { name: "Submit" }).tap();
+  await expect(phone.locator(".coding-part-bar")).toHaveText("Part 2 of 2", { timeout: 30_000 });
+  await expect(phone.locator(".coding-parts details summary")).toHaveText([
+    "Part 1, changed by part 2",
+  ]);
+  await phone.getByRole("button", { name: "Skip" }).tap();
+  await phone.getByRole("button", { name: "Next: code" }).tap();
+  await phone.locator(".coding-statement.compact > summary").tap();
+  const drawer = phone.locator(".coding-statement.compact");
+  await expect(drawer.getByRole("region", { name: "Part 2's example 1" })).toBeVisible();
+  await expect(drawer.getByRole("region", { name: "Part 1's example 1" })).toHaveCount(0);
+  expect(await scrollsSideways()).toBe(false);
 });

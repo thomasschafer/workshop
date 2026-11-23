@@ -1,5 +1,5 @@
 import type { Rating } from "../learning/types";
-import type { Api, CaseRef, Mode, Run, Session, StepName, TwistKind } from "./types";
+import type { Api, CaseRef, Mode, OpenedPart, Run, Session, StepName, TwistKind } from "./types";
 
 const STEPS: Record<Mode, StepName[]> = {
   solve: ["understand", "plan", "code", "test", "review"],
@@ -76,6 +76,28 @@ export function revealed(session: Session, count: number): number {
   return session.mode === "solve" && session.step !== "review" ? session.part + 1 : count;
 }
 
+/**
+ * Whether two sessions are the same sitting at the same place in it: started together, in the
+ * same mode and on the same part. Only then can what's on the device be saved over the other.
+ */
+export function sameSitting(a: Session, b: Session): boolean {
+  return a.started_at === b.started_at && a.mode === b.mode && a.part === b.part;
+}
+
+/**
+ * The parts, counting from 0, whose examples and tests apply once the learner is on `part`: it,
+ * and every earlier part that no part up to it replaces, as `Coding::applying` says.
+ */
+export function applying(parts: readonly OpenedPart[], part: number): number[] {
+  return parts
+    .slice(0, part + 1)
+    .map((_, earlier) => earlier)
+    .filter(
+      (earlier) =>
+        !parts.slice(earlier + 1, part + 1).some((later) => later.replaces.includes(earlier)),
+    );
+}
+
 /** Where the learner is in a problem in parts, such as "Part 2 of 3". */
 export function partOf(part: number, count: number): string {
   return `Part ${part + 1} of ${count}`;
@@ -110,31 +132,59 @@ function values(lines: string): { value: unknown; json: boolean }[] {
     });
 }
 
+/** Whether two values are the same, as the server compares results: as values. */
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
 /**
  * The calls a case makes in API mode, shown as Python, a line each, with what each returned
  * beside it, from `output`, unless it's null. A call that returned nothing has nothing beside
- * it, and the first a run stopped at, with no result, says so.
+ * it, and the first a run stopped at, with no result, says so. Given what was `expected`, as
+ * for what a solution returned, a call returning nothing where something was expected says
+ * `→ None`, the first call whose result differs is marked, and results beyond the calls are
+ * shown too.
  */
-export function showCalls(api: Api, input: string, output: string | null): string {
+export function showCalls(
+  api: Api,
+  input: string,
+  output: string | null,
+  expected?: string,
+): string {
   const results = output === null ? null : values(output);
+  const wanted = expected === undefined ? null : values(expected);
   let next = 0;
   let stopped = false;
-  return values(input)
-    .map(({ value, json }) => {
-      if (!json || !Array.isArray(value) || typeof value[0] !== "string") return String(value);
-      const [name, ...args] = value as [string, ...unknown[]];
-      const call = `${name}(${args.map(pythonValue).join(", ")})`;
-      if (name === api.class || results === null) return call;
-      const result = results[next++];
-      if (result === undefined) {
-        if (stopped) return call;
-        stopped = true;
-        return `${call}  ✗ stopped here`;
-      }
-      if (!result.json) return `${call} → ${String(result.value)}`;
-      return result.value === null ? call : `${call} → ${pythonValue(result.value)}`;
-    })
-    .join("\n");
+  let marked = false;
+  const lines = values(input).map(({ value, json }) => {
+    if (!json || !Array.isArray(value) || typeof value[0] !== "string") return String(value);
+    const [name, ...args] = value as [string, ...unknown[]];
+    const call = `${name}(${args.map(pythonValue).join(", ")})`;
+    if (name === api.class || results === null) return call;
+    const at = next++;
+    const result = results[at];
+    if (result === undefined) {
+      if (stopped) return call;
+      stopped = true;
+      marked = true;
+      return `${call}  ✗ stopped here`;
+    }
+    const want = wanted?.[at];
+    const differs = want !== undefined && !(result.json && sameValue(result.value, want.value));
+    const mark = differs && !marked ? "  ✗" : "";
+    if (differs) marked = true;
+    if (!result.json) return `${call} → ${String(result.value)}${mark}`;
+    const shown = result.value !== null || (want !== undefined && want.value !== null);
+    return `${shown ? `${call} → ${pythonValue(result.value)}` : call}${mark}`;
+  });
+  if (results !== null) {
+    for (const extra of results.slice(next)) {
+      lines.push(
+        `(more than was called) ${extra.json ? pythonValue(extra.value) : String(extra.value)}`,
+      );
+    }
+  }
+  return lines.join("\n");
 }
 
 /** The last call a case makes in API mode, as Python, and what it returns, as JSON. */
@@ -166,6 +216,89 @@ function canonical(value: unknown): unknown {
 }
 
 /**
+ * A Python literal, as a learner types what a call returns: None, True and False, numbers,
+ * strings in either quotes, and lists, tuples and dicts of them. Undefined for anything else.
+ */
+export function pythonLiteral(text: string): unknown {
+  let at = 0;
+  const fail = Symbol("not a literal");
+  const space = () => {
+    while (at < text.length && /\s/.test(text[at] ?? "")) at++;
+  };
+  const value = (): unknown => {
+    space();
+    const ch = text[at];
+    if (ch === '"' || ch === "'") {
+      let out = "";
+      at++;
+      while (at < text.length && text[at] !== ch) {
+        if (text[at] === "\\") {
+          at++;
+          const escaped = text[at] ?? "";
+          out += ({ n: "\n", t: "\t", r: "\r" } as Record<string, string>)[escaped] ?? escaped;
+        } else {
+          out += text[at];
+        }
+        at++;
+      }
+      if (text[at] !== ch) throw fail;
+      at++;
+      return out;
+    }
+    if (ch === "[" || ch === "(") {
+      const close = ch === "[" ? "]" : ")";
+      at++;
+      const items: unknown[] = [];
+      space();
+      while (text[at] !== close) {
+        items.push(value());
+        space();
+        if (text[at] === ",") at++;
+        else if (text[at] !== close) throw fail;
+        space();
+      }
+      at++;
+      return items;
+    }
+    if (ch === "{") {
+      at++;
+      const entries: [string, unknown][] = [];
+      space();
+      while (text[at] !== "}") {
+        const key = value();
+        space();
+        if (text[at] !== ":") throw fail;
+        at++;
+        entries.push([String(key), value()]);
+        space();
+        if (text[at] === ",") at++;
+        else if (text[at] !== "}") throw fail;
+        space();
+      }
+      at++;
+      return Object.fromEntries(entries);
+    }
+    const word = /^(None|True|False|null|true|false|-?\d+(\.\d+)?([eE][-+]?\d+)?)/.exec(
+      text.slice(at),
+    )?.[0];
+    if (word === undefined) throw fail;
+    at += word.length;
+    if (word === "None" || word === "null") return null;
+    if (word === "True" || word === "true") return true;
+    if (word === "False" || word === "false") return false;
+    return Number(word);
+  };
+  try {
+    const parsed = value();
+    space();
+    return at === text.length ? parsed : undefined;
+  } catch (e) {
+    if (e === fail) return undefined;
+    throw e;
+  }
+}
+
+/**
  * Whether what the learner typed is what a call returns, given as JSON: written as Python or
  * as JSON, and a string with or without its quotes.
  */
@@ -177,17 +310,9 @@ export function sameReturn(expected: string, typed: string): boolean {
     return false;
   }
   const text = typed.trim();
-  if (typeof value === "string" && (text === value || text === `'${value}'`)) return true;
-  const asJson = text
-    .replace(/\bNone\b/g, "null")
-    .replace(/\bTrue\b/g, "true")
-    .replace(/\bFalse\b/g, "false")
-    .replace(/'([^'"\\]*)'/g, '"$1"');
-  try {
-    return JSON.stringify(canonical(JSON.parse(asJson))) === JSON.stringify(canonical(value));
-  } catch {
-    return false;
-  }
+  if (typeof value === "string" && text === value) return true;
+  const parsed = pythonLiteral(text);
+  return parsed !== undefined && sameValue(parsed, value);
 }
 
 /** How a run that went wrong went wrong. */
