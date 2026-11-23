@@ -17,6 +17,10 @@ The writer can ask you questions, such as which topics you'd like more of. Each 
 
 Only one run happens at a time, from the app or the command.
 
+## Problems in parts, and in API mode
+
+The writer can write coding problems in parts, where each part adds requirements to the last and the learner keeps their code from one to the next, and problems in API mode, where the learner writes a class or functions in Python that the tests call, as [docs/packs.md](packs.md#problems-in-parts) describes. They suit skills about designing code that's easy to change, such as data structures with state, an editor's buffer or an inventory, more than a single algorithm. Every part must pass its check, as `workshop pack check` runs it: each part's references must pass its tests and the earlier parts' it doesn't replace, and agree with the brute forces that apply. The reviewer solves the whole problem, every part, blind.
+
 ## Harder problems where they're too easy
 
 Rating a coding problem easy retires it, and tells the author to write harder ones for its skills. Each skill has a level from 1 to 5, on the same scale as an item's `difficulty`, worked out from your attempts at its problems: it starts at 3, a problem rated easy lifts it to one above that problem's difficulty if that's higher, and one you forgot lowers it to one below, if that's lower. So a level settles just above what you find easy and below what you forget. The writer is told each skill's level, to write its new problems at that level with their `difficulty` set, and, for skills with problems retired, which ones they were and how hard, so it writes nothing at the same level or easier.

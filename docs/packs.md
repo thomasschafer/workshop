@@ -213,7 +213,7 @@ Answers can be typed as fractions, decimals or percentages. `## Solution` (requi
 
 ### Coding
 
-A problem to solve in code, in Python, Rust or Haskell, as a directory with an `item.md` and its files. In the Coding track by default. Programs read their input on stdin and print their answer; outputs are compared line by line, ignoring whitespace at the ends of lines and blank lines before and after.
+A problem to solve in code, in Python, Rust or Haskell, as a directory with an `item.md` and its files. In the Coding track by default. Programs read their input on stdin and print their answer; outputs are compared line by line, ignoring whitespace at the ends of lines and blank lines before and after. A problem can instead be in API mode, where the learner writes a class or functions that the tests call, and it can come in parts, each adding requirements to the last; both are described below.
 
 ```toml
 kind = "coding"
@@ -252,9 +252,110 @@ Only the first 64 KiB of what a program prints is kept, and output that's cut of
 
 Sections: `## Approach` (required), how it's meant to be solved, shown once it's solved and when it comes back for review; `## Hints`, a list of nudges from gentlest to most telling, which the learner can reveal one at a time; and `## Notes`.
 
-`workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. It needs the languages' programs installed: `python3`, `rustc`, and `ghc` for Haskell; an item that can't be run for want of one is reported as skipped rather than failed, with what to install. Everything is built and run in a sandbox, with no network and writing only to a directory of its own, where the system has one ([docs/author.md](author.md#running-what-the-writer-wrote) says which); where it doesn't, the check warns that it's running the pack's programs with all your access.
+`workshop pack check` builds and runs everything: the brute force must pass the examples, each reference must pass the examples and tests and agree with the brute force on `random_inputs` random inputs, and each starter must build. In API mode, each starter must also define what the tests call. A problem in parts is checked part by part, as below. It needs the languages' programs installed: `python3`, `rustc`, and `ghc` for Haskell; an item that can't be run for want of one is reported as skipped rather than failed, with what to install. Everything is built and run in a sandbox, with no network and writing only to a directory of its own, where the system has one ([docs/author.md](author.md#running-what-the-writer-wrote) says which); where it doesn't, the check warns that it's running the pack's programs with all your access.
 
-A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed, dictated or explained aloud; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution, where they can explain their solution aloud for the grader to mark against the approach. When it comes back for review, it's a twist on it, which takes a few minutes rather than solving it again: the tutor poses a follow-up, given the problem, its approach and the learner's solution from last time, such as a new constraint, a far larger scale, a streaming version, a better complexity target or different edge cases, a different sort each time. The learner answers by explaining how they'd change their approach, typed, dictated or aloud, and can change their code too; the grader marks the answer, and its mark is the review's rating, which schedules the problem and feeds mastery, and what it finds goes in the mistake log. Each review's twist is kept once it's posed, so opening it again shows the same one. When there's no model to pose one, or the server or the model can't be reached, the review says so and recalls the approach instead: writing down how to solve it, then comparing that with the item's approach. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
+#### API mode
+
+Rather than a program that reads its input and prints its answer, a problem in API mode asks for a class, or functions, and its tests call them, as a library's users would. It's for Python only: Workshop's driver imports the learner's code as a module and calls it by name, which a compiled language would need a driver of its own for, written for each problem's types. Say which class the tests make with `[api]` in the front matter, after the other fields; without a `class`, as `api = {}`, they call the module's functions instead.
+
+```toml
+[api]
+class = "TextBuffer"
+```
+
+A starter is then the class or functions to fill in, with nothing reading stdin, and it must define what the tests call, unfinished as it is. Each case in `tests.toml` is the calls it makes, in order, each with its arguments and what it returns. A call without `returns` returns nothing, `None` in Python, and that's checked too. `new` is what the class is made with, before the calls, nothing if it's left out; every case makes its own.
+
+```toml
+[[example]]
+calls = [
+  { call = "insert", args = ["hello"] },
+  { call = "delete", args = [2] },
+  { call = "text", returns = "hel" },
+]
+
+[[test]]
+new = ["start"]
+calls = [{ call = "text", returns = "start" }]
+```
+
+Arguments and results can be strings, numbers, booleans, and lists and tables of them. Results are compared as values, so `3` and `3.0` are the same, as are tables with their keys in another order; a tuple comes back as a list. What the learner's code prints goes to stderr, so it can't be taken for a result. The app shows the calls as Python, such as `text() → "hel"`, and when a solution is wrong, what each call returned beside what it should have.
+
+The brute force is a module too, defining the same class or functions, in Python, and the inputs program prints calls rather than an input to read: one JSON array a line, the name called, then its arguments, where calling the class makes a new one. So the inputs program for the example above might print:
+
+```
+["TextBuffer"]
+["insert", "ab"]
+["delete", 3]
+["text"]
+```
+
+#### Problems in parts
+
+Some of the most useful practice is building something, then extending it as new requirements arrive, keeping what it did before working. A problem in parts does that. Its first part is an ordinary problem, with the fields above. Each part after it is a `[[parts]]` table, after the other fields, with its own reference solutions, one in each of the problem's languages, which solve it and every part before it, and its own `tests.toml`:
+
+```toml
+[[parts]]
+reference = ["undo/reference.py"]
+tests = "undo/tests.toml"
+brute_force = "undo/brute.py"   # optional, with inputs
+inputs = "undo/inputs.py"
+replaces = [1]                  # optional: earlier parts whose requirements this one changes
+```
+
+What each part adds is a section of its own, `## Part 2`, `## Part 3` and so on, and it can have hints of its own, as `## Part 2 hints`; `## Hints` are the first part's. A problem has at most five parts.
+
+Every earlier part's examples and tests still apply at a later part, and its brute force is still compared with, unless a part changes what an earlier one asked for, and says so with `replaces`, counting parts from 1. From then on, the replaced part's tests and brute force don't apply, so the replacing part's tests should cover whatever of it still holds. A part's brute force and inputs need only cover what it adds, as the earlier parts' still apply; a part with no brute force is checked on its tests and the earlier parts' brute forces.
+
+The learner sees a part only once they reach it. They keep their code from one part to the next, so how they built the earlier parts makes the change easy or doesn't, which is the point. `## Approach` covers the whole problem, every part, and is what the review compares with.
+
+Here's an item in three parts, in API mode, as `items/stateful/text-buffer/item.md` in the sample pack has it:
+
+````markdown
++++
+kind = "coding"
+title = "A text buffer with undo"
+skills = ["data-structures"]
+languages = ["python"]
+reference = ["reference.py"]
+starter = ["starter.py"]
+brute_force = "brute.py"
+inputs = "inputs.py"
+tests = "tests.toml"
+
+[api]
+class = "TextBuffer"
+
+[[parts]]
+reference = ["undo/reference.py"]
+brute_force = "undo/brute.py"
+inputs = "undo/inputs.py"
+tests = "undo/tests.toml"
+
+[[parts]]
+reference = ["redo/reference.py"]
+brute_force = "redo/brute.py"
+inputs = "redo/inputs.py"
+tests = "redo/tests.toml"
++++
+Write a `TextBuffer` class for the text typed into an editor, with `insert(text)`,
+`delete(count)` and `text()`.
+
+## Part 2
+
+Add `undo()`, which reverses the latest `insert` or `delete` not undone yet.
+
+## Part 3
+
+Add `redo()`, which puts back the latest change undone.
+
+## Approach
+
+A list of characters, a stack of changes to undo, and a stack of changes undone to redo.
+````
+
+`workshop pack check` checks each part in turn: each brute force must pass its part's examples, and its inputs program vary with its seed, and each part's references must pass every example and test that applies at that part, its own and the earlier parts' it doesn't replace, and agree with every brute force that applies on `random_inputs` random inputs. A failure says which part, such as `part 2: undo/reference.py is wrong: it printed the wrong answer on part 1's test 2`.
+
+A learner works through a problem in steps of a few minutes each: understanding it, by working out what the first example prints; planning, in words, typed, dictated or explained aloud; coding, and running the examples; testing, when it's submitted to the hidden tests and compared with the brute force on random inputs; and reviewing, against the approach and a reference solution, where they can explain their solution aloud for the grader to mark against the approach. A problem in parts goes through understanding, planning, coding and testing for each part: passing a part's tests, and the earlier parts' that still apply, moves the learner on to understanding the next, with their code as it is, and passing the last moves them on to reviewing the whole problem. Each step is saved as it's done, and the part with it, so coming back carries on at the same part and step. The tutor and the grader are told which part the learner is on, and see the parts up to it. The problem is one item for scheduling: it's rated once, at the end, suggested from how far they got and the help they took, so giving up part-way suggests Forgot and solving it again next time, and a problem passed with one submission a part and no hints suggests Good. When it comes back for review, it's a twist on it, on the whole problem for one in parts, which takes a few minutes rather than solving it again: the tutor poses a follow-up, given the problem, its approach and the learner's solution from last time, such as a new constraint, a far larger scale, a streaming version, a better complexity target or different edge cases, a different sort each time. The learner answers by explaining how they'd change their approach, typed, dictated or aloud, and can change their code too; the grader marks the answer, and its mark is the review's rating, which schedules the problem and feeds mastery, and what it finds goes in the mistake log. Each review's twist is kept once it's posed, so opening it again shows the same one. When there's no model to pose one, or the server or the model can't be reached, the review says so and recalls the approach instead: writing down how to solve it, then comparing that with the item's approach. A problem the learner couldn't solve last time is solved again instead, and they can choose to solve it again any time.
 
 Rating a problem easy retires it, as does answering its twist in full with nothing wrong: it's never offered again, for review or as new, and counts towards its skills as known for good. Retired problems are listed at the end of the Coding track, where any can be brought back, due straight away; a retired problem done again anyway, and rated anything but easy, is brought back too. Cards and mental maths never retire: they're short, and what spaced review helps most, so rating one easy only sends it further off. Code to read and probability questions can be retired by choice, as below.
 
@@ -405,7 +506,7 @@ A design prompt is worked through as a design session of five stages: clarifying
 
 ## Timed rounds
 
-Coding problems, probability questions and design prompts can also be done as timed rounds, in the Timed rounds track: the problem against a visible clock, as in a live session, with the examiner. The learner keeps their working in one place, typed or dictated, and talks with the examiner as they go; it answers questions without giving the method away and, once they have an answer, asks follow-ups that extend or change the problem. In a round of a design prompt, it answers questions about the requirements from the prompt's brief, as a design session's coach does, with a brief made up as the round starts for a prompt without one, and the grader marks what was asked too. A round lasts the item's `minutes`, and at least 10. When time runs out, or the learner ends it, the grader marks the working and what was said against a rubric: a design prompt's own, and for a coding problem or a probability question, one Workshop has for rounds of each, judged against the item's approach or solution. Answering the examiner's follow-ups well is a point in each. That counts as an attempt, and what the grader finds goes in the mistake log.
+Coding problems, probability questions and design prompts can also be done as timed rounds, in the Timed rounds track: the problem against a visible clock, as in a live session, with the examiner. The learner keeps their working in one place, typed or dictated, and talks with the examiner as they go; it answers questions without giving the method away and, once they have an answer, asks follow-ups that extend or change the problem. In a round of a design prompt, it answers questions about the requirements from the prompt's brief, as a design session's coach does, with a brief made up as the round starts for a prompt without one, and the grader marks what was asked too. A round lasts the item's `minutes`, and at least 10. A coding problem in parts is done whole in a round, every part at once. When time runs out, or the learner ends it, the grader marks the working and what was said against a rubric: a design prompt's own, and for a coding problem or a probability question, one Workshop has for rounds of each, judged against the item's approach or solution. Answering the examiner's follow-ups well is a point in each. That counts as an attempt, and what the grader finds goes in the mistake log.
 
 Rounds are long, so the track is only on the home screen, and Continue only offers one, when the learner has said they've got a while, or has a round under way. The clock only runs while the round is open in the app. If the app closes or the phone sleeps, the clock stops, and coming back within half an hour carries on where it was, with the examiner told of the break. After longer than that, the sitting is over, so the round ends as it was left: it's marked, and what the grader finds is kept, but it doesn't count as an attempt, as a round cut short says too little about what the learner knows.
 
