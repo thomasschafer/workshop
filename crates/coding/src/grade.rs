@@ -340,6 +340,8 @@ pub async fn run_all(
 pub struct Oracle {
     /// The part whose they are.
     part: usize,
+    /// Whether the brute force is called through the driver, in API mode.
+    api: bool,
     brute_force: Program,
     inputs: Program,
     made: std::sync::Mutex<std::collections::HashMap<(u64, u32), Case>>,
@@ -397,6 +399,7 @@ impl Oracle {
         };
         Ok(Ok(Self {
             part,
+            api: coding.api.is_some(),
             brute_force,
             inputs,
             made: std::sync::Mutex::default(),
@@ -469,6 +472,12 @@ impl Oracle {
             return Ok(Err(format!(
                 "the brute force printed more than {} on the input from seed {seed} and size {size}, where output is cut off, so its answer can't be compared with; keep inputs small enough for their answers to be shorter than that",
                 workshop_runner::size(limit)
+            )));
+        }
+        if self.api && output::normalise(&answered.stdout).is_empty() {
+            return Ok(Err(format!(
+                "the inputs program made no calls that return anything for seed {seed} and size {size}, so there's nothing to compare; make calls besides the class's:\n{}",
+                shortened(input.trim_end())
             )));
         }
         let case = Case {
@@ -833,6 +842,44 @@ mod tests {
             .problem()
             .unwrap();
         assert!(problem.contains("There's no class TextBuffer"), "{problem}");
+    }
+
+    /// Nothing the learner's code reads or writes, even by accident, changes what's compared:
+    /// the calls are read before it's imported, and the results go where it can't write.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn keeps_the_drivers_calls_and_results_from_the_learners_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(dir.path(), Duration::from_secs(30));
+        let cancel = CancellationToken::new();
+        let coding = text_buffer();
+        let reference = coding.parts[0].reference[0].text.clone();
+        let meddling = format!(
+            "import os, sys\nread = sys.stdin.read()\nprint('imported')\n{}",
+            reference.replace(
+                "    def text(self) -> str:\n",
+                "    def text(self) -> str:\n        os.write(1, b'\"forged\"\\n')\n        sys.__stdout__.write('\"forged\"\\n')\n        sys.stdout.write('\"forged\"\\n')\n",
+            )
+        );
+        assert_ne!(meddling, reference);
+        let ran = run_examples(&runtime, &coding, 0, Language::Python, &meddling, &cancel)
+            .await
+            .unwrap();
+        assert!(ran.passed(), "{:?}", ran.problem());
+        let Graded::Ran { results, .. } = &ran else {
+            panic!("didn't run");
+        };
+        assert_eq!(results[0].run.stdout, "null\nnull\nnull\n\"hello wo\"\n");
+        assert!(
+            results[0].run.stderr.contains("imported"),
+            "{:?}",
+            results[0].run
+        );
+        assert!(
+            results[0].run.stderr.contains("forged"),
+            "{:?}",
+            results[0].run
+        );
     }
 
     /// Comparing with a brute force on random inputs works in API mode as it does otherwise,

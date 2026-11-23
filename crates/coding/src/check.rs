@@ -269,22 +269,31 @@ fn passed(coding: &Coding) -> String {
     )
 }
 
-/// Says if a module in API mode can't be imported by the driver, or doesn't define what the
-/// tests call, by running it with no calls.
+/// Says if a module in API mode can't be imported by the driver, or doesn't define everything
+/// the first part's examples and tests call, without calling any of it.
 async fn imports(
     runtime: &Runtime,
     coding: &Coding,
     program: &crate::programs::Program,
     cancel: &CancellationToken,
 ) -> Result<Option<String>> {
-    let run = runtime.run(program, &[], "", cancel).await?;
+    let first = &coding.parts[0];
+    let calls: String = first
+        .examples
+        .iter()
+        .chain(&first.tests)
+        .map(|case| case.input.as_str())
+        .collect();
+    let run = runtime
+        .run(program, &["--names".to_owned()], &calls, cancel)
+        .await?;
     Ok((!run.succeeded()).then(|| {
         let api = coding
             .api
             .as_ref()
             .expect("only modules in API mode are imported");
         format!(
-            "{} when it's imported, and should define {}, unfinished as it is:\n{}",
+            "{} when it's imported, and should define {}, with everything part 1 calls, unfinished as it is:\n{}",
             describe(&run),
             api.describe(),
             grade::shortened(run.stderr.trim_end())
@@ -1091,6 +1100,65 @@ mod tests {
         let verdict = check_coding(&runtime, &misnamed, &cancel).await.unwrap();
         assert!(
             matches!(&verdict, Verdict::Failed(why) if why.starts_with("the starter starter.py crashed when it's imported, and should define the class TextBuffer") && why.contains("There's no class TextBuffer")),
+            "{verdict:?}"
+        );
+    }
+
+    /// A problem in API mode calling the module's functions, rather than a class's methods.
+    fn areas(starter: &str, inputs: &str) -> Coding {
+        let item = "+++\nkind = \"coding\"\nskills = [\"sums\"]\nlanguages = [\"python\"]\nreference = [\"reference.py\"]\nstarter = [\"starter.py\"]\nbrute_force = \"brute.py\"\ninputs = \"inputs.py\"\ntests = \"tests.toml\"\nrandom_inputs = 20\napi = {}\n+++\nWrite `area(width, height)` and `perimeter(width, height)`.\n\n## Approach\n\nMultiply, and add.\n";
+        problem(&[
+            ("item.md", item),
+            (
+                "tests.toml",
+                "[[example]]\ncalls = [{ call = \"area\", args = [2, 3], returns = 6 }]\n[[test]]\ncalls = [{ call = \"area\", args = [0, 5], returns = 0 }, { call = \"perimeter\", args = [1, 2], returns = 6 }]\n",
+            ),
+            (
+                "reference.py",
+                "def area(width: int, height: int) -> int:\n    return width * height\n\n\ndef perimeter(width: int, height: int) -> int:\n    return 2 * (width + height)\n",
+            ),
+            (
+                "brute.py",
+                "def area(width, height):\n    return sum(height for _ in range(width))\n\n\ndef perimeter(width, height):\n    return width + height + width + height\n",
+            ),
+            ("inputs.py", inputs),
+            ("starter.py", starter),
+        ])
+    }
+
+    const AREA_INPUTS: &str = "import json, random, sys\nrng = random.Random(int(sys.argv[1]))\nfor _ in range(int(sys.argv[2])):\n    print(json.dumps([rng.choice(['area', 'perimeter']), rng.randint(0, 9), rng.randint(0, 9)]))\n";
+    const AREA_STARTER: &str = "def area(width: int, height: int) -> int:\n    raise NotImplementedError\n\n\ndef perimeter(width: int, height: int) -> int:\n    raise NotImplementedError\n";
+
+    /// In API mode with functions, the starter must define every function the first part
+    /// calls, and the inputs program must make calls with results to compare.
+    #[tokio::test]
+    async fn checks_a_problem_calling_functions_in_api_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(
+            dir.path(),
+            Sandbox::detect(&[]).await.unwrap_or(Sandbox::Unconfined),
+        );
+        let cancel = CancellationToken::new();
+        let verdict = check_coding(&runtime, &areas(AREA_STARTER, AREA_INPUTS), &cancel)
+            .await
+            .unwrap();
+        assert!(matches!(&verdict, Verdict::Passed(_)), "{verdict:?}");
+        // A starter without a function the tests call is found without calling anything.
+        let partial = "def area(width: int, height: int) -> int:\n    raise NotImplementedError\n";
+        let verdict = check_coding(&runtime, &areas(partial, AREA_INPUTS), &cancel)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.contains("Your code has no perimeter to call")),
+            "{verdict:?}"
+        );
+        // Blank lines are no calls, however many, so nothing comes back to compare.
+        let silent = "import sys\nprint('\\n' * int(sys.argv[1]))\n";
+        let verdict = check_coding(&runtime, &areas(AREA_STARTER, silent), &cancel)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&verdict, Verdict::Failed(why) if why.starts_with("the inputs program made no calls that return anything")),
             "{verdict:?}"
         );
     }

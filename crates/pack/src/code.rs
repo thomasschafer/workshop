@@ -535,7 +535,7 @@ impl Coding {
                 }
             }
         }
-        Ok(Self {
+        let coding = Self {
             languages,
             starter,
             api,
@@ -543,7 +543,16 @@ impl Coding {
             random_inputs,
             approach,
             notes,
-        })
+        };
+        // Random inputs are what find what a few tests miss, so every part is compared with a
+        // brute force.
+        if let Some(part) = (0..coding.parts.len()).find(|&p| coding.compared_with(p).is_empty()) {
+            return Err(format!(
+                "part {} replaces every earlier part with a brute force, so give it one of its own, with inputs",
+                part + 1
+            ));
+        }
+        Ok(coding)
     }
 }
 
@@ -562,6 +571,13 @@ impl Part {
             return Err("a coding item needs a reference solution".to_owned());
         }
         every_language(languages, "reference solution", &reference)?;
+        if let Some(extra) = reference.iter().find(|s| !languages.contains(&s.language)) {
+            return Err(format!(
+                "{:?} is a reference solution in {}, which isn't in its languages",
+                extra.file,
+                extra.language.name()
+            ));
+        }
         let tests_text = read(&fields.tests)?;
         let tests: TestsFile = toml::from_str(&tests_text)
             .map_err(|err| format!("in {}: {}", fields.tests, err.message()))?;

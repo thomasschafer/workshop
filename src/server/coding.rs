@@ -118,25 +118,10 @@ pub(super) async fn save_session(
     let found = found(&packs, &pack, &item)?;
     let now = now_ms();
     let base = (session.version > 0).then_some(session.version);
-    let (session, spent) = match app
+    let (session, spent) = app
         .problems
         .save_session_checked(&found, session, base, now)
-    {
-        Ok(res) => res,
-        Err(SessionWriteError::Conflict { current }) => {
-            return Err(ApiError(
-                StatusCode::CONFLICT,
-                serde_json::json!({
-                    "error": "This coding session changed on another device.",
-                    "current": current,
-                }),
-            ));
-        }
-        Err(err @ (SessionWriteError::NotStarted | SessionWriteError::Invalid(_))) => {
-            return Err(bad_request(format!("{err:#}")));
-        }
-        Err(SessionWriteError::Other(err)) => return Err(err.into()),
-    };
+        .map_err(write_error)?;
     app.learning.store().record_time(&found.key(), now, spent)?;
     let attempts = app.learning.store().attempts(&found.key())?;
     Ok(Json(app.problems.open(
@@ -204,11 +189,29 @@ fn start_running(app: &Shared, run_id: Option<String>) -> Result<Running<'_>, Ap
     })
 }
 
+/// Why a session couldn't be written, for the app: changed on another device, with what it's
+/// now, or not something the app can do.
+fn write_error(err: SessionWriteError) -> ApiError {
+    match err {
+        SessionWriteError::Conflict { current } => ApiError(
+            StatusCode::CONFLICT,
+            serde_json::json!({
+                "error": "This coding session changed on another device.",
+                "current": current,
+            }),
+        ),
+        err @ (SessionWriteError::NotStarted | SessionWriteError::Invalid(_)) => {
+            bad_request(format!("{err:#}"))
+        }
+        SessionWriteError::Other(err) => err.into(),
+    }
+}
+
 /// The draft being worked on, and the session it's for.
 fn current(app: &Shared, found: &Found<'_>) -> Result<(Session, VersionedFile), ApiError> {
     let session = app
         .problems
-        .session(&found.key())?
+        .session_for(found)?
         .ok_or_else(|| bad_request("Start the problem before running it."))?;
     let code = app.problems.draft(found, session.language)?;
     Ok((session, code))
@@ -302,6 +305,11 @@ pub(super) async fn submit(
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
     let (session, code) = current(&app, &found)?;
+    if session.mode != Mode::Solve {
+        return Err(bad_request(
+            "Only solving a problem submits it, not reviewing it.",
+        ));
+    }
     let body: RunIdBody = optional_json(body)?;
     let running = start_running(&app, body.run_id)?;
     let runtime = crate::coding::runtime(&app.config, &app.paths).await?;
@@ -327,8 +335,16 @@ pub(super) async fn submit(
     let now = now_ms();
     let (session, spent) = app
         .problems
-        .record_submission(&found, None, passed, now)
-        .map_err(|err| anyhow::anyhow!("{err:#}"))?;
+        .record_submission(
+            &found,
+            None,
+            crate::coding::Submitted {
+                part: Some(session.part),
+                passed,
+            },
+            now,
+        )
+        .map_err(write_error)?;
     app.learning.store().record_time(&found.key(), now, spent)?;
     // One per submission: the session's start and its count of submissions say which.
     let id = format!(
@@ -396,7 +412,7 @@ pub(super) async fn finish(
     if !already {
         let session = app
             .problems
-            .session(&key)?
+            .session_for(&found)?
             .ok_or_else(|| bad_request("The problem hasn't been started."))?;
         let now = now_ms();
         let spent = app.problems.touch(&key, now)?;
@@ -473,7 +489,7 @@ pub(super) async fn twist(
     let posing = app.posing_twist.lock().await;
     let session = app
         .problems
-        .session(&key)?
+        .session_for(&found)?
         .ok_or_else(|| bad_request("Start the problem before asking for a twist on it."))?;
     let posed = app.problems.twists(&key)?;
     let session = if session.mode == Mode::Twist && posed.for_session(session.started_at).is_none()
@@ -608,7 +624,7 @@ pub(super) async fn answer_twist(
     }
     let session = app
         .problems
-        .session(&key)?
+        .session_for(&found)?
         .filter(|session| session.mode == Mode::Twist)
         .ok_or_else(|| bad_request("There's no twist being answered on this problem."))?;
     let twist = posed
@@ -697,10 +713,9 @@ pub(super) async fn tutor(
     }
     let packs = packs(&app)?;
     let found = found(&packs, &pack, &item)?;
-    let key = found.key();
     let session = app
         .problems
-        .session(&key)?
+        .session_for(&found)?
         .ok_or_else(|| bad_request("Start the problem before asking about it."))?;
     let step = format!("{:?}", session.step).to_lowercase();
     let revealed = session.revealed(found.coding);
@@ -1314,6 +1329,91 @@ mod tests {
             review["previous_plan"],
             "Part 1: A list of characters\n\nPart 2: A stack of changes\n\nPart 3: "
         );
+    }
+
+    /// A part that changes what an earlier one asked for replaces its tests: a solution to the
+    /// later part passes, though it fails the earlier part's tests.
+    #[tokio::test]
+    async fn a_part_that_changes_an_earlier_one_replaces_its_tests() {
+        let (_dir, router) = test_app().await;
+        let item = "/api/coding/items/sample/stock";
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        let save = |text: String, version: serde_json::Value| {
+            let router = &router;
+            async move {
+                let body = serde_json::json!({ "text": text, "version": version });
+                json(
+                    send(
+                        router,
+                        request("PUT", &format!("{item}/code/python"), Some(body)),
+                    )
+                    .await,
+                )
+                .await
+            }
+        };
+        let code = save(
+            sample_file("stock/reference.py"),
+            opened["languages"][0]["code"]["version"].clone(),
+        )
+        .await;
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["opened"]["session"]["part"], 1, "{submitted}");
+        assert_eq!(
+            submitted["opened"]["parts"][1]["replaces"],
+            serde_json::json!([0])
+        );
+        save(
+            sample_file("stock/sell-what-there-is/reference.py"),
+            code["version"].clone(),
+        )
+        .await;
+        let ran = json(send(&router, request("POST", &format!("{item}/run"), None)).await).await;
+        // Only part 2's example applies.
+        assert_eq!(ran["results"].as_array().unwrap().len(), 1, "{ran}");
+        let submitted =
+            json(send(&router, request("POST", &format!("{item}/submit"), None)).await).await;
+        assert_eq!(submitted["passed"], true, "{submitted}");
+        assert_eq!(submitted["opened"]["session"]["step"], "review");
+    }
+
+    /// Only the server's own run of the tests submits, passes or moves a part on: the app can't
+    /// save a session as passed or moved on, nor submit a review.
+    #[tokio::test]
+    async fn only_the_servers_tests_pass_a_part() {
+        let (_dir, router) = test_app().await;
+        let item = "/api/coding/items/sample/text-buffer";
+        let opened =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        for (field, value) in [
+            ("passed", serde_json::json!(true)),
+            ("submissions", serde_json::json!(3)),
+            ("mode", serde_json::json!("twist")),
+        ] {
+            let mut session = opened["session"].clone();
+            session[field] = value;
+            let refused = send(
+                &router,
+                request("PUT", &format!("{item}/session"), Some(session)),
+            )
+            .await;
+            assert_eq!(refused.status(), StatusCode::BAD_REQUEST, "{field}");
+        }
+        // A review can't be submitted.
+        let finish =
+            serde_json::json!({ "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a95", "rating": "good" });
+        send(
+            &router,
+            request("POST", &format!("{item}/finish"), Some(finish)),
+        )
+        .await;
+        let review =
+            json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
+        assert_ne!(review["session"]["mode"], "solve");
+        let refused = send(&router, request("POST", &format!("{item}/submit"), None)).await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

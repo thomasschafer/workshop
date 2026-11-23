@@ -111,7 +111,8 @@ pub(super) struct Opened {
     /// In Markdown.
     prompt: String,
     source: Option<String>,
-    /// A coding problem's examples, to work from: every part's, for one in parts.
+    /// A coding problem's examples, to work from: for one in parts, those of every part that
+    /// still apply at the last.
     examples: Vec<Case>,
     /// How a coding problem's tests call the code, in API mode, which its examples are calls
     /// for.
@@ -161,10 +162,11 @@ fn opened(pack: &Pack, key: String, item: &Item, round: Option<Round>) -> Opened
     let (prompt, examples, api) = match &item.content {
         Content::Coding(coding) => (
             coding.statement(coding.last()),
+            // Those that apply to the whole problem, without parts' that later ones replace.
             coding
-                .parts
-                .iter()
-                .flat_map(|part| part.examples.clone())
+                .applying(coding.last())
+                .into_iter()
+                .flat_map(|part| coding.parts[part].examples.clone())
                 .collect(),
             crate::coding::OpenedApi::of(coding),
         ),
@@ -548,6 +550,32 @@ mod tests {
     }
 
     const ITEM: &str = "/api/rounds/sample/two-dice-seven";
+
+    /// A round of a problem in parts is of the whole problem: every part's prompt, and the
+    /// examples that still apply at the last, without those of a part it replaces.
+    #[tokio::test]
+    async fn opens_a_round_of_a_problem_in_parts_as_a_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = test_app_in(dir.path(), "");
+        let opened = json(
+            send(
+                &router,
+                request("POST", "/api/rounds/sample/stock/open", None),
+            )
+            .await,
+        )
+        .await;
+        let prompt = opened["prompt"].as_str().unwrap();
+        assert!(
+            prompt.contains("## Part 1") && prompt.contains("## Part 2"),
+            "{prompt}"
+        );
+        assert_eq!(opened["api"]["class"], "Stock");
+        // Part 2 changes what selling returns, so only its example applies.
+        let examples = opened["examples"].as_array().unwrap();
+        assert_eq!(examples.len(), 1);
+        assert!(examples[0]["input"].as_str().unwrap().contains("low"));
+    }
 
     /// Changes the round as it's saved, as if time had passed.
     fn rewind(dir: &std::path::Path, change: impl FnOnce(&mut Round)) {

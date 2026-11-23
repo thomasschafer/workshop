@@ -235,6 +235,28 @@ impl Session {
         }
     }
 
+    /// Whether the app may save `next` over this session. What only the server's own run of the
+    /// tests changes, the part, the plans before it, whether it passed and how many times it
+    /// was submitted, must stay as it is, and the mode only changes from a twist to a recall,
+    /// when there's no twist to be had.
+    fn may_become(&self, next: &Session) -> Result<(), String> {
+        let ours = (self.part, &self.plans, self.passed, self.submissions);
+        if ours != (next.part, &next.plans, next.passed, next.submissions) {
+            return Err(
+                "only running the tests moves on to another part, passes it or counts a submission"
+                    .to_owned(),
+            );
+        }
+        if next.mode != self.mode && (self.mode, next.mode) != (Mode::Twist, Mode::Recall) {
+            return Err(format!(
+                "a problem being {} can't become one being {}; open it again to start afresh",
+                self.mode.describe(),
+                next.mode.describe()
+            ));
+        }
+        Ok(())
+    }
+
     /// What they planned, for the attempt to keep: the plan, or for a problem in parts, each
     /// part's in turn.
     pub fn response(&self) -> String {
@@ -295,6 +317,15 @@ impl Session {
         }
         Ok(())
     }
+}
+
+/// How a submission went, to record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Submitted {
+    /// The part the server graded it on, counting from 0, or `None` when it wasn't the server's
+    /// own run of the tests, which can't pass anything or move on to another part.
+    pub part: Option<usize>,
+    pub passed: bool,
 }
 
 /// The Coding track's items, and where each one is.
@@ -735,7 +766,9 @@ impl Problems {
             .check(found.coding)
             .map_err(SessionWriteError::Invalid)?;
         let key = found.key();
-        let before = self.session(&key)?.ok_or(SessionWriteError::NotStarted)?;
+        let before = self
+            .session_for(found)?
+            .ok_or(SessionWriteError::NotStarted)?;
         if let Some(expected) = base_version
             && before.version != expected
         {
@@ -746,11 +779,9 @@ impl Problems {
                 current: Box::new(before),
             });
         }
-        if (session.part, &session.plans) != (before.part, &before.plans) {
-            return Err(SessionWriteError::Invalid(
-                "a part is only moved on from by passing its tests".to_owned(),
-            ));
-        }
+        before
+            .may_become(&session)
+            .map_err(SessionWriteError::Invalid)?;
         session.started_at = before.started_at;
         session.updated_at = now.max(before.updated_at);
         session.version = before.version + 1;
@@ -791,18 +822,34 @@ impl Problems {
         &self,
         found: &Found<'_>,
         base_version: Option<u64>,
-        passed: bool,
+        submitted: Submitted,
         now: i64,
     ) -> Result<(Session, i64), SessionWriteError> {
         let key = found.key();
-        let before = self.session(&key)?.ok_or(SessionWriteError::NotStarted)?;
-        if let Some(expected) = base_version
-            && before.version != expected
-        {
+        let before = self
+            .session_for(found)?
+            .ok_or(SessionWriteError::NotStarted)?;
+        if before.mode != Mode::Solve {
+            return Err(SessionWriteError::Invalid(format!(
+                "only solving a problem submits it, not {} it",
+                before.mode.describe()
+            )));
+        }
+        // Graded on one part, it's recorded for that part, or not at all if the session's moved
+        // on since, such as on another device.
+        let stale = base_version.is_some_and(|expected| before.version != expected)
+            || submitted.part.is_some_and(|part| part != before.part);
+        if stale {
             return Err(SessionWriteError::Conflict {
                 current: Box::new(before),
             });
         }
+        if submitted.passed && submitted.part.is_none() {
+            return Err(SessionWriteError::Invalid(
+                "only the server's own run of the tests can pass a problem or a part".to_owned(),
+            ));
+        }
+        let passed = submitted.passed;
         let mut next = before.clone();
         next.submissions += 1;
         if passed && next.part < found.coding.last() {
@@ -832,14 +879,31 @@ impl Problems {
         &self,
         found: &Found<'_>,
         base_version: Option<u64>,
-        passed: bool,
+        submitted: Submitted,
         now: i64,
     ) -> Result<(Session, i64), SessionWriteError> {
         let _guard = self
             .session_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.record_submission_locked(found, base_version, passed, now)
+        self.record_submission_locked(found, base_version, submitted, now)
+    }
+
+    /// A problem's session, if it's started and still fits the problem. One that doesn't, such
+    /// as for a part the pack no longer has, is dropped, so the problem starts afresh.
+    pub fn session_for(&self, found: &Found<'_>) -> Result<Option<Session>> {
+        let key = found.key();
+        let Some(session) = self.session(&key)? else {
+            return Ok(None);
+        };
+        match session.check(found.coding) {
+            Ok(()) => Ok(Some(session)),
+            Err(why) => {
+                tracing::warn!("starting {key} afresh, as its session no longer fits it: {why}");
+                self.saved.remove(&key)?;
+                Ok(None)
+            }
+        }
     }
 
     /// Notes that the learner is working on a problem, such as by typing its code. Returns the
@@ -874,7 +938,7 @@ impl Problems {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let key = found.key();
-        if let Some(session) = self.session(&key)?
+        if let Some(session) = self.session_for(found)?
             && !(solve && session.mode != Mode::Solve)
         {
             return Ok(session);
@@ -949,7 +1013,7 @@ impl Problems {
                 ..
             } => {
                 let result = (|| -> Result<Session, SessionWriteError> {
-                    if let Some(existing) = self.session(&item_key)? {
+                    if let Some(existing) = self.session_for(&found)? {
                         return Ok(existing);
                     }
                     let mut session = Session::new(mode, language, started_at);
@@ -1015,7 +1079,13 @@ impl Problems {
                 graded,
                 at,
                 ..
-            } => match self.record_submission_locked(&found, Some(base_version), passed, at) {
+            } => match self.record_submission_locked(
+                &found,
+                Some(base_version),
+                // Only the server's own run of the tests can pass a part.
+                Submitted { part: None, passed },
+                at,
+            ) {
                 Ok((saved, spent_ms)) => {
                     if let Err(err) = learning.store().record_time(&item_key, at, spent_ms) {
                         return error_outcome(format!("{err:#}"));
@@ -1077,7 +1147,7 @@ impl Problems {
                         status: CodingEventStatus::Duplicate,
                     };
                 }
-                let session_opt = match self.session(&item_key) {
+                let session_opt = match self.session_for(&found) {
                     Ok(s) => s,
                     Err(err) => return error_outcome(format!("{err:#}")),
                 };
@@ -1635,6 +1705,73 @@ mod tests {
 
         problems.finish(&found.key()).unwrap();
         assert!(problems.sessions().unwrap().is_empty());
+    }
+
+    /// A submission is recorded for the part it was graded on, and only the server's own run
+    /// passes one; an offline event can only say it failed.
+    #[test]
+    fn records_a_submission_for_the_part_it_was_graded_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let packs = vec![Pack::sample()];
+        let found = find(&packs, "sample", "text-buffer").unwrap();
+        let problems = Problems::new(dir.path());
+        problems.start(&found, &[], false, None, NOW).unwrap();
+        let passed = |part| Submitted {
+            part: Some(part),
+            passed: true,
+        };
+        let (moved, _) = problems
+            .record_submission(&found, None, passed(0), NOW)
+            .unwrap();
+        assert_eq!((moved.part, moved.step), (1, StepName::Understand));
+        // Graded on part 1 while another device moved on, it isn't recorded.
+        assert!(matches!(
+            problems.record_submission(&found, None, passed(0), NOW),
+            Err(SessionWriteError::Conflict { current }) if current.part == 1
+        ));
+        let offline = |id: &str, passed: bool| CodingEvent::Submitted {
+            id: id.to_owned(),
+            item: found.key(),
+            base_version: moved.version,
+            passed,
+            graded: None,
+            at: NOW,
+        };
+        let refused = problems.apply_event(&packs, &learning, offline("offline-pass", true));
+        assert!(
+            matches!(&refused.status, CodingEventStatus::Error { message } if message.contains("only the server's own run")),
+            "{:?}",
+            refused.status
+        );
+        let failed = problems.apply_event(&packs, &learning, offline("offline-fail", false));
+        let CodingEventStatus::Applied {
+            session: Some(failed),
+        } = failed.status
+        else {
+            panic!("{:?}", failed.status);
+        };
+        assert_eq!(
+            (failed.part, failed.step, failed.passed),
+            (1, StepName::Test, false)
+        );
+    }
+
+    /// A session left for a part the problem no longer has, such as after its pack changed, is
+    /// dropped, and the problem starts afresh.
+    #[test]
+    fn starts_afresh_when_a_session_no_longer_fits_the_problem() {
+        let dir = tempfile::tempdir().unwrap();
+        let packs = vec![Pack::sample()];
+        let found = find(&packs, "sample", "text-buffer").unwrap();
+        let problems = Problems::new(dir.path());
+        let mut session = problems.start(&found, &[], false, None, NOW).unwrap();
+        session.part = 7;
+        session.plans = vec![String::new(); 7];
+        problems.write_session(&found.key(), &session).unwrap();
+        assert_eq!(problems.session_for(&found).unwrap(), None);
+        let fresh = problems.start(&found, &[], false, None, NOW + 1).unwrap();
+        assert_eq!((fresh.part, fresh.started_at), (0, NOW + 1));
     }
 
     #[test]

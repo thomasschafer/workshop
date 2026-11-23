@@ -187,7 +187,11 @@ pub fn same_results(expected: &str, actual: &str) -> bool {
 fn same_value(expected: &serde_json::Value, actual: &serde_json::Value) -> bool {
     use serde_json::Value;
     match (expected, actual) {
-        (Value::Number(e), Value::Number(a)) => e == a || e.as_f64() == a.as_f64(),
+        // Integers are compared exactly, as large ones lose precision as floats; only when
+        // either is a float are they compared as floats, so 3 is 3.0.
+        (Value::Number(e), Value::Number(a)) if e.is_f64() || a.is_f64() => {
+            e.as_f64() == a.as_f64()
+        }
         (Value::Array(e), Value::Array(a)) => {
             e.len() == a.len() && e.iter().zip(a).all(|(e, a)| same_value(e, a))
         }
@@ -283,6 +287,8 @@ mod tests {
             "{\"b\": [1, 2], \"a\": 1}"
         ));
         assert!(!same_results("[1,2]", "[2,1]"));
+        assert!(!same_results("9007199254740993", "9007199254740992"));
+        assert!(same_results("9007199254740993", "9007199254740993"));
         assert!(!same_results("1\n2\n", "1\n"));
         assert!(!same_results("\"1\"", "1"));
         assert!(!same_results("true", "1"));

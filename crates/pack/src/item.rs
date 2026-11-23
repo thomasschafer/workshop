@@ -1066,7 +1066,9 @@ mod tests {
         Item::parse("items/x/item.md", "x", &source, &manifest(), |file| {
             match file {
             "reference.py" | "starter.py" | "brute.py" | "inputs.py" | "two/reference.py"
-            | "two/brute.py" | "two/inputs.py" | "three/reference.py" => Ok(format!("# {file}")),
+            | "two/brute.py" | "two/inputs.py" | "three/reference.py" | "two/reference.rs" => {
+                Ok(format!("# {file}"))
+            }
             "tests.toml" => Ok("[[example]]\ninput = \"a\"\noutput = \"1\"\n[[test]]\ninput = \"b\"\noutput = \"1\"\n".to_owned()),
             "two/tests.toml" | "three/tests.toml" => Ok("[[example]]\ninput = \"a a\"\noutput = \"2\"\n[[test]]\ninput = \"\"\noutput = \"0\"\n".to_owned()),
             "api.toml" => Ok("[[example]]\ncalls = [{ call = \"add\", args = [\"a\"] }, { call = \"count\", args = [\"a\"], returns = 1 }]\n[[test]]\nnew = [2]\ncalls = [{ call = \"count\", args = [\"b\"], returns = 0 }]\n".to_owned()),

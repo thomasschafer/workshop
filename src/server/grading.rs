@@ -90,7 +90,7 @@ pub(super) async fn mark(
             .map_err(|err| bad_request(format!("{err:#}")))?;
         let session = app
             .problems
-            .session(&key)?
+            .session_for(&found)?
             .ok_or_else(|| bad_request("Start the problem before explaining it."))?;
         let draft = app.problems.draft(&found, session.language)?;
         Some((session.language.name(), draft.text))
@@ -99,11 +99,14 @@ pub(super) async fn mark(
     };
     // A plan for a problem in parts is for the part the learner is on.
     let part = match (body.work, &item.content) {
-        (Work::Plan, Content::Coding(coding)) if coding.in_parts() => app
-            .problems
-            .session(&key)?
-            .filter(|session| session.mode == crate::coding::Mode::Solve)
-            .map(|session| session.part),
+        (Work::Plan, Content::Coding(coding)) if coding.in_parts() => {
+            let found = crate::coding::find(&packs, &pack.manifest.id, &item.id)
+                .map_err(|err| bad_request(format!("{err:#}")))?;
+            app.problems
+                .session_for(&found)?
+                .filter(|session| session.mode == crate::coding::Mode::Solve)
+                .map(|session| session.part)
+        }
         _ => None,
     };
     let answer = Answer {
