@@ -36,7 +36,7 @@ import { CodeKeyboard, KeyboardToggle } from "../views/keyboard";
 import { StepNav } from "../views/steps";
 import { useZen, ZenButton, ZenExit, ZenKeyboardButton } from "../views/zen";
 import { codingApi } from "./api";
-import { EditorPane } from "./editorPane";
+import { EditorPane, languageFile } from "./editorPane";
 import {
   getCachedCodingProblem,
   getCachedCodingTests,
@@ -44,6 +44,8 @@ import {
   updateCachedCodingDraft,
   updateCachedCodingSession,
 } from "./offline";
+import { openAt, ProjectFiles } from "./project";
+import { ChangesView, ReviewView } from "./review";
 import {
   applying,
   describeCase,
@@ -62,6 +64,8 @@ import {
   stepsFor,
   suggestedRating,
   TWIST_KINDS,
+  testLabel,
+  testOf,
 } from "./steps";
 import { TutorSheet } from "./tutor";
 import type {
@@ -71,6 +75,7 @@ import type {
   Finished as FinishedReply,
   Graded,
   Opened,
+  OpenedReview,
   OpenedTrack,
   Session,
   StepName,
@@ -141,6 +146,8 @@ export function ProblemView({
   const [sessionConflict, setSessionConflict] = useState<Session | null>(() =>
     outbox().conflictFor(itemKey),
   );
+  // A change to review opens in the same place as a problem, and is a review of its own.
+  const [review, setReview] = useState<OpenedReview | null>(null);
   const confirmedVersion = useRef<number>(0);
   const localExpectedVersion = useRef<number>(0);
   const staleAfterTimeout = useRef<boolean>(false);
@@ -298,7 +305,12 @@ export function ProblemView({
       setFinished(null);
       setSessionConflict(null);
       try {
-        const fresh = await codingApi.open(itemKey, solve);
+        const item = await codingApi.openItem(itemKey, solve);
+        if ("kind" in item) {
+          setReview(item);
+          return;
+        }
+        const fresh = item;
         confirmedVersion.current = fresh.session.version ?? 0;
         localExpectedVersion.current = confirmedVersion.current;
         staleAfterTimeout.current = false;
@@ -452,9 +464,11 @@ export function ProblemView({
         {
           model,
           turns,
-          code: editor.current?.text() ?? "",
+          // A project's files are the server's to show the tutor, with what's changed.
+          code: sessionRef.current?.file ? "" : (editor.current?.text() ?? ""),
           errors: editor.current?.diagnosticsText() ?? "",
           last_run: lastRun.current,
+          file: sessionRef.current?.file ?? null,
         },
         onDelta,
       );
@@ -479,6 +493,9 @@ export function ProblemView({
     </header>
   );
 
+  if (review) {
+    return <ReviewView boot={boot} opened={review} onHome={onHome} onTrack={onTrack} />;
+  }
   if (error && !opened) {
     return (
       <div class="learn">
@@ -508,13 +525,14 @@ export function ProblemView({
   }
 
   const goTo = (step: StepName) => change((s) => ({ ...s, step }), true);
+  const inProject = opened.project !== null;
   const next = () => {
-    const after = stepAfter(session.mode, session.step);
+    const after = stepAfter(session.mode, session.step, inProject);
     if (after) goTo(after);
   };
   const giveUp = () => change((s) => ({ ...s, step: "review" }), true);
 
-  const steps = stepsFor(session.mode);
+  const steps = stepsFor(session.mode, inProject);
   const offlineBanner = online ? null : (
     <div class="banner offline" role="status">
       Can't reach the server. Running code and the tutor need it; what you do here is kept, and
@@ -639,7 +657,7 @@ export function ProblemView({
         steps={steps}
         current={session.step}
         label={(step) => STEP_LABELS[step]}
-        reachable={(step) => reached(session.mode, session.step, step) && !done}
+        reachable={(step) => reached(session.mode, session.step, step, inProject) && !done}
         onGo={goTo}
       />
       {opened.part_count > 1 && session.mode === "solve" && !done ? (
@@ -956,18 +974,18 @@ function PlanStep({
         }}
       >
         <label class="learn-question" for="coding-plan">
-          {recall
-            ? "From memory: how would you solve it?"
-            : session.part > 0
-              ? `How will you change your code for part ${session.part + 1}? A few lines is plenty.`
-              : "How will you solve it? A few lines is plenty."}
+          {planQuestion(opened, session)}
         </label>
         <textarea
           id="coding-plan"
           class="coding-plan"
           rows={6}
           value={session.plan}
-          placeholder="Such as: what to keep track of, in what order, and what it costs"
+          placeholder={
+            opened.project
+              ? "Such as: which file and function, and what's going on there"
+              : "Such as: what to keep track of, in what order, and what it costs"
+          }
           onInput={(event) => setPlan(event.currentTarget.value)}
         />
         <DictateButton
@@ -989,7 +1007,13 @@ function PlanStep({
             {checking ? "Checking…" : "Check my plan"}
           </button>
           <button type="submit" class="pill primary">
-            {recall ? "Compare with the approach" : "Next: code"}
+            {recall
+              ? opened.project
+                ? "Compare with the explanation"
+                : "Compare with the approach"
+              : opened.project
+                ? "Next: the code"
+                : "Next: code"}
           </button>
         </span>
       </form>
@@ -1022,6 +1046,26 @@ function PlanStep({
       ) : null}
     </main>
   );
+}
+
+/** What planning asks: how to solve it, or in a project, what's wrong or what to change. */
+function planQuestion(opened: Opened, session: Session): string {
+  const task = opened.project?.task;
+  if (session.mode === "recall") {
+    if (task === "fix") return "From memory: what was wrong, and how did you fix it?";
+    if (task) return "From memory: how did you refactor it, and then extend it?";
+    return "From memory: how would you solve it?";
+  }
+  if (session.part > 0) {
+    return `How will you change your code for part ${session.part + 1}? A few lines is plenty.`;
+  }
+  if (task === "fix") {
+    return "Where do you think the bug is, and why? A few lines is plenty; read the code next, and come back to this if you like.";
+  }
+  if (task) {
+    return "What makes it hard to test, and how will you change it? A few lines is plenty.";
+  }
+  return "How will you solve it? A few lines is plenty.";
 }
 
 /** The plan with dictated words added on a line of their own. */
@@ -1073,9 +1117,12 @@ function CodeStep({
     return subscribeCachedBundles(() => setBundleTick((t) => t + 1));
   }, []);
 
+  const project = opened.project;
+  // A project is only ever run on the server, which keeps its files.
   const hasLocalRunner =
     bundleTick >= 0 &&
     opened.api === null &&
+    project === null &&
     language !== undefined &&
     isLanguageCachedSync(language.id);
   const mode = preferences.onDeviceMode.get();
@@ -1084,15 +1131,20 @@ function CodeStep({
   const keyboardShown = settings.ownKeyboard && keyboard.wanted && !testing;
 
   const runExamples = async () => {
-    if (!language) return;
+    if (!language && !project) return;
     setBusy("running");
     setRunError(null);
-    const hasLocal = opened.api === null && (await localRunner().isAvailable(language.id));
+    const hasLocal =
+      opened.api === null &&
+      project === null &&
+      language !== undefined &&
+      (await localRunner().isAvailable(language.id));
     const currentMode = preferences.onDeviceMode.get();
     const effectivelyOnline =
       online && (typeof navigator === "undefined" || navigator.onLine !== false);
     const backend = resolveRunBackend(currentMode, effectivelyOnline, hasLocal);
     const runLocally = async () => {
+      if (!language) return;
       void draftSaver.current?.flush().catch(() => {});
       const code = editor.current?.text() ?? language.code.text;
       const cases = buildCodingExampleCases(opened.parts, session.part);
@@ -1105,7 +1157,7 @@ function CodeStep({
       });
       setRan(graded);
       setRanEngine(engine);
-      onRan(summarise(graded, opened.api));
+      onRan(summarise(graded, opened.api, false));
       change((s) => ({ ...s, runs: s.runs + 1 }), true);
     };
     try {
@@ -1118,7 +1170,7 @@ function CodeStep({
         const graded = await codingApi.run(itemKey, newId());
         setRan(graded);
         setRanEngine(null);
-        onRan(summarise(graded, opened.api));
+        onRan(summarise(graded, opened.api, project !== null));
         change((s) => ({ ...s, runs: s.runs + 1 }), true);
       } catch (e) {
         if (e instanceof ConnectionError && currentMode === "automatic" && hasLocal) {
@@ -1135,18 +1187,22 @@ function CodeStep({
   };
 
   const submit = async () => {
-    if (!language) return;
+    if (!language && !project) return;
     keyboard.show(false);
     setBusy("submitting");
     setRunError(null);
     setSubmitted(null);
     setSubmittedEngine(null);
-    const hasLocal = opened.api === null && (await localRunner().isAvailable(language.id));
+    const hasLocal =
+      opened.api === null &&
+      project === null &&
+      language !== undefined &&
+      (await localRunner().isAvailable(language.id));
     const effectivelyOnline =
       online && (typeof navigator === "undefined" || navigator.onLine !== false);
     const backend = resolveRunBackend(preferences.onDeviceMode.get(), effectivelyOnline, hasLocal);
     try {
-      if (backend === "local") {
+      if (backend === "local" && language) {
         void draftSaver.current?.flush().catch(() => {});
         const cachedTests = await getCachedCodingTests(itemKey);
         if (!cachedTests) {
@@ -1274,7 +1330,7 @@ function CodeStep({
     }
   };
 
-  if (!language) return null;
+  if (!language && !project) return null;
   // The hints for the part being worked on.
   const partHints = opened.parts[session.part]?.hints ?? [];
   const hints = partHints.slice(0, hintsShown);
@@ -1287,6 +1343,7 @@ function CodeStep({
       {testing ? (
         <TestResults
           api={opened.api}
+          project={project !== null}
           busy={busy === "submitting"}
           submitted={submitted}
           engine={submittedEngine}
@@ -1300,7 +1357,7 @@ function CodeStep({
       ) : (
         <>
           <div class="coding-toolbar">
-            {opened.languages.length > 1 ? (
+            {language && opened.languages.length > 1 ? (
               <label class="coding-language">
                 <span class="visually-hidden">Language</span>
                 <select
@@ -1323,20 +1380,23 @@ function CodeStep({
                 {opened.part_count > 1 ? partOf(session.part, opened.part_count) : "Problem"}
               </summary>
               <Statement opened={opened} session={session} open={false} />
-              {applying(opened.parts, session.part).map((at) =>
-                (opened.parts[at]?.examples ?? []).map((example, index) => {
-                  const name =
-                    opened.part_count > 1
-                      ? `Part ${at + 1}'s example ${index + 1}`
-                      : `Example ${index + 1}`;
-                  return (
-                    <section key={`${at}-${example.input}`} aria-label={name}>
-                      <h3 class="coding-subheading">{name}</h3>
-                      <CaseIo api={opened.api} known={example} />
-                    </section>
-                  );
-                }),
-              )}
+              {project ? <ProjectTests opened={opened} part={session.part} /> : null}
+              {project
+                ? null
+                : applying(opened.parts, session.part).map((at) =>
+                    (opened.parts[at]?.examples ?? []).map((example, index) => {
+                      const name =
+                        opened.part_count > 1
+                          ? `Part ${at + 1}'s example ${index + 1}`
+                          : `Example ${index + 1}`;
+                      return (
+                        <section key={`${at}-${example.input}`} aria-label={name}>
+                          <h3 class="coding-subheading">{name}</h3>
+                          <CaseIo api={opened.api} known={example} />
+                        </section>
+                      );
+                    }),
+                  )}
               {session.plan.trim() ? (
                 <>
                   <h3 class="coding-subheading">Your plan</h3>
@@ -1367,18 +1427,33 @@ function CodeStep({
               ))}
             </ol>
           ) : null}
-          <EditorPane
-            key={language.id}
-            itemKey={itemKey}
-            language={language}
-            settings={settings}
-            editor={editor}
-            saver={draftSaver}
-            statusHost={keyboard.statusHost}
-          />
+          {project ? (
+            <ProjectFiles
+              key={session.part}
+              itemKey={itemKey}
+              project={project}
+              open={openAt(project, session.file)}
+              onOpen={(path) => void change((s) => ({ ...s, file: path }), true)}
+              settings={settings}
+              editor={editor}
+              saver={draftSaver}
+              statusHost={keyboard.statusHost}
+            />
+          ) : language ? (
+            <EditorPane
+              key={language.id}
+              itemKey={itemKey}
+              file={languageFile(itemKey, language)}
+              settings={settings}
+              editor={editor}
+              saver={draftSaver}
+              statusHost={keyboard.statusHost}
+            />
+          ) : null}
           {ran || runError ? (
             <ExampleResults
               api={opened.api}
+              project={project !== null}
               ran={ran}
               engine={ranEngine}
               error={runError}
@@ -1409,7 +1484,9 @@ function CodeStep({
                   : canRun
                     ? mode === "local" && hasLocalRunner
                       ? "Run examples (on device)"
-                      : "Run examples"
+                      : project
+                        ? "Run tests"
+                        : "Run examples"
                     : "Running needs the server"}
               </button>
               {busy !== null && hasLocalRunner ? (
@@ -1445,7 +1522,7 @@ function CodeStep({
 }
 
 /** What running on the examples did, in a line, for the tutor. */
-function summarise(graded: Graded, api: Api | null): string {
+function summarise(graded: Graded, api: Api | null, project: boolean): string {
   switch (graded.outcome) {
     case "build_failed":
       return `It didn't build:\n${graded.errors}`;
@@ -1454,6 +1531,10 @@ function summarise(graded: Graded, api: Api | null): string {
     case "ran":
       return graded.results
         .map((r) => {
+          if (project) {
+            const test = r.input.trim();
+            return r.passed ? `${test}: passed` : `${test}: failed\n${r.run.stderr}`;
+          }
           const verdict = `${describeCase(r.case)}: ${r.passed ? "passed" : describeRun(r.run)}`;
           const tooMuch = printedTooMuch(r.run);
           const output = api
@@ -1467,12 +1548,15 @@ function summarise(graded: Graded, api: Api | null): string {
 
 function ExampleResults({
   api,
+  project,
   ran,
   engine,
   error,
   onDismiss,
 }: {
   api: Api | null;
+  /** Whether it ran a project's tests, rather than examples. */
+  project: boolean;
   ran: Graded | null;
   engine: string | null;
   error: string | null;
@@ -1485,7 +1569,9 @@ function ExampleResults({
           {error
             ? "Couldn't run it"
             : ran?.outcome === "ran"
-              ? `${ran.results.filter((r) => r.passed).length} of ${ran.results.length} examples right`
+              ? project
+                ? `${ran.results.filter((r) => r.passed).length} of ${ran.results.length} tests pass`
+                : `${ran.results.filter((r) => r.passed).length} of ${ran.results.length} examples right`
               : ran?.outcome === "build_failed"
                 ? "It doesn't build"
                 : "Can't run it here"}
@@ -1501,9 +1587,13 @@ function ExampleResults({
       ) : null}
       {ran?.outcome === "unavailable" ? <p class="error-text">{ran.reason}</p> : null}
       {ran?.outcome === "ran"
-        ? ran.results.map((result) => (
-            <CaseView key={JSON.stringify(result.case)} api={api} result={result} />
-          ))
+        ? ran.results.map((result) =>
+            project ? (
+              <TestView key={JSON.stringify(result.case)} result={result} />
+            ) : (
+              <CaseView key={JSON.stringify(result.case)} api={api} result={result} />
+            ),
+          )
         : null}
     </section>
   );
@@ -1555,9 +1645,61 @@ function CaseView({ api, result }: { api: Api | null; result: CaseResult }) {
   );
 }
 
+/** How one of a project's tests went: its name, and why it failed if it did. */
+function TestView({ result }: { result: CaseResult }) {
+  const test = testOf(result.input);
+  const hidden = result.case.kind === "test";
+  return (
+    <article class={`coding-case ${result.passed ? "right" : "wrong"}`}>
+      <p class="coding-case-head">
+        {test ? testLabel(test.name) : result.input.trim()}:{" "}
+        {result.passed
+          ? "passes"
+          : result.run.ending.status === "timed_out"
+            ? "took too long"
+            : "fails"}
+      </p>
+      <p class="muted small coding-test-where">
+        {hidden ? "A hidden test, in " : ""}
+        {test ? `${test.file}, ${test.name}` : null}
+      </p>
+      {result.passed || !result.run.stderr.trim() ? null : (
+        <pre class="coding-io coding-traceback error-text">{result.run.stderr}</pre>
+      )}
+    </article>
+  );
+}
+
+/** The tests a project's learner can run, by file, as far as they've reached. */
+function ProjectTests({ opened, part }: { opened: Opened; part: number }) {
+  const tests = applying(opened.parts, part).flatMap((at) =>
+    (opened.parts[at]?.examples ?? []).map((example) => testOf(example.input)),
+  );
+  const files = [...new Set(tests.map((t) => t?.file ?? ""))].filter((f) => f !== "");
+  return (
+    <section aria-label="Tests">
+      <h3 class="coding-subheading">Tests you can run</h3>
+      {files.map((file) => (
+        <div key={file}>
+          <p class="coding-test-file">{file}</p>
+          <ul class="coding-test-list">
+            {tests
+              .filter((t) => t?.file === file)
+              .map((t) => (
+                <li key={t?.name}>{t ? testLabel(t.name) : null}</li>
+              ))}
+          </ul>
+        </div>
+      ))}
+      <p class="muted small">Hidden tests run too when you submit.</p>
+    </section>
+  );
+}
+
 /** Submitting: the hidden tests and the brute force's answers, and the first input it fails on. */
 function TestResults({
   api,
+  project,
   busy,
   submitted,
   engine,
@@ -1569,6 +1711,8 @@ function TestResults({
   onGiveUp,
 }: {
   api: Api | null;
+  /** Whether it's a project's tests. */
+  project: boolean;
   busy: boolean;
   submitted: Submitted | null;
   engine: string | null;
@@ -1583,7 +1727,9 @@ function TestResults({
     <div class="learn-content">
       {busy ? (
         <p class="muted" role="status">
-          Running the hidden tests, and comparing with a brute force on random inputs…
+          {project
+            ? "Running every test, the hidden ones too…"
+            : "Running the hidden tests, and comparing with a brute force on random inputs…"}
         </p>
       ) : null}
       {error ? <p class="error-text">{error}</p> : null}
@@ -1596,7 +1742,11 @@ function TestResults({
           </h2>
           {engine ? <p class="muted small">Ran on device ({engine})</p> : null}
           {submitted.failure ? (
-            <CaseView api={api} result={submitted.failure} />
+            project ? (
+              <TestView result={submitted.failure} />
+            ) : (
+              <CaseView api={api} result={submitted.failure} />
+            )
           ) : (
             <pre class="coding-io error-text">{submitted.problem}</pre>
           )}
@@ -1681,9 +1831,25 @@ function ReviewStep({
           </>
         ) : null}
       </section>
+      {solution?.project ? (
+        <section aria-label="Changes">
+          <details class="coding-statement" open>
+            <summary>Your changes</summary>
+            <ChangesView changes={solution.project.yours} label="Your changes" />
+          </details>
+          <details class="coding-statement">
+            <summary>
+              {opened.project?.task === "fix" ? "The reference fix" : "A reference solution"}
+            </summary>
+            <ChangesView changes={solution.project.reference} label="The reference's changes" />
+          </details>
+        </section>
+      ) : null}
       {solution ? (
         <section aria-label="Approach">
-          <h2 class="coding-subheading">How it's solved</h2>
+          <h2 class="coding-subheading">
+            {opened.project?.task === "fix" ? "What was wrong" : "How it's solved"}
+          </h2>
           <Markdown text={solution.approach} />
           {reference ? (
             <details class="coding-statement">
@@ -1857,7 +2023,7 @@ function TwistStep({
           <EditorPane
             key={language.id}
             itemKey={itemKey}
-            language={language}
+            file={languageFile(itemKey, language)}
             settings={settings}
             editor={editor}
             saver={draftSaver}
@@ -1956,12 +2122,12 @@ function TwistResult({
 const CODING_TRACK: OpenedTrack = { id: "coding", name: "Coding", icon: "code" };
 
 /** What the button that goes back to a problem's track says. */
-function more(track: OpenedTrack): string {
+export function more(track: OpenedTrack): string {
   return track.id === "coding" ? "More coding" : `More in ${track.name}`;
 }
 
 /** When a problem comes back, or that it won't, once it's finished. */
-function comesBack(finished: FinishedReply, track: OpenedTrack): string {
+export function comesBack(finished: FinishedReply, track: OpenedTrack): string {
   if (finished.retired) {
     const list = track.id === "coding" ? "the Coding list" : track.name;
     return `Retired: it won't come back. Bring it back from ${list} any time.`;

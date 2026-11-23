@@ -29,6 +29,16 @@ export function MarkedView({ marked }: { marked: Marked }) {
         ))}
       </ul>
       {marked.questioning ? <QuestioningView questioning={marked.questioning} /> : null}
+      {marked.missed && marked.missed.length > 0 ? (
+        <>
+          <h3 class="tracks-heading">Missed, kept in your log</h3>
+          <ul class="marked-findings">
+            {marked.missed.map((missed) => (
+              <li key={missed}>{missed}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       {marked.findings.length > 0 ? (
         <>
           <h3 class="tracks-heading">Mistakes, kept in your log</h3>

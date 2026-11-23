@@ -209,6 +209,34 @@ function questioning(prompt) {
   return { found, missed, assumed: [] };
 }
 
+// The grader, marking a review of a change against its planted defects: a defect is found by a
+// comment on a line it covers, and a comment saying "nothing" is a false alarm.
+if (prompt.includes("<change>") && prompt.includes("<work>")) {
+  const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";
+  const lines = [...work.matchAll(/line (\d+)(?! of the old)/g)].map((m) => Number(m[1]));
+  const points = (prompt.match(/<rubric>\n([\s\S]*?)<\/rubric>/)?.[1] ?? "")
+    .split("\n")
+    .filter((line) => line.startsWith("- "))
+    .map((line) => {
+      const [, start, end] = line.match(/:(\d+)(?:-(\d+))?\)$/) ?? [];
+      const from = Number(start);
+      const to = Number(end ?? start);
+      const found = lines.some((n) => n >= from && n <= to);
+      return { point: line.slice(2), met: found ? "yes" : "no", comment: found ? "Found it." : "" };
+    });
+  await reply([
+    JSON.stringify({
+      score: 1,
+      points,
+      findings: work.includes("nothing")
+        ? [{ error_type: "misread", detail: "Said a line was wrong that's right" }]
+        : [],
+      feedback: "Look at what the change **leaves out** as well as what it adds.",
+    }),
+  ]);
+  process.exit(0);
+}
+
 // The grader, marking written work or checking a card.
 if (prompt.includes("<work>")) {
   const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";

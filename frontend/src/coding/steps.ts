@@ -1,5 +1,17 @@
 import type { Rating } from "../learning/types";
-import type { Api, CaseRef, Mode, OpenedPart, Run, Session, StepName, TwistKind } from "./types";
+import type {
+  Api,
+  CaseRef,
+  Comment,
+  DiffLine,
+  Mode,
+  OpenedPart,
+  Run,
+  Session,
+  StepName,
+  Task,
+  TwistKind,
+} from "./types";
 
 const STEPS: Record<Mode, StepName[]> = {
   solve: ["understand", "plan", "code", "test", "review"],
@@ -7,8 +19,12 @@ const STEPS: Record<Mode, StepName[]> = {
   twist: ["twist"],
 };
 
-export function stepsFor(mode: Mode): StepName[] {
-  return STEPS[mode];
+/** Solving a project starts with planning, as there's code to read rather than an example. */
+const PROJECT_SOLVE: StepName[] = ["plan", "code", "test", "review"];
+
+/** The steps of going through a problem this way, as `Mode::steps_for` says. */
+export function stepsFor(mode: Mode, project = false): StepName[] {
+  return project && mode === "solve" ? PROJECT_SOLVE : STEPS[mode];
 }
 
 export const STEP_LABELS: Record<StepName, string> = {
@@ -29,15 +45,122 @@ export const TWIST_KINDS: Record<TwistKind, string> = {
 };
 
 /** The step after this one, or null at the end. */
-export function stepAfter(mode: Mode, step: StepName): StepName | null {
-  const steps = STEPS[mode];
+export function stepAfter(mode: Mode, step: StepName, project = false): StepName | null {
+  const steps = stepsFor(mode, project);
   return steps[steps.indexOf(step) + 1] ?? null;
 }
 
 /** Whether a step can be gone back to from where the learner is: any that's been done. */
-export function reached(mode: Mode, current: StepName, step: StepName): boolean {
-  const steps = STEPS[mode];
+export function reached(mode: Mode, current: StepName, step: StepName, project = false): boolean {
+  const steps = stepsFor(mode, project);
   return steps.includes(step) && steps.indexOf(step) <= steps.indexOf(current);
+}
+
+export const TASKS: Record<Task, string> = {
+  fix: "Fix a bug",
+  review: "Review a change",
+  refactor: "Refactor and extend",
+};
+
+/** Which test a case in a project is, from its input, such as `test_loans.py::test_due`. */
+export function testOf(input: string): { file: string; name: string } | null {
+  const [file, name, ...rest] = input.trim().split("::");
+  return file && name && rest.length === 0 ? { file, name } : null;
+}
+
+/** A test's name as a person reads it: `test_a_day_missed` is "a day missed". */
+export function testLabel(name: string): string {
+  return name.replace(/^test_/, "").replaceAll("_", " ");
+}
+
+/** Where a line was found by searching a project's files. */
+export interface Found {
+  path: string;
+  /** Counting from 1. */
+  line: number;
+  text: string;
+}
+
+/** The most lines a search finds, so a common word doesn't fill a phone's screen. */
+export const MOST_FOUND = 50;
+
+/** The lines of these files that have `query` in them, ignoring case, in order. */
+export function search(files: readonly { path: string; text: string }[], query: string): Found[] {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return [];
+  const found: Found[] = [];
+  for (const file of files) {
+    const lines = file.text.split("\n");
+    for (const [at, text] of lines.entries()) {
+      if (text.toLowerCase().includes(wanted)) {
+        found.push({ path: file.path, line: at + 1, text: text.trim() });
+        if (found.length === MOST_FOUND) return found;
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Why a new file can't have this name in a project, or null if it can: as the server says,
+ * letters, digits, `_`, `-` and `.`, a `.py` file that isn't one of tests, and not one there
+ * already.
+ */
+export function newFileProblem(name: string, taken: readonly string[]): string | null {
+  if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name) || name.startsWith(".")) {
+    return "Use letters, digits, _, - and . in the name.";
+  }
+  if (!name.endsWith(".py")) return "Name it as a Python file, ending .py.";
+  if (/^test_.*\.py$/.test(name)) return "Test files are the problem's own; name it otherwise.";
+  if (taken.includes(name)) return `There's a ${name} already.`;
+  return null;
+}
+
+/** Runs of a change's lines, with long stretches kept the same folded away. */
+export type Shown = { line: DiffLine } | { folded: number; from: number };
+
+/**
+ * A change's lines as a phone shows them: every line added or removed, with `context` lines kept
+ * the same around each, and the rest folded into a count, from `from`, its index in `lines`.
+ */
+export function fold(lines: readonly DiffLine[], context: number): Shown[] {
+  const near = lines.map(() => false);
+  lines.forEach((line, at) => {
+    if (line.kind === "kept") return;
+    for (let n = Math.max(0, at - context); n <= Math.min(lines.length - 1, at + context); n++) {
+      near[n] = true;
+    }
+  });
+  const shown: Shown[] = [];
+  let at = 0;
+  while (at < lines.length) {
+    if (near[at]) {
+      shown.push({ line: lines[at] as DiffLine });
+      at++;
+      continue;
+    }
+    const from = at;
+    while (at < lines.length && !near[at]) at++;
+    shown.push({ folded: at - from, from });
+  }
+  return shown;
+}
+
+/** Where a review comment is about, as it's shown, such as "loans.py, line 47". */
+export function commentPlace(comment: Pick<Comment, "file" | "line" | "old">): string {
+  if (comment.file === null) return "The whole change";
+  if (comment.line === null) return comment.file;
+  return comment.old
+    ? `${comment.file}, old line ${comment.line}`
+    : `${comment.file}, line ${comment.line}`;
+}
+
+/** Whether a comment is about this line of a file: by its new number, or a removed line's old. */
+export function commentIsOn(comment: Comment, path: string, line: DiffLine): boolean {
+  if (comment.file !== path || comment.line === null) return false;
+  return comment.old
+    ? line.kind === "removed" && line.old === comment.line
+    : line.kind !== "removed" && line.new === comment.line;
 }
 
 /**

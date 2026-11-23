@@ -8,7 +8,10 @@ import type {
   Language,
   OfflineBundle,
   Opened,
+  OpenedReview,
   Overview,
+  ReviewMarked,
+  ReviewSession,
   Session,
   Submitted,
   Toolchain,
@@ -19,6 +22,12 @@ const item = (key: string) => {
   const [pack, id] = key.split("/");
   if (!pack || !id) throw new Error(`${key} isn't an item's key`);
   return `/coding/items/${encodeURIComponent(pack)}/${encodeURIComponent(id)}`;
+};
+
+const review = (key: string) => {
+  const [pack, id] = key.split("/");
+  if (!pack || !id) throw new Error(`${key} isn't an item's key`);
+  return `/coding/reviews/${encodeURIComponent(pack)}/${encodeURIComponent(id)}`;
 };
 
 const toolchain = (language: Language) => `/coding/toolchain/${encodeURIComponent(language)}`;
@@ -39,8 +48,15 @@ export const codingApi = {
     ),
   offlineBundle: () =>
     request<OfflineBundle>("GET", "/coding/offline-bundle", undefined, { timeoutMs: 15_000 }),
-  open: (key: string, solve = false) =>
-    request<Opened>("POST", `${item(key)}/open${solve ? "?solve=true" : ""}`),
+  /** Opens a problem, or for a change to review, the review. */
+  openItem: (key: string, solve = false) =>
+    request<Opened | OpenedReview>("POST", `${item(key)}/open${solve ? "?solve=true" : ""}`),
+  /** Opens a problem to solve. */
+  open: async (key: string, solve = false): Promise<Opened> => {
+    const opened = await codingApi.openItem(key, solve);
+    if ("kind" in opened) throw new Error(`${key} is a change to review, not a problem`);
+    return opened;
+  },
   saveSession: (key: string, session: Session, keepalive = false) =>
     request<Opened>("PUT", `${item(key)}/session`, session, { keepalive }),
   saveCode: (key: string, language: Language, text: string, version: string, keepalive = false) =>
@@ -50,6 +66,19 @@ export const codingApi = {
       { text, version },
       { keepalive },
     ),
+  /** Saves a file of a project, or adds one. */
+  saveFile: (key: string, path: string, text: string, version: string, keepalive = false) =>
+    request<VersionedFile>(
+      "PUT",
+      `${item(key)}/files/${encodeURIComponent(path)}`,
+      { text, version },
+      { keepalive },
+    ),
+  saveReview: (key: string, session: ReviewSession, keepalive = false) =>
+    request<ReviewSession>("PUT", `${review(key)}/session`, session, { keepalive }),
+  /** Has the grader mark a review's comments; `id` is the attempt's. */
+  submitReview: (key: string, id: string) =>
+    request<ReviewMarked>("POST", `${review(key)}/submit`, { id }, { timeoutMs: 0 }),
   run: (key: string, runId?: string) =>
     request<Graded>("POST", `${item(key)}/run`, runId ? { run_id: runId } : undefined, {
       timeoutMs: 0,
@@ -83,7 +112,14 @@ export const codingApi = {
     request<Finished>("POST", `${item(key)}/bring-back`, { id }),
   tutor: async (
     key: string,
-    body: { model: string; turns: Turn[]; code: string; errors: string; last_run: string },
+    body: {
+      model: string;
+      turns: Turn[];
+      code: string;
+      errors: string;
+      last_run: string;
+      file?: string | null;
+    },
     onDelta: (text: string) => void,
   ): Promise<{ text: string }> => {
     let reply: string | null = null;

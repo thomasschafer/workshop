@@ -2,7 +2,7 @@
 // running code in crates/coding.
 
 import type { InstallStatus, ProgramNeeds, VersionedFile } from "../api";
-import type { MarkedReply } from "../grading/types";
+import type { Marked, MarkedReply } from "../grading/types";
 import type { TrackIcon as TrackIconName, TrackId } from "../tracks/types";
 
 export type Language = "python" | "rust" | "cpp" | "haskell";
@@ -35,6 +35,8 @@ export interface Session {
   hints: number;
   /** Why a review that would have been a twist is a recall instead. */
   no_twist: string | null;
+  /** For a project, the file open in the editor. */
+  file?: string | null | undefined;
   started_at: number;
   updated_at: number;
   /** Monotonic version bumped on every write, shared by online and offline sync paths. */
@@ -71,11 +73,7 @@ export interface OfflineItem {
   languages: OfflineLanguage[];
   session: Session | null;
   previous_plan: string | null;
-  solution: {
-    approach: string;
-    notes: string | null;
-    reference: { language: Language; text: string }[];
-  };
+  solution: Solution;
   /** Each part's hidden tests. */
   tests: Case[][];
   oracle_cases: OracleCase[];
@@ -138,6 +136,55 @@ export interface OpenedTrack {
   icon: TrackIconName;
 }
 
+/** What a codebase item asks. */
+export type Task = "fix" | "review" | "refactor";
+
+/** A file of a project, as the learner has it. */
+export interface ProjectFile {
+  path: string;
+  code: VersionedFile;
+  /** The file as the project is given, or null for one the learner added. */
+  original: string | null;
+  /** A file of tests, which the learner reads and runs but can't change. */
+  read_only: boolean;
+  uri: string;
+}
+
+/** A project being worked in, for a fix or a refactor. */
+export interface OpenedProject {
+  task: Task;
+  files: ProjectFile[];
+  editor_mode: string;
+  lsp: { root_uri: string; language_id: string; options: unknown } | null;
+  /** The version of a file that isn't there yet, for adding one. */
+  empty_version: string;
+}
+
+/** A line of a change: in both versions, or only in one, with its number in each. */
+export interface DiffLine {
+  kind: "kept" | "added" | "removed";
+  old: number | null;
+  new: number | null;
+  text: string;
+}
+
+/** How a file was changed, line by line. */
+export interface FileChange {
+  path: string;
+  lines: DiffLine[];
+  added: number;
+  removed: number;
+}
+
+/** How a problem is solved, shown once it's being reviewed. */
+export interface Solution {
+  approach: string;
+  notes: string | null;
+  reference: { language: Language; text: string }[];
+  /** For a project, how the reference changes it, and how the learner did. */
+  project: { reference: FileChange[]; yours: FileChange[] } | null;
+}
+
 export interface Opened {
   key: string;
   label: string;
@@ -150,14 +197,13 @@ export interface Opened {
   /** How many parts it has, seen or not. */
   part_count: number;
   api: Api | null;
+  /** The languages a program can be written in; none for a project. */
   languages: OpenedLanguage[];
+  /** For a fix or a refactor, the project it's worked in. */
+  project: OpenedProject | null;
   session: Session;
   previous_plan: string | null;
-  solution: {
-    approach: string;
-    notes: string | null;
-    reference: { language: Language; text: string }[];
-  } | null;
+  solution: Solution | null;
   /** For a twist, the twist, once it's been posed. */
   twist: { kind: TwistKind; prompt: string } | null;
 }
@@ -224,13 +270,71 @@ export interface Finished {
 
 export interface Listed {
   key: string;
-  kind: "coding" | "reading";
+  kind: "coding" | "reading" | "codebase";
   label: string;
   skills: string[];
   minutes: number;
   status: Status;
   step: StepName | null;
   mode: Mode | null;
+  /** For work in a codebase, what's asked. */
+  task: Task | null;
+}
+
+/** A review comment: about a line of a file, a file, or the change as a whole. */
+export interface Comment {
+  id: string;
+  file: string | null;
+  /** In the file as the change leaves it, or with `old`, a line it removes. */
+  line: number | null;
+  old: boolean;
+  text: string;
+}
+
+export interface ReviewSession {
+  comments: Comment[];
+  /** The file being read. */
+  file: string | null;
+  started_at: number;
+  updated_at: number;
+  version: number;
+}
+
+/** A file as a review shows it: changed, line by line, or as it is. */
+export interface ReviewFile {
+  path: string;
+  changed: boolean;
+  lines: DiffLine[];
+}
+
+/** A change to review, as it's opened. */
+export interface OpenedReview {
+  kind: "review";
+  key: string;
+  label: string;
+  track: OpenedTrack;
+  skills: string[];
+  source: string | null;
+  minutes: number;
+  prompt: string;
+  files: ReviewFile[];
+  session: ReviewSession;
+}
+
+/** A defect planted in a change, shown once the review's marked. */
+export interface Defect {
+  file: string;
+  lines: [number, number];
+  description: string;
+}
+
+/** How a review was marked, which finished it. */
+export interface ReviewMarked extends Finished {
+  attempt: string;
+  marked: Marked;
+  defects: Defect[];
+  notes: string | null;
+  comments: Comment[];
 }
 
 export interface Overview {

@@ -213,6 +213,8 @@ export async function openCodingFromCache(
     parts: cached.parts.slice(0, revealed(session, cached.parts.length)),
     part_count: cached.parts.length,
     api: cached.api,
+    // Work in a codebase needs the server, so it's never cached.
+    project: null,
     languages: cached.languages.map((lang) => ({
       id: lang.id,
       name: lang.name,

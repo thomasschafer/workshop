@@ -22,7 +22,7 @@ import {
 import {
   Compartment,
   EditorSelection,
-  type EditorState,
+  EditorState,
   type Extension,
   StateEffect,
   StateField,
@@ -264,6 +264,8 @@ export interface EditorOptions {
   onChange: (text: string) => void;
   onCursor: (pos: number) => void;
   onDiagnostics: (diagnostics: Diagnostics) => void;
+  /** For code to read and move around in, but not change, such as a project's tests. */
+  readOnly?: boolean;
 }
 
 /** Where the cursor was when an utterance was spoken. */
@@ -323,6 +325,7 @@ export class CodeEditor {
         this.scale.of(scaled(options.codeScale)),
         this.inset.of([]),
         changedField,
+        options.readOnly ? EditorState.readOnly.of(true) : [],
         options.formatAutomatically ? formatWhenSettled(() => this.format()) : [],
         language ? language() : [],
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],

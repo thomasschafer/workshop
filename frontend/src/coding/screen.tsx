@@ -20,7 +20,7 @@ import {
   syncCodingBundle,
 } from "./offline";
 import { CodingLink, ProblemView } from "./problem";
-import { STEP_LABELS } from "./steps";
+import { STEP_LABELS, TASKS } from "./steps";
 import type { Listed, Overview, Status } from "./types";
 
 /** The Coding track: the list of its items, or one of them, as `pack/item`. */
@@ -131,8 +131,8 @@ export function CodingItems({
             >
               <span class="coding-item-name">{item.label}</span>
               <span class="coding-item-detail muted">
-                {item.kind === "reading" ? "Code to read" : "Problem"} · {statusOf(item)} · ~
-                {item.minutes} min{!online ? capabilityLabel : ""}
+                {kindOf(item)} · {statusOf(item)} · ~{item.minutes} min
+                {!online ? capabilityLabel : ""}
               </span>
             </button>
           </li>
@@ -148,6 +148,12 @@ export function toDo(items: Listed[]): Listed[] {
   return items
     .filter((item) => item.status !== "retired")
     .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+}
+
+/** What sort of item it is, as the list says. */
+function kindOf(item: Listed): string {
+  if (item.task) return TASKS[item.task];
+  return item.kind === "reading" ? "Code to read" : "Problem";
 }
 
 function statusOf(item: Listed): string {

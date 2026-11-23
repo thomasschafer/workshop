@@ -15,6 +15,8 @@ export interface Marked {
    * found out, those they missed, and what they assumed without asking.
    */
   questioning: { found: string[]; missed: string[]; assumed: string[] } | null;
+  /** For a review of a change, the defects in it that weren't found. */
+  missed?: string[];
 }
 
 export interface MarkedReply {
