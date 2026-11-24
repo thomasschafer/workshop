@@ -696,10 +696,52 @@ export async function streamLines(
   if (buffered.trim()) onLine(JSON.parse(buffered));
 }
 
-type DiscussEvent =
+type ReplyEvent =
   | { delta: string }
   | { done: { text: string; model: string | null } }
   | { error: string };
+
+/** A coach's reply, or as much as arrived, lost with the connection; it can be picked up again. */
+export class ReplyLost extends Error {}
+
+/**
+ * Reads a coach's reply, handing over its text as it's written. Rejects with `ReplyLost` if the
+ * connection goes before it's finished, or with any other error for a reply that failed.
+ */
+async function readReply(
+  method: string,
+  path: string,
+  body: unknown,
+  onDelta: (text: string) => void,
+): Promise<{ text: string; model: string | null }> {
+  let reply: { text: string; model: string | null } | null = null;
+  let failed: string | null = null;
+  try {
+    await streamLines(method, path, body, (line) => {
+      const event = line as ReplyEvent;
+      if ("delta" in event) onDelta(event.delta);
+      else if ("done" in event) reply = event.done;
+      else failed = sentence(event.error);
+    });
+  } catch (e) {
+    // The server said no, rather than the connection going.
+    if (e instanceof ApiError) throw e;
+  }
+  if (failed !== null) throw new Error(failed);
+  if (reply === null) throw new ReplyLost("Lost the connection before the reply was finished.");
+  return reply;
+}
+
+/** Asks a coach at `path` for a reply, kept on the server as `body.reply_id`. */
+export const askCoach = (
+  path: string,
+  body: { reply_id: string },
+  onDelta: (text: string) => void,
+) => readReply("POST", path, body, onDelta);
+
+/** Picks up a reply asked for earlier, from the start. */
+export const followReply = (id: string, onDelta: (text: string) => void) =>
+  readReply("GET", `/replies/${encodeURIComponent(id)}`, undefined, onDelta);
 
 const day = (p: Puzzle) => `/puzzles/${p.year}/${p.day}`;
 
@@ -818,28 +860,20 @@ export const api = {
       { doc, utterance, pieces, recent, earlier },
       { timeoutMs: 0, ...(signal ? { signal } : {}) },
     ),
-  discuss: async (
+  discuss: (
     body: {
       year: number;
       day: number;
       model: string;
       turns: Turn[];
       code: string;
+      notes: string;
       errors: string;
       last_run: string;
+      reply_id: string;
     },
     onDelta: (text: string) => void,
-  ): Promise<{ text: string; model: string | null }> => {
-    const reply: { value: { text: string; model: string | null } | null } = { value: null };
-    await streamLines("POST", "/discuss", body, (line) => {
-      const event = line as DiscussEvent;
-      if ("delta" in event) onDelta(event.delta);
-      else if ("done" in event) reply.value = event.done;
-      else throw new Error(sentence(event.error));
-    });
-    if (reply.value === null) throw new Error("The reply stopped before it was finished.");
-    return reply.value;
-  },
+  ) => askCoach("/discuss", body, onDelta),
   /** Fire-and-forget: records phone-side events in the server's log file. */
   log: (kind: "error" | "command" | "speech", message: string) => {
     request<null>("POST", "/log", { kind, message }, { timeoutMs: 3_000 }).catch(() => {});

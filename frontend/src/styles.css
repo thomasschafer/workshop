@@ -547,6 +547,11 @@ html[data-tab-turn] .content {
   border-radius: var(--radius);
 }
 
+.turn-retry {
+  align-self: flex-end;
+  padding: 0 4px;
+}
+
 .turn.user {
   align-self: flex-end;
   background: var(--surface);

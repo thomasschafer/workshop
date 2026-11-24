@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 // Errors are shown to the user, so they carry the full context chain.
+#[derive(Debug)]
 pub(super) struct ApiError(pub(super) StatusCode, pub(super) serde_json::Value);
 
 impl From<anyhow::Error> for ApiError {

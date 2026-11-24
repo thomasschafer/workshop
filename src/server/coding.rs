@@ -890,6 +890,9 @@ pub(super) struct TutorBody {
     /// For a project, the file open in the editor.
     #[serde(default)]
     file: Option<String>,
+    /// What to keep the reply under, so it can be picked up again.
+    #[serde(default)]
+    reply_id: Option<String>,
 }
 
 /// Asks the tutor for a hint, streamed as it's written, as the discussion coach's replies are.
@@ -944,12 +947,7 @@ pub(super) async fn tutor(
     let system =
         discuss::tutor_system_prompt(found.pack.prompt_add_ons.get("tutor").map(String::as_str));
     let spec = app.config.providers[&provider].spec(Role::Discuss, &body.model, system);
-    Ok(super::discuss::stream_reply(
-        app.clone(),
-        provider,
-        spec,
-        prompt,
-    ))
+    super::discuss::stream_reply(app.clone(), provider, spec, prompt, body.reply_id)
 }
 
 /// A language the learner writes code in, with its profile, which says how to install its
@@ -2475,6 +2473,7 @@ mod tests {
             "model": "fake",
             "turns": [{ "speaker": "user", "text": "Where should I look?" }],
             "file": "words.py",
+            "reply_id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a90",
         });
         let reply = send(
             &router,
@@ -2490,5 +2489,20 @@ mod tests {
         )
         .unwrap();
         assert!(text.contains("re.split gives"), "{text}");
+        // The reply is kept, so a page that lost its connection can pick it up again.
+        let again = send(
+            &router,
+            request(
+                "GET",
+                "/api/replies/5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a90",
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(again.status(), StatusCode::OK);
+        let again = axum::body::to_bytes(again.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8(again.to_vec()).unwrap(), text);
     }
 }

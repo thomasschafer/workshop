@@ -467,7 +467,7 @@ export function ProblemView({
   const lastRun = useRef("");
   const tutor = useConversation(
     `workshop:tutor:${itemKey}`,
-    (turns, onDelta) => {
+    (turns, replyId, onDelta) => {
       change((s) => ({ ...s, hints: s.hints + 1 }));
       return codingApi.tutor(
         itemKey,
@@ -479,6 +479,7 @@ export function ProblemView({
           errors: editor.current?.diagnosticsText() ?? "",
           last_run: lastRun.current,
           file: sessionRef.current?.file ?? null,
+          reply_id: replyId,
         },
         onDelta,
       );

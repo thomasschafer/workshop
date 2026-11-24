@@ -23,6 +23,7 @@ mod on_device;
 mod packages;
 mod packs;
 mod puzzles;
+mod replies;
 mod rounds;
 mod run;
 mod settings;
@@ -238,6 +239,7 @@ pub fn router(app: Shared) -> Router {
         .route("/run/cancel", post(run::cancel_run))
         .route("/edit", post(edit::edit_code))
         .route("/discuss", post(discuss::discuss))
+        .route("/replies/{id}", get(replies::reply))
         .route("/git/sync", post(git::git_sync))
         .route("/log", post(client::client_log))
         .route("/lsp", get(lsp::lsp))

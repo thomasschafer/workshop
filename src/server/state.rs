@@ -97,6 +97,8 @@ pub struct App {
     /// change is decided on them as they are, and they're marked once however many times
     /// that's asked for at once.
     follow_ups_locks: std::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Coaches' replies, kept so a page that lost its connection can pick one up again.
+    pub(super) replies: super::replies::Replies,
     /// Background prefetch jobs for saving a year's AoC puzzles offline.
     pub(super) year_cache: std::sync::Mutex<BTreeMap<u16, YearCacheState>>,
 }
@@ -174,6 +176,7 @@ impl App {
             oracles: tokio::sync::Mutex::default(),
             posing_twist: tokio::sync::Mutex::default(),
             follow_ups_locks: std::sync::Mutex::default(),
+            replies: super::replies::Replies::default(),
             year_cache: std::sync::Mutex::new(BTreeMap::new()),
             config,
             paths,

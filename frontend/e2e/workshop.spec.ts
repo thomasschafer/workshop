@@ -330,6 +330,55 @@ test("keeps everything across a reload", async () => {
   await expect(editor()).toContainText("return len(data.splitlines())");
 });
 
+test("shows the coach the notes, and gets its reply however the connection goes", async () => {
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await page.locator(".notes textarea").fill("try a hash set");
+  await page.getByRole("button", { name: "Discuss", exact: true }).click();
+  const last = page.locator(".turn.coach").last();
+  await send("what do my notes say");
+  await expect(last).toHaveText('Your notes say "try a hash set".');
+
+  // Reloaded part-way through a reply, as when a phone drops the app, the reply is picked up.
+  const writing = page.locator(".turn.coach.writing");
+  const slow = "Slowly, step by step, to the end.";
+  await send("answer slowly");
+  await expect(writing).toHaveText("Slowly, ");
+  await page.reload();
+  await expect(page.locator(".turn.user").last()).toHaveText("answer slowly");
+  await expect(last).toHaveText(slow);
+  await expect(page.locator(".turn.coach")).toHaveCount(2);
+
+  // Losing the connection part-way through, the reply is picked up again. The connection's cut
+  // after the reply's first part, while the server goes on to finish it.
+  await page.route(
+    "**/api/discuss",
+    async (route) => {
+      const response = await route.fetch();
+      const first = (await response.text()).split("\n")[0];
+      await route.fulfill({ response, body: `${first}\n` });
+    },
+    { times: 1 },
+  );
+  await send("answer slowly again");
+  await expect(last).toHaveText(slow);
+  await expect(page.locator(".turn.coach")).toHaveCount(3);
+
+  // A reply that fails can be asked for again, without asking the question again.
+  const retry = page.getByRole("button", { name: "Retry" });
+  await expect(retry).toHaveCount(0);
+  await send("the coach is away");
+  await expect(page.locator(".pane.discuss .error-text")).toContainText("can't be reached");
+  await retry.click();
+  await expect(last).toHaveText('You asked "the coach is away", after 4 question(s).');
+  await expect(retry).toHaveCount(0);
+  await expect(page.locator(".turn.user")).toHaveCount(4);
+
+  await page.getByRole("button", { name: "Clear" }).click();
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await page.locator(".notes textarea").fill("");
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+});
+
 test("shows help as a modal", async () => {
   await page.getByRole("button", { name: "Help" }).click();
   await expect(page.getByRole("dialog", { name: "How Workshop works" })).toBeVisible();

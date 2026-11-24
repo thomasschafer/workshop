@@ -3,15 +3,14 @@
 use std::time::Duration;
 
 use axum::Json;
-use axum::body::Body;
 use axum::extract::State;
-use axum::http::header;
-use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
+use axum::response::Response;
+use serde::Deserialize;
 use workshop_provider::{CallSpec, Role};
 
 use super::error::{ApiError, bad_request};
 use super::puzzles::puzzle;
+use super::replies::Finished;
 use super::state::Shared;
 use crate::discuss::{self, Turn};
 use crate::models;
@@ -29,12 +28,11 @@ pub(super) struct DiscussBody {
     errors: String,
     #[serde(default)]
     last_run: String,
-}
-
-#[derive(Serialize)]
-struct Discussed {
-    text: String,
-    model: Option<String>,
+    #[serde(default)]
+    notes: String,
+    /// What to keep the reply under, so it can be picked up again.
+    #[serde(default)]
+    reply_id: Option<String>,
 }
 
 /// Replies to the discussion, as newline-delimited JSON: `{"delta": text}` as the reply is
@@ -71,6 +69,7 @@ pub(super) async fn discuss(
             code: &body.code,
             errors: &body.errors,
             last_run: &body.last_run,
+            notes: &body.notes,
             helpers: helpers
                 .as_ref()
                 .map(|(path, text)| (path.as_str(), text.as_str())),
@@ -84,59 +83,47 @@ pub(super) async fn discuss(
         discuss::SYSTEM_PROMPT.to_owned(),
     );
 
-    Ok(stream_reply(app, provider, spec, prompt))
+    stream_reply(app, provider, spec, prompt, body.reply_id)
 }
 
 /// The model's reply, as newline-delimited JSON: `{"delta": text}` as it's written, if the
 /// model's CLI reports it, then `{"done": {text, model}}` or `{"error": message}`. Shared by
-/// every coach the app talks to.
+/// every coach the app talks to. The reply is kept under `id`, if the app gave one, so it can be
+/// picked up again from `/replies/{id}` if the connection is lost.
 pub(super) fn stream_reply(
     app: Shared,
     provider: String,
     spec: CallSpec,
     prompt: String,
-) -> Response {
-    let (lines, receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
+    id: Option<String>,
+) -> Result<Response, ApiError> {
+    let id = id.unwrap_or_else(super::replies::Replies::unnamed);
+    let writer = app.replies.start(&id)?;
+    let following = app.replies.follow(&id)?;
     tokio::spawn(async move {
         let (partial, mut parts) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let forward = {
-            let lines = lines.clone();
-            tokio::spawn(async move {
-                while let Some(text) = parts.recv().await {
-                    // The phone may have gone; the reply is still finished, just not shown.
-                    let _ = lines.send(serde_json::json!({ "delta": text }).to_string());
-                }
-            })
+        // Owns the sender, so the parts end with the call.
+        let call = async move {
+            app.runners[&provider]
+                .call_streaming(&spec, &prompt, DISCUSS_TIMEOUT, Some(&partial))
+                .await
         };
-        let reply = app.runners[&provider]
-            .call_streaming(&spec, &prompt, DISCUSS_TIMEOUT, Some(&partial))
-            .await;
-        drop(partial);
-        let _ = forward.await;
-        let last = match reply {
-            Ok(reply) => {
-                serde_json::json!({ "done": Discussed { text: reply.text, model: reply.model } })
+        let forward = async {
+            while let Some(text) = parts.recv().await {
+                writer.delta(&text);
             }
+        };
+        let (reply, ()) = tokio::join!(call, forward);
+        writer.finish(match reply {
+            Ok(reply) => Ok(Finished {
+                text: reply.text,
+                model: reply.model,
+            }),
             Err(err) => {
                 tracing::warn!("discussing: {err:#}");
-                serde_json::json!({ "error": format!("{err:#}") })
+                Err(format!("{err:#}"))
             }
-        };
-        let _ = lines.send(last.to_string());
+        });
     });
-    let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
-        let line = receiver.recv().await?;
-        Some((
-            Ok::<_, std::convert::Infallible>(format!("{line}\n")),
-            receiver,
-        ))
-    });
-    (
-        [
-            (header::CONTENT_TYPE, "application/x-ndjson"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        Body::from_stream(stream),
-    )
-        .into_response()
+    Ok(following)
 }

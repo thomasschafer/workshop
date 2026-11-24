@@ -4,6 +4,7 @@ import { useConversation } from "./useConversation";
 /** What the discussion model is shown alongside the conversation. */
 export interface DiscussContext {
   code: string;
+  notes: string;
   errors: string;
   lastRun: string;
 }
@@ -12,9 +13,9 @@ export interface DiscussContext {
 export function useDiscussion(puzzle: Puzzle | null, model: string, context: () => DiscussContext) {
   return useConversation(
     puzzle ? `workshop:discuss:${puzzle.year}:${puzzle.day}` : null,
-    (turns, onDelta) => {
+    (turns, replyId, onDelta) => {
       if (!puzzle) throw new Error("Open a puzzle before discussing it.");
-      const { code, errors, lastRun } = context();
+      const { code, notes, errors, lastRun } = context();
       return api.discuss(
         {
           year: puzzle.year,
@@ -22,8 +23,10 @@ export function useDiscussion(puzzle: Puzzle | null, model: string, context: () 
           model,
           turns,
           code,
+          notes,
           errors,
           last_run: lastRun,
+          reply_id: replyId,
         },
         onDelta,
       );

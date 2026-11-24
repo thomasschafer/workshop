@@ -278,7 +278,20 @@ if (prompt.includes("Check this card for mistakes.")) {
 const asked = prompt.match(/^Them: .*$/gm);
 if (asked) {
   const question = asked[asked.length - 1].replace(/^Them: /, "");
-  if (question.includes("format")) {
+  // Told the coach is away, it can't be reached the first time, and is the next.
+  const away = join(process.cwd(), "coach-was-away");
+  if (question.includes("coach is away") && !existsSync(away)) {
+    writeFileSync(away, "");
+    process.stderr.write("The fake coach can't be reached.\n");
+    process.exit(1);
+  }
+  if (question.includes("my notes")) {
+    const notes = prompt.match(/<notes>\n([\s\S]*?)\n<\/notes>/)?.[1];
+    await reply([notes ? `Your notes say "${notes}".` : "You have no notes."]);
+  } else if (question.includes("slowly")) {
+    // Slow enough to lose the connection part-way through.
+    await reply(["Slowly, ", "step by step, ", "to the end."], 1500);
+  } else if (question.includes("format")) {
     await reply(["Some **clues**:\n\n1. Look at `seen`.\n", "2. Try a <b>set</b>.\n"], 700);
   } else {
     // In two parts, with time to see the first before the second.

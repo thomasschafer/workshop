@@ -129,6 +129,8 @@ pub struct Context<'a> {
     pub code: &'a str,
     pub errors: &'a str,
     pub last_run: &'a str,
+    /// What they've written in their notes on the puzzle.
+    pub notes: &'a str,
     /// The user's helpers module, with its path, if they have one.
     pub helpers: Option<(&'a str, &'a str)>,
     /// Packages installed for solutions to use.
@@ -159,6 +161,9 @@ pub fn prompt(context: &Context, turns: &[Turn]) -> String {
             context.packages.join(", ")
         ));
     }
+    if !context.notes.trim().is_empty() {
+        out.push_str(&format!("<notes>\n{}\n</notes>\n\n", context.notes.trim()));
+    }
     if !context.errors.trim().is_empty() {
         out.push_str(&format!(
             "<errors>\n{}\n</errors>\n\n",
@@ -188,6 +193,7 @@ mod tests {
                 code: "main = pure ()",
                 errors: "",
                 last_run: "exit 1",
+                notes: "Try a deque.",
                 helpers: Some(("lib/Aoc.hs", "module Aoc where\n")),
                 packages: &["split".to_owned()],
             },
@@ -205,6 +211,7 @@ mod tests {
         assert!(prompt.contains("<puzzle>\nCount pebbles.\n</puzzle>"));
         assert!(!prompt.contains("<errors>"));
         assert!(prompt.contains("<last_run>\nexit 1\n</last_run>"));
+        assert!(prompt.contains("<notes>\nTry a deque.\n</notes>"));
         assert!(prompt.contains("Them: why?\nYou: look at main\n"));
         assert!(prompt.contains("<helpers path=\"lib/Aoc.hs\">\nmodule Aoc where\n</helpers>"));
         assert!(prompt.contains("Installed packages: split\n"));

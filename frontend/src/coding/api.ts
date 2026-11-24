@@ -1,4 +1,4 @@
-import { request, streamLines, type Turn, type VersionedFile } from "../api";
+import { askCoach, request, type Turn, type VersionedFile } from "../api";
 import { utcOffset } from "../learning/local";
 import type { Rating } from "../learning/types";
 import type { TrackId } from "../tracks/types";
@@ -110,7 +110,7 @@ export const codingApi = {
   /** Brings a retired problem back, due straight away; `id` is the change's. */
   bringBack: (key: string, id: string) =>
     request<Finished>("POST", `${item(key)}/bring-back`, { id }),
-  tutor: async (
+  tutor: (
     key: string,
     body: {
       model: string;
@@ -119,17 +119,8 @@ export const codingApi = {
       errors: string;
       last_run: string;
       file?: string | null;
+      reply_id: string;
     },
     onDelta: (text: string) => void,
-  ): Promise<{ text: string }> => {
-    let reply: string | null = null;
-    await streamLines("POST", `${item(key)}/tutor`, body, (line) => {
-      const event = line as { delta: string } | { done: { text: string } } | { error: string };
-      if ("delta" in event) onDelta(event.delta);
-      else if ("done" in event) reply = event.done.text;
-      else throw new Error(event.error);
-    });
-    if (reply === null) throw new Error("The reply stopped before it was finished.");
-    return { text: reply };
-  },
+  ) => askCoach(`${item(key)}/tutor`, body, onDelta),
 };

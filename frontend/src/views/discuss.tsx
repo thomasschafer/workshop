@@ -27,10 +27,13 @@ interface Props {
   /** The reply so far, while it's being written. */
   partial: string;
   error: string | null;
+  /** Whether the last message has no reply, and none is coming, so it can be asked again. */
+  unanswered: boolean;
   draft: string;
   onDraft: (draft: string) => void;
   onModel: (model: string) => void;
   onSend: (text: string) => void;
+  onRetry: () => void;
   onClear: () => void;
   /** What's said before the conversation starts, about what the coach can help with. */
   intro?: string;
@@ -43,12 +46,14 @@ export function DiscussView({
   thinking,
   partial,
   error,
+  unanswered,
   draft,
   onDraft,
   onModel,
   onSend,
+  onRetry,
   onClear,
-  intro = "Stuck? Ask about the puzzle or your code. The coach can see both, won't edit anything, and won't give the answer away unless you ask.",
+  intro = "Stuck? Ask about the puzzle, your code or your notes. The coach can see them all, won't edit anything, and won't give the answer away unless you ask.",
 }: Props) {
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -70,7 +75,7 @@ export function DiscussView({
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [turns.length, thinking, partial]);
+  }, [turns.length, thinking, partial, error]);
 
   const send = (event?: Event) => {
     event?.preventDefault();
@@ -118,6 +123,11 @@ export function DiscussView({
           ) : (
             <div class="turn coach muted">Thinking…</div>
           )
+        ) : null}
+        {unanswered ? (
+          <button type="button" class="text-button turn-retry" onClick={onRetry}>
+            Retry
+          </button>
         ) : null}
         {error ? <div class="error-text">{error}</div> : null}
         <div ref={end} />

@@ -148,6 +148,7 @@ export function App({
     const last = latest.current.run.last;
     return {
       code: editor.current?.text() ?? "",
+      notes: latest.current.notes,
       errors: editor.current?.diagnosticsText() ?? "",
       lastRun: last
         ? `${last.input} input: ${describeEnding(last.result)}\nstdout:\n${last.result.stdout}\nstderr:\n${last.result.stderr}`
@@ -1034,10 +1035,12 @@ export function App({
             thinking={discussion.thinking}
             partial={discussion.partial}
             error={discussion.error}
+            unanswered={discussion.unanswered}
             draft={discussion.draft}
             onDraft={discussion.setDraft}
             onModel={setDiscussModel}
             onSend={(text) => enqueue(text)}
+            onRetry={() => void discussion.retry()}
             onClear={discussion.clear}
           />
         ) : null}
