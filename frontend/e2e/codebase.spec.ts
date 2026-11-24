@@ -261,10 +261,31 @@ test("reviews a change, commenting on a line and on the whole, saved as it goes"
   await expect(diff.locator(".diff-fold").first()).toContainText("unchanged");
   await fitsTheScreen();
 
+  // The first comment's save lands, but its reply is slow, and the next is added before it.
+  let firstLanded!: () => void;
+  const landed = new Promise<void>((resolve) => {
+    firstLanded = resolve;
+  });
+  let replyNow!: () => void;
+  const reply = new Promise<void>((resolve) => {
+    replyNow = resolve;
+  });
+  await phone.route(
+    "**/coding/reviews/**/session",
+    async (route) => {
+      const response = await route.fetch();
+      firstLanded();
+      await reply;
+      await route.fulfill({ response });
+    },
+    { times: 1 },
+  );
+
   await diff.getByRole("button", { name: /^Line 47, added/ }).tap();
   await phone.getByLabel("Comment on line 47").fill("Off by one: this allows a third renewal.");
   await phone.getByRole("button", { name: "Add", exact: true }).tap();
   await expect(diff.locator(".diff-comment")).toContainText("allows a third renewal");
+  await landed;
 
   // A comment on the whole change, dictated.
   await phone.getByRole("button", { name: "Comment on the whole change" }).tap();
@@ -278,6 +299,7 @@ test("reviews a change, commenting on a line and on the whole, saved as it goes"
     "the tests never renew early",
   );
   await phone.getByRole("button", { name: "Add", exact: true }).tap();
+  replyNow();
   const comments = phone.getByRole("region", { name: "Your comments" });
   await expect(comments.locator(".coding-comment")).toHaveCount(2);
   await expect(comments).toContainText("loans.py, line 47");

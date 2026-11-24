@@ -76,12 +76,21 @@ export function ReviewView({
   const [promptOpen] = useState(() => opened.session.comments.length === 0);
   const onList = () => onTrack(opened.track.id);
 
+  // The versions this page's comments have been based on since it last took the review as it
+  // was changed elsewhere: its own saves', and those it chose to keep its comments over.
+  const ownVersions = useRef(new Set([opened.session.version]));
   const saver = useMemo(
     () =>
       new LatestSaver<ReviewSession>(
         async (next, keepalive) => {
+          // A change made while an earlier save was on its way is based on the version before
+          // that save, but follows on from it, so it's sent as based on the version it gave.
+          const base = ownVersions.current.has(next.version)
+            ? { ...next, version: sessionRef.current.version }
+            : next;
           try {
-            const saved = await codingApi.saveReview(opened.key, next, keepalive);
+            const saved = await codingApi.saveReview(opened.key, base, keepalive);
+            ownVersions.current.add(saved.version);
             // Only the version is the server's: what's typed since stays as it is.
             const bumped = { ...sessionRef.current, version: saved.version };
             sessionRef.current = bumped;
@@ -221,6 +230,7 @@ export function ReviewView({
               class="text-button"
               onClick={() => {
                 const mine = { ...sessionRef.current, version: conflict.version };
+                ownVersions.current.add(conflict.version);
                 setConflict(null);
                 sessionRef.current = mine;
                 setSession(mine);
@@ -233,6 +243,8 @@ export function ReviewView({
               type="button"
               class="text-button"
               onClick={() => {
+                // A change made before this, still to be sent, is based on what's discarded.
+                ownVersions.current = new Set([conflict.version]);
                 setConflict(null);
                 sessionRef.current = conflict;
                 setSession(conflict);
