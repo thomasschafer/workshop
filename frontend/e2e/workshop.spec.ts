@@ -2865,6 +2865,12 @@ test("opens a cached Advent of Code puzzle offline, edits notes, shows On-device
 
   await phone.getByRole("button", { name: "Notes" }).tap();
   await phone.locator(".notes textarea").fill("offline note check");
+  // Wait past the 400ms saver debounce and verify offline editing stays quiet (no red save toasts).
+  await phone.waitForTimeout(700);
+  await expect(phone.locator(".banner.offline")).toContainText(
+    "Offline · changes saved on this device",
+  );
+  await expect(phone.locator(".card.error")).toHaveCount(0);
 
   await setOffline(context, false);
   const notesFile = join(HOME, "solutions", "notes", "2017", "day04.md");

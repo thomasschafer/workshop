@@ -416,6 +416,11 @@ export class ConnectionError extends Error {}
  * completely offline. */
 export class TimeoutError extends Error {}
 
+/** Whether `err` is a transient connectivity/timeout error rather than a server rejection. */
+export function isTransientNetworkError(err: unknown): boolean {
+  return err instanceof ConnectionError || err instanceof TimeoutError;
+}
+
 /** Answers a proxy such as `tailscale serve` gives when the server behind it isn't running. */
 const UNREACHABLE = new Set([502, 503, 504]);
 

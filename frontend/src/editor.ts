@@ -944,6 +944,7 @@ export class LanguageServerConnection {
   private closed = false;
   private backend: LanguageServerBackend = "server";
   private helpers: WorkerHelperFile[] = [];
+  private readonly stopOnlineListener: () => void;
 
   constructor(
     rootUri: string,
@@ -979,6 +980,20 @@ export class LanguageServerConnection {
       },
     });
     document.addEventListener("visibilitychange", this.onVisibility);
+    this.stopOnlineListener = connection.subscribe((online) => {
+      if (
+        online &&
+        this.backend === "server" &&
+        this.socket === null &&
+        this.workerTransport === null &&
+        !this.closed &&
+        !this.givenUp
+      ) {
+        this.retryDelay = MIN_RECONNECT_MS;
+        clearTimeout(this.retryTimer);
+        void this.start();
+      }
+    });
     void this.start();
   }
 
@@ -1086,6 +1101,13 @@ export class LanguageServerConnection {
       }
       if (!ready && allowLocalFailover) {
         this.openLocal();
+        return;
+      }
+      const browserOffline =
+        !connection.isOnline || (typeof navigator !== "undefined" && navigator.onLine === false);
+      if (browserOffline && !allowLocalFailover) {
+        // Don't burn retry attempts or give up permanently while offline; reconnect once back online.
+        this.onStatus("reconnecting");
         return;
       }
       if (!ready) this.failures++;
@@ -1224,6 +1246,7 @@ export class LanguageServerConnection {
     this.closed = true;
     clearTimeout(this.retryTimer);
     clearTimeout(this.failoverTimer);
+    this.stopOnlineListener();
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.socket?.close();
     this.closeWorker();

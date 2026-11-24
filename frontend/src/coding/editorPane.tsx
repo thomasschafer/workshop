@@ -2,6 +2,7 @@ import type { RefObject } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { VersionedFile } from "../api";
 import { CodeEditor, type Diagnostics, NO_DIAGNOSTICS } from "../editor";
+import { useConnection } from "../hooks/useConnection";
 import type { EditorSettings } from "../hooks/useEditorSettings";
 import { useLanguageServer } from "../hooks/useLanguageServer";
 import * as preferences from "../preferences";
@@ -127,6 +128,7 @@ export function EditorPane({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [conflict, setConflict] = useState<FileVersion | null>(null);
   const [showProblems, setShowProblems] = useState(false);
+  const online = useConnection();
   const mode = preferences.onDeviceMode.get();
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
@@ -232,6 +234,7 @@ export function EditorPane({
       <StatusLine
         checks={lsp ? lspStatus : null}
         backend={lsp ? lspBackend : undefined}
+        online={online}
         unavailable={lspUnavailable}
         onRetry={retryLsp}
         serverError={lspError !== null}

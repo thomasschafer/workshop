@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "./api";
+import { ApiError, ConnectionError, connection, TimeoutError } from "./api";
 import { type FileVersion, LatestSaver, type SaveStatus, VersionedSaver } from "./saver";
 
 beforeEach(() => {
   vi.useFakeTimers();
+  connection.set(true);
   const store = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => store.get(key) ?? null,
@@ -13,6 +14,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  connection.set(true);
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -302,6 +304,55 @@ describe("VersionedSaver", () => {
     saver.schedule("ab");
     await expect(saver.flush()).rejects.toThrow("haven't saved");
   });
+
+  it("stays quietly in offline status on ConnectionError/TimeoutError and flushes on reconnect", async () => {
+    const statuses: SaveStatus[] = [];
+    const saveFile = vi
+      .fn()
+      .mockRejectedValueOnce(new TimeoutError("The server took too long to respond."))
+      .mockResolvedValue({ text: "edited", version: "2" });
+    const saver = new VersionedSaver(
+      saveFile,
+      "workshop:test:offline",
+      "1",
+      "a",
+      (s) => statuses.push(s),
+      () => {},
+    );
+
+    // TimeoutError on flaky link marks status "offline" instead of "error".
+    saver.schedule("edited");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(statuses).toContain("offline");
+    expect(statuses).not.toContain("error");
+
+    // Going offline pauses retries; coming back online flushes immediately.
+    connection.set(false);
+    saver.schedule("edited offline");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(saveFile).toHaveBeenCalledTimes(1);
+
+    connection.set(true);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(saveFile).toHaveBeenCalledTimes(2);
+    expect(statuses.at(-1)).toBe("saved");
+    saver.close();
+  });
+
+  it("preserves ConnectionError/TimeoutError when flush fails due to network", async () => {
+    const saveFile = vi.fn().mockRejectedValue(new TimeoutError("slow"));
+    const saver = new VersionedSaver(
+      saveFile,
+      "workshop:test:timeout-flush",
+      "1",
+      "a",
+      () => {},
+      () => {},
+    );
+    saver.schedule("ab");
+    await expect(saver.flush()).rejects.toBeInstanceOf(TimeoutError);
+    saver.close();
+  });
 });
 
 describe("LatestSaver", () => {
@@ -323,7 +374,9 @@ describe("LatestSaver", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValue(null);
     const errors: string[] = [];
-    const saver = new LatestSaver<string>(save, 100, (e) => errors.push(e));
+    const saver = new LatestSaver<string>(save, 100, (e) => errors.push(e), {
+      pauseWhileOffline: true,
+    });
     saver.schedule("notes");
     await vi.advanceTimersByTimeAsync(100 + 1000 + 2000);
     expect(save).toHaveBeenCalledTimes(3);
@@ -338,6 +391,7 @@ describe("LatestSaver", () => {
     expect(save).toHaveBeenCalledExactlyOnceWith("sample", false);
     saver.schedule("other");
     await expect(saver.flush()).rejects.toThrow("Couldn't save");
+    saver.close();
   });
 
   it("flushes only once the latest value has landed, however many flushes wait together", async () => {
@@ -372,5 +426,36 @@ describe("LatestSaver", () => {
     expect(save).toHaveBeenCalledExactlyOnceWith("cursor", true);
     await vi.advanceTimersByTimeAsync(1000);
     expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays quiet on ConnectionError/TimeoutError and flushes automatically when back online", async () => {
+    const save = vi
+      .fn()
+      .mockRejectedValueOnce(new TimeoutError("slow"))
+      .mockRejectedValueOnce(new ConnectionError("offline"))
+      .mockResolvedValue(null);
+    const errors: string[] = [];
+    const saver = new LatestSaver<string>(save, 100, (e) => errors.push(e), {
+      pauseWhileOffline: true,
+    });
+
+    saver.schedule("meta-1");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(errors).toEqual([]);
+
+    connection.set(false);
+    saver.schedule("meta-2");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([]);
+
+    connection.set(true);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(errors).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(save).toHaveBeenCalledTimes(3);
+    expect(errors).toEqual([]);
+    saver.close();
   });
 });

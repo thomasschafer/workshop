@@ -22,6 +22,7 @@ export function describeCounts({ errors, warnings, others }: Diagnostics): strin
 export function StatusLine({
   checks,
   backend,
+  online = true,
   unavailable,
   onRetry,
   serverError,
@@ -35,6 +36,8 @@ export function StatusLine({
   checks: LanguageServerStatus | null;
   /** Where the active language server is running, when known. */
   backend?: "server" | "local" | undefined;
+  /** Whether the server is reachable; suppresses noisy server-LSP warnings while offline. */
+  online?: boolean | undefined;
   /** Why the language server's been given up on, if it has. */
   unavailable: LanguageServerUnavailable | null;
   /** Tries the language server again, once it's been given up on. */
@@ -52,9 +55,11 @@ export function StatusLine({
   const saving =
     saveStatus === "error"
       ? "not saved"
-      : saveStatus !== "saved" && saveStatus !== "conflict"
-        ? "saving"
-        : null;
+      : saveStatus === "offline"
+        ? "saved on device"
+        : saveStatus !== "saved" && saveStatus !== "conflict"
+          ? "saving"
+          : null;
   const any = diagnostics.errors + diagnostics.warnings + diagnostics.others > 0;
   const problem = showProblem ? diagnostics.atCursor : null;
   return (
@@ -104,7 +109,7 @@ export function StatusLine({
           <code class="hover">{hover}</code>
         ) : null}
       </div>
-      {checks === "unavailable" && unavailable ? (
+      {checks === "unavailable" && unavailable && (online || backend === "local") ? (
         <UnavailableNote unavailable={unavailable} onRetry={onRetry} />
       ) : null}
     </>

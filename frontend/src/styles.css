@@ -402,6 +402,13 @@ html[data-tab-turn] .content {
   color: var(--warn);
 }
 
+.banner.offline {
+  padding: 4px 12px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .banner-actions {
   display: flex;
   gap: 16px;

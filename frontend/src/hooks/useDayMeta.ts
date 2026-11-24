@@ -1,5 +1,5 @@
 import type { RefObject } from "preact";
-import { useCallback, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, api, type DayMeta, type Puzzle } from "../api";
 import { mergeAocPuzzle } from "../offline/db";
 import { EMPTY_META } from "../samples";
@@ -88,6 +88,7 @@ export function useDayMeta(
         },
         600,
         (e) => notify("error", `Couldn't save, retrying: ${e}`),
+        { pauseWhileOffline: true },
       );
       metaSavers.current.set(key, saver);
     }
@@ -106,6 +107,13 @@ export function useDayMeta(
     },
     [saveMetaSoon],
   );
+
+  useEffect(() => {
+    return () => {
+      for (const saver of metaSavers.current.values()) saver.close();
+      metaSavers.current.clear();
+    };
+  }, []);
 
   return { meta, setMeta, initMeta, metaRef, metaSavers, updateMeta };
 }

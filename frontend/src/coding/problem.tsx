@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiError, type Bootstrap, ConnectionError, connection, TimeoutError } from "../api";
+import {
+  ApiError,
+  type Bootstrap,
+  ConnectionError,
+  connection,
+  isTransientNetworkError,
+  TimeoutError,
+} from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
@@ -283,6 +290,7 @@ export function ProblemView({
     return () => {
       window.removeEventListener("pagehide", leave);
       leave();
+      saver.close();
     };
   }, [saver]);
 
@@ -396,10 +404,9 @@ export function ProblemView({
           writeUnsaved(itemKey, null);
         },
         (e: unknown) => {
-          const why =
-            e instanceof ConnectionError
-              ? "The server can't be reached to pose a twist, so recall how to solve it instead."
-              : `Couldn't get a twist (${errorMessage(e)}), so recall how to solve it instead.`;
+          const why = isTransientNetworkError(e)
+            ? "The server can't be reached to pose a twist, so recall how to solve it instead."
+            : `Couldn't get a twist (${errorMessage(e)}), so recall how to solve it instead.`;
           void change((s) => ({ ...s, mode: "recall", step: "plan", no_twist: why }), true);
         },
       )
@@ -538,8 +545,7 @@ export function ProblemView({
   const steps = stepsFor(session.mode, inProject);
   const offlineBanner = online ? null : (
     <div class="banner offline" role="status">
-      Can't reach the server. Running code and the tutor need it; what you do here is kept, and
-      saved once it's back.
+      Offline · changes saved on this device
     </div>
   );
   const shared = {
@@ -1227,7 +1233,7 @@ function CodeStep({
         onRan(summarise(graded, opened.api, project !== null));
         change((s) => ({ ...s, runs: s.runs + 1 }), true);
       } catch (e) {
-        if (e instanceof ConnectionError && currentMode === "automatic" && hasLocal) {
+        if (isTransientNetworkError(e) && currentMode === "automatic" && hasLocal) {
           await runLocally();
           return;
         }

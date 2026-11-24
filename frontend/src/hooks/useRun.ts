@@ -1,6 +1,6 @@
 import type { RefObject } from "preact";
 import { useRef, useState } from "preact/hooks";
-import { api, ConnectionError, type DayMeta, type Problem, type Puzzle } from "../api";
+import { api, type DayMeta, isTransientNetworkError, type Problem, type Puzzle } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
 import { newId } from "../learning/local";
@@ -158,7 +158,7 @@ export function useRun({
         await saver.current?.flush();
         await metaSavers.current.get(`${p.year}-${p.day}`)?.flush();
       } catch (e) {
-        if (e instanceof ConnectionError && onDeviceMode === "automatic" && hasLocal) {
+        if (isTransientNetworkError(e) && onDeviceMode === "automatic" && hasLocal) {
           await runLocally();
           return;
         }
@@ -171,7 +171,7 @@ export function useRun({
       } catch (e) {
         if (
           !controller.signal.aborted &&
-          e instanceof ConnectionError &&
+          isTransientNetworkError(e) &&
           onDeviceMode === "automatic" &&
           hasLocal
         ) {

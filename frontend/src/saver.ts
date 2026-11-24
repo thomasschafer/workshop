@@ -1,7 +1,17 @@
-import { ApiError } from "./api";
+import {
+  ApiError,
+  ConnectionError,
+  connection,
+  isTransientNetworkError,
+  TimeoutError,
+} from "./api";
 import { errorMessage } from "./errors";
 
-export type SaveStatus = "saved" | "pending" | "saving" | "conflict" | "error";
+export type SaveStatus = "saved" | "pending" | "saving" | "offline" | "conflict" | "error";
+
+function isBrowserOffline(): boolean {
+  return !connection.isOnline || (typeof navigator !== "undefined" && navigator.onLine === false);
+}
 
 /** A file as the server has it. */
 export interface FileVersion {
@@ -54,6 +64,9 @@ export class VersionedSaver {
   private conflicted = false;
   private closed = false;
   private retryDelay = MIN_RETRY_MS;
+  /** Most recent failure, used so `flush()` preserves network error types for callers. */
+  private lastError: unknown = null;
+  private readonly stopOnlineListener: () => void;
   /** How many times the version has changed, so a read can tell whether it's out of date. */
   private versionChanges = 0;
 
@@ -67,6 +80,13 @@ export class VersionedSaver {
   ) {
     this.latest = text;
     this.confirmed = text;
+    this.stopOnlineListener = connection.subscribe((online) => {
+      if (online && this.pending !== null && !this.conflicted && !this.closed) {
+        this.retryDelay = MIN_RETRY_MS;
+        clearTimeout(this.timer);
+        void this.flush().catch(() => {});
+      }
+    });
   }
 
   /**
@@ -118,7 +138,12 @@ export class VersionedSaver {
       throw new Error("This file changed elsewhere; choose which version to keep first.");
     }
     if (this.hasUnsavedChanges) {
-      throw new Error("Your latest changes haven't saved yet; check the connection and try again.");
+      const msg = "Your latest changes haven't saved yet; check the connection and try again.";
+      if (this.lastError instanceof TimeoutError) throw new TimeoutError(msg);
+      if (this.lastError instanceof ConnectionError || isBrowserOffline()) {
+        throw new ConnectionError(msg);
+      }
+      throw new Error(msg);
     }
   }
 
@@ -180,15 +205,27 @@ export class VersionedSaver {
   }
 
   close(): void {
+    this.stopOnlineListener();
     this.flushOnExit();
     this.closed = true;
   }
 
   private queue(text: string): void {
     this.pending = text;
+    if (isBrowserOffline()) {
+      clearTimeout(this.timer);
+      this.onStatus("offline");
+      return;
+    }
     this.onStatus("pending");
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.flush().catch(() => {}), 400);
+    this.timer = setTimeout(() => {
+      if (isBrowserOffline()) {
+        this.onStatus("offline");
+        return;
+      }
+      void this.flush().catch(() => {});
+    }, 400);
   }
 
   private async attempt(text: string, keepalive: boolean): Promise<void> {
@@ -197,10 +234,12 @@ export class VersionedSaver {
     this.onStatus("saving");
     try {
       const saved = await this.saveFile(text, this.version, keepalive);
+      this.lastError = null;
       // The server may have added a final newline, but what it saved is still this text.
       this.confirm({ text, version: saved.version });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
+        this.lastError = null;
         const theirs = (err.body as { current?: FileVersion } | null)?.current;
         if (!theirs) {
           this.enterConflict({ text: this.confirmed, version: this.version });
@@ -215,9 +254,19 @@ export class VersionedSaver {
         }
         return;
       }
+      this.lastError = err;
       this.pending ??= this.latest;
-      this.onStatus("error", errorMessage(err));
       clearTimeout(this.timer);
+      if (isTransientNetworkError(err)) {
+        // Changes are already persisted in localStorage; keep offline/slow retries quiet.
+        this.onStatus("offline");
+        if (!isBrowserOffline()) {
+          this.timer = setTimeout(() => void this.flush().catch(() => {}), this.retryDelay);
+          this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
+        }
+        return;
+      }
+      this.onStatus("error", errorMessage(err));
       this.timer = setTimeout(() => void this.flush().catch(() => {}), this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
     }
@@ -314,16 +363,38 @@ export class LatestSaver<T> {
   /** Saves sent as the page was hidden, which aren't one at a time with the rest. */
   private readonly exiting = new Set<Promise<void>>();
   private retryDelay = MIN_RETRY_MS;
+  private lastError: unknown = null;
+  private readonly pauseWhileOffline: boolean;
+  private readonly stopOnlineListener: () => void;
 
   constructor(
     private readonly save: (value: T, keepalive: boolean) => Promise<unknown>,
     private readonly delayMs: number,
     private readonly onError: (message: string) => void,
-  ) {}
+    options?: { pauseWhileOffline?: boolean },
+  ) {
+    this.pauseWhileOffline = options?.pauseWhileOffline ?? false;
+    this.stopOnlineListener = connection.subscribe((online) => {
+      if (online && this.latest !== null) {
+        this.retryDelay = MIN_RETRY_MS;
+        clearTimeout(this.timer);
+        void this.run();
+      }
+    });
+  }
+
+  close(): void {
+    this.stopOnlineListener();
+    clearTimeout(this.timer);
+  }
 
   schedule(value: T): void {
     this.scheduled++;
     this.latest = { value, count: this.scheduled };
+    if (this.pauseWhileOffline && isBrowserOffline()) {
+      clearTimeout(this.timer);
+      return;
+    }
     this.wait(this.delayMs);
   }
 
@@ -344,7 +415,12 @@ export class LatestSaver<T> {
         continue;
       }
       if (tried || this.latest === null) {
-        throw new Error("Couldn't save; check the connection and try again.");
+        const msg = "Couldn't save; check the connection and try again.";
+        if (this.lastError instanceof TimeoutError) throw new TimeoutError(msg);
+        if (this.lastError instanceof ConnectionError || isBrowserOffline()) {
+          throw new ConnectionError(msg);
+        }
+        throw new Error(msg);
       }
       tried = true;
       await this.run();
@@ -355,6 +431,7 @@ export class LatestSaver<T> {
   flushOnExit(): void {
     if (this.latest === null) return;
     clearTimeout(this.timer);
+    if (this.pauseWhileOffline && isBrowserOffline()) return;
     const pending = this.latest;
     this.latest = null;
     const sent: Promise<void> = this.save(pending.value, true)
@@ -362,7 +439,7 @@ export class LatestSaver<T> {
         () => this.confirm(pending.count),
         () => {
           this.latest ??= pending;
-          this.wait(this.retryDelay);
+          if (!(this.pauseWhileOffline && isBrowserOffline())) this.wait(this.retryDelay);
         },
       )
       .finally(() => this.exiting.delete(sent));
@@ -375,7 +452,10 @@ export class LatestSaver<T> {
 
   private wait(ms: number): void {
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.run(), ms);
+    this.timer = setTimeout(() => {
+      if (this.pauseWhileOffline && isBrowserOffline()) return;
+      void this.run();
+    }, ms);
   }
 
   private run(): Promise<void> {
@@ -385,12 +465,23 @@ export class LatestSaver<T> {
     this.latest = null;
     this.saving = this.save(pending.value, false)
       .then(() => {
+        this.lastError = null;
         this.confirm(pending.count);
         this.retryDelay = MIN_RETRY_MS;
-        if (this.latest !== null) this.wait(this.delayMs);
+        if (this.latest !== null && !(this.pauseWhileOffline && isBrowserOffline())) {
+          this.wait(this.delayMs);
+        }
       })
       .catch((err: unknown) => {
+        this.lastError = err;
         this.latest ??= pending;
+        if (isTransientNetworkError(err)) {
+          if (!isBrowserOffline()) {
+            this.wait(this.retryDelay);
+            this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);
+          }
+          return;
+        }
         this.onError(errorMessage(err));
         this.wait(this.retryDelay);
         this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS);

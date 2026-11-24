@@ -3,6 +3,8 @@ import {
   api,
   type Bootstrap,
   ConnectionError,
+  connection,
+  isTransientNetworkError,
   loginNeeded,
   type OpenPuzzle,
   type Problem,
@@ -799,7 +801,13 @@ export function App({
       ? () => {
           Promise.all([saver.current?.flush(), notesSaver.current?.flush()]).then(
             () => notify("ok", "Saved"),
-            (e: unknown) => notify("error", `Couldn't save: ${errorMessage(e)}`),
+            (e: unknown) => {
+              if (!connection.isOnline || isTransientNetworkError(e)) {
+                notify("info", "Saved on this device; will sync when online.");
+                return;
+              }
+              notify("error", `Couldn't save: ${errorMessage(e)}`);
+            },
           );
         }
       : null,
@@ -938,7 +946,7 @@ export function App({
         ) : null}
         {online ? null : (
           <div class="banner offline" role="status">
-            Can't reach the server. Is it running, and is this device connected to it? Trying again…
+            Offline · changes saved on this device
           </div>
         )}
         {openError && !showPicker ? <p class="pane error-text">{openError}</p> : null}
@@ -971,6 +979,7 @@ export function App({
           <StatusLine
             checks={lsp ? lspStatus : null}
             backend={lsp ? lspBackend : undefined}
+            online={online}
             unavailable={lspUnavailable}
             onRetry={retryLsp}
             serverError={lspError !== null}
