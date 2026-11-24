@@ -210,6 +210,7 @@ pub async fn check_coding(
             0,
             starter.language,
             grade::Code::Program(&starter.text),
+            false,
             cancel,
         )
         .await?

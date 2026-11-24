@@ -4,6 +4,7 @@
 
 use anyhow::{Result, bail};
 use tokio_util::sync::CancellationToken;
+use workshop_pack::project::same_name;
 use workshop_pack::{Coding, Language, PartWork, ProjectFile, Task, Verdict};
 
 use crate::grade::{self, CaseRef, Code, Graded};
@@ -12,16 +13,23 @@ use crate::programs::Runtime;
 /// The test driver, which reads the test to run on stdin and prints whether it passed.
 pub const DRIVER: &str = include_str!("tests.py");
 
-/// The file the driver is written to, beside the project's files, which it imports.
-pub const DRIVER_FILE: &str = "workshop_tests.py";
+/// The file the driver is written to, beside the project's directory and the hidden tests'.
+pub use workshop_pack::project::DRIVER_FILE;
 
-/// A project's files for a run once the learner is on `part`: the solution's own, without any
-/// tests of its own, as the tests are always the item's, and every test that applies then, the
-/// project's, each part's given tests and the hidden ones.
+/// Python's flags for the driver: isolated, so neither the driver's directory nor the
+/// environment's settings are on the import path.
+pub const FLAGS: &[&str] = &["-I"];
+
+/// A project's files for a run once the learner is on `part`, by where they go beside the
+/// driver: the solution's own in `project/`, without any tests of its own, as the tests are
+/// always the item's, with the tests the learner can see then; and with `hidden`, the hidden
+/// tests that apply in `hidden/`, where the project doesn't run. Two files whose names differ
+/// only in case are refused, as on macOS and Windows they'd be one file.
 pub fn modules(
     coding: &Coding,
     part: usize,
     files: &[ProjectFile],
+    hidden: bool,
 ) -> Result<Vec<(String, String)>> {
     if coding.project().is_none() {
         bail!("only a codebase item's solution is a project");
@@ -29,28 +37,32 @@ pub fn modules(
     if part > coding.last() {
         bail!("there's no part {} to run the tests of", part + 1);
     }
-    let mut modules: Vec<(String, String)> = Vec::new();
+    let mut own: Vec<&ProjectFile> = Vec::new();
     for file in files.iter().filter(|f| !f.is_test()) {
-        if file.path == DRIVER_FILE || file.path == "built" {
+        if let Some(problem) = workshop_pack::project::name_problem(&file.path) {
+            bail!("{problem}");
+        }
+        if let Some(other) = own.iter().find(|o| same_name(&o.path, &file.path)) {
             bail!(
-                "{} is Workshop's own, so a project can't have a file called it",
+                "the project has {} and {}, which are one file where case is ignored",
+                other.path,
                 file.path
             );
         }
-        if !workshop_pack::diff::is_project_path(&file.path) {
-            bail!("{:?} can't be a file in a project", file.path);
-        }
-        if modules.iter().any(|(path, _)| *path == file.path) {
-            bail!("the project has {} twice", file.path);
-        }
-        modules.push((file.path.clone(), file.text.clone()));
+        own.push(file);
     }
-    for test in coding
-        .test_files(part)
+    let mut modules: Vec<(String, String)> = own
         .into_iter()
-        .chain(coding.hidden_files(part))
-    {
-        modules.push((test.path.clone(), test.text.clone()));
+        .chain(coding.test_files(part))
+        .map(|f| (format!("project/{}", f.path), f.text.clone()))
+        .collect();
+    if hidden {
+        modules.extend(
+            coding
+                .hidden_files(part)
+                .into_iter()
+                .map(|f| (format!("hidden/{}", f.path), f.text.clone())),
+        );
     }
     Ok(modules)
 }
@@ -422,6 +434,170 @@ mod tests {
         .await
         .unwrap_err();
         assert!(format!("{err:#}").contains("Workshop's own"), "{err:#}");
+        // In any case, and so is the marker of a build; files differing only in case are one
+        // file on macOS and Windows; and a file named like a test is the item's test, not theirs.
+        for (path, says) in [
+            ("Workshop_Tests.py", "Workshop's own"),
+            ("built", "Workshop's own"),
+            ("Words.py", "one file where case is ignored"),
+        ] {
+            let clash = with(files(&coding), path, "");
+            let err = grade::run_examples(
+                &runtime,
+                &coding,
+                0,
+                Language::Python,
+                Code::Project(&clash),
+                &cancel,
+            )
+            .await
+            .unwrap_err();
+            assert!(format!("{err:#}").contains(says), "{path}: {err:#}");
+        }
+        let renamed = with(
+            files(&coding),
+            "Test_stats.py",
+            "def test_nothing():\n    pass\n",
+        );
+        let ran = grade::run_examples(
+            &runtime,
+            &coding,
+            0,
+            Language::Python,
+            Code::Project(&renamed),
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert!(ran.passed(), "{:?}", ran.problem());
+        let Graded::Ran { results, .. } = &ran else {
+            panic!("didn't run: {ran:?}");
+        };
+        assert_eq!(results.len(), coding.parts[0].examples.len());
+    }
+
+    /// A project's file named like a module of Python's own, as it might be by accident, doesn't
+    /// stand in for it, in the driver or the tests.
+    #[tokio::test]
+    async fn the_projects_files_dont_stand_in_for_pythons_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(dir.path()).await;
+        let cancel = CancellationToken::new();
+        let coding = sample("word-counts");
+        let mut shadowing = files(&coding);
+        for module in ["importlib.py", "traceback.py", "os.py", "collections.py"] {
+            shadowing = with(
+                shadowing,
+                module,
+                "import sys\nprint('passed')\nraise SystemExit(0)\n",
+            );
+        }
+        let graded = grade::grade(
+            &runtime,
+            &coding,
+            &[],
+            0,
+            Language::Python,
+            Code::Project(&shadowing),
+            0,
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        // As it was without them: its own tests pass, and a hidden one finds the bug.
+        let failure = graded.failure().unwrap();
+        assert!(matches!(failure.case, CaseRef::Test { .. }), "{failure:?}");
+        assert!(
+            failure
+                .run
+                .stderr
+                .contains("test_ends_with_a_full_stop failed"),
+            "{}",
+            failure.run.stderr
+        );
+    }
+
+    /// Running the tests the learner can see leaves the hidden ones out, and when they're run,
+    /// they're neither where the project runs nor where it imports from.
+    #[tokio::test]
+    async fn the_hidden_tests_are_out_of_the_projects_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime(dir.path()).await;
+        let cancel = CancellationToken::new();
+        let coding = sample("word-counts");
+        let looking = with(
+            files(&coding),
+            "words.py",
+            &format!(
+                "{}\nimport glob, os, sys\nfor where in [os.getcwd(), *sys.path]:\n    for found in glob.glob(os.path.join(where, 'test_punctuation.py')):\n        print('FOUND', found, file=sys.stderr)\n",
+                coding.project().unwrap().file("words.py").unwrap().text
+            ),
+        );
+        let ran = grade::run_examples(
+            &runtime,
+            &coding,
+            0,
+            Language::Python,
+            Code::Project(&looking),
+            &cancel,
+        )
+        .await
+        .unwrap();
+        let Graded::Ran { results, .. } = &ran else {
+            panic!("didn't run: {ran:?}");
+        };
+        assert!(
+            results.iter().all(|r| !r.run.stderr.contains("FOUND")),
+            "{results:?}"
+        );
+        let mut present = Vec::new();
+        for entry in walk(dir.path()) {
+            if entry.ends_with("test_punctuation.py") {
+                present.push(entry);
+            }
+        }
+        // Only in the build with the hidden tests, which running the visible ones didn't make.
+        assert!(present.is_empty(), "{present:?}");
+        let graded = grade::grade(
+            &runtime,
+            &coding,
+            &[],
+            0,
+            Language::Python,
+            Code::Project(&looking),
+            0,
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let Graded::Ran { results, .. } = &graded else {
+            panic!("didn't run: {graded:?}");
+        };
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r.case, CaseRef::Test { .. }))
+        );
+        assert!(
+            results.iter().all(|r| !r.run.stderr.contains("FOUND")),
+            "{results:?}"
+        );
+    }
+
+    /// Every file under a directory.
+    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                out.extend(walk(&path));
+            } else {
+                out.push(path);
+            }
+        }
+        out
     }
 
     #[tokio::test]

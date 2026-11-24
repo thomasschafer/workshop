@@ -2104,6 +2104,12 @@ mod tests {
         )
         .await;
         assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        // Nor can one be Workshop's own, or another of the project's with its case changed, as
+        // on macOS and Windows they'd be the same file.
+        for path in ["built", "Workshop_tests.py", "Test_stats.py", "Words.py"] {
+            let bad = save_file(&router, item, path, "", &opened["project"]["empty_version"]).await;
+            assert_eq!(bad.status(), StatusCode::BAD_REQUEST, "{path}");
+        }
 
         // The project's own tests pass as it's given, and a hidden one finds the bug.
         let ran = json(send(&router, request("POST", &format!("{item}/run"), None)).await).await;

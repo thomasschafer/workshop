@@ -214,13 +214,15 @@ impl<'a> From<&'a [ProjectFile]> for Code<'a> {
 
 /// Builds a solution, or one of the item's own, or says why it can't be run: a program, or in
 /// API mode, a module, which Workshop's driver imports and calls, or for a project, its files
-/// with the tests that apply once the learner is on `part`, which Workshop's test driver runs.
+/// with the tests that apply once the learner is on `part`, which Workshop's test driver runs,
+/// the hidden ones only when they're to be run, with `hidden`.
 pub async fn build_solution(
     runtime: &Runtime,
     coding: &Coding,
     part: usize,
     language: Language,
     code: Code<'_>,
+    hidden: bool,
     cancel: &CancellationToken,
 ) -> Result<Result<Program, Graded>> {
     let built = match (code, &coding.api) {
@@ -242,7 +244,7 @@ pub async fn build_solution(
                 .await?
         }
         (Code::Project(files), _) => {
-            let modules = crate::project::modules(coding, part, files)?;
+            let modules = crate::project::modules(coding, part, files, hidden)?;
             let modules: Vec<(&str, &str)> = modules
                 .iter()
                 .map(|(path, text)| (path.as_str(), text.as_str()))
@@ -251,6 +253,7 @@ pub async fn build_solution(
                 .build_named(
                     language,
                     crate::project::DRIVER_FILE,
+                    crate::project::FLAGS,
                     crate::project::DRIVER,
                     &modules,
                     Flavour::Plain,
@@ -369,11 +372,15 @@ pub async fn run_all<'a>(
     code: impl Into<Code<'a>>,
     cancel: &CancellationToken,
 ) -> Result<Graded> {
-    let program = match build_solution(runtime, coding, part, language, code.into(), cancel).await?
-    {
-        Ok(program) => program,
-        Err(graded) => return Ok(graded),
-    };
+    // The hidden tests are only there to be read when they're run.
+    let hidden = cases
+        .iter()
+        .any(|(case, _)| matches!(case, CaseRef::Test { .. }));
+    let program =
+        match build_solution(runtime, coding, part, language, code.into(), hidden, cancel).await? {
+            Ok(program) => program,
+            Err(graded) => return Ok(graded),
+        };
     let mut results = Vec::new();
     for (case, known) in cases {
         results.push(run_case(runtime, coding, &program, case, known, cancel).await?);
@@ -415,6 +422,7 @@ impl Oracle {
             part,
             brute.program.language,
             Code::Program(&brute.program.text),
+            false,
             cancel,
         )
         .await?
@@ -603,11 +611,11 @@ pub async fn grade<'a>(
             part + 1
         );
     }
-    let program = match build_solution(runtime, coding, part, language, code.into(), cancel).await?
-    {
-        Ok(program) => program,
-        Err(graded) => return Ok(Ok(graded)),
-    };
+    let program =
+        match build_solution(runtime, coding, part, language, code.into(), true, cancel).await? {
+            Ok(program) => program,
+            Err(graded) => return Ok(Ok(graded)),
+        };
     let examples = examples(coding, part);
     let tests = tests(coding, part);
     let total = examples.len() + random as usize * oracles.len() + tests.len();

@@ -77,9 +77,43 @@ pub fn as_text<'a>(files: impl Iterator<Item = &'a ProjectFile>) -> String {
         .collect()
 }
 
-/// Whether a file's name makes it one of a project's tests: `test_*.py`.
+/// Whether a file's name makes it one of a project's tests: `test_*.py`, in any case, as the file
+/// systems of macOS and Windows don't tell `Test_loans.py` from `test_loans.py`.
 pub fn is_test_file(path: &str) -> bool {
+    let path = path.to_ascii_lowercase();
     path.starts_with("test_") && path.ends_with(".py")
+}
+
+/// Whether a file of tests has a name Python can import it by: `test_`, then letters, digits
+/// and `_`, then `.py`.
+pub fn is_test_module(path: &str) -> bool {
+    path.strip_prefix("test_")
+        .and_then(|rest| rest.strip_suffix(".py"))
+        .is_some_and(|name| {
+            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+}
+
+/// The file Workshop's test driver is run from, which a project's files are run beside.
+pub const DRIVER_FILE: &str = "workshop_tests.py";
+
+/// Whether two files of a project would be the same file on macOS or Windows, which ignore case.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Why a project can't have a file of this name, if it can't: it isn't a plain name, or it's
+/// Workshop's own, in any case.
+pub fn name_problem(path: &str) -> Option<String> {
+    if !diff::is_project_path(path) {
+        return Some(format!(
+            "{path:?} can't be a file in a project: name it with letters, digits, _, - and ."
+        ));
+    }
+    [DRIVER_FILE, "built", "project", "hidden"]
+        .iter()
+        .find(|reserved| same_name(path, reserved))
+        .map(|reserved| format!("{path} is too like {reserved}, which is Workshop's own"))
 }
 
 /// A project to fix or refactor, as the learner starts it.
@@ -103,6 +137,8 @@ pub struct Review {
     pub files: Vec<ProjectFile>,
     /// Each file the change touches, by name, with its lines kept, added and removed.
     pub changed: BTreeMap<String, Vec<Line>>,
+    /// The files the change deletes, rather than leaving empty.
+    pub deleted: Vec<String>,
     pub defects: Vec<Defect>,
     pub notes: Option<String>,
 }
@@ -116,7 +152,7 @@ impl Review {
             .map(|f| (f.path.clone(), f.text.clone()))
             .collect();
         for (path, lines) in &self.changed {
-            if lines.iter().all(|l| l.kind == diff::LineKind::Removed) {
+            if self.deleted.contains(path) {
                 files.remove(path);
             } else {
                 files.insert(path.clone(), diff::new_text(lines));
@@ -396,7 +432,7 @@ fn project_part(
 ) -> Result<Part, String> {
     let given = test_files("given", &fields.given, read)?;
     for file in &given {
-        if seen.iter().any(|f| f.path == file.path) {
+        if seen.iter().any(|f| same_name(&f.path, &file.path)) {
             return Err(format!(
                 "the given tests {} have the same name as a file the project has by then; name them apart",
                 file.path
@@ -409,7 +445,7 @@ fn project_part(
     }
     let hidden = test_files("tests", &fields.tests, read)?;
     for file in &hidden {
-        if seen.iter().any(|f| f.path == file.path) {
+        if seen.iter().any(|f| same_name(&f.path, &file.path)) {
             return Err(format!(
                 "the hidden tests {} have the same name as a file of the project's, or another part's tests; name them apart",
                 file.path
@@ -433,6 +469,15 @@ fn project_part(
         .map(|f| (f.path.clone(), f.text.clone()))
         .collect();
     for file in changed {
+        if let Some(other) = reference
+            .keys()
+            .find(|path| **path != file.path && same_name(path, &file.path))
+        {
+            return Err(format!(
+                "{}/{} is {other} in the project, with its case changed; name it as the project does",
+                fields.reference, file.path
+            ));
+        }
         reference.insert(file.path, file.text);
     }
     // The project's own tests are the first part's examples, as are each part's given tests.
@@ -484,12 +529,12 @@ fn test_files(
     let mut out: Vec<ProjectFile> = Vec::new();
     for file in files {
         let path = file.rsplit('/').next().unwrap_or(file).to_owned();
-        if !is_test_file(&path) {
+        if !is_test_module(&path) {
             return Err(format!(
-                "{file:?}, in {what}, should be a file of tests, named test_*.py"
+                "{file:?}, in {what}, should be a file of tests Python can import, named test_, then letters, digits and _, then .py"
             ));
         }
-        if out.iter().any(|f| f.path == path) {
+        if out.iter().any(|f| same_name(&f.path, &path)) {
             return Err(format!(
                 "{what} has two files called {path}; name them apart"
             ));
@@ -506,7 +551,16 @@ fn test_files(
 fn cases<'a>(files: impl Iterator<Item = &'a ProjectFile>) -> Result<Vec<Case>, String> {
     let mut out = Vec::new();
     for file in files {
-        for name in test_names(&file.text) {
+        let names = test_names(&file.text);
+        for (at, name) in names.iter().enumerate() {
+            if names[..at].contains(name) {
+                return Err(format!(
+                    "{} defines {name} twice, so only the second would run; name them apart",
+                    file.path
+                ));
+            }
+        }
+        for name in names {
             out.push(Case {
                 input: format!("{}::{name}\n", file.path),
                 output: format!("{PASSED}\n"),
@@ -543,11 +597,20 @@ fn directory(
     list_dir: ListDir<'_>,
 ) -> Result<Vec<ProjectFile>, String> {
     let dir = dir.trim_end_matches('/');
-    let mut files = Vec::new();
+    let mut files: Vec<ProjectFile> = Vec::new();
     for name in list_dir(dir)? {
-        if !diff::is_project_path(&name) {
+        if let Some(problem) = name_problem(&name) {
+            return Err(format!("in {dir}/: {problem}"));
+        }
+        if is_test_file(&name) && !is_test_module(&name) {
             return Err(format!(
-                "{dir}/{name} can't be in a project: name files with letters, digits, _, - and ."
+                "{dir}/{name} is a file of tests, so name it as Python can import it: test_, then letters, digits and _"
+            ));
+        }
+        if let Some(other) = files.iter().find(|f| same_name(&f.path, &name)) {
+            return Err(format!(
+                "{dir}/ has {} and {name}, which are one file where case is ignored, as on macOS and Windows",
+                other.path
             ));
         }
         files.push(ProjectFile {
@@ -577,10 +640,41 @@ fn review(
     let mut review = Review {
         files,
         changed,
+        deleted: changes
+            .iter()
+            .filter(|c| c.new.is_none())
+            .map(|c| c.path().to_owned())
+            .collect(),
         defects: Vec::new(),
         notes,
     };
     let after = review.after();
+    if after.len() > MAX_FILES {
+        return Err(format!(
+            "the project has {} files once it's changed; keep it to {MAX_FILES} at most, so it can be read on a phone",
+            after.len()
+        ));
+    }
+    let lines: usize = after.values().map(|text| text.lines().count()).sum();
+    if lines > MAX_LINES {
+        return Err(format!(
+            "the project has {lines} lines once it's changed; keep it to {MAX_LINES} at most, so it can be read on a phone"
+        ));
+    }
+    if let Some(added) = changes
+        .iter()
+        .filter_map(|c| c.new.as_deref())
+        .find_map(|path| {
+            name_problem(path).or_else(|| {
+                before
+                    .keys()
+                    .find(|other| *other != path && same_name(other, path))
+                    .map(|other| format!("{path} is {other} with its case changed"))
+            })
+        })
+    {
+        return Err(format!("in {change}: {added}"));
+    }
     let items = list(defects);
     if items.is_empty() {
         return Err(
@@ -821,7 +915,7 @@ mod tests {
             (fix("", "Fix it.\n"), "needs a `## Explanation` section"),
             (
                 fix("given = [\"checks/hidden.py\"]\n", body),
-                "named test_*.py",
+                "a file of tests Python can import",
             ),
             (
                 fix(
@@ -990,6 +1084,152 @@ mod tests {
             &[("project/big.py", &big)],
         ));
         assert!(found.contains("so it can be read on a phone"), "{found}");
+    }
+
+    /// A fix with its hidden tests in a file of this name and text, and these other files.
+    fn fix_with(hidden: (&str, &str), files: &[(&str, &str)]) -> Pack {
+        let mut all = vec![
+            ("project/count.py", COUNT),
+            ("project/test_count.py", OWN_TESTS),
+            ("fixed/count.py", FIXED),
+        ];
+        all.retain(|(path, _)| !files.iter().any(|(other, _)| other == path));
+        all.extend_from_slice(files);
+        all.push((hidden.0, hidden.1));
+        pack(
+            &format!(
+                "task = \"fix\"\ntests = [{:?}]\nreference = \"fixed\"\n",
+                hidden.0
+            ),
+            "Fix it.\n\n## Explanation\n\nThis.\n",
+            &all,
+        )
+    }
+
+    #[test]
+    fn refuses_names_that_clash_or_cant_be_imported() {
+        for (pack, says) in [
+            (
+                fix_with(("checks/test_a.b.py", HIDDEN), &[]),
+                "Python can import",
+            ),
+            (
+                fix_with(("checks/test_h.py", HIDDEN), &[("project/Count.py", COUNT)]),
+                "one file where case is ignored",
+            ),
+            (
+                fix_with(
+                    ("checks/test_h.py", HIDDEN),
+                    &[("project/Workshop_Tests.py", "")],
+                ),
+                "Workshop's own",
+            ),
+            (
+                fix_with(("checks/test_h.py", HIDDEN), &[("project/built", "")]),
+                "Workshop's own",
+            ),
+            (fix_with(("checks/test_COUNT.py", HIDDEN), &[]), "same name"),
+            (
+                pack(
+                    "task = \"fix\"
+tests = [\"checks/test_h.py\"]
+reference = \"fixed\"
+",
+                    "Fix it.
+
+## Explanation
+
+This.
+",
+                    &[
+                        ("project/count.py", COUNT),
+                        ("project/test_count.py", OWN_TESTS),
+                        ("checks/test_h.py", HIDDEN),
+                        ("fixed/Count.py", FIXED),
+                    ],
+                ),
+                "with its case changed",
+            ),
+            (
+                fix_with(
+                    (
+                        "checks/test_h.py",
+                        "def test_a():\n    pass\n\ndef test_a():\n    assert False\n",
+                    ),
+                    &[],
+                ),
+                "defines test_a twice",
+            ),
+        ] {
+            let found = problem(&pack);
+            assert!(found.contains(says), "wanted {says:?}, got {found}");
+        }
+    }
+
+    fn review_of(change: &str, defects: &str, files: &[(&str, &str)]) -> Pack {
+        let mut all = vec![("project/count.py", COUNT), ("change.diff", change)];
+        all.extend_from_slice(files);
+        pack(
+            "task = \"review\"\nchange = \"change.diff\"\n",
+            &format!("Review this.\n\n## Defects\n\n{defects}\n"),
+            &all,
+        )
+    }
+
+    #[test]
+    fn checks_a_change_does_something_and_says_where() {
+        let defect = "- `count.py:1`: x.";
+        for (change, says) in [
+            (
+                "--- a/count.py\n+++ b/count.py\n@@ -1,2 +1,2 @@\n def count(xs):\n     return len(xs) - 1\n",
+                "changes nothing",
+            ),
+            (
+                "--- a/count.py\n+++ b/count.py\n@@ -2 +5 @@\n-    return len(xs) - 1\n+    return 0\n",
+                "says it starts at line 5 of the new version",
+            ),
+            (
+                "--- /dev/null\n+++ b/Count.py\n@@ -0,0 +1 @@\n+x = 1\n",
+                "with its case changed",
+            ),
+        ] {
+            let found = problem(&review_of(change, defect, &[]));
+            assert!(found.contains(says), "wanted {says:?}, got {found}");
+        }
+        // Growing past what a phone can read, once it's changed.
+        let big: String = (0..MAX_LINES).map(|n| format!("+x{n} = {n}\n")).collect();
+        let grown = format!("--- /dev/null\n+++ b/big.py\n@@ -0,0 +1,{MAX_LINES} @@\n{big}");
+        let found = problem(&review_of(&grown, defect, &[]));
+        assert!(found.contains("once it's changed"), "{found}");
+
+        // A file emptied is still there, unlike one deleted.
+        let emptied = "--- a/count.py\n+++ b/count.py\n@@ -1,2 +0,0 @@\n-def count(xs):\n-    return len(xs) - 1\n";
+        let kept = review_of(
+            emptied,
+            "- `other.py:1`: x.",
+            &[("project/other.py", "y = 2\n")],
+        );
+        assert!(kept.problems.is_empty(), "{}", problem(&kept));
+        let Content::Review(review) = &kept.items[0].content else {
+            panic!("not a review");
+        };
+        assert_eq!(review.after()["count.py"], "");
+        assert!(
+            review.diff().contains("+++ b/count.py"),
+            "{}",
+            review.diff()
+        );
+        let deleted = emptied.replace("+++ b/count.py", "+++ /dev/null");
+        let gone = review_of(
+            &deleted,
+            "- `other.py:1`: x.",
+            &[("project/other.py", "y = 2\n")],
+        );
+        let Content::Review(review) = &gone.items[0].content else {
+            panic!("not a review: {}", problem(&gone));
+        };
+        assert!(!review.after().contains_key("count.py"));
+        assert!(review.diff().contains("+++ /dev/null"), "{}", review.diff());
     }
 
     #[test]

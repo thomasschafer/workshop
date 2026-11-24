@@ -1604,18 +1604,24 @@ impl Problems {
         if found.coding.project().is_none() {
             return Some("only a codebase item has files to save".to_owned());
         }
-        if !diff::is_project_path(path) {
-            return Some(format!(
-                "{path:?} can't be a file in the project: name it with letters, digits, _, - and ."
-            ));
+        if let Some(problem) = workshop_pack::project::name_problem(path) {
+            return Some(problem);
         }
         if workshop_pack::project::is_test_file(path) {
             return Some(format!(
-                "{path} is a file of tests, which are the problem's own, so it can't be changed"
+                "{path} is named as a file of tests, which are the problem's own, so it can't be changed or added"
             ));
         }
-        if path == workshop_coding::project::DRIVER_FILE {
-            return Some(format!("{path} is Workshop's own"));
+        let taken = std::fs::read_dir(self.project_dir(&found.key()))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .find(|name| name != path && workshop_pack::project::same_name(name, path));
+        if let Some(taken) = taken {
+            return Some(format!(
+                "the project has {taken} already, which is the same file where case is ignored"
+            ));
         }
         let dir = self.project_dir(&found.key());
         if !dir.join(path).exists() {

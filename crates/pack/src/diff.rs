@@ -177,6 +177,8 @@ impl FileChange {
 pub struct Hunk {
     /// Where it starts in the old version, counting from 1, or 0 when it has no old lines.
     pub old_start: usize,
+    /// Where it starts in the new version, likewise.
+    pub new_start: usize,
     pub lines: Vec<(LineKind, String)>,
 }
 
@@ -286,11 +288,15 @@ pub fn parse(text: &str) -> Result<Vec<FileChange>, String> {
                     "the hunk on line {number} of the diff comes before any file's --- and +++ lines"
                 ));
             };
-            let (old_start, old_count, new_count) = hunk_header(header).ok_or_else(|| {
-                format!("line {number} of the diff isn't a hunk's header, such as @@ -3,4 +3,5 @@")
-            })?;
+            let (old_start, old_count, new_start, new_count) =
+                hunk_header(header).ok_or_else(|| {
+                    format!(
+                        "line {number} of the diff isn't a hunk's header, such as @@ -3,4 +3,5 @@"
+                    )
+                })?;
             change.hunks.push(Hunk {
                 old_start,
+                new_start,
                 lines: Vec::new(),
             });
             remaining = Some((old_count, new_count));
@@ -320,6 +326,19 @@ pub fn parse(text: &str) -> Result<Vec<FileChange>, String> {
             empty.path()
         ));
     }
+    for change in &changes {
+        if let Some(n) = change
+            .hunks
+            .iter()
+            .position(|h| h.lines.iter().all(|(kind, _)| *kind == LineKind::Kept))
+        {
+            return Err(format!(
+                "hunk {} of {}'s change has only lines of context, so it changes nothing",
+                n + 1,
+                change.path()
+            ));
+        }
+    }
     Ok(changes)
 }
 
@@ -344,9 +363,9 @@ fn is_git_line(line: &str) -> bool {
     .any(|start| line.starts_with(start))
 }
 
-/// A hunk header's start in the old version, and how many old and new lines it has: from
+/// A hunk header's start and count of lines in the old version and the new: from
 /// `-3,4 +3,5 @@`, with a count of 1 where it's left out, as in `-3 +3 @@`.
-fn hunk_header(header: &str) -> Option<(usize, usize, usize)> {
+fn hunk_header(header: &str) -> Option<(usize, usize, usize, usize)> {
     let (ranges, _) = header.split_once(" @@")?;
     let (old, new) = ranges.split_once(' ')?;
     let range = |text: &str, sign: char| -> Option<(usize, usize)> {
@@ -357,8 +376,8 @@ fn hunk_header(header: &str) -> Option<(usize, usize, usize)> {
         }
     };
     let (old_start, old_count) = range(old, '-')?;
-    let (_, new_count) = range(new, '+')?;
-    Some((old_start, old_count, new_count))
+    let (new_start, new_count) = range(new, '+')?;
+    Some((old_start, old_count, new_start, new_count))
 }
 
 /// Whether a path is a file directly in a project: a name of letters, digits, `_`, `-` and
@@ -439,6 +458,18 @@ pub fn apply(
                 ));
             }
             keep_until(start, &mut lines, &mut next_old, &mut next_new);
+            let has_new = hunk
+                .lines
+                .iter()
+                .any(|(kind, _)| *kind != LineKind::Removed);
+            let new_start = if has_new { next_new + 1 } else { next_new };
+            if hunk.new_start != new_start {
+                return Err(format!(
+                    "hunk {} of {path}'s change says it starts at line {} of the new version, and it starts at line {new_start}",
+                    n + 1,
+                    hunk.new_start
+                ));
+            }
             for (kind, text) in &hunk.lines {
                 match kind {
                     LineKind::Added => {

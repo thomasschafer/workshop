@@ -397,21 +397,29 @@ impl Runtime {
         cancel: &CancellationToken,
     ) -> Result<Built> {
         let file = format!("main.{}", language.extension());
-        self.build_named(language, &file, source, modules, flavour, cancel)
+        self.build_named(language, &file, &[], source, modules, flavour, cancel)
             .await
     }
 
-    /// Builds a program from its source, in a file of this name, and modules of its own beside
-    /// it, as [`Runtime::build_with`] does. Only Python, which isn't compiled, can be named.
+    /// Builds a program from its source, in a file of this name, and modules of its own, as
+    /// [`Runtime::build_with`] does. Only Python, which isn't compiled, can be named, and given
+    /// `flags` for its interpreter, such as `-I`. Its modules can be in directories of their own
+    /// beside it, one deep, as `project/loans.py`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn build_named(
         &self,
         language: Language,
         file: &str,
+        flags: &[&str],
         source: &str,
         modules: &[(&str, &str)],
         flavour: Flavour,
         cancel: &CancellationToken,
     ) -> Result<Built> {
+        anyhow::ensure!(
+            flags.is_empty() || language == Language::Python,
+            "only Python is given flags as it runs"
+        );
         let main = format!("main.{}", language.extension());
         anyhow::ensure!(
             file == main || language == Language::Python,
@@ -426,21 +434,44 @@ impl Runtime {
             Err(missing) => return Ok(Built::Unavailable(missing)),
         };
         let file = file.to_owned();
-        if let Some((name, _)) = modules
-            .iter()
-            .find(|(name, _)| *name == file || name.contains(['/', '\\']) || name == &"built")
-        {
-            anyhow::bail!("{name:?} can't be the name of a program's module");
+        // Names are compared ignoring case, as the file systems of macOS and Windows do.
+        let clashes = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+        for (at, (name, _)) in modules.iter().enumerate() {
+            let parts: Vec<&str> = name.split('/').collect();
+            let safe = parts.len() <= 2
+                && !name.contains('\\')
+                && parts
+                    .iter()
+                    .all(|part| !part.is_empty() && *part != "." && *part != "..");
+            if !safe
+                || clashes(name, &file)
+                || clashes(name, "built")
+                || modules[..at].iter().any(|(other, _)| clashes(other, name))
+            {
+                anyhow::bail!("{name:?} can't be the name of a program's module");
+            }
         }
         let compiled = format!("{compiler:?}");
-        let mut parts = vec![language.id(), compiled.as_str(), file.as_str(), source];
+        let flagged = flags.join(" ");
+        let mut parts = vec![
+            language.id(),
+            compiled.as_str(),
+            file.as_str(),
+            flagged.as_str(),
+            source,
+        ];
         for (name, text) in modules {
             parts.extend([*name, *text]);
         }
         let key = fingerprint(&parts);
         let dir = self.scratch.join(&key);
         let (command, reads) = match language {
-            Language::Python => (vec![tool.program.clone(), file.clone()], tool.reads.clone()),
+            Language::Python => {
+                let mut command = vec![tool.program.clone()];
+                command.extend(flags.iter().map(|flag| (*flag).to_owned()));
+                command.push(file.clone());
+                (command, tool.reads.clone())
+            }
             Language::Rust | Language::Cpp | Language::Haskell => (
                 vec![dir.join(binary()).to_string_lossy().into_owned()],
                 Vec::new(),
@@ -467,7 +498,11 @@ impl Runtime {
             .with_context(|| format!("creating {}", staging.display()))?;
         std::fs::write(staging.join(&file), source)?;
         for (name, text) in modules {
-            std::fs::write(staging.join(name), text)?;
+            let path = staging.join(name);
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(path, text)?;
         }
         if let Some(mut args) = compiler {
             args.push(file.clone());
