@@ -166,8 +166,6 @@ export function FollowUpsView({
       const marked = await gradingApi.finishFollowUps(itemKey, exchange.id);
       forgetDraft();
       learning().forgetFollowUps(itemKey);
-      // So the attempt is on this device too, rather than offering the card again first.
-      void learning().sync();
       onMarked(marked, latest);
     } catch (e) {
       // Marking it again gives the marks already given, so it's left to be tried again, unless

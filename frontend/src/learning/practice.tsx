@@ -269,11 +269,7 @@ export function ItemView({
             record(rating);
             onDone(null);
           }}
-          onMarked={() => {
-            // The grader's attempt is the server's, so the deck catches up with it.
-            void learning().sync();
-            onDone(null);
-          }}
+          onMarked={() => onDone(null)}
           onFlag={(note) => {
             learning().flag({
               id: newId(),

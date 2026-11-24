@@ -94,6 +94,66 @@ describe("Learning", () => {
     expect(new Learning(storage).deck?.follow_ups).toEqual(["p/b"]);
   });
 
+  it("counts an attempt the server recorded until the deck has it, even after a reload", async () => {
+    const storage = new MemoryStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(DECK))),
+    );
+    const learning = new Learning(storage);
+    await learning.sync();
+    // Marked by the grader, then the page goes before the sync that follows is answered.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    const marked = attempt();
+    learning.recordedOnServer(marked);
+    expect(learning.attempts).toEqual([marked]);
+
+    const sent: { attempts: Attempt[] }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify(DECK));
+      }),
+    );
+    const reloaded = new Learning(storage);
+    expect(reloaded.attempts).toEqual([marked]);
+    // It's the server's already, so there's nothing to send.
+    expect(reloaded.syncStatus.pending).toBe(0);
+    await reloaded.sync();
+    expect(sent).toEqual([{ attempts: [], flags: [], retirements: [] }]);
+    expect(reloaded.attempts).toEqual([]);
+  });
+
+  it("counts an attempt the server recorded until a sync begun after it", async () => {
+    const answers: (() => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await new Promise<void>((resolve) => answers.push(resolve));
+        return new Response(JSON.stringify(DECK));
+      }),
+    );
+    const learning = new Learning(new MemoryStorage());
+    // A sync begun before the grader recorded it sends back a deck without it.
+    const opening = learning.sync();
+    const marked = attempt();
+    learning.recordedOnServer(marked);
+    learning.recordedOnServer(marked);
+    expect(learning.attempts).toEqual([marked]);
+    await vi.waitFor(() => expect(answers).toHaveLength(1));
+    answers[0]?.();
+    await opening;
+    expect(learning.attempts).toEqual([marked]);
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    answers[1]?.();
+    await vi.waitFor(() => expect(learning.attempts).toEqual([]));
+    expect(answers).toHaveLength(2);
+  });
+
   it("keeps what's done while a sync is on its way, and sends it next", async () => {
     let answer: (() => void) | null = null;
     const bodies: { attempts: Attempt[] }[] = [];

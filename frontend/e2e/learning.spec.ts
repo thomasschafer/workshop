@@ -528,15 +528,20 @@ test("works through a design session in stages, asking the coach and answering i
   expect(mine.map((m) => m.detail)).toContain("Didn't find out: Durability");
 });
 
-test("practises offline on a phone, keeping answers across a reload, and syncs them later", async () => {
-  // The app is kept on the phone by its service worker, once that's in charge of the page.
+/** Waits until the app's kept on the phone by its service worker, which is in charge of the page. */
+async function keptOnThePhone(): Promise<void> {
   await phone.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });
+  if (await phone.evaluate(() => navigator.serviceWorker.controller !== null)) return;
   await phone.reload();
   await expect
     .poll(() => phone.evaluate(() => navigator.serviceWorker.controller !== null))
     .toBe(true);
+}
+
+test("practises offline on a phone, keeping answers across a reload, and syncs them later", async () => {
+  await keptOnThePhone();
   await goHome();
   await expect(phone.locator(".track")).toHaveCount(7);
 
@@ -698,8 +703,10 @@ test("marks a card answered in the learner's own words", async () => {
 });
 
 test("explains a card aloud, marked for what's right and how clearly it's put", async () => {
+  await keptOnThePhone();
   await phone.goto("/practice/review");
   await phone.getByRole("button", { name: "Explain it aloud" }).tap();
+  const prompt = await phone.locator(".learn-prompt").innerText();
   const explain = phone.getByRole("region", { name: "Explain it aloud" });
   await holdToTalk(
     phone,
@@ -725,7 +732,14 @@ test("explains a card aloud, marked for what's right and how clearly it's put", 
     "before",
   );
   await expect(phone.getByRole("region", { name: "Answer" })).toBeVisible();
+  // The connection goes before the deck on the phone catches up with the attempt, but it isn't
+  // offered again, even after a reload.
+  await setOffline(context, true);
   await phone.getByRole("button", { name: "Next" }).tap();
+  await phone.reload();
+  await expect(phone.locator(".learn-count")).toHaveText(/^1 of/);
+  expect(await phone.locator(".learn-prompt").innerText()).not.toBe(prompt);
+  await setOffline(context, false);
   // It's an attempt, and its mistakes are in the log, as a written answer's are.
   const log = (await (await phone.request.get("/api/mistakes")).json()) as {
     mistakes: { source: string; detail: string }[];

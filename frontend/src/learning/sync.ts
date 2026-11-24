@@ -28,6 +28,11 @@ interface Saved {
   flags: FlagChange[];
   /** Missing from what an older Workshop saved on the device. */
   retirements?: RetirementChange[];
+  /**
+   * Recorded by the server itself since the deck came, as when the grader marks an answer, so
+   * not to send. Missing from what an older Workshop saved on the device.
+   */
+  recorded?: Attempt[];
 }
 
 export interface SyncStatus {
@@ -71,7 +76,12 @@ export class Learning {
 
   /** Syncs now if anything is waiting, such as when the server can be reached again. */
   syncIfPending(): void {
-    if (this.pending() > 0) void this.sync();
+    if (this.behind()) void this.sync();
+  }
+
+  /** Whether there's anything to send, or anything the server has that the deck doesn't. */
+  private behind(): boolean {
+    return this.pending() > 0 || this.recorded.length > 0;
   }
 
   private pending(): number {
@@ -84,8 +94,13 @@ export class Learning {
     return this.saved.deck;
   }
 
+  /** Done since the deck came: still to send, or recorded by the server but not in the deck. */
   get attempts(): Attempt[] {
-    return this.saved.attempts;
+    return [...this.saved.attempts, ...this.recorded];
+  }
+
+  private get recorded(): Attempt[] {
+    return this.saved.recorded ?? [];
   }
 
   get flagChanges(): FlagChange[] {
@@ -114,6 +129,19 @@ export class Learning {
   /** Saves an attempt on the device straight away, then sends it when it can. */
   record(attempt: Attempt): void {
     this.saved = { ...this.saved, attempts: [...this.saved.attempts, attempt] };
+    this.save();
+    void this.sync();
+  }
+
+  /**
+   * Counts an attempt the server recorded itself, as it does once the grader marks an answer,
+   * until the deck has it, so the device doesn't offer the item again first, even if the page
+   * goes before the deck catches up.
+   */
+  recordedOnServer(attempt: Attempt): void {
+    // Such as the same marks given again, after a reply was lost.
+    if (this.attempts.some((a) => a.id === attempt.id)) return;
+    this.saved = { ...this.saved, recorded: [...this.recorded, attempt] };
     this.save();
     void this.sync();
   }
@@ -179,7 +207,7 @@ export class Learning {
     // another straight after it.
     this.following ??= this.running.then(() => {
       this.following = null;
-      return this.pending() > 0 ? this.sync() : undefined;
+      return this.behind() ? this.sync() : undefined;
     });
     return this.following;
   }
@@ -192,6 +220,8 @@ export class Learning {
     const attempts = this.saved.attempts;
     const flags = this.saved.flags;
     const retirements = this.retirementChanges;
+    // The server had these before this began, so the deck it sends back has them.
+    const recorded = this.recorded;
     const pendingOutbox =
       typeof localStorage !== "undefined" && this.storage === localStorage ? outbox() : null;
     const outboxBatch = pendingOutbox ? pendingOutbox.tryAcquireBatch() : null;
@@ -225,11 +255,13 @@ export class Learning {
       const sentAttempts = new Set(attempts.map((a) => a.id));
       const sentFlags = new Set(flags.map((f) => f.id));
       const sentRetirements = new Set(retirements.map((r) => r.id));
+      const inDeck = new Set(recorded.map((a) => a.id));
       this.saved = {
         deck,
         attempts: this.saved.attempts.filter((a) => !sentAttempts.has(a.id)),
         flags: this.saved.flags.filter((f) => !sentFlags.has(f.id)),
         retirements: this.retirementChanges.filter((r) => !sentRetirements.has(r.id)),
+        recorded: this.recorded.filter((a) => !inDeck.has(a.id)),
       };
       this.retryMs = RETRY_MS;
       this.save();

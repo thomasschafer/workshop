@@ -1,5 +1,7 @@
 // Types mirror the grader in src/grader.rs and its routes in src/server/grading.rs.
 
+import type { Attempt } from "../learning/types";
+
 export type Work = "design" | "plan" | "card" | "explanation";
 
 export interface Marked {
@@ -24,6 +26,8 @@ export interface MarkedReply {
   rubric: string[];
   /** When it comes back, for work that counts as an attempt. */
   due: number | null;
+  /** The attempt it was recorded as, for work that counts as one. */
+  attempt: Attempt | null;
 }
 
 /** A design session marked, with the brief its questions were answered from, now it's shown. */

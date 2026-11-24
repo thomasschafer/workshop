@@ -1,5 +1,6 @@
 import { request } from "../api";
 import { utcOffset } from "../learning/local";
+import { learning } from "../learning/sync";
 import type {
   DesignEdit,
   DesignListed,
@@ -19,6 +20,12 @@ const path = (key: string) => {
   if (!pack || !item) throw new Error(`${key} isn't an item's key`);
   return `${encodeURIComponent(pack)}/${encodeURIComponent(item)}`;
 };
+
+/** Counts the attempt the marks were recorded as on the device, as soon as it's heard of. */
+function counted<T extends MarkedReply>(reply: T): T {
+  if (reply.attempt) learning().recordedOnServer(reply.attempt);
+  return reply;
+}
 
 export const gradingApi = {
   designs: () =>
@@ -45,7 +52,9 @@ export const gradingApi = {
     ),
   /** Has the grader mark the whole session, which ends it; `id` is the attempt's. */
   finishDesign: (key: string, id: string) =>
-    request<DesignMarked>("POST", `/design/${path(key)}/finish`, { id }, { timeoutMs: 0 }),
+    request<DesignMarked>("POST", `/design/${path(key)}/finish`, { id }, { timeoutMs: 0 }).then(
+      counted,
+    ),
   /**
    * Marks work with the grader, written or, if `spoken`, what was heard explaining it aloud;
    * `id` is the attempt's, for work that counts as one.
@@ -56,7 +65,7 @@ export const gradingApi = {
       `/items/${path(key)}/mark`,
       { id, work, text, spoken },
       { timeoutMs: 0 },
-    ),
+    ).then(counted),
   /** The follow-up questions under way on a card, if there are any. */
   followUps: (key: string) =>
     request<{ exchange: Exchange | null }>("GET", `/cards/${path(key)}/follow-ups`).then(
@@ -105,7 +114,7 @@ export const gradingApi = {
       `/cards/${path(key)}/follow-ups/finish`,
       { exchange },
       { timeoutMs: 0 },
-    ),
+    ).then(counted),
   flagged: () => request<{ cards: FlaggedCard[] }>("GET", "/cards/flagged").then((r) => r.cards),
   review: (key: string) =>
     request<{ review: Review; cleared: boolean }>("POST", `/cards/${path(key)}/review`, undefined, {
