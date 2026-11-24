@@ -341,7 +341,7 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
     let levels = workshop_learning::levels(&learning.store().all_attempts()?, |key| {
         items
             .get(key)
-            .filter(|item| item.kind == Kind::Coding)
+            .filter(|item| matches!(item.kind, Kind::Coding | Kind::Codebase))
             .map(|item| workshop_learning::level::Problem {
                 skills: &item.skills,
                 difficulty: item.difficulty,
@@ -358,7 +358,7 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
         retired
             .iter()
             .copied()
-            .filter(|item| item.kind == Kind::Coding),
+            .filter(|item| matches!(item.kind, Kind::Coding | Kind::Codebase)),
         |skill, _| {
             levels
                 .get(skill)

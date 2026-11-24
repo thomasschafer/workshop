@@ -199,7 +199,15 @@ fn own_rubric(
             review
                 .defects
                 .iter()
-                .map(|defect| format!("Finds that {} ({})", defect.description, defect.location()))
+                .enumerate()
+                .map(|(at, defect)| {
+                    format!(
+                        "{} Finds that {} ({})",
+                        defect_id(at),
+                        defect.description,
+                        defect.location()
+                    )
+                })
                 .collect(),
             review.notes.clone(),
         )),
@@ -308,7 +316,7 @@ pub fn mark_prompt(
         }
         Content::Review(review) => {
             out.push_str(&format!(
-                "The project, before the change:\n\n<project>\n{}</project>\n\nThe change the learner reviewed:\n\n<change>\n{}</change>\n\nThe rubric's points are the defects planted in the change, each with where it is, by its line in the changed file. Each review comment says where it's about, by a file and a line in the changed file, or a line of the old file it removes, or says nothing of where, for the change as a whole. Credit a point when a comment finds that defect, in any words, even if it's about a nearby line or gives no line, and partly when it notices something wrong there but not what. A comment that finds a real problem that isn't a point is fine, and so is one on style or naming: neither is a finding. Each finding is a false alarm: a comment saying something is wrong that isn't, such as a misread of what the code does. Don't list a defect that was missed as a finding; it's kept as a mistake already.\n\n",
+                "The project, before the change:\n\n<project>\n{}</project>\n\nThe change the learner reviewed:\n\n<change>\n{}</change>\n\nThe rubric's points are the defects planted in the change, each with an id, such as [D1], and where it is, by its line in the changed file; give each point back as it's written, starting with its id. Each review comment says where it's about, by a file and a line in the changed file, or a line of the old file it removes, or says nothing of where, for the change as a whole. Credit a point when a comment finds that defect, in any words, even if it's about a nearby line or gives no line, and partly when it notices something wrong there but not what. A comment that finds a real problem that isn't a point is fine, and so is one on style or naming: neither is a finding. Each finding is a false alarm: a comment saying something is wrong that isn't, such as a misread of what the code does. Don't list a defect that was missed as a finding; it's kept as a mistake already.\n\n",
                 workshop_pack::project::as_text(review.files.iter()),
                 review.diff()
             ));
@@ -628,13 +636,29 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType], answer: &Answer<'_>)
 /// in part counting half, less [`FALSE_ALARM_COST`] for each false alarm. The defects not found
 /// at all are kept, for the mistake log.
 pub fn score_review(marked: Marked, review: &workshop_pack::Review) -> Result<Marked> {
-    if marked.points.len() != review.defects.len() {
-        bail!(
-            "the grader marked {} points, and the change has {} defects",
-            marked.points.len(),
-            review.defects.len()
-        );
+    // Points are matched with defects by their ids, whatever order the grader gives them in.
+    let mut points: Vec<Option<Point>> = vec![None; review.defects.len()];
+    for point in &marked.points {
+        let at = (0..review.defects.len())
+            .find(|&at| point.point.trim_start().starts_with(&defect_id(at)))
+            .with_context(|| {
+                format!(
+                    "the grader marked a point that isn't one of the defects: {:?}",
+                    point.point
+                )
+            })?;
+        if points[at].replace(point.clone()).is_some() {
+            bail!("the grader marked {} twice", defect_id(at));
+        }
     }
+    let points: Vec<Point> = points
+        .into_iter()
+        .enumerate()
+        .map(|(at, point)| {
+            point.with_context(|| format!("the grader didn't mark {}", defect_id(at)))
+        })
+        .collect::<Result<_>>()?;
+    let marked = Marked { points, ..marked };
     let found: f64 = marked
         .points
         .iter()
@@ -659,6 +683,12 @@ pub fn score_review(marked: Marked, review: &workshop_pack::Review) -> Result<Ma
         missed,
         ..marked
     })
+}
+
+/// What a review's defect is called in its rubric, which the grader gives back with its mark:
+/// `[D1]`, counting from 1.
+fn defect_id(at: usize) -> String {
+    format!("[D{}]", at + 1)
 }
 
 /// Marks a piece of work with the grader.
@@ -1151,7 +1181,7 @@ mod tests {
         let prompt = mark_prompt(item, Work::Review, Answer::written(comments), &types).unwrap();
         // Each defect is a point, with where it is, and the grader sees the change.
         assert!(
-            prompt.contains("- Finds that The renewal limit is off by one"),
+            prompt.contains("- [D1] Finds that The renewal limit is off by one"),
             "{prompt}"
         );
         assert!(prompt.contains("(loans.py:47)"), "{prompt}");
@@ -1171,7 +1201,8 @@ mod tests {
         );
         assert!(Work::Review.is_attempt());
 
-        let reply = r#"{"score": 1, "points": [{"point": "a", "met": "yes"}, {"point": "b", "met": "partly"}, {"point": "c", "met": "no"}], "findings": [], "feedback": "Good start."}"#;
+        // Given back in another order, they're matched by their ids.
+        let reply = r#"{"score": 1, "points": [{"point": "[D3] c", "met": "no"}, {"point": "[D1] a", "met": "yes"}, {"point": "[D2] b", "met": "partly"}], "findings": [], "feedback": "Good start."}"#;
         let marked = parse_marked(reply, &types, &Answer::written(comments)).unwrap();
         // Scored from what it found, whatever the grader said.
         let scored = score_review(marked.clone(), review).unwrap();
@@ -1205,12 +1236,34 @@ mod tests {
             scored.mistakes("attempt", "sample/loan-renewals", 1).len(),
             2
         );
-        // Every defect must be marked.
-        let short = Marked {
-            points: marked.points[..2].to_vec(),
-            ..marked
+        assert_eq!(
+            score_review(marked.clone(), review).unwrap().points[0].point,
+            "[D1] a"
+        );
+        // Every defect must be marked, once, and nothing else.
+        let point = |text: &str| Point {
+            point: text.to_owned(),
+            met: Met::Yes,
+            comment: String::new(),
         };
-        assert!(score_review(short, review).is_err());
+        for (points, says) in [
+            (vec![point("[D1] a"), point("[D2] b")], "didn't mark [D3]"),
+            (
+                vec![point("[D1] a"), point("[D1] b"), point("[D3] c")],
+                "marked [D1] twice",
+            ),
+            (
+                vec![point("[D1] a"), point("b"), point("[D3] c")],
+                "isn't one of the defects",
+            ),
+        ] {
+            let wrong = Marked {
+                points,
+                ..marked.clone()
+            };
+            let err = score_review(wrong, review).unwrap_err();
+            assert!(err.to_string().contains(says), "{err}");
+        }
     }
 
     #[test]

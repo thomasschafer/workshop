@@ -2029,8 +2029,8 @@ mod tests {
 
         let opened =
             json(send(&router, request("POST", &format!("{item}/open"), None)).await).await;
-        // There's code to read, rather than an example to work out, so it starts with a plan.
-        assert_eq!(opened["session"]["step"], "plan");
+        // There's code to read, rather than an example to work out, so it starts with the code.
+        assert_eq!(opened["session"]["step"], "code");
         assert_eq!(opened["languages"], serde_json::json!([]));
         assert_eq!(opened["project"]["task"], "fix");
         let paths: Vec<&str> = opened["project"]["files"]
@@ -2268,7 +2268,7 @@ mod tests {
                 opened["session"]["part"].as_i64(),
                 opened["session"]["step"].as_str()
             ),
-            (Some(1), Some("plan"))
+            (Some(1), Some("code"))
         );
         assert!(
             opened["project"]["files"]
@@ -2295,7 +2295,7 @@ mod tests {
         );
     }
 
-    const REVIEW_MARKED: &str = r#"{"score": 0.9, "points": [{"point": "Off by one", "met": "yes", "comment": "Found it"}, {"point": "From today", "met": "partly", "comment": "Close"}, {"point": "Reservations", "met": "no", "comment": ""}], "findings": [{"error_type": "misread", "detail": "Said renew raises when the member is the borrower"}], "feedback": "Check what renewing does to someone waiting."}"#;
+    const REVIEW_MARKED: &str = r#"{"score": 0.9, "points": [{"point": "[D3] Reservations", "met": "no", "comment": ""}, {"point": "[D1] Off by one", "met": "yes", "comment": "Found it"}, {"point": "[D2] From today", "met": "partly", "comment": "Close"}], "findings": [{"error_type": "misread", "detail": "Said renew raises when the member is the borrower"}], "feedback": "Check what renewing does to someone waiting."}"#;
 
     /// A review is saved comment by comment, and the grader marks it against the planted
     /// defects: an attempt rated from what it found, with each defect missed in the mistake log.

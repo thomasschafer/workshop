@@ -508,6 +508,8 @@ fn asks_for_harder_problems_in_the_skills_whose_problems_were_found_too_easy() {
     assert!(record(attempt("1", "sample/islands", Rating::Easy)));
     assert!(record(attempt("2", "sample/fewest-hops", Rating::Easy)));
     assert!(!record(attempt("3", "sample/pair-sums", Rating::Again)));
+    // Work in a codebase counts as a problem.
+    assert!(record(attempt("4", "sample/word-counts", Rating::Easy)));
     let pack = Pack::load(&s.pack).unwrap();
     let brief = brief(&s.learning, &pack, &[], now).unwrap();
     let graphs = &brief.too_easy[0];
@@ -528,6 +530,17 @@ fn asks_for_harder_problems_in_the_skills_whose_problems_were_found_too_easy() {
         .find(|(skill, _)| skill == "algorithms.hashing")
         .unwrap();
     assert!(hashing.1 < 3, "{hashing:?}");
+    let debugging = brief
+        .too_easy
+        .iter()
+        .find(|skill| skill.skill == "debugging")
+        .unwrap_or_else(|| panic!("{:?}", brief.too_easy));
+    assert_eq!(debugging.retired[0].0, "Word counts that are one too many");
+    assert!(
+        brief.levels.contains(&("debugging".to_owned(), 3)),
+        "{:?}",
+        brief.levels
+    );
 }
 
 #[test]

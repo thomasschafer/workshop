@@ -15,7 +15,7 @@
 //!
 //! A codebase item's fix or refactor is solved the same way, in a project of several files
 //! rather than from a starter, without understanding it from an example first, as the project
-//! is there to read. It comes back as a recall, of what was wrong and how it was put right.
+//! is there to read, and with the plan written beside the code once it's been read. It comes back as a recall, of what was wrong and how it was put right.
 //! A change to review is the `review` module's.
 
 use std::collections::BTreeMap;
@@ -130,16 +130,12 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The steps of going through a problem this way: for a project, solving it starts with
-    /// planning, as there's code to read rather than an example to work out.
+    /// The steps of going through a problem this way: for a project, solving it starts with the
+    /// code, as there's code to read rather than an example to work out, and the plan, of what's
+    /// wrong or what to change, is written beside it, once it's been read.
     pub fn steps_for(self, coding: &Coding) -> &'static [StepName] {
         match (self, coding.project()) {
-            (Self::Solve, Some(_)) => &[
-                StepName::Plan,
-                StepName::Code,
-                StepName::Test,
-                StepName::Review,
-            ],
+            (Self::Solve, Some(_)) => &[StepName::Code, StepName::Test, StepName::Review],
             _ => self.steps(),
         }
     }
@@ -2451,7 +2447,7 @@ mod tests {
         let found = find(&packs, "sample", "habit-streaks").unwrap();
         let problems = Problems::new(dir.path());
         let session = problems.start(&found, &[], false, None, NOW).unwrap();
-        assert_eq!((session.mode, session.step), (Mode::Solve, StepName::Plan));
+        assert_eq!((session.mode, session.step), (Mode::Solve, StepName::Code));
         let open = Session {
             file: Some("tracker.py".to_owned()),
             ..session.clone()
