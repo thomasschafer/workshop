@@ -1067,7 +1067,9 @@ function TrackProblems({ track, onOpen }: { track: TrackId; onOpen: (item: strin
     if (!online) return;
     codingApi.overview(track).then(setOverview, () => setOverview(null));
   }, [track, online]);
-  const problems = (overview?.items ?? []).filter((item) => item.kind === "coding");
+  const problems = (overview?.items ?? []).filter(
+    (item) => item.kind === "coding" || item.kind === "codebase",
+  );
   if (problems.length === 0) return null;
   const bringBack = (key: string) => {
     setBringing(key);

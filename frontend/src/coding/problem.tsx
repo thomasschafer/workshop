@@ -139,6 +139,8 @@ export function ProblemView({
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const openedRef = useRef(opened);
+  openedRef.current = opened;
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
@@ -466,7 +468,7 @@ export function ProblemView({
           model,
           turns,
           // A project's files are the server's to show the tutor, with what's changed.
-          code: sessionRef.current?.file ? "" : (editor.current?.text() ?? ""),
+          code: openedRef.current?.project ? "" : (editor.current?.text() ?? ""),
           errors: editor.current?.diagnosticsText() ?? "",
           last_run: lastRun.current,
           file: sessionRef.current?.file ?? null,
@@ -1871,7 +1873,13 @@ function ReviewStep({
         <ExplainAloud
           itemKey={opened.key}
           work="explanation"
-          question="Explain how your solution works, and what it costs"
+          question={
+            opened.project?.task === "fix"
+              ? "Explain what was wrong, and how your change puts it right"
+              : opened.project
+                ? "Explain what your changes separate, and why that makes it testable"
+                : "Explain how your solution works, and what it costs"
+          }
           serverDictation={serverDictation}
           onMarked={() => {}}
         />

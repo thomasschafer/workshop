@@ -542,7 +542,9 @@ pub(super) async fn submit(
         session.started_at,
         session.submissions
     );
-    if let Some(mistake) = crate::mistakes::from_submission(&found.key(), id, now, &graded) {
+    if let Some(mistake) =
+        crate::mistakes::from_submission(&found.key(), found.coding, id, now, &graded)
+    {
         app.learning.store().record_mistakes(&[mistake])?;
     }
     let (ran, total) = match &graded {
@@ -2128,6 +2130,12 @@ mod tests {
                 .unwrap()
                 .contains("failed"),
             "{submitted}"
+        );
+        // Kept in the mistake log by the test's name.
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        assert_eq!(
+            log["mistakes"][0]["detail"],
+            "A submission failed hidden test 1, test_ends_with_a_full_stop in test_punctuation.py"
         );
 
         let words = file(&opened, "words.py");

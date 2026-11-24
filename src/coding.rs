@@ -1299,9 +1299,13 @@ impl Problems {
                             "submission-{}-{}-{}",
                             item_key, saved.started_at, saved.submissions
                         );
-                        if let Some(mistake) =
-                            crate::mistakes::from_submission(&item_key, mistake_id, at, graded)
-                            && let Err(err) = learning.store().record_mistakes(&[mistake])
+                        if let Some(mistake) = crate::mistakes::from_submission(
+                            &item_key,
+                            found.coding,
+                            mistake_id,
+                            at,
+                            graded,
+                        ) && let Err(err) = learning.store().record_mistakes(&[mistake])
                         {
                             return error_outcome(format!("{err:#}"));
                         }

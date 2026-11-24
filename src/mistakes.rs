@@ -114,6 +114,7 @@ fn numeric(
 /// otherwise a missed edge case.
 pub fn from_submission(
     key: &str,
+    coding: &workshop_pack::Coding,
     id: String,
     at: i64,
     graded: &workshop_coding::Graded,
@@ -137,6 +138,28 @@ pub fn from_submission(
         Some(part) => format!("part {}'s {what}", part + 1),
         None => what,
     };
+    // A project's tests have names, which say more than where they come in the list.
+    let test = workshop_pack::Case {
+        input: failure.input.clone(),
+        output: failure.expected.clone(),
+    };
+    if coding.project().is_some()
+        && let Some((file, name)) = workshop_pack::project::test_of(&test)
+    {
+        let how = match failure.run.ending {
+            workshop_runner::Ending::TimedOut => "took too long on",
+            _ => "failed",
+        };
+        return Some(NewMistake {
+            id,
+            item: key.to_owned(),
+            at,
+            source: MistakeSource::Submission,
+            attempt: None,
+            detail: format!("A submission {how} {on}, {name} in {file}"),
+            suggested: Some(suggested.to_owned()),
+        });
+    }
     Some(NewMistake {
         id,
         item: key.to_owned(),
