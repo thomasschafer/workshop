@@ -2299,6 +2299,7 @@ mod tests {
 
     /// A review is saved comment by comment, and the grader marks it against the planted
     /// defects: an attempt rated from what it found, with each defect missed in the mistake log.
+    #[cfg(unix)]
     #[tokio::test]
     async fn reviews_a_change_against_its_defects() {
         let dir = tempfile::tempdir().unwrap();
@@ -2442,6 +2443,7 @@ mod tests {
 
     /// The tutor sees the project as the learner has it, what they've changed, and which file
     /// they're in.
+    #[cfg(unix)]
     #[tokio::test]
     async fn the_tutor_sees_the_project_and_the_learners_changes() {
         let dir = tempfile::tempdir().unwrap();
