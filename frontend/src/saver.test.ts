@@ -279,6 +279,22 @@ describe("VersionedSaver", () => {
     expect(server.text).toBe("desk");
   });
 
+  it("knows its own save landed when the page reloaded before hearing so", async () => {
+    // Saved with a final newline added, as the server does, and the page reloaded before the
+    // reply arrived, such as just after typing.
+    const server = new FakeServer("a");
+    server.addsFinalNewline = true;
+    server.failAfter = 1;
+    const before = saverFor(server).saver;
+    before.schedule("typed");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(server.text).toBe("typed\n");
+    const { saver, conflicts } = saverFor(server);
+    expect(saver.recover()).toBe("typed\n");
+    expect(conflicts).toEqual([]);
+    await expect(saver.flush()).resolves.toBeUndefined();
+  });
+
   it("rejects a flush that couldn't save", async () => {
     const server = new FakeServer("a");
     server.failBefore = 1;

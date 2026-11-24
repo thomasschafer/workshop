@@ -29,6 +29,11 @@ const MAX_RETRY_MS = 15_000;
 /** Texts sent recently, so a conflict caused by one of our own earlier saves is recognised. */
 const REMEMBERED_SENDS = 20;
 
+/** Whether `text`, saved, is `saved`, which the server gives a final newline it lacked. */
+function sameSaved(text: string, saved: string): boolean {
+  return text === saved || `${text}\n` === saved;
+}
+
 /**
  * Saves a file the user edits, shortly after each change and one request at a time.
  *
@@ -70,7 +75,9 @@ export class VersionedSaver {
    */
   recover(): string {
     const unsaved = this.readUnsaved();
-    if (unsaved === null || unsaved.text === this.confirmed) {
+    // Text the server has, with the final newline it adds, was saved after all: the page went
+    // before it heard so, such as on a reload just after typing.
+    if (unsaved === null || sameSaved(unsaved.text, this.confirmed)) {
       this.clearUnsaved();
       return this.confirmed;
     }
@@ -250,7 +257,7 @@ export class VersionedSaver {
 
   /** The recently sent text that the server saved as `saved`, which may add a final newline. */
   private sentAs(saved: string): string | undefined {
-    return this.sent.find((text) => text === saved || `${text}\n` === saved);
+    return this.sent.find((text) => sameSaved(text, saved));
   }
 
   private remember(text: string): void {
