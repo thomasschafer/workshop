@@ -71,11 +71,14 @@ jobs:
               dist-bundle/bundle-manifest.json \
               --clobber
           else
+            # Never mark bundle asset releases as "Latest" so `releases/latest` stays on `v*` app
+            # releases used by `install.sh` and the in-app update checker.
             gh release create "$tag" \
               dist-bundle/bsdtar.wasm \
               dist-bundle/rootfs.tar.zst \
               dist-bundle/SHA256SUMS \
               dist-bundle/bundle-manifest.json \
+              --latest=false \
               --title "On-device Haskell GHC WASM ${{ inputs.version }}" \
               --notes "Reproducible on-device runtime bundle built from workflow run ${{ github.run_id }}."
           fi

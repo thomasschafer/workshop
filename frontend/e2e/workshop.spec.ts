@@ -508,6 +508,10 @@ test("keeps the code scrolled where it was when an edit makes a line long, unles
   await expect(editor()).toContainText("well past the right edge");
   await page.waitForTimeout(300);
   expect(await scrolledSideways()).toBe(0);
+  // Wait for both the active puzzle and the edit to finish saving before reloading, so a slow
+  // keepalive write on exit can't race with the reloaded page's bootstrap.
+  await expect.poll(() => readFileSync(uiState, "utf8")).toMatch(/"day": *4/);
+  await expect.poll(() => readFileSync(solution, "utf8")).toContain("well past the right edge");
   // Coming back puts the cursor where it was, at the end of the long line.
   await page.reload();
   await page.getByRole("button", { name: "Code", exact: true }).click();
