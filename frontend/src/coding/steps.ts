@@ -21,8 +21,11 @@ const STEPS: Record<Mode, StepName[]> = {
   twist: ["twist"],
 };
 
-/** Solving a project starts with planning, as there's code to read rather than an example. */
-const PROJECT_SOLVE: StepName[] = ["plan", "code", "test", "review"];
+/**
+ * Solving a project starts with its code, as there's code to read rather than an example, and
+ * the plan is written beside it.
+ */
+const PROJECT_SOLVE: StepName[] = ["code", "test", "review"];
 
 /** The steps of going through a problem this way, as `Mode::steps_for` says. */
 export function stepsFor(mode: Mode, project = false): StepName[] {

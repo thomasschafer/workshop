@@ -496,10 +496,11 @@
 .diff-row {
   display: grid;
   grid-template-columns: 2.4em 1.2em minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   width: 100%;
-  min-height: 24px;
-  padding: 1px 6px 1px 0;
+  /* Tall enough to tap the line meant, on a phone. */
+  min-height: 40px;
+  padding: 2px 6px 2px 0;
   border: 0;
   background: none;
   color: var(--fg);
@@ -591,6 +592,13 @@ button.diff-row:focus-visible {
 .coding-review-title {
   margin: 0;
   font-size: 20px;
+}
+
+.coding-plan-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
 }
 
 .coding-review-whole {

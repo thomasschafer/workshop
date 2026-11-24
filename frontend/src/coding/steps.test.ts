@@ -170,12 +170,12 @@ describe("steps", () => {
 });
 
 describe("work in a codebase", () => {
-  it("starts solving a project at its plan", () => {
-    expect(stepsFor("solve", true)).toEqual(["plan", "code", "test", "review"]);
+  it("starts solving a project at its code, with the plan beside it", () => {
+    expect(stepsFor("solve", true)).toEqual(["code", "test", "review"]);
     expect(stepsFor("recall", true)).toEqual(["plan", "review"]);
-    expect(stepAfter("solve", "plan", true)).toBe("code");
-    expect(reached("solve", "code", "understand", true)).toBe(false);
-    expect(reached("solve", "code", "plan", true)).toBe(true);
+    expect(stepAfter("solve", "code", true)).toBe("test");
+    expect(reached("solve", "test", "plan", true)).toBe(false);
+    expect(reached("solve", "test", "code", true)).toBe(true);
     expect(stepsFor("solve")[0]).toBe("understand");
   });
 

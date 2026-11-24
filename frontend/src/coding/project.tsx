@@ -5,7 +5,7 @@ import type { EditorSettings } from "../hooks/useEditorSettings";
 import type { VersionedSaver } from "../saver";
 import { codingApi } from "./api";
 import { EditorPane, projectFile } from "./editorPane";
-import { fileState, newFileProblem, search } from "./steps";
+import { fileState, newFileProblem, openAt, search } from "./steps";
 import type { OpenedProject, ProjectFile } from "./types";
 
 /**
@@ -17,8 +17,9 @@ import type { OpenedProject, ProjectFile } from "./types";
 export function ProjectFiles({
   itemKey,
   project,
-  open,
+  file,
   onOpen,
+  onProject,
   settings,
   editor,
   saver,
@@ -26,15 +27,21 @@ export function ProjectFiles({
 }: {
   itemKey: string;
   project: OpenedProject;
-  /** The file open, by its name. */
-  open: string;
+  /** The file open last, by its name, if it's been saved with the session. */
+  file: string | null | undefined;
   onOpen: (path: string) => void;
+  /**
+   * Changes the project as the problem has it, as a file's saved or added, so it's as it is now
+   * whenever it's shown again, such as after going to another step and back.
+   */
+  onProject: (update: (project: OpenedProject) => OpenedProject) => void;
   settings: EditorSettings;
   editor: { current: CodeEditor | null };
   saver: { current: VersionedSaver | null };
   statusHost: { current: HTMLElement | null };
 }) {
-  const [files, setFiles] = useState<ProjectFile[]>(project.files);
+  const files = project.files;
+  const open = openAt(project, file);
   // What each file has in it now, as it's typed, for marking what's changed and for search.
   const [texts, setTexts] = useState<Record<string, string>>(() =>
     Object.fromEntries(project.files.map((f) => [f.path, f.code.text])),
@@ -53,7 +60,10 @@ export function ProjectFiles({
       ...file,
       save: async (text: string, version: string, keepalive: boolean) => {
         const code = await file.save(text, version, keepalive);
-        setFiles((all) => all.map((f) => (f.path === current.path ? { ...f, code } : f)));
+        onProject((p) => ({
+          ...p,
+          files: p.files.map((f) => (f.path === current.path ? { ...f, code } : f)),
+        }));
         return code;
       },
     };
@@ -102,7 +112,10 @@ export function ProjectFiles({
         read_only: false,
         uri: `${sibling.slice(0, sibling.lastIndexOf("/") + 1)}${encodeURIComponent(name)}`,
       };
-      setFiles((all) => [...all, added].sort((a, b) => (a.path < b.path ? -1 : 1)));
+      onProject((p) => ({
+        ...p,
+        files: [...p.files, added].sort((a, b) => (a.path < b.path ? -1 : 1)),
+      }));
       setTexts((all) => ({ ...all, [name]: code.text }));
       setAdding(null);
       void switchTo(name);

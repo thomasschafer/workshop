@@ -28,6 +28,14 @@ const SAVE_DELAY_MS = 600;
 /** How many lines kept the same are shown around each change. */
 const CONTEXT = 3;
 
+/** A line to bring into view, unfolding it if it's folded away, as asked for at `at`. */
+interface Focus {
+  file: string;
+  line: number | null;
+  old: boolean;
+  at: number;
+}
+
 /** Where a comment's being written: on a line, or on the change as a whole. */
 type Writing = { file: string; line: number; old: boolean; id: string | null } | null;
 
@@ -59,6 +67,13 @@ export function ReviewView({
   const [submitting, setSubmitting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [marked, setMarked] = useState<ReviewMarked | null>(null);
+  // One attempt however many times it's sent, so a reply lost on the way is given again.
+  const attempt = useRef(newId());
+  // What's typed in a comment box not yet added, which submitting adds rather than loses.
+  const drafts = useRef({ line: "", overall: "" });
+  const [focus, setFocus] = useState<Focus | null>(null);
+  // Open to start with, before there are comments, and then as the learner leaves it.
+  const [promptOpen] = useState(() => opened.session.comments.length === 0);
   const onList = () => onTrack(opened.track.id);
 
   const saver = useMemo(
@@ -123,15 +138,26 @@ export function ReviewView({
         ? { ...s, comments: s.comments.map((c) => (c.id === writing.id ? comment : c)) }
         : { ...s, comments: [...others, comment] };
     });
+    drafts.current.line = "";
     setWriting(null);
+  };
+
+  const addOverall = (text: string) => {
+    drafts.current.overall = "";
+    change((s) => ({
+      ...s,
+      comments: [...s.comments, { id: newId(), file: null, line: null, old: false, text }],
+    }));
   };
 
   const submit = async () => {
     setSubmitting(true);
     setProblem(null);
     try {
+      if (writing && drafts.current.line.trim()) saveComment(drafts.current.line);
+      if (drafts.current.overall.trim()) addOverall(drafts.current.overall.trim());
       await saver.flush();
-      const result = await codingApi.submitReview(opened.key, newId());
+      const result = await codingApi.submitReview(opened.key, attempt.current);
       setMarked(result);
     } catch (e) {
       setProblem(errorMessage(e));
@@ -174,7 +200,7 @@ export function ReviewView({
       {header}
       <main class="learn-content">
         <h1 class="coding-review-title">{opened.label}</h1>
-        <details class="coding-statement" open={comments.length === 0}>
+        <details class="coding-statement" open={promptOpen}>
           <summary>The change</summary>
           <Markdown text={opened.prompt} class="learn-prompt" />
           {opened.source ? <p class="learn-source muted">Source: {opened.source}</p> : null}
@@ -239,7 +265,12 @@ export function ReviewView({
             ) : null}
             <p class="muted small">Tap a line to comment on it.</p>
             <DiffView
+              key={current.path}
               path={current.path}
+              focus={focus}
+              onDraft={(text) => {
+                drafts.current.line = text;
+              }}
               lines={current.lines}
               shown={current.changed && !whole ? fold(current.lines, CONTEXT) : null}
               comments={comments}
@@ -263,19 +294,20 @@ export function ReviewView({
                 })
               }
               onSave={saveComment}
-              onCancel={() => setWriting(null)}
+              onCancel={() => {
+                drafts.current.line = "";
+                setWriting(null);
+              }}
             />
           </>
         ) : null}
         <OverallComment
           serverDictation={boot.server_dictation}
           onNotice={setNotice}
-          onAdd={(text) =>
-            change((s) => ({
-              ...s,
-              comments: [...s.comments, { id: newId(), file: null, line: null, old: false, text }],
-            }))
-          }
+          onDraft={(text) => {
+            drafts.current.overall = text;
+          }}
+          onAdd={addOverall}
         />
         <section class="coding-review-comments" aria-label="Your comments">
           <h2 class="coding-subheading">
@@ -295,8 +327,15 @@ export function ReviewView({
                       class="text-button"
                       onClick={() => {
                         if (comment.file !== current?.path) {
+                          setWriting(null);
                           change((s) => ({ ...s, file: comment.file }));
                         }
+                        setFocus({
+                          file: comment.file ?? "",
+                          line: comment.line,
+                          old: comment.old,
+                          at: Date.now(),
+                        });
                       }}
                     >
                       Show
@@ -417,6 +456,8 @@ export function DiffView({
   path,
   lines,
   shown,
+  focus = null,
+  onDraft,
   comments = [],
   writing = null,
   serverDictation = false,
@@ -429,6 +470,10 @@ export function DiffView({
   path: string;
   lines: DiffLine[];
   shown: Shown[] | null;
+  /** A line to bring into view. */
+  focus?: Focus | null;
+  /** Told what's typed in a comment not yet added. */
+  onDraft?: (text: string) => void;
   comments?: Comment[];
   writing?: Writing;
   serverDictation?: boolean;
@@ -439,7 +484,32 @@ export function DiffView({
   onCancel?: () => void;
 }) {
   const [opened, setOpened] = useState<number[]>([]);
+  const list = useRef<HTMLOListElement>(null);
   const rows: Shown[] = shown ?? lines.map((line) => ({ line }));
+  const rowId = (line: DiffLine) =>
+    line.kind === "removed" ? `old-${line.old}` : `new-${line.new}`;
+  // Brought into view, unfolded first if it's folded away.
+  useEffect(() => {
+    if (!focus || focus.file !== path) return;
+    const at = lines.findIndex((line) =>
+      focus.line === null
+        ? line.kind !== "kept"
+        : focus.old
+          ? line.kind === "removed" && line.old === focus.line
+          : line.kind !== "removed" && line.new === focus.line,
+    );
+    const target = lines[at];
+    if (!target) return;
+    const fold = rows.find(
+      (row) => "folded" in row && at >= row.from && at < row.from + row.folded,
+    );
+    if (fold && "folded" in fold) setOpened((all) => [...all, fold.from]);
+    requestAnimationFrame(() =>
+      list.current
+        ?.querySelector(`[data-line="${rowId(target)}"]`)
+        ?.scrollIntoView({ block: "center" }),
+    );
+  }, [focus?.at]);
   const isWriting = (line: DiffLine) =>
     writing !== null &&
     writing.file === path &&
@@ -447,7 +517,7 @@ export function DiffView({
       ? line.kind === "removed" && line.old === writing.line
       : line.kind !== "removed" && line.new === writing.line);
   return (
-    <ol class="diff" aria-label={`${path}, line by line`}>
+    <ol class="diff" ref={list} aria-label={`${path}, line by line`}>
       {rows.flatMap((row) => {
         if ("folded" in row) {
           if (opened.includes(row.from)) {
@@ -483,7 +553,11 @@ export function DiffView({
       </>
     );
     return (
-      <li key={`${line.kind}-${line.old}-${line.new}`} class={`diff-line ${line.kind}`}>
+      <li
+        key={`${line.kind}-${line.old}-${line.new}`}
+        class={`diff-line ${line.kind}`}
+        data-line={rowId(line)}
+      >
         {onTap ? (
           <button
             type="button"
@@ -510,7 +584,9 @@ export function DiffView({
           ))}
         {editing && onSave && onCancel ? (
           <CommentBox
+            key={writing?.id ?? `new-${rowId(line)}`}
             label={`Comment on line ${number}`}
+            onDraft={onDraft}
             initial={comments.find((c) => c.id === writing?.id)?.text ?? ""}
             serverDictation={serverDictation}
             onNotice={onNotice}
@@ -531,15 +607,24 @@ function CommentBox({
   onNotice,
   onSave,
   onCancel,
+  onDraft,
 }: {
   label: string;
   initial: string;
+  /** Told what's typed, until it's added. */
+  onDraft?: ((text: string) => void) | undefined;
   serverDictation: boolean;
   onNotice: (text: string) => void;
   onSave: (text: string) => void;
   onCancel?: () => void;
 }) {
-  const [text, setText] = useState(initial);
+  const [text, setTextOnly] = useState(initial);
+  const setText = (update: string | ((typed: string) => string)) =>
+    setTextOnly((typed) => {
+      const next = typeof update === "function" ? update(typed) : update;
+      onDraft?.(next);
+      return next;
+    });
   const field = useRef<HTMLTextAreaElement>(null);
   useEffect(() => field.current?.focus(), []);
   const id = `comment-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -588,10 +673,12 @@ function CommentBox({
 function OverallComment({
   serverDictation,
   onNotice,
+  onDraft,
   onAdd,
 }: {
   serverDictation: boolean;
   onNotice: (text: string) => void;
+  onDraft: (text: string) => void;
   onAdd: (text: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -610,11 +697,15 @@ function OverallComment({
         initial=""
         serverDictation={serverDictation}
         onNotice={onNotice}
+        onDraft={onDraft}
         onSave={(text) => {
           if (text.trim()) onAdd(text.trim());
           setOpen(false);
         }}
-        onCancel={() => setOpen(false)}
+        onCancel={() => {
+          onDraft("");
+          setOpen(false);
+        }}
       />
     </section>
   );

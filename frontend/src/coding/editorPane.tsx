@@ -157,6 +157,11 @@ export function EditorPane({
   useEffect(() => {
     const parent = host.current;
     if (!parent) return;
+    // What was said of another file isn't this one's.
+    setConflict(null);
+    setSaveStatus("saved");
+    setDiagnostics(NO_DIAGNOSTICS);
+    setShowProblems(false);
     const code = new VersionedSaver(
       file.save,
       `workshop:unsaved:coding:${itemKey}:${file.id}`,

@@ -51,7 +51,6 @@ import {
   describeCase,
   describeRun,
   lastCall,
-  openAt,
   partOf,
   printedTooMuch,
   pythonValue,
@@ -76,6 +75,7 @@ import type {
   Finished as FinishedReply,
   Graded,
   Opened,
+  OpenedProject,
   OpenedReview,
   OpenedTrack,
   Session,
@@ -608,6 +608,12 @@ export function ProblemView({
         setSession(fresh.session);
         writeUnsaved(itemKey, null);
       }}
+      onProject={(update) =>
+        setOpened((current) =>
+          current?.project ? { ...current, project: update(current.project) } : current,
+        )
+      }
+      serverDictation={boot.server_dictation}
       onGiveUp={giveUp}
     />
   ) : (
@@ -1051,6 +1057,45 @@ function PlanStep({
   );
 }
 
+/**
+ * The plan for work in a project, written beside its code once it's been read: what's wrong,
+ * for a fix, or what to change, typed or dictated, and saved as it's written.
+ */
+function PlanBox({
+  opened,
+  session,
+  change,
+  serverDictation,
+  notify,
+}: Pick<StepProps, "opened" | "session" | "change" | "notify"> & { serverDictation: boolean }) {
+  return (
+    <div class="coding-plan-box">
+      <label class="learn-question" for="coding-plan">
+        {planQuestion(opened, session)}
+      </label>
+      <textarea
+        id="coding-plan"
+        class="coding-plan"
+        rows={4}
+        value={session.plan}
+        placeholder="Such as: which file and function, and what's going on there"
+        onInput={(event) => {
+          const plan = event.currentTarget.value;
+          void change((s) => ({ ...s, plan }));
+        }}
+      />
+      <DictateButton
+        serverDictation={serverDictation}
+        onHeard={(text) => {
+          const plan = sessionPlan(session.plan, text);
+          void change((s) => ({ ...s, plan }), true);
+        }}
+        onNotice={notify}
+      />
+    </div>
+  );
+}
+
 /** What planning asks: how to solve it, or in a project, what's wrong or what to change. */
 function planQuestion(opened: Opened, session: Session): string {
   const task = opened.project?.task;
@@ -1063,7 +1108,7 @@ function planQuestion(opened: Opened, session: Session): string {
     return `How will you change your code for part ${session.part + 1}? A few lines is plenty.`;
   }
   if (task === "fix") {
-    return "Where do you think the bug is, and why? A few lines is plenty; read the code next, and come back to this if you like.";
+    return "What's wrong, and why does it give the symptom? A few lines is plenty.";
   }
   if (task) {
     return "What makes it hard to test, and how will you change it? A few lines is plenty.";
@@ -1091,6 +1136,9 @@ function CodeStep({
   draftSaver,
   onRan,
   onReloaded,
+  onProject,
+  serverDictation,
+  notify,
   onGiveUp,
 }: StepProps & {
   itemKey: string;
@@ -1102,6 +1150,9 @@ function CodeStep({
   draftSaver: { current: VersionedSaver | null };
   onRan: (summary: string) => void;
   onReloaded: (opened: Opened) => void;
+  /** Changes the project as it's kept, as its files are saved or added. */
+  onProject: (update: (project: OpenedProject) => OpenedProject) => void;
+  serverDictation: boolean;
   onGiveUp: () => void;
 }) {
   const [busy, setBusy] = useState<"running" | "submitting" | null>(null);
@@ -1400,13 +1451,25 @@ function CodeStep({
                       );
                     }),
                   )}
-              {session.plan.trim() ? (
+              {session.plan.trim() && !project ? (
                 <>
                   <h3 class="coding-subheading">Your plan</h3>
                   <p class="coding-plan-text">{session.plan}</p>
                 </>
               ) : null}
             </details>
+            {project ? (
+              <details class="coding-statement compact">
+                <summary>{project.task === "fix" ? "Diagnosis" : "Plan"}</summary>
+                <PlanBox
+                  opened={opened}
+                  session={session}
+                  change={change}
+                  serverDictation={serverDictation}
+                  notify={notify}
+                />
+              </details>
+            ) : null}
             {partHints.length > hintsShown ? (
               <button
                 type="button"
@@ -1435,8 +1498,9 @@ function CodeStep({
               key={session.part}
               itemKey={itemKey}
               project={project}
-              open={openAt(project, session.file)}
+              file={session.file}
               onOpen={(path) => void change((s) => ({ ...s, file: path }), true)}
+              onProject={onProject}
               settings={settings}
               editor={editor}
               saver={draftSaver}
