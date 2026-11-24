@@ -395,54 +395,72 @@ export function App({
       try {
         let opened: OpenPuzzle;
         let fromOfflineCache = false;
-        try {
-          opened = await api.open(puzzle);
-          if (cancelled) return;
-          void mergeAocPuzzle(puzzle.year, puzzle.day, {
-            code: opened.code,
-            notes: opened.notes,
-            meta: opened.meta,
-            fileUri: opened.file_uri,
-          });
-          // Quietly cache the puzzle's input and shared helpers on-device for offline use.
-          void getAocPuzzle(puzzle.year, puzzle.day).then((existing) => {
-            if (existing?.input === undefined) {
-              api
-                .input(puzzle)
-                .then((inp) => mergeAocPuzzle(puzzle.year, puzzle.day, { input: inp.text }))
-                .catch(() => {});
-            }
-          });
-          void getHelpers(boot.language.id).then((existing) => {
-            if (!existing) {
-              api
-                .helpers()
-                .then((h) => (h ? putHelpers(h.language_id, h.file, h.text) : undefined))
-                .catch(() => {});
-            }
-          });
-        } catch (openErr) {
-          if (!(openErr instanceof ConnectionError || openErr instanceof TimeoutError)) {
-            throw openErr;
-          }
-          const cached = await getAocPuzzle(puzzle.year, puzzle.day);
-          if (cancelled) return;
-          if (!cached?.code) {
-            setOpenError(
-              "This puzzle isn't saved on this device yet. Open it once while connected, or save the year for offline use from the puzzle list.",
-            );
-            return;
-          }
+        const cachedBeforeOpen = await getAocPuzzle(puzzle.year, puzzle.day);
+        if (cancelled) return;
+        const browserOffline =
+          !connection.isOnline || (typeof navigator !== "undefined" && navigator.onLine === false);
+        const openFromCache = (cached: typeof cachedBeforeOpen): OpenPuzzle | null => {
+          if (!cached?.code) return null;
           fromOfflineCache = true;
-          opened = {
+          if (cached.problem) {
+            setProblem(cached.problem);
+            setProblemFromCache(true);
+          }
+          return {
             code: cached.code,
             notes: cached.notes ?? { text: "", version: EMPTY_FILE_VERSION, path: "" },
             meta: cached.meta ?? EMPTY_META,
             file_uri: cached.fileUri ?? "",
           };
-          if (cached.problem) {
-            setProblem(cached.problem);
-            setProblemFromCache(true);
+        };
+
+        if (browserOffline && cachedBeforeOpen?.code) {
+          opened = openFromCache(cachedBeforeOpen) as OpenPuzzle;
+        } else {
+          try {
+            // When we already have a local copy, use a tighter timeout so a blackholed VPN falls
+            // back to the cached puzzle within 3s instead of hanging for 8s.
+            opened = await api.open(
+              puzzle,
+              cachedBeforeOpen?.code ? { timeoutMs: 3_000 } : undefined,
+            );
+            if (cancelled) return;
+            void mergeAocPuzzle(puzzle.year, puzzle.day, {
+              code: opened.code,
+              notes: opened.notes,
+              meta: opened.meta,
+              fileUri: opened.file_uri,
+            });
+            // Quietly cache the puzzle's input and shared helpers on-device for offline use.
+            if (cachedBeforeOpen?.input === undefined) {
+              api
+                .input(puzzle)
+                .then((inp) => mergeAocPuzzle(puzzle.year, puzzle.day, { input: inp.text }))
+                .catch(() => {});
+            }
+            void getHelpers(boot.language.id).then((existing) => {
+              if (!existing) {
+                api
+                  .helpers()
+                  .then((h) => (h ? putHelpers(h.language_id, h.file, h.text) : undefined))
+                  .catch(() => {});
+              }
+            });
+          } catch (openErr) {
+            if (!isTransientNetworkError(openErr)) {
+              throw openErr;
+            }
+            connection.set(false);
+            const cached = cachedBeforeOpen ?? (await getAocPuzzle(puzzle.year, puzzle.day));
+            if (cancelled) return;
+            const fallback = openFromCache(cached);
+            if (!fallback) {
+              setOpenError(
+                "This puzzle isn't saved on this device yet. Open it once while connected, or save a year for offline use from the puzzle list.",
+              );
+              return;
+            }
+            opened = fallback;
           }
         }
 
@@ -949,7 +967,14 @@ export function App({
             Offline · changes saved on this device
           </div>
         )}
-        {openError && !showPicker ? <p class="pane error-text">{openError}</p> : null}
+        {openError && !showPicker ? (
+          <div class="pane">
+            <p class="error-text">{openError}</p>
+            <button type="button" class="text-button" onClick={() => setPicking(true)}>
+              Choose a cached puzzle
+            </button>
+          </div>
+        ) : null}
         {codeConflict && !showPicker ? (
           <ConflictBanner what="code" onResolve={resolveCodeConflict} />
         ) : null}

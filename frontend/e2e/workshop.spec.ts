@@ -2888,3 +2888,102 @@ test("opens a cached Advent of Code puzzle offline, edits notes, shows On-device
     .toContain("offline note check");
   await context.close();
 });
+
+test("cold-starts offline and on a stalled link from / and opens cached AoC puzzles", async ({
+  browser,
+  browserName,
+}) => {
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  const context = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${PORT}`,
+  });
+  const warm = await context.newPage();
+  await warm.goto(`/?token=${token}`);
+  await warm.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+  await warm.reload();
+  await expect
+    .poll(() => warm.evaluate(() => navigator.serviceWorker.controller !== null))
+    .toBe(true);
+  // Wait for home to load so its snapshot is cached too.
+  await expect(warm.locator(".home")).toBeVisible();
+
+  // Open AoC Day 4 online so its code, problem, and input are cached in IndexedDB.
+  await warm.goto("/advent-of-code");
+  if (!(await warm.locator(".picker").isVisible())) {
+    await warm
+      .locator("header.top")
+      .getByRole("button", { name: /Practice puzzle|2017/ })
+      .tap();
+    await expect(warm.locator(".picker")).toBeVisible();
+  }
+  const stateSaved = warm.waitForResponse(
+    (res) => res.url().endsWith("/api/state") && res.request().method() === "PUT" && res.ok(),
+  );
+  await warm.getByRole("button", { name: "2017", exact: true }).tap();
+  await warm.locator(".day", { hasText: /^4$/ }).tap();
+  await warm.getByRole("button", { name: "Problem" }).tap();
+  await expect(warm.locator(".pane.problem")).toContainText("Day 4: Counting Lines");
+  await stateSaved;
+  await warm.close();
+
+  // 1. Cold-start a brand-new tab at `/` while completely offline.
+  await setOffline(context, true);
+  const coldOffline = await context.newPage();
+  await coldOffline.goto("/");
+  await expect(coldOffline.locator(".home")).toBeVisible({ timeout: 5_000 });
+  await expect(coldOffline.locator("text=Couldn't start Workshop")).toHaveCount(0);
+
+  // Navigate to AoC offline: Day 4 opens immediately from cache with zero error toasts.
+  await coldOffline.goto("/advent-of-code");
+  await expect(coldOffline.locator(".pane.problem")).toContainText("Day 4: Counting Lines", {
+    timeout: 5_000,
+  });
+  await expect(coldOffline.locator(".banner.offline")).toContainText(
+    "Offline · changes saved on this device",
+  );
+  await expect(coldOffline.locator(".card.error")).toHaveCount(0);
+
+  // Opening the picker and switching to an uncached year stays quiet (no "Couldn't load your stars").
+  await coldOffline.locator("header.top").getByRole("button", { name: /2017/ }).tap();
+  await expect(coldOffline.locator(".picker")).toBeVisible();
+  await coldOffline.getByRole("button", { name: "2016", exact: true }).tap();
+  await expect(coldOffline.locator(".picker")).not.toContainText("Couldn't load your stars");
+  await coldOffline.close();
+
+  // 2. Cold-start on a stalled/blackholed link (simulating VPN up with no internet):
+  // navigator.onLine stays true, but API requests never answer.
+  // Playwright only intercepts requests from SW-controlled pages in Chromium.
+  if (browserName === "chromium") {
+    await setOffline(context, false);
+    const stalled = await context.newPage();
+    // Remove SW-cached bootstrap so we also verify the localStorage fallback timeout.
+    await stalled.goto("/");
+    await stalled.evaluate(async () => {
+      const cache = await caches.open("workshop-app");
+      await cache.delete("/api/bootstrap");
+    });
+    await stalled.close();
+
+    const pendingRoutes: Array<() => void> = [];
+    await context.route("**/api/**", () => {
+      return new Promise<void>((resolve) => {
+        pendingRoutes.push(resolve);
+      });
+    });
+    const blackhole = await context.newPage();
+    await blackhole.goto("/advent-of-code");
+    await expect(blackhole.locator(".pane.problem")).toContainText("Day 4: Counting Lines", {
+      timeout: 8_000,
+    });
+    await expect(blackhole.locator(".banner.offline")).toContainText(
+      "Offline · changes saved on this device",
+    );
+    await expect(blackhole.locator(".card.error")).toHaveCount(0);
+    await context.unrouteAll({ behavior: "ignoreErrors" });
+    for (const done of pendingRoutes) done();
+  }
+  await context.close();
+});

@@ -552,8 +552,13 @@ export function onNetworkOnline(listener: () => void): () => void {
   };
 }
 
-/** True when the most recent `/api/bootstrap` response came from the service worker cache. */
+/** True when the most recent `/api/bootstrap` response came from the service worker or local cache. */
 export let bootstrapWasStale = false;
+
+/** Marks bootstrap as loaded from a cached copy so Shell refreshes it quietly once online. */
+export function markBootstrapStale(): void {
+  bootstrapWasStale = true;
+}
 
 export interface RequestOptions {
   /** Lets a request finish after the page is hidden or closed, which is when the phone is put down. */
@@ -631,7 +636,12 @@ async function send(
     throw new ConnectionError("Can't reach the server.");
   }
   if (response.headers.get("X-Workshop-Cache") === "stale") {
-    if (path === "/bootstrap") bootstrapWasStale = true;
+    if (path === "/bootstrap") {
+      bootstrapWasStale = true;
+      // Booted from SW cache because the network was unreachable or stalled; reflect offline state
+      // immediately so opening cached AoC/Coding items doesn't wait on another doomed timeout.
+      connection.set(false);
+    }
     // Served from SW cache while offline or stalled; do not report as a live server round-trip.
   } else {
     if (path === "/bootstrap") bootstrapWasStale = false;
@@ -699,7 +709,8 @@ const AOC_TIMEOUT_MS = 25_000;
 export const api = {
   /** Checks the server can be reached; any answer from it will do. */
   ping: () => request<null>("GET", "/ping", undefined, { timeoutMs: 3_000 }),
-  bootstrap: () => request<Bootstrap>("GET", "/bootstrap", undefined, { timeoutMs: 4_000 }),
+  bootstrap: (options?: RequestOptions) =>
+    request<Bootstrap>("GET", "/bootstrap", undefined, { timeoutMs: 4_000, ...options }),
   saveState: (state: UiState, keepalive = false) =>
     request<null>("PUT", "/state", state, { keepalive }),
   doctor: () => request<Check[]>("GET", "/doctor", undefined, { timeoutMs: 15_000 }),
@@ -744,7 +755,8 @@ export const api = {
   cacheYearStatus: (year: number) =>
     request<YearCacheStatus>("GET", `/years/${year}/cache`, undefined, { timeoutMs: 5_000 }),
   helpers: () => request<HelpersFile | null>("GET", "/helpers"),
-  open: (p: Puzzle) => request<OpenPuzzle>("GET", day(p)),
+  open: (p: Puzzle, options?: RequestOptions) =>
+    request<OpenPuzzle>("GET", day(p), undefined, options),
   saveCode: (p: Puzzle, text: string, version: string, keepalive = false) =>
     request<VersionedFile>("PUT", `${day(p)}/code`, { text, version }, { keepalive }),
   saveNotes: (p: Puzzle, text: string, version: string, keepalive = false) =>

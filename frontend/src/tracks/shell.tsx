@@ -6,6 +6,7 @@ import { errorMessage } from "../errors";
 import { DesignScreen } from "../grading/design";
 import { Practice } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
+import { writeCachedBootstrap } from "../offline/bootstrap";
 import { PackScreen } from "../pack/screen";
 import { GoalsScreen } from "../progress/goals";
 import { MistakesScreen } from "../progress/mistakes";
@@ -46,6 +47,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
 
     const schedule = () => {
       if (cancelled || !needsBootstrapRefresh.current || timer !== null) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
       timer = setTimeout(() => {
         timer = null;
         refresh();
@@ -56,6 +58,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
     const refresh = () => {
       if (cancelled || inFlight || !needsBootstrapRefresh.current) return;
       if (routeRef.current.screen === "advent-of-code") return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
       inFlight = true;
       api
         .bootstrap()
@@ -64,6 +67,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             if (cancelled) return;
             if (!bootstrapWasStale) {
               needsBootstrapRefresh.current = false;
+              writeCachedBootstrap(fresh);
               if (routeRef.current.screen !== "advent-of-code") setBoot(fresh);
             } else {
               schedule();
@@ -132,10 +136,11 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
   useEffect(() => {
     const left = shownBefore.current !== route.screen && route.screen === "home";
     shownBefore.current = route.screen;
-    if (!left) return;
+    if (!left || !connection.isOnline) return;
     rebooting.current = api.bootstrap().then(
       // Only taken at home: Advent of Code would start over with it.
       (fresh) => {
+        writeCachedBootstrap(fresh);
         if (routeRef.current.screen === "home") setBoot(fresh);
       },
       (e: unknown) => {

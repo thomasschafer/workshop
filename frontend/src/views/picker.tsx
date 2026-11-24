@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import {
   api,
-  ConnectionError,
+  isTransientNetworkError,
   type LeaderboardMember,
   type OfflineYear,
   type Puzzle,
   type StarTimes,
-  TimeoutError,
 } from "../api";
 import {
   daysIn,
@@ -125,12 +124,10 @@ export function Picker({ current, hasSession, onPick }: Props) {
     if (!hasSession) return;
     let cancelled = false;
     let fetchedFresh = false;
-    let hasCached = starsByYear.has(year);
     setError(null);
     const cacheReady = getAocYear(year).then((cached) => {
       if (cancelled) return;
       if (cached?.stars && !fetchedFresh) {
-        hasCached = true;
         starsByYear.set(year, cached.stars);
         setLoaded({ year, stars: cached.stars });
       }
@@ -139,6 +136,11 @@ export function Picker({ current, hasSession, onPick }: Props) {
         setTimes((prev) => (prev?.year === year ? prev : { year, times: cachedTimes }));
       }
     });
+    if (!online) {
+      return () => {
+        cancelled = true;
+      };
+    }
     api
       .stars(year)
       .then((s) => {
@@ -153,17 +155,17 @@ export function Picker({ current, hasSession, onPick }: Props) {
       .catch(async (e: unknown) => {
         await cacheReady;
         if (cancelled) return;
-        if ((e instanceof ConnectionError || e instanceof TimeoutError) && hasCached) return;
+        if (isTransientNetworkError(e)) return;
         setError(`Couldn't load your stars: ${errorMessage(e)}`);
       });
     return () => {
       cancelled = true;
     };
-  }, [year, hasSession]);
+  }, [year, hasSession, online]);
 
   // Times are extra: without them the picker works just the same, so failing is quiet.
   useEffect(() => {
-    if (!hasSession) return;
+    if (!hasSession || !online) return;
     let cancelled = false;
     api
       .times(year)
@@ -175,14 +177,14 @@ export function Picker({ current, hasSession, onPick }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [year, hasSession]);
+  }, [year, hasSession, online]);
   const yearTimes = times?.year === year ? Object.entries(times.times) : [];
 
   // Only when one's chosen: the server says so by returning nothing.
   const [board, setBoard] = useState<{ year: number; members: LeaderboardMember[] } | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
   useEffect(() => {
-    if (!hasSession) return;
+    if (!hasSession || !online) return;
     let cancelled = false;
     setBoardError(null);
     api
@@ -190,13 +192,13 @@ export function Picker({ current, hasSession, onPick }: Props) {
       .then((members) => !cancelled && setBoard(members ? { year, members } : null))
       .catch((e: unknown) => {
         if (cancelled) return;
-        if (e instanceof ConnectionError || e instanceof TimeoutError) return;
+        if (isTransientNetworkError(e)) return;
         setBoardError(`Couldn't load the leaderboard: ${errorMessage(e)}`);
       });
     return () => {
       cancelled = true;
     };
-  }, [year, hasSession]);
+  }, [year, hasSession, online]);
   const members = board?.year === year ? board.members : null;
 
   const syncOfflineYear = useCallback(
@@ -290,11 +292,18 @@ export function Picker({ current, hasSession, onPick }: Props) {
   const years: number[] = [];
   for (let y = latestYear(now); y >= 2015; y--) years.push(y);
   const total = stars === null ? null : Object.values(stars).reduce((a, b) => a + b, 0);
+  const cachedCount = cachedDays.size;
   const status = !hasSession
     ? "Add your session cookie to see stars."
-    : (error ?? (total === null ? "Loading stars…" : `${total} stars in ${year}`));
+    : (error ??
+      (total !== null
+        ? `${total} stars in ${year}`
+        : !online
+          ? cachedCount > 0
+            ? `${cachedCount} saved offline in ${year}`
+            : `Offline · no saved puzzles in ${year}`
+          : "Loading stars…"));
   const yearSave = savingYear?.year === year ? savingYear : null;
-  const cachedCount = cachedDays.size;
 
   return (
     <div class="picker">
@@ -333,7 +342,7 @@ export function Picker({ current, hasSession, onPick }: Props) {
           Day {next.puzzle.day} unlocks in <strong>{formatCountdown(next.at - now)}</strong>
         </p>
       ) : null}
-      <div class={`days ${hasSession && stars === null ? "loading" : ""}`}>
+      <div class={`days ${hasSession && online && stars === null ? "loading" : ""}`}>
         {Array.from({ length: daysIn(year) }, (_, i) => i + 1).map((day) => {
           const count = stars?.[String(day)] ?? 0;
           const isCurrent = current?.year === year && current.day === day;

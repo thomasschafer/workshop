@@ -43,12 +43,15 @@ export function Home({
     setError(null);
     setStale(false);
     const key = homeSnapshotKey(aWhile, utcOffset());
+    const altKey = homeSnapshotKey(!aWhile, utcOffset());
 
-    const cacheReady = getSnapshot<HomeState>(key).then((cached) => {
-      if (cancelled || !cached || fetchedFresh) return Boolean(cached);
-      setSnapshot(cached.value);
-      return true;
-    });
+    const cacheReady = getSnapshot<HomeState>(key)
+      .then((cached) => cached ?? getSnapshot<HomeState>(altKey))
+      .then((cached) => {
+        if (cancelled || !cached || fetchedFresh) return Boolean(cached);
+        setSnapshot(cached.value);
+        return true;
+      });
 
     // What was done offline is sent first, so what's suggested takes it into account.
     // `learning().sync()` already piggybacks pending outbox events in one `/api/sync` request;
@@ -146,9 +149,17 @@ export function Home({
         {error && home === null ? (
           <div class="home-error">
             <p class="error-text">Couldn't load your tracks: {error}</p>
-            <button type="button" onClick={() => setAttempt((n) => n + 1)}>
-              Try again
-            </button>
+            <div class="banner-actions">
+              <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+                Try again
+              </button>
+              <button type="button" onClick={() => onGo({ kind: "puzzle_list" })}>
+                Open Advent of Code
+              </button>
+              <button type="button" onClick={() => onGo({ kind: "coding", item: null })}>
+                Open Coding
+              </button>
+            </div>
           </div>
         ) : home === null ? (
           <p class="muted">Loading…</p>
