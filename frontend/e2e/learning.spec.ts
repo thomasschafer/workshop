@@ -1092,6 +1092,9 @@ test("offers no follow-ups on a card that doesn't want them", async ({ browser }
   await page.getByRole("button", { name: "Explain it aloud" }).tap();
   await expect(page.getByRole("region", { name: "Explain it aloud" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Go deeper" })).toHaveCount(0);
+  // The sync as the page opened again may still be in the route, whose response would be gone
+  // from under it if the context closed first.
+  await page.unrouteAll({ behavior: "wait" });
   await other.close();
 });
 
