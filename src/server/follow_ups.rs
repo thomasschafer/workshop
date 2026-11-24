@@ -7,6 +7,7 @@
 //! question it answers, so it's never filed under another, and marking it again gives the marks
 //! already given rather than another attempt.
 
+use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -288,11 +289,12 @@ pub(super) async fn finish(
     let (pack, key, item, _) = card(&packs, &pack, &item)?;
     // Held while the grader marks it too, so nothing's said to it meanwhile, and it's marked once.
     let _card = app.follow_ups_lock(&key).await;
-    let marked_reply = |marked: Marked| -> ApiResult<MarkedReply> {
+    let marked_reply = |marked: Marked, attempt: Attempt| -> ApiResult<MarkedReply> {
         Ok(Json(MarkedReply {
             rubric: marked.points.iter().map(|p| p.point.clone()).collect(),
             due: due(&app, &key)?,
             marked,
+            attempt: Some(attempt),
         }))
     };
     let mut exchange = match app.learning.exchange(&key)? {
@@ -300,7 +302,15 @@ pub(super) async fn finish(
         _ => return Err(over(SUPERSEDED)),
     };
     if let Some(marked) = exchange.marked {
-        return marked_reply(marked);
+        // Recorded as it was marked, with the exchange's id.
+        let attempt = app
+            .learning
+            .store()
+            .attempts(&key)?
+            .into_iter()
+            .find(|attempt| attempt.id == exchange.id)
+            .with_context(|| format!("follow-ups {} were marked with no attempt", exchange.id))?;
+        return marked_reply(marked, attempt);
     }
     let transcript = exchange.transcript(TUTOR);
     let error_types = crate::mistakes::error_types(&packs);
@@ -325,22 +335,23 @@ pub(super) async fn finish(
         return Err(over(SUPERSEDED));
     }
     let now = now_ms();
+    let attempt = Attempt {
+        id: exchange.id.clone(),
+        item: key.clone(),
+        answered_at: now,
+        duration_ms: workshop_sessions::spent(exchange.updated_at, now),
+        rating: marked.rating(),
+        response: Some(transcript),
+        seed: None,
+    };
     app.learning.record_marked(
-        Attempt {
-            id: exchange.id.clone(),
-            item: key.clone(),
-            answered_at: now,
-            duration_ms: workshop_sessions::spent(exchange.updated_at, now),
-            rating: marked.rating(),
-            response: Some(transcript),
-            seed: None,
-        },
+        attempt.clone(),
         &marked.mistakes(&exchange.id, &key, now),
         now,
     )?;
     exchange.mark(marked.clone()).map_err(refused)?;
     app.learning.exchanges().put(&key, &exchange)?;
-    marked_reply(marked)
+    marked_reply(marked, attempt)
 }
 #[cfg(all(test, unix))]
 mod tests {
@@ -530,6 +541,13 @@ esac
         assert_eq!(marked["marked"]["score"], 0.7);
         assert_eq!(marked["marked"]["clarity"]["score"], 0.6);
         assert!(marked["due"].as_i64().is_some());
+        // With the attempt it was recorded as, for the device to count before its deck has it.
+        assert_eq!(marked["attempt"]["id"], ID);
+        assert_eq!(
+            marked["attempt"]["item"],
+            "sample/breadth-first-shortest-paths"
+        );
+        assert_eq!(marked["attempt"]["rating"], "hard");
         let graded = std::fs::read_to_string(dir.path().join("graded")).unwrap();
         assert!(graded.contains(
             "<work>\nLearner: It goes out a layer at a time\nTutor: Question 1: why is that?\nLearner (aloud): the queue keeps nearer ones first\nTutor: Question 2: why is that?\nLearner: With weights it's Dijkstra's\n</work>"
@@ -619,7 +637,10 @@ esac
         };
         let (first, second) = tokio::join!(finish(), finish());
         assert_eq!(first["marked"], second["marked"]);
-        assert_eq!(finish().await["marked"], first["marked"]);
+        let again = finish().await;
+        assert_eq!(again["marked"], first["marked"]);
+        assert_eq!(again["attempt"], first["attempt"]);
+        assert_eq!(again["attempt"]["id"], ID);
         let graded = std::fs::read_to_string(dir.path().join("graded-times")).unwrap();
         assert_eq!(graded.lines().count(), 1);
         let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;

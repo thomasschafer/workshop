@@ -65,6 +65,9 @@ pub(super) struct MarkedReply {
     pub(super) rubric: Vec<String>,
     /// When it comes back, for work that counts as an attempt, in milliseconds since 1970.
     pub(super) due: Option<i64>,
+    /// The attempt it was recorded as, for work that counts as one, so the device can count it
+    /// before its deck, which it fetches afterwards, has it.
+    pub(super) attempt: Option<Attempt>,
 }
 
 /// Marks a piece of work, written or explained aloud, with the grader. What it finds goes in
@@ -136,24 +139,22 @@ pub(super) async fn mark(
         .map_err(|err| bad_request(format!("{err:#}")))?;
     let now = now_ms();
     let findings = marked.mistakes(&body.id, &key, now);
-    let due = if body.work.is_attempt() {
-        app.learning.record_marked(
-            Attempt {
-                id: body.id,
-                item: key.clone(),
-                answered_at: now,
-                duration_ms: now - started,
-                rating: marked.rating(),
-                response: Some(body.text),
-                seed: None,
-            },
-            &findings,
-            now,
-        )?;
-        due(&app, &key)?
+    let (due, attempt) = if body.work.is_attempt() {
+        let attempt = Attempt {
+            id: body.id,
+            item: key.clone(),
+            answered_at: now,
+            duration_ms: now - started,
+            rating: marked.rating(),
+            response: Some(body.text),
+            seed: None,
+        };
+        app.learning
+            .record_marked(attempt.clone(), &findings, now)?;
+        (due(&app, &key)?, Some(attempt))
     } else {
         app.learning.store().record_mistakes(&findings)?;
-        None
+        (None, None)
     };
     if body.work == Work::Design {
         crate::tracks::done_long(
@@ -170,6 +171,7 @@ pub(super) async fn mark(
         marked,
         rubric,
         due,
+        attempt,
     }))
 }
 
@@ -514,6 +516,7 @@ mod tests {
         )
         .await;
         assert_eq!(marked["due"], serde_json::Value::Null);
+        assert_eq!(marked["attempt"], serde_json::Value::Null);
         let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
         assert!(deck["schedules"].get("sample/islands").is_none());
         let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
@@ -605,6 +608,11 @@ mod tests {
         assert_eq!(marked["marked"]["clarity"]["score"], 0.5);
         // It counts as an attempt, as a written answer does.
         assert!(marked["due"].as_i64().is_some());
+        assert_eq!(
+            marked["attempt"]["id"],
+            "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a51"
+        );
+        assert_eq!(marked["attempt"]["rating"], "good");
         let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
         assert_eq!(deck["schedules"]["sample/binary-heap-costs"]["reviews"], 1);
 
@@ -646,6 +654,7 @@ mod tests {
             "Lead with the answer."
         );
         assert_eq!(marked["due"], serde_json::Value::Null);
+        assert_eq!(marked["attempt"], serde_json::Value::Null);
         let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
         assert!(deck["schedules"].get("sample/islands").is_none());
     }

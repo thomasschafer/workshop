@@ -426,19 +426,17 @@ pub(super) async fn finish(
     .map_err(|err| bad_request(format!("{err:#}")))?;
     let now = now_ms();
     let findings = marked.mistakes(&body.id, &key, now);
-    app.learning.record_marked(
-        Attempt {
-            id: body.id,
-            item: key.clone(),
-            answered_at: now,
-            duration_ms: workshop_sessions::spent(session.updated_at, now),
-            rating: marked.rating(),
-            response: Some(transcript),
-            seed: None,
-        },
-        &findings,
-        now,
-    )?;
+    let attempt = Attempt {
+        id: body.id,
+        item: key.clone(),
+        answered_at: now,
+        duration_ms: workshop_sessions::spent(session.updated_at, now),
+        rating: marked.rating(),
+        response: Some(transcript),
+        seed: None,
+    };
+    app.learning
+        .record_marked(attempt.clone(), &findings, now)?;
     app.design_sessions.remove(&key)?;
     crate::tracks::done_long(
         &app.paths.data_dir,
@@ -454,6 +452,7 @@ pub(super) async fn finish(
             rubric: rubric.clone(),
             marked,
             due,
+            attempt: Some(attempt),
         },
         brief,
     }))
@@ -735,6 +734,7 @@ esac
             "Links reported as malware must stop working"
         );
         assert!(marked["due"].as_i64().is_some());
+        assert_eq!(marked["attempt"]["id"], id);
         // Once it's marked, the brief is shown.
         assert!(marked["brief"].as_str().unwrap().contains(UNASKED));
         // The session's over, and what was done is kept with the attempt.
