@@ -318,6 +318,8 @@ async fn reviews_with_the_writers_own_provider_in_a_call_of_its_own() {
     assert!(!blind.contains("## Answer"));
 }
 
+// Antigravity refuses to run on Windows, as its hook is a shell command.
+#[cfg(unix)]
 #[tokio::test]
 async fn reviews_with_antigravity_in_a_directory_of_each_calls_own() {
     let mut s = setup();
