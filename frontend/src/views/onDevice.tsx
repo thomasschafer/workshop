@@ -186,7 +186,14 @@ export function OnDevicePage({
         controller.signal,
       );
       await refresh();
-      setMessage(`${bundle.engine} installed and SHA-256 verified on this device.`);
+      if (mode === "server") {
+        onMode("automatic");
+        setMessage(
+          `${bundle.engine} installed and SHA-256 verified. Switched on-device mode to Automatic so it activates when offline.`,
+        );
+      } else {
+        setMessage(`${bundle.engine} installed and SHA-256 verified on this device.`);
+      }
     } catch (e) {
       if (!controller.signal.aborted) {
         setMessage(`Device install failed: ${errorMessage(e)}`);

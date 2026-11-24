@@ -74,7 +74,38 @@ try {
   throw err;
 }
 
-// Test 1: Run a solution using Data.Text + OverloadedStrings + unordered-containers + split + parsec!
+// Test 1: `-fno-code -dynamic -Wall -ferror-spans` type-check diagnostics on a cold session
+// (must run BEFORE any interpreted run warms `Prelude` in GHC's external package state).
+const brokenProgram = `module Main where
+import Control.Arrow ((***))
+import Control.Monad (join)
+bad :: Int
+bad = "nope"
+main :: IO ()
+main = print (join (***) (+ (1 :: Int)) (bad, 2))
+`;
+
+stdout = "";
+stderr = "";
+let threw = false;
+try {
+  await runPlayground(
+    "-v0 -fno-code -dynamic -Wall -ferror-spans -fdiagnostics-color=never",
+    brokenProgram,
+  );
+} catch {
+  threw = true;
+}
+stderr += dec.decode();
+console.log("Test 1 (cold -fno-code -dynamic) threw:", threw, "stderr excerpt:", stderr.slice(0, 200));
+if (!stderr.includes("Couldn't match type") || !stderr.includes("/tmp/Main.hs:5:")) {
+  throw new Error(`Expected GHC error diagnostic in Test 1, got:\n${stderr}`);
+}
+if (stderr.includes("Could not load module")) {
+  throw new Error(`Missing .dyn_hi interface in Test 1:\n${stderr}`);
+}
+
+// Test 2: Run a solution using Data.Text + OverloadedStrings + unordered-containers + split + parsec!
 const sampleProgram = `{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
@@ -96,42 +127,20 @@ stderr = "";
 try {
   await runPlayground("-v0", sampleProgram);
 } catch (err) {
-  console.error("Test 1 threw!");
+  console.error("Test 2 threw!");
   console.error("=== STDOUT ===\n" + stdout + dec.decode());
   console.error("=== STDERR ===\n" + stderr + dec.decode());
   throw err;
 }
 stdout += dec.decode();
 stderr += dec.decode();
-console.log("Test 1 stdout:", stdout.trim());
-if (stderr.trim()) console.error("Test 1 stderr:", stderr.trim());
+console.log("Test 2 stdout:", stdout.trim());
+if (stderr.trim()) console.error("Test 2 stderr:", stderr.trim());
 if (!stdout.includes('a=2 parsed=Right "42"')) {
-  throw new Error(`Unexpected Test 1 stdout: ${JSON.stringify(stdout)} (stderr: ${stderr})`);
+  throw new Error(`Unexpected Test 2 stdout: ${JSON.stringify(stdout)} (stderr: ${stderr})`);
 }
 if (stderr.trim() !== "") {
-  throw new Error(`Expected empty stderr for Test 1, got: ${stderr}`);
-}
-
-// Test 2: `-fno-code -Wall -ferror-spans` type-check diagnostics (Phase 3 LSP path)
-const brokenProgram = `module Main where
-bad :: Int
-bad = "nope"
-main :: IO ()
-main = print bad
-`;
-
-stdout = "";
-stderr = "";
-let threw = false;
-try {
-  await runPlayground("-v0 -fno-code -Wall -ferror-spans -fdiagnostics-color=never", brokenProgram);
-} catch {
-  threw = true;
-}
-stderr += dec.decode();
-console.log("Test 2 threw:", threw, "stderr excerpt:", stderr.slice(0, 200));
-if (!stderr.includes("Couldn't match type") || !stderr.includes("/tmp/Main.hs:3:")) {
-  throw new Error(`Expected GHC error diagnostic in Test 2, got:\n${stderr}`);
+  throw new Error(`Expected empty stderr for Test 2, got: ${stderr}`);
 }
 
 // Test 3: Verify persistent session still runs cleanly after `-fno-code` error

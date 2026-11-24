@@ -295,6 +295,14 @@ export interface OfflineYear {
   puzzles: OfflinePuzzle[];
 }
 
+export interface OfflineDay {
+  year: number;
+  day: number;
+  template: string;
+  empty_version: string;
+  puzzle: OfflinePuzzle;
+}
+
 export interface YearCacheStatus {
   year: number;
   caching: boolean;
@@ -792,6 +800,11 @@ export const api = {
     }),
   offlineYear: (year: number) =>
     request<OfflineYear>("GET", `/years/${year}/offline`, undefined, { timeoutMs: 15_000 }),
+  offlineDay: (year: number, dayNumber: number, signal?: AbortSignal) =>
+    request<OfflineDay>("GET", `/years/${year}/offline/${dayNumber}`, undefined, {
+      ...(signal ? { signal } : {}),
+      timeoutMs: 45_000,
+    }),
   cacheYear: (year: number) =>
     request<YearCacheStatus>("POST", `/years/${year}/cache`, undefined, { timeoutMs: 10_000 }),
   cacheYearStatus: (year: number) =>

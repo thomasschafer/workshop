@@ -69,7 +69,13 @@ export function StatusLine({
           {checks === null ? null : checks === "unavailable" ? (
             "no checks"
           ) : checks !== "ready" ? (
-            "starting checks"
+            backend === "local" ? (
+              "starting on-device checks"
+            ) : !online ? (
+              "checks offline"
+            ) : (
+              "starting checks"
+            )
           ) : any ? (
             <button type="button" class="status-count" onClick={onProblems}>
               {describeCounts(diagnostics)}

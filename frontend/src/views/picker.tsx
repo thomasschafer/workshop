@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
   api,
   isTransientNetworkError,
   type LeaderboardMember,
-  type OfflineYear,
   type Puzzle,
   type StarTimes,
 } from "../api";
@@ -19,15 +18,10 @@ import {
 import { errorMessage } from "../errors";
 import { useConnection } from "../hooks/useConnection";
 import { useNow } from "../hooks/useNow";
-import {
-  getAocPuzzle,
-  getAocYear,
-  listAocPuzzles,
-  mergeAocPuzzle,
-  mergeAocYear,
-  putHelpers,
-} from "../offline/db";
+import { getAocYear, listAocPuzzles, mergeAocYear } from "../offline/db";
+import { yearSync } from "../offline/yearSync";
 import { isPractice, PRACTICE } from "../puzzle";
+import { Modal } from "./modal";
 
 interface Props {
   current: Puzzle | null;
@@ -38,32 +32,38 @@ interface Props {
 /** Stars already fetched this session, so switching back to a year is instant. */
 const starsByYear = new Map<number, Record<string, number>>();
 
+/** How long a year chip must be held to open its offline sheet directly. */
+const LONG_PRESS_MS = 450;
+
+/** Pointer drift beyond this cancels a long-press so scrolling the year bar still feels natural. */
+const LONG_PRESS_DRIFT_PX = 10;
+
 interface CachedDayInfo {
   parts: number;
   hasInput: boolean;
+  fullyCached: boolean;
 }
 
-async function storeOfflineYear(data: OfflineYear): Promise<void> {
-  for (const p of data.puzzles) {
-    const existing = await getAocPuzzle(data.year, p.day);
-    const patch: Parameters<typeof mergeAocPuzzle>[2] = {
-      fileUri: p.file_uri,
-      meta: p.meta,
-    };
-    if (p.problem !== null) patch.problem = p.problem;
-    if (p.input !== null) patch.input = p.input;
-    if (p.code !== null) {
-      patch.code = p.code;
-    } else if (!existing?.code) {
-      patch.code = { text: data.template, version: data.empty_version, path: "" };
-    }
-    if (p.notes !== null) {
-      patch.notes = p.notes;
-    } else if (!existing?.notes) {
-      patch.notes = { text: "", version: data.empty_version, path: "" };
-    }
-    await mergeAocPuzzle(data.year, p.day, patch);
+function unlockedDaysFor(targetYear: number, now: number): number[] {
+  const days: number[] = [];
+  for (let d = 1; d <= daysIn(targetYear); d++) {
+    if (isUnlocked(targetYear, d, now)) days.push(d);
   }
+  return days;
+}
+
+/** Orders uncached days with unsolved ones first when star counts are known. */
+function remainingDaysFor(
+  targetYear: number,
+  now: number,
+  cached: ReadonlyMap<number, CachedDayInfo>,
+  stars: Record<string, number> | null,
+): number[] {
+  const missing = unlockedDaysFor(targetYear, now).filter((d) => !cached.get(d)?.fullyCached);
+  if (!stars) return missing;
+  const unsolved = missing.filter((d) => (stars[String(d)] ?? 0) < 2);
+  const solved = missing.filter((d) => (stars[String(d)] ?? 0) >= 2);
+  return [...unsolved, ...solved];
 }
 
 export function Picker({ current, hasSession, onPick }: Props) {
@@ -82,43 +82,68 @@ export function Picker({ current, hasSession, onPick }: Props) {
   const [times, setTimes] = useState<{ year: number; times: Record<string, StarTimes> } | null>(
     null,
   );
-  const [cachedDays, setCachedDays] = useState<Map<number, CachedDayInfo>>(() => new Map());
-  const [savingYear, setSavingYear] = useState<{
+  const [cachedByYear, setCachedByYear] = useState<Map<number, Map<number, CachedDayInfo>>>(
+    () => new Map(),
+  );
+  const [, setSyncTick] = useState(0);
+  /** Year whose offline bottom sheet is open, or null when closed. */
+  const [offlineSheetYear, setOfflineSheetYear] = useState<number | null>(null);
+
+  // Long-press state for holding down a year chip to open its offline sheet.
+  const pressRef = useRef<{
     year: number;
-    caching: boolean;
-    cached: number;
-    total: number;
-    error: string | null;
+    timer: ReturnType<typeof setTimeout>;
+    x: number;
+    y: number;
   } | null>(null);
+  const suppressClickYear = useRef<number | null>(null);
+
   // A second at a time while counting down, so the next day opens the moment it unlocks.
   const upcoming = nextUnlock();
   const now = useNow(1000, upcoming !== null);
   const next = nextUnlock(now);
   const today = todaysPuzzle(now);
 
-  const loadCachedForYear = useCallback(async (targetYear: number) => {
+  const loadAllCached = useCallback(async () => {
     const all = await listAocPuzzles();
-    const map = new Map<number, CachedDayInfo>();
+    const byYear = new Map<number, Map<number, CachedDayInfo>>();
     for (const p of all) {
-      if (p.year === targetYear && (p.problem || p.code)) {
-        map.set(p.day, {
-          parts: p.problemParts ?? p.problem?.parts_html.length ?? 0,
-          hasInput: p.input !== undefined,
-        });
+      if (!p.problem && !p.code) continue;
+      let map = byYear.get(p.year);
+      if (!map) {
+        map = new Map();
+        byYear.set(p.year, map);
       }
+      map.set(p.day, {
+        parts: p.problemParts ?? p.problem?.parts_html.length ?? 0,
+        hasInput: p.input !== undefined,
+        fullyCached: Boolean(p.problem && p.input !== undefined),
+      });
     }
-    return map;
+    return byYear;
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    void loadCachedForYear(year).then((map) => {
-      if (!cancelled) setCachedDays(map);
+    const refresh = () => {
+      void loadAllCached().then((byYear) => {
+        if (!cancelled) setCachedByYear(byYear);
+      });
+    };
+    refresh();
+    const unsub = yearSync().subscribe(() => {
+      setSyncTick((n) => n + 1);
+      refresh();
     });
     return () => {
       cancelled = true;
+      unsub();
+      if (pressRef.current) {
+        clearTimeout(pressRef.current.timer);
+        pressRef.current = null;
+      }
     };
-  }, [year, loadCachedForYear]);
+  }, [loadAllCached]);
 
   useEffect(() => {
     if (!hasSession) return;
@@ -201,98 +226,59 @@ export function Picker({ current, hasSession, onPick }: Props) {
   }, [year, hasSession, online]);
   const members = board?.year === year ? board.members : null;
 
-  const syncOfflineYear = useCallback(
-    async (targetYear: number): Promise<OfflineYear> => {
-      const data = await api.offlineYear(targetYear);
-      await storeOfflineYear(data);
-      const map = await loadCachedForYear(targetYear);
-      setCachedDays(map);
-      setSavingYear({
-        year: targetYear,
-        caching: data.caching,
-        cached: data.cached_days,
-        total: data.total_unlocked,
-        error: data.error,
-      });
-      return data;
-    },
-    [loadCachedForYear],
-  );
-
-  // Poll the lightweight status endpoint while the server's throttled prefetch is running,
-  // fetching the full offline bundle only once caching finishes.
-  useEffect(() => {
-    if (!savingYear || savingYear.year !== year || !savingYear.caching) return;
-    let cancelled = false;
-    const timer = setInterval(() => {
-      void api
-        .cacheYearStatus(year)
-        .then(async (status) => {
-          if (cancelled) return;
-          if (!status.caching) {
-            await syncOfflineYear(year);
-          } else {
-            setSavingYear({
-              year,
-              caching: status.caching,
-              cached: status.cached_days,
-              total: status.total_unlocked,
-              error: status.error,
-            });
-          }
-        })
-        .catch((e: unknown) => {
-          if (!cancelled) {
-            setSavingYear((prev) =>
-              prev?.year === year ? { ...prev, caching: false, error: errorMessage(e) } : prev,
-            );
-          }
-        });
-    }, 2500);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [savingYear?.year, savingYear?.caching, year, syncOfflineYear]);
-
-  const saveYearOffline = async () => {
-    setSavingYear({
-      year,
-      caching: true,
-      cached: cachedDays.size,
-      total: Array.from({ length: daysIn(year) }, (_, i) => i + 1).filter((d) =>
-        isUnlocked(year, d, now),
-      ).length,
-      error: null,
-    });
-    try {
-      const helpers = await api.helpers().catch(() => null);
-      if (helpers) {
-        await putHelpers(helpers.language_id, helpers.file, helpers.text);
-      }
-      const status = await api.cacheYear(year);
-      if (!status.caching) {
-        await syncOfflineYear(year);
-      } else {
-        setSavingYear({
-          year,
-          caching: status.caching,
-          cached: status.cached_days,
-          total: status.total_unlocked,
-          error: status.error,
-        });
-      }
-    } catch (e) {
-      setSavingYear((prev) =>
-        prev?.year === year ? { ...prev, caching: false, error: errorMessage(e) } : prev,
-      );
+  const cancelLongPress = () => {
+    if (pressRef.current) {
+      clearTimeout(pressRef.current.timer);
+      pressRef.current = null;
     }
+  };
+
+  const onYearPointerDown = (targetYear: number, e: PointerEvent) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    cancelLongPress();
+    const x = e.clientX;
+    const y = e.clientY;
+    const timer = setTimeout(() => {
+      pressRef.current = null;
+      suppressClickYear.current = targetYear;
+      setOfflineSheetYear(targetYear);
+    }, LONG_PRESS_MS);
+    pressRef.current = { year: targetYear, timer, x, y };
+  };
+
+  const onYearPointerMove = (e: PointerEvent) => {
+    const press = pressRef.current;
+    if (!press) return;
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > LONG_PRESS_DRIFT_PX) {
+      cancelLongPress();
+    }
+  };
+
+  const onYearPointerEnd = (targetYear: number) => {
+    cancelLongPress();
+    if (suppressClickYear.current === targetYear) {
+      setTimeout(() => {
+        if (suppressClickYear.current === targetYear) suppressClickYear.current = null;
+      }, 400);
+    }
+  };
+
+  const onYearClick = (targetYear: number) => {
+    if (suppressClickYear.current === targetYear) {
+      suppressClickYear.current = null;
+      return;
+    }
+    setYear(targetYear);
   };
 
   const years: number[] = [];
   for (let y = latestYear(now); y >= 2015; y--) years.push(y);
-  const total = stars === null ? null : Object.values(stars).reduce((a, b) => a + b, 0);
+
+  const cachedDays = cachedByYear.get(year) ?? new Map<number, CachedDayInfo>();
+  const unlockedCount = unlockedDaysFor(year, now).length;
+  const fullyCachedCount = Array.from(cachedDays.values()).filter((d) => d.fullyCached).length;
   const cachedCount = cachedDays.size;
+  const total = stars === null ? null : Object.values(stars).reduce((a, b) => a + b, 0);
   const status = !hasSession
     ? "Add your session cookie to see stars."
     : (error ??
@@ -303,40 +289,82 @@ export function Picker({ current, hasSession, onPick }: Props) {
             ? `${cachedCount} saved offline in ${year}`
             : `Offline · no saved puzzles in ${year}`
           : "Loading stars…"));
-  const yearSave = savingYear?.year === year ? savingYear : null;
+
+  const yearJob = yearSync().get(year);
+  const activeJob = yearSync().active();
+  const offlinePillLabel = yearJob?.active
+    ? `Saving ${yearJob.completed}/${yearJob.total}…`
+    : unlockedCount > 0 && fullyCachedCount >= unlockedCount
+      ? `${fullyCachedCount}/${unlockedCount} offline ✓`
+      : fullyCachedCount > 0
+        ? `${fullyCachedCount}/${unlockedCount} offline ↓`
+        : "Offline ↓";
+
+  // State for whichever year's offline sheet is currently open (may differ from selected year on long-press).
+  const sheetCached =
+    offlineSheetYear !== null
+      ? (cachedByYear.get(offlineSheetYear) ?? new Map<number, CachedDayInfo>())
+      : null;
+  const sheetUnlocked = offlineSheetYear !== null ? unlockedDaysFor(offlineSheetYear, now) : [];
+  const sheetFullyCached = sheetCached
+    ? Array.from(sheetCached.values()).filter((d) => d.fullyCached).length
+    : 0;
+  const sheetAnyCached = sheetCached?.size ?? 0;
+  const sheetRemaining =
+    offlineSheetYear !== null && sheetCached
+      ? remainingDaysFor(
+          offlineSheetYear,
+          now,
+          sheetCached,
+          starsByYear.get(offlineSheetYear) ?? null,
+        )
+      : [];
+  const sheetJob = offlineSheetYear !== null ? yearSync().get(offlineSheetYear) : null;
 
   return (
     <div class="picker">
       <div class="years">
-        {years.map((y) => (
-          <button
-            type="button"
-            key={y}
-            class={`chip ${y === year ? "selected" : ""}`}
-            onClick={() => setYear(y)}
-          >
-            {y}
-          </button>
-        ))}
+        {years.map((y) => {
+          const yCached = cachedByYear.get(y);
+          const hasCached = (yCached?.size ?? 0) > 0;
+          const isDownloading = activeJob?.year === y;
+          return (
+            <button
+              type="button"
+              key={y}
+              class={`chip year-chip ${y === year ? "selected" : ""} ${hasCached ? "cached" : ""} ${isDownloading ? "downloading" : ""}`}
+              title="Tap to view · Hold for offline options"
+              onPointerDown={(e) => onYearPointerDown(y, e)}
+              onPointerMove={onYearPointerMove}
+              onPointerUp={() => onYearPointerEnd(y)}
+              onPointerCancel={() => onYearPointerEnd(y)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                cancelLongPress();
+                setOfflineSheetYear(y);
+              }}
+              onClick={() => onYearClick(y)}
+            >
+              {y}
+            </button>
+          );
+        })}
       </div>
       <div class="picker-status">
         <p class="muted">{status}</p>
-        {hasSession ? (
+        {hasSession || cachedCount > 0 ? (
           <button
             type="button"
-            class="text-button"
-            disabled={!online || yearSave?.caching === true}
-            onClick={() => void saveYearOffline()}
+            class={`chip offline-pill ${yearJob?.active ? "downloading" : unlockedCount > 0 && fullyCachedCount >= unlockedCount ? "complete" : ""}`}
+            onClick={() => setOfflineSheetYear(year)}
           >
-            {yearSave?.caching
-              ? `Saving offline (${yearSave.cached}/${yearSave.total})…`
-              : cachedCount > 0
-                ? `Save ${year} offline (${cachedCount} cached)`
-                : `Save ${year} for offline`}
+            {offlinePillLabel}
           </button>
         ) : null}
       </div>
-      {yearSave?.error ? <p class="error-text small">{yearSave.error}</p> : null}
+      {yearJob?.error && offlineSheetYear !== year ? (
+        <p class="muted small">{yearJob.error}</p>
+      ) : null}
       {next && next.puzzle.year === year ? (
         <p class="countdown">
           Day {next.puzzle.day} unlocks in <strong>{formatCountdown(next.at - now)}</strong>
@@ -424,6 +452,100 @@ export function Picker({ current, hasSession, onPick }: Props) {
           Practice puzzle
         </button>
       </div>
+      {offlineSheetYear !== null ? (
+        <Modal
+          title={`Offline · ${offlineSheetYear}`}
+          shape="sheet"
+          onClose={() => setOfflineSheetYear(null)}
+        >
+          <div class="offline-year-sheet">
+            <p class="offline-year-summary">
+              <strong>{sheetFullyCached}</strong> of {sheetUnlocked.length} unlocked{" "}
+              {sheetUnlocked.length === 1 ? "day" : "days"} saved on this device.
+            </p>
+            {sheetJob?.active ? (
+              <div class="offline-year-progress">
+                <div class="offline-progress-track" aria-hidden="true">
+                  <div
+                    class="offline-progress-fill"
+                    style={{
+                      width: `${sheetJob.total > 0 ? Math.round((sheetJob.completed / sheetJob.total) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+                <p class="muted small">
+                  Downloading day {sheetJob.currentDay ?? "…"} ({sheetJob.completed}/
+                  {sheetJob.total} in this batch). You can close this and keep coding — each day
+                  saves as it arrives.
+                </p>
+              </div>
+            ) : sheetJob?.error ? (
+              <p class="muted small">{sheetJob.error}</p>
+            ) : sheetJob?.paused ? (
+              <p class="muted small">Paused — days already downloaded stay saved on this device.</p>
+            ) : null}
+
+            <div class="offline-year-actions">
+              {sheetJob?.active ? (
+                <button
+                  type="button"
+                  class="pill"
+                  onClick={() => yearSync().pause(offlineSheetYear)}
+                >
+                  Pause download
+                </button>
+              ) : sheetRemaining.length > 0 && hasSession ? (
+                <>
+                  {sheetRemaining.length > 5 ? (
+                    <button
+                      type="button"
+                      class="pill primary"
+                      disabled={!online}
+                      onClick={() =>
+                        void yearSync().start(offlineSheetYear, sheetRemaining.slice(0, 5))
+                      }
+                    >
+                      Save next 5 days
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    class={sheetRemaining.length > 5 ? "pill" : "pill primary"}
+                    disabled={!online}
+                    onClick={() => void yearSync().start(offlineSheetYear, sheetRemaining)}
+                  >
+                    {sheetFullyCached > 0
+                      ? `Save remaining (${sheetRemaining.length} ${sheetRemaining.length === 1 ? "day" : "days"})`
+                      : `Save all ${sheetRemaining.length} days`}
+                  </button>
+                </>
+              ) : sheetUnlocked.length > 0 && sheetRemaining.length === 0 ? (
+                <p class="muted small">
+                  Every unlocked day in {offlineSheetYear} is saved offline.
+                </p>
+              ) : null}
+
+              {sheetAnyCached > 0 ? (
+                <button
+                  type="button"
+                  class="text-button"
+                  onClick={() => void yearSync().removeYear(offlineSheetYear)}
+                >
+                  Remove saved puzzles for {offlineSheetYear}
+                </button>
+              ) : null}
+            </div>
+
+            {!sheetJob?.active && sheetRemaining.length > 0 && hasSession ? (
+              <p class="muted small">
+                {online
+                  ? "Downloads one day at a time (~6 s each for Advent of Code's rate limit) and resumes where it left off if interrupted."
+                  : "Reconnect to download the remaining days."}
+              </p>
+            ) : null}
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }

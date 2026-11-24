@@ -10,12 +10,12 @@ use axum::extract::{Path, Query, State};
 use serde::Serialize;
 use workshop_common::files::version_of;
 
-use super::error::ApiResult;
+use super::error::{ApiResult, bad_request};
 use super::lsp::file_uri;
 use super::puzzles::{RefreshQuery, puzzle};
 use super::state::{Shared, lock};
 use crate::aoc::Problem;
-use crate::language::Puzzle;
+use crate::language::{LanguageProfile, Puzzle};
 use crate::workspace::{DayMeta, VersionedFile};
 
 /// The chosen private leaderboard for a year, or nothing if none is chosen.
@@ -72,6 +72,15 @@ pub(super) struct OfflineYear {
 }
 
 #[derive(Serialize)]
+pub(super) struct OfflineDay {
+    year: u16,
+    day: u8,
+    template: String,
+    empty_version: String,
+    puzzle: OfflinePuzzle,
+}
+
+#[derive(Serialize)]
 pub(super) struct YearCacheStatus {
     year: u16,
     caching: bool,
@@ -105,6 +114,36 @@ fn count_cached_days(app: &Shared, year: u16, unlocked: &[u8]) -> Result<usize, 
     Ok(cached)
 }
 
+fn load_offline_puzzle(
+    app: &Shared,
+    profile: &LanguageProfile,
+    p: Puzzle,
+) -> Result<(Option<OfflinePuzzle>, bool), anyhow::Error> {
+    let problem = app.aoc.cached_problem(p)?;
+    let input = app.aoc.cached_input(p)?;
+    let code = app.workspace.load_existing_code(profile, p)?;
+    let loaded_notes = app.workspace.load_notes(p)?;
+    let notes = (!loaded_notes.text.is_empty()).then_some(loaded_notes);
+    let fully_cached = problem.is_some() && input.is_some();
+    if problem.is_some() || input.is_some() || code.is_some() || notes.is_some() {
+        let path = profile.solution_path(&app.workspace.solutions_dir, p)?;
+        let meta = app.workspace.load_day_meta(p)?;
+        return Ok((
+            Some(OfflinePuzzle {
+                day: p.day,
+                problem,
+                input,
+                code,
+                notes,
+                file_uri: file_uri(&path),
+                meta,
+            }),
+            fully_cached,
+        ));
+    }
+    Ok((None, false))
+}
+
 /// Returns everything already cached on the server for a year's unlocked puzzles without making
 /// any network requests to Advent of Code.
 pub(super) async fn offline(
@@ -119,26 +158,12 @@ pub(super) async fn offline(
 
     for &day in &unlocked {
         let p = Puzzle::new(year, day)?;
-        let problem = app.aoc.cached_problem(p)?;
-        let input = app.aoc.cached_input(p)?;
-        let code = app.workspace.load_existing_code(profile, p)?;
-        let loaded_notes = app.workspace.load_notes(p)?;
-        let notes = (!loaded_notes.text.is_empty()).then_some(loaded_notes);
-        if problem.is_some() && input.is_some() {
+        let (offline_puzzle, fully_cached) = load_offline_puzzle(&app, profile, p)?;
+        if fully_cached {
             cached_days += 1;
         }
-        if problem.is_some() || input.is_some() || code.is_some() || notes.is_some() {
-            let path = profile.solution_path(&app.workspace.solutions_dir, p)?;
-            let meta = app.workspace.load_day_meta(p)?;
-            puzzles.push(OfflinePuzzle {
-                day,
-                problem,
-                input,
-                code,
-                notes,
-                file_uri: file_uri(&path),
-                meta,
-            });
+        if let Some(item) = offline_puzzle {
+            puzzles.push(item);
         }
     }
 
@@ -155,6 +180,49 @@ pub(super) async fn offline(
         template: profile.template.clone(),
         empty_version: version_of(""),
         puzzles,
+    }))
+}
+
+/// Fetches (if needed, through the throttled AoC client) and returns a single unlocked day's
+/// offline bundle so clients can download a year incrementally and resume after interruptions.
+pub(super) async fn offline_day(
+    State(app): State<Shared>,
+    Path((year, day)): Path<(u16, u8)>,
+) -> ApiResult<OfflineDay> {
+    let p = puzzle(year, day)?;
+    if !crate::calendar::is_unlocked(year, day, now_secs()) {
+        return Err(bad_request(format!(
+            "Day {day} of {year} hasn't unlocked yet."
+        )));
+    }
+    let already_cached = app.aoc.cached_problem(p)?.is_some() && app.aoc.cached_input(p)?.is_some();
+    if !already_cached {
+        if !app.aoc.has_session() {
+            return Err(anyhow::Error::from(crate::aoc::NeedsLogin(
+                "Log in to Advent of Code before saving puzzles for offline use.",
+            ))
+            .into());
+        }
+        app.aoc.prefetch_puzzle_background(p).await?;
+    }
+    let profile = app.language();
+    let path = profile.solution_path(&app.workspace.solutions_dir, p)?;
+    let (loaded, _) = load_offline_puzzle(&app, profile, p)?;
+    let item = loaded.unwrap_or(OfflinePuzzle {
+        day,
+        problem: None,
+        input: None,
+        code: None,
+        notes: None,
+        file_uri: file_uri(&path),
+        meta: app.workspace.load_day_meta(p)?,
+    });
+    Ok(Json(OfflineDay {
+        year,
+        day,
+        template: profile.template.clone(),
+        empty_version: version_of(""),
+        puzzle: item,
     }))
 }
 
@@ -289,5 +357,13 @@ mod tests {
             .unwrap();
         let cache_res = send(&router, cache_req).await;
         assert_eq!(cache_res.status(), StatusCode::BAD_REQUEST);
+
+        // Requesting a single uncached day without a session also asks to log in.
+        let day_req = Request::get("/api/years/2017/offline/1")
+            .header(header::COOKIE, "workshop_token=secret")
+            .body(Body::empty())
+            .unwrap();
+        let day_res = send(&router, day_req).await;
+        assert_eq!(day_res.status(), StatusCode::BAD_REQUEST);
     }
 }

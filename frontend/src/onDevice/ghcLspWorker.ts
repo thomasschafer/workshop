@@ -167,8 +167,10 @@ async function runCheck(uri: string): Promise<void> {
     syncWorkDir();
     stderrChunks = [];
     try {
+      // `-dynamic` is required alongside `-fno-code` because the WASM rootfs ships `.dyn_hi`
+      // interfaces (for interpreter/dynamic loading) rather than static `.hi` files.
       await runPlayground(
-        "-v0 -fno-code -Wall -ferror-spans -fdiagnostics-color=never -i/work",
+        "-v0 -fno-code -dynamic -Wall -ferror-spans -fdiagnostics-color=never -i/work",
         textAtStart,
       );
     } catch {

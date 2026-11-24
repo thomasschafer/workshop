@@ -160,6 +160,29 @@ export async function listAocPuzzles(): Promise<CachedAocPuzzle[]> {
   return rows ?? [];
 }
 
+/** Deletes all cached AoC puzzle records for a given year from this device. */
+export async function deleteAocYear(year: number): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction("aoc", "readwrite");
+      const store = tx.objectStore("aoc");
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const rows = (req.result as CachedAocPuzzle[] | undefined) ?? [];
+        for (const row of rows) {
+          if (row.year === year) store.delete(row.key);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 /** Merges fields into a puzzle's cached record so partial updates keep earlier data intact. */
 export async function mergeAocPuzzle(
   year: number,

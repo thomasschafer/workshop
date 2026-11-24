@@ -85,5 +85,5 @@ export type OnDeviceMode = (typeof ON_DEVICE_MODES)[number];
 export const onDeviceMode = choice<OnDeviceMode>(
   "workshop:on-device-mode",
   ON_DEVICE_MODES,
-  "server",
+  "automatic",
 );

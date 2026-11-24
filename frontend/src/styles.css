@@ -2575,13 +2575,88 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
 .picker-status {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-bottom: 10px;
 }
 
 .picker-status p {
-  margin: 0 0 10px;
+  margin: 0;
+}
+
+.year-chip {
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.year-chip.cached::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+  opacity: 0.85;
+}
+
+.year-chip.downloading {
+  border-color: var(--accent);
+}
+
+.offline-pill {
+  font-size: 13px;
+  padding: 5px 11px;
+}
+
+.offline-pill.downloading {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.offline-pill.complete {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.offline-year-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.offline-year-summary {
+  margin: 0;
+}
+
+.offline-year-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.offline-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(128, 128, 128, 0.2));
+  overflow: hidden;
+}
+
+.offline-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.offline-year-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .day.cached {

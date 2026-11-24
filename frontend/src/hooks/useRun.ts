@@ -151,6 +151,14 @@ export function useRun({
         await runLocally();
         return;
       }
+      if (!effectivelyOnline) {
+        const reason =
+          hasLocal && onDeviceMode === "server"
+            ? "Offline — switch Settings → On-device to Automatic or On device to run locally."
+            : "Offline — install the on-device runtime in Settings → On-device while connected to run code offline.";
+        setRun((r) => ({ ...r, running: null, error: reason }));
+        return;
+      }
 
       await formatBeforeRun();
       try {
