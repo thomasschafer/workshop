@@ -113,6 +113,12 @@ impl Paths {
     pub fn day_meta_dir(&self) -> PathBuf {
         self.data_dir.join("days")
     }
+
+    /// The user's notes on each puzzle. They're kept out of the solutions repo, so they aren't
+    /// committed with the solutions.
+    pub fn notes_dir(&self) -> PathBuf {
+        self.data_dir.join("notes")
+    }
 }
 
 #[cfg(test)]

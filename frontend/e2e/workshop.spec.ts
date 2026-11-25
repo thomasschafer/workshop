@@ -2986,7 +2986,7 @@ test("opens a cached Advent of Code puzzle offline, edits notes, shows On-device
   await expect(phone.locator(".card.error")).toHaveCount(0);
 
   await setOffline(context, false);
-  const notesFile = join(HOME, "solutions", "notes", "2017", "day04.md");
+  const notesFile = join(HOME, "data", "notes", "2017", "day04.md");
   await expect
     .poll(
       () => {

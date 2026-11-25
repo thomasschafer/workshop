@@ -134,8 +134,10 @@ impl App {
                 ))
             })
             .collect::<Result<_>>()?;
+        let workspace = Workspace::new(config.solutions_dir.clone(), paths.clone());
+        workspace.move_notes_out_of_repo()?;
         Ok(Self {
-            workspace: Workspace::new(config.solutions_dir.clone(), paths.clone()),
+            workspace,
             aoc: crate::solutions::aoc_client(&config, &paths, aoc_session)?,
             runners,
             settings: std::sync::RwLock::new(AppSettings::load(&config, &paths)),

@@ -323,10 +323,25 @@ impl Workspace {
     }
 
     fn notes_path(&self, puzzle: Puzzle) -> PathBuf {
-        self.solutions_dir
-            .join("notes")
+        self.paths
+            .notes_dir()
             .join(puzzle.year_label())
             .join(format!("day{:02}.md", puzzle.day))
+    }
+
+    /// Moves notes that older versions kept in the solutions repo's `notes` directory into
+    /// Workshop's own, leaving their removal to be committed with the next solution. Fails,
+    /// moving nothing more, if a note is in both places with different text.
+    pub fn move_notes_out_of_repo(&self) -> Result<()> {
+        let old_dir = self.solutions_dir.join(LEGACY_NOTES_DIR);
+        if !old_dir.exists() {
+            return Ok(());
+        }
+        let _guard = self
+            .save_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        move_tree(&old_dir, &self.paths.notes_dir())
     }
 
     pub fn load_notes(&self, puzzle: Puzzle) -> Result<VersionedFile> {
@@ -443,8 +458,8 @@ impl Workspace {
     }
 
     /// The files Workshop writes in the solutions repo that any of `candidates` could be: the
-    /// shared ones, such as the helpers, and the solutions and notes of the puzzles from the
-    /// years the candidates name.
+    /// shared ones, such as the helpers, and the solutions of the puzzles from the years the
+    /// candidates name.
     fn owned_files(
         &self,
         profile: &LanguageProfile,
@@ -479,7 +494,6 @@ impl Workspace {
         for puzzle in puzzles {
             let puzzle = puzzle?;
             owned.insert(profile.solution_path(dir, puzzle)?);
-            owned.insert(self.notes_path(puzzle));
         }
         Ok(owned)
     }
@@ -522,6 +536,51 @@ pub fn read_versioned(path: &Path) -> Result<VersionedFile> {
         text,
         path: path.to_owned(),
     })
+}
+
+/// Where older versions of Workshop kept notes, inside the solutions repo.
+const LEGACY_NOTES_DIR: &str = "notes";
+
+/// Moves every file under `from` to the same place under `to`, then removes `from`. A file
+/// already at its destination with the same contents is just removed from `from`.
+fn move_tree(from: &Path, to: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(from).with_context(|| format!("reading {}", from.display()))? {
+        let entry = entry.with_context(|| format!("reading {}", from.display()))?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        let kind = entry
+            .file_type()
+            .with_context(|| format!("reading {}", source.display()))?;
+        if kind.is_dir() {
+            move_tree(&source, &target)?;
+            continue;
+        }
+        if !kind.is_file() {
+            bail!(
+                "can't move {} out of the solutions repo, as it isn't a file",
+                source.display()
+            );
+        }
+        let contents =
+            std::fs::read(&source).with_context(|| format!("reading {}", source.display()))?;
+        match std::fs::read(&target) {
+            Ok(existing) if existing == contents => {}
+            Ok(_) => bail!(
+                "{} and {} are different versions of the same note: keep the one you want at \
+                 the second and delete the first",
+                source.display(),
+                target.display()
+            ),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir_all(to)
+                    .with_context(|| format!("creating {}", to.display()))?;
+                files::write_atomic(&target, &contents)?;
+            }
+            Err(err) => return Err(err).with_context(|| format!("reading {}", target.display())),
+        }
+        std::fs::remove_file(&source).with_context(|| format!("removing {}", source.display()))?;
+    }
+    std::fs::remove_dir(from).with_context(|| format!("removing {}", from.display()))
 }
 
 fn read_optional(path: &Path) -> Result<Option<String>> {
@@ -662,12 +721,47 @@ mod tests {
             workspace.save_notes(puzzle, "stale", &empty.version),
             Err(SaveError::Conflict { current }) if current.version == saved.version
         ));
-        assert!(
-            !workspace
-                .solutions_dir
-                .join("notes/2017/day04.md")
-                .starts_with(&workspace.paths.data_dir)
-        );
+        assert!(saved.path.starts_with(workspace.paths.data_dir));
+        assert!(!workspace.solutions_dir.join("notes").exists());
+    }
+
+    #[test]
+    fn moves_notes_out_of_the_solutions_repo() {
+        let (_dir, workspace, _) = setup();
+        let old = workspace.solutions_dir.join("notes");
+        std::fs::create_dir_all(old.join("2017")).unwrap();
+        std::fs::write(old.join("2017/day04.md"), "try a map\n").unwrap();
+        std::fs::write(old.join("2017/day05.md"), "use a stack\n").unwrap();
+        let day5 = Puzzle::new(2017, 5).unwrap();
+        let empty = workspace.load_notes(day5).unwrap();
+        workspace
+            .save_notes(day5, "use a stack", &empty.version)
+            .unwrap();
+
+        workspace.move_notes_out_of_repo().unwrap();
+        assert!(!old.exists());
+        let day4 = workspace.load_notes(Puzzle::new(2017, 4).unwrap()).unwrap();
+        assert_eq!(day4.text, "try a map\n");
+        assert_eq!(workspace.load_notes(day5).unwrap().text, "use a stack\n");
+        workspace.move_notes_out_of_repo().unwrap();
+    }
+
+    #[test]
+    fn refuses_to_move_a_note_that_differs_from_the_one_kept() {
+        let (_dir, workspace, _) = setup();
+        let puzzle = Puzzle::new(2017, 4).unwrap();
+        let empty = workspace.load_notes(puzzle).unwrap();
+        workspace
+            .save_notes(puzzle, "kept", &empty.version)
+            .unwrap();
+        let old = workspace.solutions_dir.join("notes/2017/day04.md");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, "in the repo\n").unwrap();
+
+        let err = workspace.move_notes_out_of_repo().unwrap_err();
+        assert!(err.to_string().contains("different versions"), "{err}");
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), "in the repo\n");
+        assert_eq!(workspace.load_notes(puzzle).unwrap().text, "kept\n");
     }
 
     #[test]
@@ -801,7 +895,7 @@ mod tests {
         // Paths compare by component, so git's `/` matches the system's separator.
         let committed: Vec<&Path> = committed.lines().map(Path::new).collect();
         assert!(committed.contains(&solution.as_path()));
-        assert!(committed.contains(&Path::new("notes/2017/day05.md")));
+        assert!(!committed.iter().any(|path| path.starts_with("notes")));
         assert!(!committed.contains(&Path::new("tmp.py")));
         let changed = git(&workspace.solutions_dir, &["status", "--porcelain"])
             .await
