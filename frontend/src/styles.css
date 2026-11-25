@@ -34,9 +34,14 @@
   --key: #ffffff;
   --key-fn: #b3b5bf;
   --key-fg: #111114;
+  --key-fn-fg: #111114;
   --key-down: #9a9ca8;
+  --key-on: var(--accent);
+  --key-on-fg: var(--accent-fg);
   --key-preview: #ffffff;
   --key-move: #e4ebfa;
+  /* The key to lower the keyboard, drawn as Android draws its own in the navigation bar. */
+  --key-nav: #111114;
 
   color-scheme: light dark;
 }
@@ -65,13 +70,18 @@
     --syntax-type: #79c9ef;
     --syntax-operator: #a3a3ad;
 
-    --key-tray: #0c0c0f;
-    --key: #3a3a43;
-    --key-fn: #25252c;
-    --key-fg: #ffffff;
-    --key-down: #5c5c68;
-    --key-preview: #6a6a78;
+    /* Gboard's own dark theme, taken from a Pixel's. */
+    --key-tray: #1b181f;
+    --key: #2e2b34;
+    --key-fn: #3e384c;
+    --key-fg: #eae3ef;
+    --key-fn-fg: #c4bbd4;
+    --key-down: #57506a;
+    --key-on: #c4bbd4;
+    --key-on-fg: #1b181f;
+    --key-preview: #4a4655;
     --key-move: #3b4256;
+    --key-nav: #ffffff;
   }
 }
 
@@ -1035,12 +1045,17 @@ html[data-tab-turn] .content {
 
 /* Beneath the keys, as on a phone's keyboard: Helix's status line, and the key to lower it. */
 .keyboard-footer {
+  position: relative;
   width: 100%;
   max-width: 48rem;
   height: calc(44 * var(--u));
   display: flex;
   align-items: center;
-  gap: var(--key-gap);
+}
+
+/* Clear of the key to lower the keyboard, which sits at its left. */
+.keyboard-footer:has(.keyboard-lower) {
+  padding-left: calc(100 * var(--u));
 }
 
 .keyboard-status {
@@ -1057,42 +1072,94 @@ html[data-tab-turn] .content {
   min-width: 0;
 }
 
+/* A chevron where Android draws its own keyboard's, in the navigation bar, a little left of the
+   space bar: as near the bottom as it can be seen, as the page ends above the navigation bar. */
+.keyboard-lower {
+  position: absolute;
+  left: calc(37.6 * var(--u));
+  bottom: 0;
+  width: calc(56 * var(--u));
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: calc(12 * var(--u));
+  background: none;
+  color: var(--key-nav);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  touch-action: none;
+}
+
+.keyboard-lower:active {
+  background: var(--key-down);
+}
+
+.keyboard-lower-icon {
+  display: block;
+  width: calc(9.85 * var(--u));
+  height: calc(6 * var(--u));
+}
+
+/* Full screen, the page reaches under the navigation bar, so the chevron can be just where
+   Android's is: centred 23.3px above the screen's bottom edge. */
+:root:fullscreen .keyboard-lower-icon {
+  transform: translateY(calc(3 * var(--u) + 0.7px));
+}
+
+/* Shaped and lettered as Gboard's keys, flat, with Google's sans where the phone has it. */
 .key {
   min-width: 0;
   height: calc(51 * var(--u));
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: calc(5.5 * var(--u));
   background: var(--key);
   color: var(--key-fg);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
-  font-family: var(--mono);
-  font-size: 22px;
+  font-family: "Google Sans", google-sans, Roboto, system-ui, sans-serif;
+  font-size: calc(26.5 * var(--u));
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   touch-action: none;
   position: relative;
 }
 
 .keyboard-row-small .key {
   height: calc(40 * var(--u));
-  font-size: 19px;
+  font-size: calc(22 * var(--u));
 }
 
 .key-named,
-.key-modifier,
-.key-lower {
+.key-modifier {
   background: var(--key-fn);
+  color: var(--key-fn-fg);
 }
 
-.key-lower {
-  flex: none;
-  width: calc(52 * var(--u));
-  height: calc(32 * var(--u));
-  font-size: 18px;
+/* As Gboard's bottom row: its punctuation is coloured as the keys around the letters are, and
+   the keys at either end are rounded off. */
+:where(.keyboard-row:has(+ .keyboard-footer)) .key-char:not([data-key=" "]) {
+  background: var(--key-fn);
+  color: var(--key-fn-fg);
+}
+
+.keyboard-row:has(+ .keyboard-footer) .key:is(:first-child, :last-child) {
+  border-radius: 999px;
+}
+
+.key-icon {
+  display: block;
+  fill: currentColor;
 }
 
 /* Names such as `esc`, which would be wide at the size of a character. */
 .keyboard .key-word {
-  font-size: 14px;
+  font-size: calc(18 * var(--u));
+}
+
+.keyboard .keyboard-row-small .key-word {
+  font-size: calc(16 * var(--u));
 }
 
 .key-move {
@@ -1104,8 +1171,8 @@ html[data-tab-turn] .content {
 }
 
 .key.on {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--key-on);
+  color: var(--key-on-fg);
 }
 
 /* A modifier locked on by a double tap, underlined as a phone's keyboard shows caps lock. */
@@ -1211,10 +1278,6 @@ html[data-tab-turn] .content {
 
   .keyboard-footer {
     height: 30px;
-  }
-
-  .key-lower {
-    height: 24px;
   }
 }
 

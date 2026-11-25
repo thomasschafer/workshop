@@ -1,4 +1,4 @@
-import type { RefObject } from "preact";
+import type { JSX, RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { CodeEditor } from "../editor";
 import type { Key } from "../helix/keys";
@@ -76,7 +76,71 @@ function columns(n: number): { flex: string } {
   return { flex: `0 0 calc((100% + var(--key-gap)) * ${n / COLUMNS} - var(--key-gap))` };
 }
 
+/**
+ * Keys drawn as Gboard draws them, rather than with their labels. Each is sized in the units of a
+ * 411px-wide screen's pixels, as the keyboard is, from a Pixel's at 960 device pixels wide.
+ */
+const ICONS: ReadonlyMap<string, JSX.Element> = new Map([
+  [
+    "Shift",
+    <svg
+      class="key-icon"
+      viewBox="0 0 48 46"
+      style={iconSize(20.5, 19.7)}
+      aria-hidden="true"
+      key="Shift"
+    >
+      <polygon
+        points="24,2 46,23.5 36.5,23.5 36.5,44 11.5,44 11.5,23.5 2,23.5"
+        stroke="currentColor"
+        stroke-width="3"
+        stroke-linejoin="round"
+      />
+    </svg>,
+  ],
+  [
+    "Backspace",
+    <svg
+      class="key-icon"
+      viewBox="0 0 58 48"
+      style={iconSize(24.8, 20.5)}
+      aria-hidden="true"
+      key="Backspace"
+    >
+      <g
+        fill="none"
+        stroke="currentColor"
+        stroke-width="4.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M2.5 24 L17 2.25 H52 a3.5 3.5 0 0 1 3.5 3.5 V42.25 a3.5 3.5 0 0 1 -3.5 3.5 H17 Z" />
+        <path d="M26.5 16 L42 32 M42 16 L26.5 32" />
+      </g>
+    </svg>,
+  ],
+  [
+    "Enter",
+    <svg
+      class="key-icon"
+      viewBox="0 0 24 24"
+      style={iconSize(26, 26)}
+      aria-hidden="true"
+      key="Enter"
+    >
+      <path d="M19 7v4H5.83l3.58-3.59L8 6l-6 6 6 6 1.41-1.41L5.83 13H21V7z" />
+    </svg>,
+  ],
+]);
+
+function iconSize(width: number, height: number): { width: string; height: string } {
+  return { width: `calc(${width} * var(--u))`, height: `calc(${height} * var(--u))` };
+}
+
 const DEFS = new Map(LAYOUT.flatMap((row) => row.keys).map((def) => [keyId(def), def]));
+for (const id of ICONS.keys()) {
+  if (!DEFS.has(id)) throw new Error(`the keyboard has an icon for ${id}, which isn't a key`);
+}
 
 /** Where the keys are drawn now, measured at each touch, as the keyboard moves with the page. */
 function measureKeys(root: HTMLElement): {
@@ -264,7 +328,7 @@ export function Keyboard({
                 aria-pressed={def.kind === "modifier" ? on : undefined}
                 data-key={id}
               >
-                {labelFor(def, mods.shift)}
+                {ICONS.get(id) ?? labelFor(def, mods.shift)}
                 {showOffsets ? <OffsetMark offset={offsets[id]} /> : null}
               </button>
             );
@@ -277,7 +341,7 @@ export function Keyboard({
         {onLower ? (
           <button
             type="button"
-            class="key key-lower"
+            class="keyboard-lower"
             tabIndex={-1}
             aria-label="Hide keyboard"
             // On a click, once the finger's lifted, so the controls coming back under it don't
@@ -287,7 +351,16 @@ export function Keyboard({
             onClick={onLower}
             onContextMenu={(e) => e.preventDefault()}
           >
-            ▾
+            <svg class="keyboard-lower-icon" viewBox="0 0 23 14" aria-hidden="true">
+              <polyline
+                points="1.75,1.75 11.5,11.5 21.25,1.75"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
           </button>
         ) : null}
       </div>
