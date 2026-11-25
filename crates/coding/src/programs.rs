@@ -522,7 +522,14 @@ impl Runtime {
             .await?;
             if output.ending != (Ending::Exited { code: Some(0) }) {
                 let _ = std::fs::remove_dir_all(&staging);
-                let errors = format!("{}{}", output.stdout, output.stderr);
+                let mut errors = format!("{}{}", output.stdout, output.stderr);
+                // Otherwise a build stopped part-way can say nothing at all of why it failed.
+                if output.ending == Ending::TimedOut {
+                    errors.push_str(&format!(
+                        "The build took longer than {} seconds, so it was stopped.\n",
+                        self.build_timeout.as_secs()
+                    ));
+                }
                 return Ok(Built::Failed {
                     errors: shorten_paths(&errors, &staging),
                     ending: output.ending,
@@ -687,6 +694,25 @@ mod tests {
             Built::Ready(_)
         ));
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), entries);
+    }
+
+    #[tokio::test]
+    async fn says_when_a_build_took_too_long() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime {
+            build_timeout: Duration::from_millis(1),
+            ..runtime(dir.path())
+        };
+        let Built::Failed { errors, ending } =
+            built(&runtime, Language::Rust, "fn main() {}\n").await
+        else {
+            panic!("built in a millisecond");
+        };
+        assert_eq!(ending, Ending::TimedOut);
+        assert!(
+            errors.contains("The build took longer than 0 seconds"),
+            "{errors}"
+        );
     }
 
     #[tokio::test]

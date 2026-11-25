@@ -26,6 +26,23 @@ let page: Page;
 const solution = join(HOME, "solutions", "2017", "day04", "main.py");
 const uiState = join(HOME, "data", "state.json");
 
+/**
+ * Undoes with `undo`, a step at a time, until the solution saved on the server is `original`
+ * again. Each step waits for its save to land, which can take seconds on a slow machine.
+ */
+async function undoUntilSaved(
+  page: Page,
+  undo: () => Promise<void>,
+  original: string,
+): Promise<void> {
+  const saved = () => readFileSync(solution, "utf8");
+  for (let i = 0; i < 8 && saved() !== original; i++) {
+    await undo();
+    await expect(page.locator(".status-line")).not.toContainText("saving", { timeout: 15_000 });
+  }
+  await expect.poll(saved).toBe(original);
+}
+
 /** Says something, by typing it in place of speech, without waiting for what happens. */
 async function send(text: string): Promise<void> {
   await page.locator(".typed input").fill(text);
@@ -2275,13 +2292,7 @@ test("completes as it's typed, and renames with the editor's own keys", async ({
     ? "Meta"
     : "Control";
   /** Undoes until the file is as it was. */
-  const restore = async (undo: () => Promise<void>) => {
-    for (let i = 0; i < 8 && saved() !== original; i++) {
-      await undo();
-      await computer.waitForTimeout(700);
-    }
-    expect(saved()).toBe(original);
-  };
+  const restore = (undo: () => Promise<void>) => undoUntilSaved(computer, undo, original);
 
   // The language server's completions come up as a word's typed, the first chosen for Enter.
   await computer.locator(".cm-content").click();
@@ -2336,11 +2347,7 @@ test("completes as it's typed, and renames with the editor's own keys", async ({
   await helix.keyboard.type("x");
   await helix.waitForTimeout(500);
   await expect(offered).toHaveCount(0);
-  for (let i = 0; i < 8 && saved() !== original; i++) {
-    await helix.keyboard.type("u");
-    await helix.waitForTimeout(700);
-  }
-  expect(saved()).toBe(original);
+  await undoUntilSaved(helix, () => helix.keyboard.type("u"), original);
   await helixContext.close();
 });
 
@@ -2355,13 +2362,8 @@ test("imports what's completed, however the language server adds the import", as
   const mod = (await computer.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform)))
     ? "Meta"
     : "Control";
-  const restore = async () => {
-    for (let i = 0; i < 8 && saved() !== original; i++) {
-      await computer.keyboard.press(`${mod}+z`);
-      await computer.waitForTimeout(700);
-    }
-    expect(saved()).toBe(original);
-  };
+  const restore = () =>
+    undoUntilSaved(computer, () => computer.keyboard.press(`${mod}+z`), original);
   const complete = async (typed: string, label: string) => {
     await computer.locator(".cm-content").click();
     await computer.keyboard.press(`${mod}+End`);
@@ -2409,11 +2411,7 @@ test("imports what's completed, however the language server adds the import", as
   await helix.keyboard.press("Enter");
   await expect.poll(saved).toBe(`from fake import fetchByCommand\nfetchByCommand\n${original}`);
   await helix.keyboard.press("Escape");
-  for (let i = 0; i < 8 && saved() !== original; i++) {
-    await helix.keyboard.type("u");
-    await helix.waitForTimeout(700);
-  }
-  expect(saved()).toBe(original);
+  await undoUntilSaved(helix, () => helix.keyboard.type("u"), original);
   await helixContext.close();
 });
 
@@ -2463,11 +2461,7 @@ test("offers completions on a phone as rows a finger can tap, on screen", async 
       `from fake import fetchOnResolve\n${original.replace("def part1", "fetchOnResolve\ndef part1")}`,
     );
   await phone.keyboard.press("Escape");
-  for (let i = 0; i < 8 && saved() !== original; i++) {
-    await phone.keyboard.type("u");
-    await phone.waitForTimeout(700);
-  }
-  expect(saved()).toBe(original);
+  await undoUntilSaved(phone, () => phone.keyboard.type("u"), original);
   await context.close();
 });
 
@@ -2483,13 +2477,7 @@ test("formats the code when asked, before a run, and once Helix is left alone", 
   const mod = (await computer.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform)))
     ? "Meta"
     : "Control";
-  const restore = async (undo: () => Promise<void>) => {
-    for (let i = 0; i < 8 && saved() !== original; i++) {
-      await undo();
-      await computer.waitForTimeout(700);
-    }
-    expect(saved()).toBe(original);
-  };
+  const restore = (undo: () => Promise<void>) => undoUntilSaved(computer, undo, original);
 
   // With the editor's own keys, nothing's formatted for pausing.
   await computer.locator(".cm-content").click();

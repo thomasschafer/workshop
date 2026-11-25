@@ -93,13 +93,18 @@ pub(super) async fn bench_result(
         .and_then(|s| s.as_str())
         .ok_or_else(|| bad_request("The result needs its session."))?;
     let path = bench_dir(&app, session)?.join("results.jsonl");
+    // Results can arrive together, as when phrases are skipped quickly. Each is written whole, in
+    // one write, and one at a time, so no two are interleaved into a line that can't be read.
+    static APPENDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _appending = APPENDING.lock().expect("bench results lock poisoned");
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .with_context(|| format!("opening {}", path.display()))?;
-    writeln!(file, "{result}").with_context(|| format!("writing {}", path.display()))?;
+    file.write_all(format!("{result}\n").as_bytes())
+        .with_context(|| format!("writing {}", path.display()))?;
     Ok(Json(()))
 }
 

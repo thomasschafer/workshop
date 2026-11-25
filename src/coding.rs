@@ -37,8 +37,14 @@ use crate::tracks::Destination;
 use crate::workspace::{SaveError, VersionedFile, read_versioned, save_versioned};
 
 /// How long a solution may run on one input. Shorter than for Advent of Code, as the inputs are
-/// small, and a solution stuck in a loop shouldn't keep the learner waiting long.
-const RUN_TIMEOUT: Duration = Duration::from_secs(10);
+/// small, and a solution stuck in a loop shouldn't keep the learner waiting long. Tests run many
+/// programs at once, on machines such as CI's that can be far slower, and none of them waits on a
+/// run being cut off, so they allow as long as a build.
+const RUN_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_secs(60)
+} else {
+    Duration::from_secs(10)
+};
 
 /// How many random inputs a submission is compared with the brute force on.
 pub const SUBMIT_RANDOM_INPUTS: u32 = 30;

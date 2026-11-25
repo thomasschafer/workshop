@@ -809,8 +809,11 @@ mod tests {
                 .unwrap()
                 .starts_with("it took too long on example 1")
         );
+        // With all the time it needs, as a crash should never be mistaken for running too long,
+        // however slow the machine.
+        let patient = self::runtime(dir.path(), Duration::from_secs(60));
         let crash = format!("def longest_rise(readings):\n    raise NotImplementedError\n{MAIN}");
-        let crashed = run_examples(&runtime, &coding, 0, Language::Python, &crash, &cancel)
+        let crashed = run_examples(&patient, &coding, 0, Language::Python, &crash, &cancel)
             .await
             .unwrap();
         let problem = crashed.problem().unwrap();
