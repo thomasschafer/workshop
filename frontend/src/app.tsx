@@ -984,7 +984,7 @@ export function App({
           onHeight={setStackHeight}
         />
         {zen ? <ZenExit onExit={exitZen} shortcut /> : null}
-        {zen ? <ZenTabs shown={shownTab} /> : null}
+        {zen ? <ZenTabs shown={shownTab} onTab={setTab} /> : null}
         {showPicker ? (
           <div class="pane">
             <Picker current={puzzle} hasSession={hasSession} onPick={openPuzzle} />

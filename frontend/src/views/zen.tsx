@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import type { Tab } from "../api";
 import { errorMessage } from "../errors";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
-import { withShortcut } from "../shortcuts";
+import { TAB_SHORTCUTS, withShortcut } from "../shortcuts";
 import { TABS, tabLabel } from "../tabs";
 
 /** Corner brackets pointing out, to enter zen mode, or in, to leave it. */
@@ -66,19 +66,26 @@ export function ZenExit({ onExit, shortcut = false }: { onExit: () => void; shor
 }
 
 /**
- * Which tab is showing in zen mode, where the tabs themselves are hidden: shown for a moment on
- * turning to one, then fading out of the way.
+ * The tabs in zen mode, where the usual ones are hidden: shown in full for a moment on turning to
+ * one, then fading back to stay out of the way while still there to tap or click.
  */
-export function ZenTabs({ shown }: { shown: Tab }) {
+export function ZenTabs({ shown, onTab }: { shown: Tab; onTab: (tab: Tab) => void }) {
   return (
     // Keyed by the tab, so turning to another starts the fade again.
-    <div key={shown} class="zen-tabs" role="status">
+    <nav key={shown} class="zen-tabs" aria-label="Tabs">
       {TABS.map((tab) => (
-        <span key={tab} class={tab === shown ? "selected" : ""}>
+        <button
+          type="button"
+          key={tab}
+          class={tab === shown ? "selected" : ""}
+          aria-current={tab === shown ? "page" : undefined}
+          title={withShortcut(tabLabel(tab), TAB_SHORTCUTS[tab])}
+          onClick={() => onTab(tab)}
+        >
           {tabLabel(tab)}
-        </span>
+        </button>
       ))}
-    </div>
+    </nav>
   );
 }
 

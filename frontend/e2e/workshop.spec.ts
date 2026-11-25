@@ -2197,6 +2197,14 @@ test("turns to other tabs in zen mode with two fingers, keeping the keyboard for
   // Sweeping over the code doesn't change its size, as pinching it does.
   expect(await phone.evaluate(() => localStorage.getItem("workshop:code-scale"))).toBeNull();
 
+  // The tabs can be tapped as well, faded as they are.
+  await phone.locator(".zen-tabs").getByRole("button", { name: "Notes" }).tap();
+  await expect(phone.locator(".notes textarea")).toBeVisible();
+  await expect(shown).toHaveText("Notes");
+  await phone.locator(".zen-tabs").getByRole("button", { name: "Code" }).tap();
+  await expect(code).toBeVisible();
+  await expect(keyboard).toBeVisible();
+
   // With the keyboard lowered, it stays lowered on coming back.
   await keyboard.getByRole("button", { name: "Hide keyboard" }).tap();
   await sweep(phone, middle, 150);
@@ -2321,7 +2329,20 @@ test("runs, enters zen mode and turns between tabs from the keyboard, and lists 
     await expect.poll(slidesSeen).toEqual(expect.arrayContaining(["tab-out-left", "tab-in-right"]));
   }
   await turn(["Alt+BracketLeft"], computer.locator(".cm-content"));
+  await turn(["Alt+Digit4"], computer.locator(".pane.discuss"));
+  await expect(computer.locator(".zen-tabs .selected")).toHaveText("Discuss");
+  await turn(["Alt+Digit2"], computer.locator(".cm-content"));
   await computer.clock.resume();
+  // And clicked, with their shortcuts shown on hover.
+  const zenTabs = computer.locator(".zen-tabs");
+  await expect(zenTabs.getByRole("button", { name: "Problem" })).toHaveAttribute(
+    "title",
+    `Problem (${alt}1)`,
+  );
+  await zenTabs.getByRole("button", { name: "Problem" }).click();
+  await expect(computer.locator(".pane.problem")).toBeVisible();
+  await zenTabs.getByRole("button", { name: "Code" }).click();
+  await expect(computer.locator(".cm-content")).toBeVisible();
   await computer.keyboard.press(`${mod}+Period`);
   await expect(computer.locator("nav.tabs")).toBeVisible();
 

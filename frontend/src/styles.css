@@ -2363,25 +2363,38 @@ html[data-tab-turn] .content {
 /* Which tab zen mode is showing, for a moment after turning to it. */
 .zen-tabs {
   position: absolute;
-  top: calc(8px + env(safe-area-inset-top));
+  top: calc(6px + env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
   display: flex;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: 2px;
+  padding: 2px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--muted);
   font-size: 13px;
-  pointer-events: none;
   animation: zen-tabs-fade 1.6s ease-in forwards;
+}
+
+.zen-tabs button {
+  background: none;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--muted);
 }
 
 .zen-tabs .selected {
   color: var(--fg);
   font-weight: 600;
+}
+
+/* Back in full while it's being used. */
+.zen-tabs:hover,
+.zen-tabs:focus-within {
+  animation: none;
+  opacity: 1;
 }
 
 @keyframes zen-tabs-fade {
@@ -2390,7 +2403,7 @@ html[data-tab-turn] .content {
     opacity: 1;
   }
   100% {
-    opacity: 0;
+    opacity: 0.35;
   }
 }
 
