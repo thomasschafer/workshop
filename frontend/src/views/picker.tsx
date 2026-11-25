@@ -44,6 +44,26 @@ interface CachedDayInfo {
   fullyCached: boolean;
 }
 
+/** Quiet download arrow (down arrow over a tray) used to mark puzzles and years saved offline. */
+function OfflineIcon({ size = 11, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      class={`offline-icon ${className}`.trim()}
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 2.5v7.5m0 0-3-3m3 3 3-3M3.5 13h9" />
+    </svg>
+  );
+}
+
 function unlockedDaysFor(targetYear: number, now: number): number[] {
   const days: number[] = [];
   for (let d = 1; d <= daysIn(targetYear); d++) {
@@ -294,11 +314,9 @@ export function Picker({ current, hasSession, onPick }: Props) {
   const activeJob = yearSync().active();
   const offlinePillLabel = yearJob?.active
     ? `Saving ${yearJob.completed}/${yearJob.total}…`
-    : unlockedCount > 0 && fullyCachedCount >= unlockedCount
-      ? `${fullyCachedCount}/${unlockedCount} offline ✓`
-      : fullyCachedCount > 0
-        ? `${fullyCachedCount}/${unlockedCount} offline ↓`
-        : "Offline ↓";
+    : fullyCachedCount > 0
+      ? `${fullyCachedCount}/${unlockedCount} offline`
+      : "Offline";
 
   // State for whichever year's offline sheet is currently open (may differ from selected year on long-press).
   const sheetCached =
@@ -345,7 +363,8 @@ export function Picker({ current, hasSession, onPick }: Props) {
               }}
               onClick={() => onYearClick(y)}
             >
-              {y}
+              <span>{y}</span>
+              {hasCached ? <OfflineIcon size={11} className="year-offline-icon" /> : null}
             </button>
           );
         })}
@@ -355,10 +374,11 @@ export function Picker({ current, hasSession, onPick }: Props) {
         {hasSession || cachedCount > 0 ? (
           <button
             type="button"
-            class={`chip offline-pill ${yearJob?.active ? "downloading" : unlockedCount > 0 && fullyCachedCount >= unlockedCount ? "complete" : ""}`}
+            class={`chip offline-pill ${yearJob?.active ? "downloading" : ""}`}
             onClick={() => setOfflineSheetYear(year)}
           >
-            {offlinePillLabel}
+            <OfflineIcon size={12} />
+            <span>{offlinePillLabel}</span>
           </button>
         ) : null}
       </div>
@@ -396,6 +416,7 @@ export function Picker({ current, hasSession, onPick }: Props) {
             >
               <span>{day}</span>
               <span class="stars">{"★".repeat(count)}</span>
+              {cached ? <OfflineIcon size={10} className="day-offline-icon" /> : null}
             </button>
           );
         })}

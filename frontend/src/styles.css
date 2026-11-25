@@ -2587,28 +2587,33 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
 
 .year-chip {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-}
-
-.year-chip.cached::after {
-  content: "";
-  position: absolute;
-  top: 4px;
-  right: 5px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--ok);
-  opacity: 0.85;
 }
 
 .year-chip.downloading {
   border-color: var(--accent);
 }
 
+.offline-icon {
+  flex: none;
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+.year-chip.selected .year-offline-icon {
+  color: currentColor;
+  opacity: 0.65;
+}
+
 .offline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13px;
   padding: 5px 11px;
 }
@@ -2618,9 +2623,9 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
   color: var(--accent);
 }
 
-.offline-pill.complete {
-  border-color: var(--ok);
-  color: var(--ok);
+.offline-pill.downloading .offline-icon {
+  color: currentColor;
+  opacity: 0.9;
 }
 
 .offline-year-sheet {
@@ -2663,16 +2668,11 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
   position: relative;
 }
 
-.day.cached::after {
-  content: "";
+.day-offline-icon {
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--ok);
-  opacity: 0.8;
+  top: 4px;
+  right: 4px;
+  pointer-events: none;
 }
 
 .on-device-dl {
