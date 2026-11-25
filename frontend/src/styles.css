@@ -2755,3 +2755,22 @@ html[data-tab-turn="back"]::view-transition-new(tab) {
   margin-top: 6px;
   margin-bottom: 2px;
 }
+
+/* Floats over whichever screen is showing, below the camera's inset. */
+.update-card {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 16px);
+  padding: 6px 6px 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  white-space: nowrap;
+}

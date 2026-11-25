@@ -69,7 +69,7 @@ Besides Advent of Code, Workshop practises short items from a pack: review cards
 
 Practice comes in steps of a few minutes, and each answer is saved as you give it, so you can stop at any moment. Items come back when you're due to forget them, scheduled with [FSRS](https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm). Continue puts due reviews first, up to a daily limit, and the home screen counts your practice towards a weekly target rather than a streak.
 
-Short items work offline: once a phone has opened Workshop, it keeps what it needs to practise, and syncs your answers when it can reach the server again.
+Short items work offline: once a phone has opened Workshop, it keeps what it needs to practise, and syncs your answers when it can reach the server again. As it keeps the app itself too, a phone carries on with the version it opened until it's reloaded: once a newer one is ready, a card at the top offers to reload, and coming back to the app after a while reloads it by itself, at home or on a puzzle with nothing under way.
 
 ## Coding
 

@@ -11,6 +11,7 @@ import { PackScreen } from "../pack/screen";
 import { GoalsScreen } from "../progress/goals";
 import { MistakesScreen } from "../progress/mistakes";
 import { RoundsScreen } from "../rounds/screen";
+import { UpdateCard } from "../views/update";
 import { Home } from "./home";
 import { pathOf, type Route, routeFor, routeOf } from "./routes";
 import { watchActivity } from "./sitting";
@@ -162,70 +163,78 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
   };
   const goHome = () => open({ screen: "home" });
 
-  switch (route.screen) {
-    case "home":
-      return <Home onGo={(destination) => void go(destination)} onOpen={open} />;
-    case "mistakes":
-      return <MistakesScreen onHome={goHome} />;
-    case "pack":
-      return <PackScreen onHome={goHome} />;
-    case "design":
-      return (
-        <DesignScreen
-          item={route.item}
-          serverDictation={boot.server_dictation}
-          onHome={goHome}
-          onOpen={(item) => open({ screen: "design", item })}
-        />
-      );
-    case "rounds":
-      return (
-        <RoundsScreen
-          item={route.item}
-          serverDictation={boot.server_dictation}
-          onHome={goHome}
-          onOpen={(item) => open({ screen: "rounds", item })}
-        />
-      );
-    case "goals":
-      return (
-        <GoalsScreen
-          goal={route.goal}
-          onHome={goHome}
-          onOpen={(goal) => open({ screen: "goals", goal })}
-        />
-      );
-    case "practice":
-      return (
-        <Practice
-          key={route.track}
-          track={route.track}
-          serverDictation={boot.server_dictation}
-          onHome={goHome}
-          onOpenProblem={(item) => void go({ kind: "coding", item })}
-        />
-      );
-    case "coding":
-      return (
-        <CodingScreen
-          boot={boot}
-          item={route.item}
-          onHome={goHome}
-          onOpen={(item) => void go({ kind: "coding", item })}
-          onTrack={(track) => void go({ kind: "practice", track })}
-        />
-      );
-    case "advent-of-code":
-      return (
-        <App
-          boot={boot}
-          entry={entry}
-          onHome={(left) => {
-            history.pushState(null, "", pathOf({ screen: "home" }));
-            setEntry(left);
-            setRoute({ screen: "home" });
-          }}
-        />
-      );
-  }
+  const screen = (() => {
+    switch (route.screen) {
+      case "home":
+        return <Home onGo={(destination) => void go(destination)} onOpen={open} />;
+      case "mistakes":
+        return <MistakesScreen onHome={goHome} />;
+      case "pack":
+        return <PackScreen onHome={goHome} />;
+      case "design":
+        return (
+          <DesignScreen
+            item={route.item}
+            serverDictation={boot.server_dictation}
+            onHome={goHome}
+            onOpen={(item) => open({ screen: "design", item })}
+          />
+        );
+      case "rounds":
+        return (
+          <RoundsScreen
+            item={route.item}
+            serverDictation={boot.server_dictation}
+            onHome={goHome}
+            onOpen={(item) => open({ screen: "rounds", item })}
+          />
+        );
+      case "goals":
+        return (
+          <GoalsScreen
+            goal={route.goal}
+            onHome={goHome}
+            onOpen={(goal) => open({ screen: "goals", goal })}
+          />
+        );
+      case "practice":
+        return (
+          <Practice
+            key={route.track}
+            track={route.track}
+            serverDictation={boot.server_dictation}
+            onHome={goHome}
+            onOpenProblem={(item) => void go({ kind: "coding", item })}
+          />
+        );
+      case "coding":
+        return (
+          <CodingScreen
+            boot={boot}
+            item={route.item}
+            onHome={goHome}
+            onOpen={(item) => void go({ kind: "coding", item })}
+            onTrack={(track) => void go({ kind: "practice", track })}
+          />
+        );
+      case "advent-of-code":
+        return (
+          <App
+            boot={boot}
+            entry={entry}
+            onHome={(left) => {
+              history.pushState(null, "", pathOf({ screen: "home" }));
+              setEntry(left);
+              setRoute({ screen: "home" });
+            }}
+          />
+        );
+    }
+  })();
+  return (
+    <>
+      {screen}
+      <UpdateCard />
+    </>
+  );
 }

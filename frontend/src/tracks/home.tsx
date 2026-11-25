@@ -5,6 +5,7 @@ import { utcOffset } from "../learning/local";
 import { learning } from "../learning/sync";
 import { getSnapshot, putSnapshot } from "../offline/db";
 import { outbox } from "../offline/outbox";
+import { useReloadSafety } from "../update";
 import { tracksApi } from "./api";
 import "./home.css";
 import { homeSnapshotKey, patchHome } from "./homeLocal";
@@ -25,6 +26,8 @@ export function Home({
   onGo: (destination: Destination) => void;
   onOpen: (route: Route) => void;
 }) {
+  // Nothing's under way at home, so a new release can be picked up by reloading.
+  useReloadSafety(true);
   const [snapshot, setSnapshot] = useState<HomeState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);

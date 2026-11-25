@@ -584,6 +584,48 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
   retiredProbability = question;
 });
 
+test("offers to reload once a new release takes over, and reloads by itself at home on coming back", async () => {
+  await keptOnThePhone();
+  await phone.goto("/");
+  await expect(phone.locator(".track").first()).toBeVisible();
+  const card = phone.getByRole("status").filter({ hasText: "Workshop has been updated" });
+  await expect(card).toHaveCount(0);
+  // A new release's service worker takes over the page, as it does once installed.
+  const takeOver = () =>
+    phone.evaluate(() => {
+      Object.assign(window, { sameLoad: true });
+      navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    });
+  // Asked mid-reload, the page can't answer yet, so it's as if it hadn't reloaded.
+  const sameLoad = () => phone.evaluate(() => "sameLoad" in window).catch(() => true);
+
+  await takeOver();
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Reload later" }).tap();
+  await expect(card).toHaveCount(0);
+  await takeOver();
+  await expect(card).toHaveCount(0);
+
+  // Going away for a while and coming back reloads the home screen, which has nothing to lose.
+  await phone.evaluate(() => {
+    let state: DocumentVisibilityState = "hidden";
+    Object.defineProperty(document, "visibilityState", { get: () => state });
+    document.dispatchEvent(new Event("visibilitychange"));
+    const now = Date.now.bind(Date);
+    Date.now = () => now() + 60_000;
+    state = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(sameLoad).toBe(false);
+  await expect(phone.locator(".track").first()).toBeVisible();
+
+  // Tapping Reload reloads at once, wherever it is.
+  await takeOver();
+  await card.getByRole("button", { name: "Reload", exact: true }).tap();
+  await expect.poll(sameLoad).toBe(false);
+  await expect(card).toHaveCount(0);
+});
+
 test("sends an answer again when the reply was lost, without counting it twice", async ({
   browser,
 }) => {

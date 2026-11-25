@@ -12,6 +12,7 @@ import { readCachedBootstrap, writeCachedBootstrap } from "./offline/bootstrap";
 import "./styles.css";
 import { applyThemeCss } from "./theme";
 import { Shell } from "./tracks/shell";
+import { watchForUpdates } from "./update";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
@@ -35,6 +36,7 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch((e: unknown) => {
     api.log("error", `couldn't keep the app for offline use: ${errorMessage(e)}`);
   });
+  watchForUpdates();
 }
 
 function start(boot: Bootstrap): void {

@@ -1,4 +1,4 @@
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { DictationMethod } from "../dictation";
 import type { TalkPhase } from "../hooks/usePushToTalk";
 import { withShortcut } from "../shortcuts";
@@ -23,6 +23,8 @@ interface Props {
   onRun: () => void;
   keyboard: boolean;
   onToggleKeyboard: () => void;
+  /** Says whether something's being typed to say, which would be lost on reloading. */
+  onDrafting: (drafting: boolean) => void;
 }
 
 /**
@@ -35,6 +37,9 @@ export function Controls(props: Props) {
   const [composing, setComposing] = useState(false);
   const [composed, setComposed] = useState("");
   const composer = useRef<HTMLTextAreaElement>(null);
+  const drafting = typed !== "" || composing;
+  const { onDrafting } = props;
+  useEffect(() => onDrafting(drafting), [drafting]);
 
   const submitTyped = (event: Event) => {
     event.preventDefault();

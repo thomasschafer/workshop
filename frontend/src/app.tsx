@@ -45,6 +45,7 @@ import { watchSwipes } from "./swipe";
 import { TABS, tabBeside } from "./tabs";
 import { turnTab } from "./tabTurn";
 import type { Destination } from "./tracks/types";
+import { useReloadSafety } from "./update";
 import {
   done,
   type Job,
@@ -868,6 +869,24 @@ export function App({
         : null,
   });
 
+  // Code and notes are kept on the device until saved, so they survive a reload; what's under
+  // way, being typed to say or showing in a dialog or zen mode wouldn't.
+  const [drafting, setDrafting] = useState(false);
+  useReloadSafety(
+    sheet === null &&
+      !zen &&
+      !drafting &&
+      talk.live.length === 0 &&
+      cards.every((card) => card.status.kind === "done") &&
+      run.running === null &&
+      !run.submitting &&
+      !discussion.thinking &&
+      discussion.draft === "" &&
+      codeConflict === null &&
+      notesConflict === null &&
+      (saveStatus === "saved" || saveStatus === "pending" || saveStatus === "offline"),
+  );
+
   const resolveCodeConflict = (keep: "mine" | "theirs") => {
     if (!codeConflict) return;
     if (keep === "mine") {
@@ -1235,6 +1254,7 @@ export function App({
         // Workshop's own keyboard only shows for the code, so elsewhere the button brings it up.
         keyboard={ownKeyboard ? keyboardShown : keyboard.wanted}
         onToggleKeyboard={() => keyboard.show(ownKeyboard ? !keyboardShown : !keyboard.wanted)}
+        onDrafting={setDrafting}
       />
       {keyboardShown ? (
         <CodeKeyboard
