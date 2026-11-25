@@ -181,6 +181,17 @@ code {
   box-shadow: 0 0 0 1px var(--border);
 }
 
+.tabs button.tab-column {
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tabs button.tab-column:hover {
+  color: var(--fg);
+}
+
 .content {
   flex: 1;
   min-height: 0;

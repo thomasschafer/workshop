@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { chordLabel, type KeyPress, matchShortcut, SHORTCUTS } from "./shortcuts";
+import { chordLabel, type KeyPress, matchShortcut, SHORTCUTS, TAB_SHORTCUTS } from "./shortcuts";
+import { TABS } from "./tabs";
 
 const press = (code: string, mods: Partial<KeyPress> = {}): KeyPress => ({
   code,
@@ -31,6 +32,17 @@ describe("matching a key press to a shortcut", () => {
   it("goes by where a key is, whatever Alt makes it type", () => {
     expect(matchShortcut(press("BracketRight", { altKey: true }), true)).toBe("nextTab");
     expect(matchShortcut(press("BracketLeft", { altKey: true }), false)).toBe("previousTab");
+  });
+
+  it("numbers the tabs in the order they're shown", () => {
+    expect(
+      TABS.map((tab) =>
+        matchShortcut(press(`Digit${TABS.indexOf(tab) + 1}`, { altKey: true }), true),
+      ),
+    ).toEqual(TABS.map((tab) => TAB_SHORTCUTS[tab]));
+    expect(matchShortcut(press("Digit5", { altKey: true }), true)).toBeNull();
+    expect(matchShortcut(press("Digit2"), true)).toBeNull();
+    expect(matchShortcut(press("Backslash", { altKey: true }), false)).toBe("problemBeside");
   });
 
   it("has no two shortcuts on one chord", () => {

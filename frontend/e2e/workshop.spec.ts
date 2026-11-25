@@ -858,9 +858,30 @@ test("shows the puzzle beside the code on a wide screen", async () => {
   await expect(page.locator(".side .problem")).toBeVisible();
   await expect(page.locator(".cm-content")).toBeVisible();
   await expect(page.locator("nav.tabs").getByRole("button", { name: "Problem" })).toHaveCount(0);
+
+  // The puzzle can move into a tab of its own, leaving the code where it was, and back.
+  const tabs = page.locator("nav.tabs");
+  await tabs.getByRole("button", { name: "Show the puzzle as a tab" }).click();
+  await expect(page.locator(".side")).toHaveCount(0);
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await tabs.getByRole("button", { name: "Problem" }).click();
+  await expect(page.locator(".pane.problem")).toBeVisible();
+  await expect(page.locator(".cm-content")).toBeHidden();
+  // It stays where it was put on coming back.
+  await page.reload();
+  await expect(tabs.getByRole("button", { name: "Problem" })).toBeVisible();
+  await expect(page.locator(".side")).toHaveCount(0);
+  // Turning to the code, then back to the puzzle beside it, by the keyboard.
+  await page.keyboard.press("Alt+Digit2");
+  await page.keyboard.press("Alt+Backslash");
+  await expect(page.locator(".side .problem")).toBeVisible();
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await expect(tabs.getByRole("button", { name: "Problem" })).toHaveCount(0);
+
   if (phone) await page.setViewportSize(phone);
   await expect(page.locator(".side")).toHaveCount(0);
-  await expect(page.locator("nav.tabs").getByRole("button", { name: "Problem" })).toBeVisible();
+  await expect(tabs.getByRole("button", { name: "Problem" })).toBeVisible();
+  await expect(tabs.getByRole("button", { name: /puzzle/ })).toHaveCount(0);
 });
 
 test("waits for the server when it can't be reached, then carries on", async () => {
@@ -2184,6 +2205,13 @@ test("turns to other tabs in zen mode with two fingers, keeping the keyboard for
   await expect(keyboard).toBeHidden();
   await phone.getByRole("button", { name: "Leave zen mode" }).tap();
   await expect(phone.locator("nav.tabs")).toBeVisible();
+
+  // Out of zen mode, sweeping turns between the tabs too.
+  await sweep(phone, middle, -150);
+  await expect(phone.locator(".notes textarea")).toBeVisible();
+  await expect(phone.locator("nav.tabs .selected")).toHaveText("Notes");
+  await sweep(phone, middle, 150);
+  await expect(code).toBeVisible();
   await context.close();
 });
 
@@ -2219,9 +2247,31 @@ test("runs, enters zen mode and turns between tabs from the keyboard, and lists 
   await computer.keyboard.press(`${mod}+Shift+Slash`);
   await expect(shortcuts).toBeHidden();
   await computer.getByRole("button", { name: "Help" }).click();
-  await computer.getByRole("button", { name: "keyboard shortcuts" }).click();
+  await computer.locator(".help").getByRole("button", { name: "keyboard shortcuts" }).click();
   await expect(shortcuts).toBeVisible();
   await computer.keyboard.press("Escape");
+  // With a keyboard, there's a button for them at the top too, and buttons say their shortcuts
+  // when hovered over.
+  await computer.getByRole("button", { name: "Keyboard shortcuts" }).click();
+  await expect(shortcuts).toContainText("Go to Notes");
+  await computer.keyboard.press("Escape");
+  const alt = mod === "Meta" ? "⌥" : "Alt+";
+  await expect(computer.getByRole("button", { name: "Zen mode" })).toHaveAttribute(
+    "title",
+    new RegExp(`\\(${mod === "Meta" ? "⌘" : "Ctrl\\+"}\\.\\)$`),
+  );
+  await expect(computer.locator("nav.tabs").getByRole("button", { name: "Notes" })).toHaveAttribute(
+    "title",
+    `Notes (${alt}3)`,
+  );
+
+  // Each tab has a shortcut of its own, by its place among them.
+  await computer.keyboard.press("Alt+Digit3");
+  await expect(computer.locator(".notes textarea")).toBeVisible();
+  await computer.keyboard.press("Alt+Digit1");
+  await expect(computer.locator(".pane.problem")).toBeVisible();
+  await computer.keyboard.press("Alt+Digit2");
+  await expect(computer.locator(".cm-content")).toBeVisible();
 
   // Zen mode, where the tabs are hidden but can still be turned between.
   await computer.keyboard.press(`${mod}+Period`);

@@ -50,7 +50,8 @@ export function Help({ onShortcuts }: { onShortcuts: () => void }) {
           <button type="button" class="text-button inline" onClick={onShortcuts}>
             keyboard shortcuts
           </button>{" "}
-          for running, zen mode and turning between tabs.
+          for running, zen mode, going to a tab and moving the puzzle beside the code or into a tab.
+          Hovering over a button shows its shortcut.
         </p>
         <p>
           The button turns green once it's listening; start speaking then. If what's heard often

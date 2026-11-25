@@ -143,7 +143,7 @@ The code is formatted, by the language server or for Python by Ruff, before each
 
 An error the language server reports itself, rather than in the code, shows as "server error" above the code; tap it to read the whole message with the code's problems. The language server can be restarted from there, or with `:lsp-restart` in Helix.
 
-With a keyboard there are shortcuts for running, zen mode and turning between tabs, whichever keybindings the code has; the help lists them, as does Cmd-Shift-/ on a Mac or Ctrl-Shift-/ elsewhere.
+With a keyboard there are shortcuts for running, zen mode, going straight to a tab or turning between them, and moving the puzzle, whichever keybindings the code has. The keyboard button at the top lists them, as do the help and Cmd-Shift-/ on a Mac or Ctrl-Shift-/ elsewhere, and hovering over a button shows its shortcut. On a wide screen the puzzle sits in a column beside the code; the button at the start of the tabs, or Alt-\, makes it a tab of its own, for more room for the code, and puts it back. On a touch screen, two fingers swept sideways turn to the next tab or back.
 
 To compare models on the same set of example utterances, use `workshop eval --model codex:luna`, for example. Workshop checks once a day for a newer release; set `check_for_updates = false` under `[server]` to turn this off.
 

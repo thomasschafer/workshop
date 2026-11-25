@@ -2,7 +2,8 @@ import { useState } from "preact/hooks";
 import type { Tab } from "../api";
 import { errorMessage } from "../errors";
 import { useCloseOnBack } from "../hooks/useCloseOnBack";
-import { TABS, tabLabel } from "./header";
+import { withShortcut } from "../shortcuts";
+import { TABS, tabLabel } from "../tabs";
 
 /** Corner brackets pointing out, to enter zen mode, or in, to leave it. */
 function CornersIcon({ inward }: { inward: boolean }) {
@@ -23,13 +24,21 @@ function CornersIcon({ inward }: { inward: boolean }) {
   );
 }
 
-export function ZenButton({ onClick }: { onClick: () => void }) {
+/** `shortcut` says whether the zen shortcut works here, for the hover text to give it. */
+export function ZenButton({
+  onClick,
+  shortcut = false,
+}: {
+  onClick: () => void;
+  shortcut?: boolean;
+}) {
+  const title = "Zen mode: just the code and the keyboard, full screen";
   return (
     <button
       type="button"
       class="icon-button"
       aria-label="Zen mode"
-      title="Zen mode: just the code and the keyboard"
+      title={shortcut ? withShortcut(title, "zen") : title}
       onClick={onClick}
     >
       <CornersIcon inward={false} />
@@ -37,11 +46,20 @@ export function ZenButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Floats over the code while in zen mode, the only way out besides going back. */
-export function ZenExit({ onExit }: { onExit: () => void }) {
+/**
+ * Floats over the code while in zen mode, the only way out besides going back and, where
+ * `shortcut` says it works, the zen shortcut.
+ */
+export function ZenExit({ onExit, shortcut = false }: { onExit: () => void; shortcut?: boolean }) {
   useCloseOnBack(onExit);
   return (
-    <button type="button" class="zen-exit" aria-label="Leave zen mode" onClick={onExit}>
+    <button
+      type="button"
+      class="zen-exit"
+      aria-label="Leave zen mode"
+      title={shortcut ? withShortcut("Leave zen mode", "zen") : "Leave zen mode"}
+      onClick={onExit}
+    >
       <CornersIcon inward />
     </button>
   );

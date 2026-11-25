@@ -1,4 +1,5 @@
 import type { FinalStar, RunResult, SubmitOutcome } from "../api";
+import { shortcutLabel } from "../shortcuts";
 
 export type InputKind = "sample" | "real";
 
@@ -136,6 +137,7 @@ export function RunSheet({
           type="button"
           class="pill"
           disabled={state.running !== null || !hasSample}
+          title={shortcutLabel("runSample")}
           onClick={() => onRun("sample")}
         >
           {state.running === "sample" ? "Running…" : "Run sample"}
@@ -144,6 +146,7 @@ export function RunSheet({
           type="button"
           class={`pill ${sampleMatches ? "primary" : ""}`}
           disabled={state.running !== null}
+          title={shortcutLabel("runReal")}
           onClick={() => onRun("real")}
         >
           {state.running === "real" ? "Running…" : "Run real input"}

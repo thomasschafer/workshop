@@ -2,16 +2,32 @@
 // chords with Cmd on a Mac and Ctrl elsewhere, or function keys, chosen to stay clear of what
 // browsers keep for themselves and of the keys Helix binds.
 
+import type { Tab } from "./api";
+import { TABS, tabLabel } from "./tabs";
+
 export type ShortcutId =
   | "runSample"
   | "runReal"
   | "zen"
   | "nextTab"
   | "previousTab"
+  | "problemTab"
+  | "codeTab"
+  | "notesTab"
+  | "discussTab"
+  | "problemBeside"
   | "save"
   | "nextProblem"
   | "previousProblem"
   | "shortcuts";
+
+/** The shortcut that goes straight to each tab, by its place among them. */
+export const TAB_SHORTCUTS = {
+  problem: "problemTab",
+  code: "codeTab",
+  notes: "notesTab",
+  discuss: "discussTab",
+} as const satisfies Record<Tab, ShortcutId>;
 
 interface Chord {
   /** Cmd on a Mac, Ctrl elsewhere. */
@@ -58,6 +74,18 @@ export const SHORTCUTS: readonly Shortcut[] = [
     id: "previousTab",
     chord: { alt: true, code: "BracketLeft", name: "[" },
     description: "Turn to the tab before",
+  },
+  ...TABS.map(
+    (tab, at): Shortcut => ({
+      id: TAB_SHORTCUTS[tab],
+      chord: { alt: true, code: `Digit${at + 1}`, name: `${at + 1}` },
+      description: `Go to ${tabLabel(tab)}`,
+    }),
+  ),
+  {
+    id: "problemBeside",
+    chord: { alt: true, code: "Backslash", name: "\\" },
+    description: "Show the puzzle beside the code, or as a tab, on a wide screen",
   },
   { id: "save", chord: { mod: true, code: "KeyS", name: "S" }, description: "Save now" },
   { id: "nextProblem", chord: { code: "F8", name: "F8" }, description: "Go to the next problem" },
@@ -106,6 +134,18 @@ export function chordLabel(chord: Chord, mac: boolean): string {
   return [chord.mod ? "Ctrl" : "", chord.alt ? "Alt" : "", chord.shift ? "Shift" : "", chord.name]
     .filter((part) => part !== "")
     .join("+");
+}
+
+/** The chord for a shortcut, as this device's keyboard writes it. */
+export function shortcutLabel(id: ShortcutId): string {
+  const shortcut = SHORTCUTS.find((s) => s.id === id);
+  if (!shortcut) throw new Error(`No shortcut ${id}`);
+  return chordLabel(shortcut.chord, isApple());
+}
+
+/** A button's hover text, with the shortcut that does the same: `Zen mode (⌘.)`. */
+export function withShortcut(text: string, id: ShortcutId): string {
+  return `${text} (${shortcutLabel(id)})`;
 }
 
 /** Whether this is a Mac, an iPhone or an iPad, whose keyboards have Cmd for shortcuts. */

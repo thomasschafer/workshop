@@ -42,6 +42,7 @@ import { isPractice, PRACTICE, puzzleTitle } from "./puzzle";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
 import { debounced, type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
 import { watchSwipes } from "./swipe";
+import { TABS, tabBeside } from "./tabs";
 import { turnTab } from "./tabTurn";
 import type { Destination } from "./tracks/types";
 import {
@@ -58,7 +59,7 @@ import { Calibrate } from "./views/calibrate";
 import { Controls } from "./views/controls";
 import { DiscussView } from "./views/discuss";
 import { ConflictBanner } from "./views/frame";
-import { Header, TABS, Tabs, tabBeside } from "./views/header";
+import { Header, Tabs } from "./views/header";
 import { Help } from "./views/help";
 import { CodeKeyboard } from "./views/keyboard";
 import { Modal } from "./views/modal";
@@ -110,13 +111,14 @@ export function App({
     entry?.kind === "puzzle" ? entry.puzzle : boot.state.puzzle,
   );
   const [tab, setTab] = useState<Tab>(boot.state.tab);
-  // On a wide screen the puzzle has a column of its own, beside the other tabs.
+  // On a wide screen the puzzle can have a column of its own, beside the other tabs.
   const wide = useMediaQuery("(min-width: 1000px)");
+  const [beside, setBeside] = useState(() => preferences.problemBeside.get());
   const online = useConnection();
   const zenMode = useZen((text) => notify("warn", text));
   const zen = zenMode.on;
   // In zen mode the puzzle has no column, so it's a tab there on any screen.
-  const split = wide && !zen;
+  const split = wide && !zen && beside;
   const shownTab: Tab = split && tab === "problem" ? "code" : tab;
   const [models, setModels] = useState(boot.models);
   const [chosenDiscussModel, setDiscussModel] = useState(boot.state.discuss_model);
@@ -793,29 +795,45 @@ export function App({
   const turnByRef = useRef(turnBy);
   turnByRef.current = turnBy;
 
-  // In zen mode the tabs are hidden, so on a touch screen two fingers swept sideways turn to the
-  // next one, or back. The keyboard, if it's up, goes while the code isn't showing, and comes
-  // back with it.
-  // As zen mode is entered, rather than once the page has next been drawn, so no sweep is missed.
-  // On the whole page: while one tab slides to the next, touches on it land on what's behind.
-  useLayoutEffect(() => {
-    if (!zen || !touchScreen) return;
-    return watchSwipes(document.documentElement, ".keyboard, .modal-backdrop", (direction) =>
-      turnByRef.current(direction === "left" ? 1 : -1),
-    );
-  }, [zen, touchScreen]);
+  // On a touch screen two fingers swept sideways turn to the next tab, or back, as well as
+  // tapping one; in zen mode, where the tabs are hidden, it's the only way. The keyboard, if it's
+  // up, goes while the code isn't showing, and comes back with it. Listened for on any device,
+  // as a computer can have a touch screen besides its mouse. On the whole page: while one tab
+  // slides to the next, touches on it land on what's behind.
+  useLayoutEffect(
+    () =>
+      watchSwipes(document.documentElement, ".keyboard, .modal-backdrop", (direction) =>
+        turnByRef.current(direction === "left" ? 1 : -1),
+      ),
+    [],
+  );
+
+  // Kept for next time on this device. Moving it out of its column leaves the tab as it was, as
+  // it's moved to make room for the code.
+  const toggleBeside = () => {
+    preferences.problemBeside.set(!beside);
+    setBeside(!beside);
+  };
 
   const exitZen = zenMode.exit;
 
   // With a dialog open, only the shortcut that lists the shortcuts works, to show or hide them.
   const puzzleOpen = puzzle !== null && !picking && (sheet === null || sheet === "run");
   const quiet = sheet === null;
+  const goToTab = (t: Tab) => (puzzleOpen && quiet ? () => turnTo(t) : null);
   useShortcuts({
     runSample: puzzleOpen ? () => void doRun("sample", true) : null,
     runReal: puzzleOpen ? () => void doRun("real", true) : null,
     zen: puzzleOpen && quiet ? () => (zen ? exitZen() : enterZen()) : null,
     nextTab: puzzleOpen && quiet ? () => turnBy(1) : null,
     previousTab: puzzleOpen && quiet ? () => turnBy(-1) : null,
+    // Beside the code, the puzzle is already showing, so its shortcut does nothing, rather than
+    // typing what the chord would.
+    problemTab: goToTab("problem"),
+    codeTab: goToTab("code"),
+    notesTab: goToTab("notes"),
+    discussTab: goToTab("discuss"),
+    problemBeside: puzzleOpen && quiet && wide && !zen ? toggleBeside : null,
     save: puzzleOpen
       ? () => {
           Promise.all([saver.current?.flush(), notesSaver.current?.flush()]).then(
@@ -931,12 +949,21 @@ export function App({
           setPicking(true);
         }}
         onZen={showPicker ? null : enterZen}
+        onShortcuts={
+          touchScreen ? null : () => setSheet(sheet === "shortcuts" ? null : "shortcuts")
+        }
         onHelp={() => setSheet(sheet === "help" ? null : "help")}
         onSettings={() => setSheet(sheet === "settings" ? null : "settings")}
       />
       {sideBySide ? <aside class="side">{problemView}</aside> : null}
 
-      <Tabs hidden={showPicker} wide={split} shown={shownTab} onTab={setTab} />
+      <Tabs
+        hidden={showPicker}
+        beside={split}
+        shown={shownTab}
+        onTab={setTab}
+        onBeside={wide && !zen ? toggleBeside : null}
+      />
 
       <main class="content" style={{ "--stack-height": `${stackHeight}px` }}>
         <Stack
@@ -956,7 +983,7 @@ export function App({
           onCancelReply={() => setReplying(false)}
           onHeight={setStackHeight}
         />
-        {zen ? <ZenExit onExit={exitZen} /> : null}
+        {zen ? <ZenExit onExit={exitZen} shortcut /> : null}
         {zen ? <ZenTabs shown={shownTab} /> : null}
         {showPicker ? (
           <div class="pane">

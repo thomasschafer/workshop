@@ -1,22 +1,13 @@
 import type { Puzzle, Tab } from "../api";
 import { puzzleLabel } from "../puzzle";
+import { TAB_SHORTCUTS, withShortcut } from "../shortcuts";
+import { TABS, tabLabel } from "../tabs";
 import { ZenButton } from "./zen";
-
-/** The tabs, in the order they're shown and swept through. */
-export const TABS = ["problem", "code", "notes", "discuss"] as const;
-
-export const tabLabel = (tab: Tab): string =>
-  tab === "discuss" ? "Discuss" : `${tab[0]?.toUpperCase() ?? ""}${tab.slice(1)}`;
-
-/** The tab beside `tab`, or `tab` itself at either end. */
-export function tabBeside(tab: Tab, direction: 1 | -1): Tab {
-  const index = TABS.indexOf(tab);
-  return TABS[Math.max(0, Math.min(TABS.length - 1, index + direction))] ?? tab;
-}
 
 /**
  * The top bar: a button for the home screen, the open puzzle, which opens the picker, and
- * buttons for zen mode, help and settings.
+ * buttons for zen mode, the keyboard shortcuts, where there's a keyboard to use them, help and
+ * settings.
  */
 export function Header({
   showPicker,
@@ -26,6 +17,7 @@ export function Header({
   onHome,
   onPick,
   onZen,
+  onShortcuts,
   onHelp,
   onSettings,
 }: {
@@ -38,6 +30,8 @@ export function Header({
   onPick: () => void;
   /** Enters zen mode, or null where there's no code to show in it. */
   onZen: (() => void) | null;
+  /** Lists the keyboard shortcuts, or null on a touch screen, which has no keyboard for them. */
+  onShortcuts: (() => void) | null;
   onHelp: () => void;
   onSettings: () => void;
 }) {
@@ -64,7 +58,18 @@ export function Header({
         )}
       </span>
       <span class="header-actions">
-        {onZen ? <ZenButton onClick={onZen} /> : null}
+        {onZen ? <ZenButton onClick={onZen} shortcut /> : null}
+        {onShortcuts ? (
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Keyboard shortcuts"
+            title={withShortcut("Keyboard shortcuts", "shortcuts")}
+            onClick={onShortcuts}
+          >
+            <KeyboardIcon />
+          </button>
+        ) : null}
         <button type="button" class="icon-button" aria-label="Help" onClick={onHelp}>
           ?
         </button>
@@ -76,25 +81,89 @@ export function Header({
   );
 }
 
-/** The tabs, without Problem on a wide screen, where the puzzle has a column of its own. */
+function KeyboardIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect
+        x="1.5"
+        y="4"
+        width="13"
+        height="8.5"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+      />
+      <path
+        d="M4 7h1M7.5 7h1M11 7h1M5 10h6"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
+/** A window with a column down its left, filled while the puzzle is in that column. */
+function ColumnIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect
+        x="1.5"
+        y="2.5"
+        width="13"
+        height="11"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+      />
+      <path d="M6 2.5v11" stroke="currentColor" stroke-width="1.4" />
+      {filled ? <rect x="2.2" y="3.2" width="3.4" height="9.6" fill="currentColor" /> : null}
+    </svg>
+  );
+}
+
+/**
+ * The tabs, without Problem where the puzzle has a column of its own beside the code. On a wide
+ * screen, a button first moves the puzzle between that column and a tab of its own.
+ */
 export function Tabs({
   hidden,
-  wide,
+  beside,
   shown,
   onTab,
+  onBeside,
 }: {
   hidden: boolean;
-  wide: boolean;
+  /** Whether the puzzle is in its own column beside the code, rather than a tab. */
+  beside: boolean;
   shown: Tab;
   onTab: (tab: Tab) => void;
+  /** Moves the puzzle beside the code or into a tab, or null where the screen's too narrow. */
+  onBeside: (() => void) | null;
 }) {
+  const besideLabel = beside ? "Show the puzzle as a tab" : "Show the puzzle beside the code";
   return (
     <nav class={`tabs ${hidden ? "hidden" : ""}`}>
-      {(wide ? (["code", "notes", "discuss"] as const) : TABS).map((t) => (
+      {onBeside ? (
+        <button
+          type="button"
+          class="tab-column"
+          aria-label={besideLabel}
+          aria-pressed={beside}
+          title={withShortcut(besideLabel, "problemBeside")}
+          onClick={onBeside}
+        >
+          <ColumnIcon filled={beside} />
+        </button>
+      ) : null}
+      {(beside ? TABS.filter((t) => t !== "problem") : TABS).map((t) => (
         <button
           type="button"
           key={t}
           class={t === shown ? "selected" : ""}
+          title={withShortcut(tabLabel(t), TAB_SHORTCUTS[t])}
           onClick={() => onTab(t)}
         >
           {tabLabel(t)}

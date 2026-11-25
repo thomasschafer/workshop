@@ -43,6 +43,8 @@ function choice<T extends string>(key: string, choices: readonly T[], fallback: 
 
 export const keepScreenOn = flag("workshop:keep-screen-on", true);
 export const lineWrapping = flag("workshop:line-wrapping", false);
+/** Whether a wide screen shows the puzzle in a column beside the code, rather than as a tab. */
+export const problemBeside = flag("workshop:problem-beside", true);
 
 /** How much the code editor's text is scaled from its usual size, by pinching or in settings. */
 export const codeScale = new DevicePreference<number>("workshop:code-scale", 1, (stored) => {
