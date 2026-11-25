@@ -1175,6 +1175,16 @@ html[data-tab-turn] .content {
   color: var(--key-on-fg);
 }
 
+/* Keys that show whether they're on in their own icons, as Gboard's shift does. */
+.key.key-drawn.on:not(.down) {
+  background: var(--key-fn);
+  color: var(--key-fn-fg);
+}
+
+.key.key-drawn.locked::after {
+  content: none;
+}
+
 /* A modifier locked on by a double tap, underlined as a phone's keyboard shows caps lock. */
 .key.locked::after {
   content: "";

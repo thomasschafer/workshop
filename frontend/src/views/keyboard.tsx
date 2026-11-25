@@ -76,62 +76,83 @@ function columns(n: number): { flex: string } {
   return { flex: `0 0 calc((100% + var(--key-gap)) * ${n / COLUMNS} - var(--key-gap))` };
 }
 
+/** Whether a modifier's on, and whether it's locked on, for a key that draws as much itself. */
+type ModifierShown = "off" | "on" | "locked";
+
 /**
- * Keys drawn as Gboard draws them, rather than with their labels. Each is sized in the units of a
+ * Keys drawn as Gboard draws them, rather than with their labels: shift drawn whether it's on, as
+ * Gboard's is, and the others the same whatever the modifiers. Each is sized in the units of a
  * 411px-wide screen's pixels, as the keyboard is, from a Pixel's at 960 device pixels wide.
  */
-const ICONS: ReadonlyMap<string, JSX.Element> = new Map([
-  [
-    "Shift",
-    <svg
-      class="key-icon"
-      viewBox="0 0 48 46"
-      style={iconSize(20.5, 19.7)}
-      aria-hidden="true"
-      key="Shift"
-    >
-      <polygon
-        points="24,2 46,23.5 36.5,23.5 36.5,44 11.5,44 11.5,23.5 2,23.5"
-        stroke="currentColor"
-        stroke-width="3"
-        stroke-linejoin="round"
-      />
-    </svg>,
-  ],
+const ICONS: ReadonlyMap<string, (shown: ModifierShown) => JSX.Element> = new Map([
+  ["Shift", (shown: ModifierShown) => <ShiftIcon shown={shown} />],
   [
     "Backspace",
-    <svg
-      class="key-icon"
-      viewBox="0 0 58 48"
-      style={iconSize(24.8, 20.5)}
-      aria-hidden="true"
-      key="Backspace"
-    >
-      <g
-        fill="none"
-        stroke="currentColor"
-        stroke-width="4.5"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+    () => (
+      <svg
+        class="key-icon"
+        viewBox="0 0 58 48"
+        style={iconSize(24.8, 20.5)}
+        aria-hidden="true"
+        key="Backspace"
       >
-        <path d="M2.5 24 L17 2.25 H52 a3.5 3.5 0 0 1 3.5 3.5 V42.25 a3.5 3.5 0 0 1 -3.5 3.5 H17 Z" />
-        <path d="M26.5 16 L42 32 M42 16 L26.5 32" />
-      </g>
-    </svg>,
+        <g
+          fill="none"
+          stroke="currentColor"
+          stroke-width="4.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M2.5 24 L17 2.25 H52 a3.5 3.5 0 0 1 3.5 3.5 V42.25 a3.5 3.5 0 0 1 -3.5 3.5 H17 Z" />
+          <path d="M26.5 16 L42 32 M42 16 L26.5 32" />
+        </g>
+      </svg>
+    ),
   ],
   [
     "Enter",
-    <svg
-      class="key-icon"
-      viewBox="0 0 24 24"
-      style={iconSize(26, 26)}
-      aria-hidden="true"
-      key="Enter"
-    >
-      <path d="M19 7v4H5.83l3.58-3.59L8 6l-6 6 6 6 1.41-1.41L5.83 13H21V7z" />
-    </svg>,
+    () => (
+      <svg
+        class="key-icon"
+        viewBox="0 0 24 24"
+        style={iconSize(26, 26)}
+        aria-hidden="true"
+        key="Enter"
+      >
+        <path d="M19 7v4H5.83l3.58-3.59L8 6l-6 6 6 6 1.41-1.41L5.83 13H21V7z" />
+      </svg>
+    ),
   ],
 ]);
+
+/** Gboard's shift: an outline while it's off, filled while it's on, and underlined when locked. */
+function ShiftIcon({ shown }: { shown: ModifierShown }) {
+  return (
+    <svg class="key-icon" viewBox="0 0 52 58" style={iconSize(22.26, 24.83)} aria-hidden="true">
+      {shown === "off" ? (
+        <polygon
+          points="26,7 48.5,31.5 38,31.5 38,50 14,50 14,31.5 3.5,31.5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="5"
+          stroke-linejoin="round"
+        />
+      ) : (
+        <polygon
+          points={
+            shown === "on"
+              ? "26,8 49,31 37.5,31 37.5,50 14.5,50 14.5,31 3,31"
+              : "26,4.5 49,28.5 37.5,28.5 37.5,44.75 14.5,44.75 14.5,28.5 3,28.5"
+          }
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linejoin="round"
+        />
+      )}
+      {shown === "locked" ? <rect x="13" y="52.5" width="26" height="5.25" rx="2.6" /> : null}
+    </svg>
+  );
+}
 
 function iconSize(width: number, height: number): { width: string; height: string } {
   return { width: `calc(${width} * var(--u))`, height: `calc(${height} * var(--u))` };
@@ -317,18 +338,19 @@ export function Keyboard({
             const id = keyId(def);
             const on = def.kind === "modifier" && mods[def.modifier];
             const locked = def.kind === "modifier" && locks[def.modifier];
+            const icon = ICONS.get(id);
             return (
               <button
                 type="button"
                 key={id}
-                class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${movesCursor(def) ? " key-move" : ""}${on ? " on" : ""}${locked ? " locked" : ""}${down.has(id) ? " down" : ""}`}
+                class={`key key-${def.kind}${[...labelFor(def, false)].length > 1 ? " key-word" : ""}${movesCursor(def) ? " key-move" : ""}${icon ? " key-drawn" : ""}${on ? " on" : ""}${locked ? " locked" : ""}${down.has(id) ? " down" : ""}`}
                 style={columns(widthOf(def))}
                 tabIndex={-1}
                 aria-label={def.name}
                 aria-pressed={def.kind === "modifier" ? on : undefined}
                 data-key={id}
               >
-                {ICONS.get(id) ?? labelFor(def, mods.shift)}
+                {icon ? icon(locked ? "locked" : on ? "on" : "off") : labelFor(def, mods.shift)}
                 {showOffsets ? <OffsetMark offset={offsets[id]} /> : null}
               </button>
             );

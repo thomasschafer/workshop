@@ -56,7 +56,7 @@ export const LAYOUT: readonly Row[] = [
       { kind: "modifier", modifier: "ctrl", label: "ctrl", name: "Ctrl" },
       { kind: "modifier", modifier: "alt", label: "alt", name: "Alt" },
       { kind: "char", char: "," },
-      { kind: "char", char: " ", label: "space", name: "Space", width: 3.5 },
+      { kind: "char", char: " ", label: "", name: "Space", width: 3.5 },
       ...chars("./"),
       { kind: "named", key: "ret", label: "⏎", name: "Enter", width: 1.5 },
     ],
