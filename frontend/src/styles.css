@@ -778,11 +778,29 @@ html[data-tab-turn] .content {
   max-height: 30dvh;
   overflow: auto;
   font-size: 12px;
-  white-space: pre-wrap;
+  /* Not wrapped, so a grid of characters keeps its shape on a narrow screen; it scrolls instead. */
+  white-space: pre;
 }
 
 .confirm {
   margin-top: 12px;
+}
+
+.submit-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.submit-answer input {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--mono);
+  /* At 16px or more, iOS doesn't zoom in on focusing it. */
+  font-size: 16px;
 }
 
 .submitted {

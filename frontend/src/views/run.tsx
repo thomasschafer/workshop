@@ -1,3 +1,4 @@
+import { useState } from "preact/hooks";
 import type { FinalStar, RunResult, SubmitOutcome } from "../api";
 import { shortcutLabel } from "../shortcuts";
 
@@ -98,8 +99,8 @@ export function RunSheet({
     expected !== null &&
     sampleAnswer !== null &&
     sampleAnswer === expected;
-  const canSubmit =
-    last?.input === "real" && answer !== null && part !== null && last.result.phase === "run";
+  // Offered without a printed answer too, for puzzles whose answer is read off a drawing.
+  const canSubmit = last?.input === "real" && part !== null && last.result.phase === "run";
 
   if (finalStar !== null && part === 2) {
     return (
@@ -214,29 +215,18 @@ export function RunSheet({
         </p>
       )}
 
-      {canSubmit && answer !== null && part !== null ? (
+      {canSubmit && part !== null ? (
         state.confirmSubmit ? (
-          <div class="confirm">
-            <p>
-              Submit <code>{answer}</code> for part {part}?
-            </p>
-            <div class="run-buttons">
-              <button type="button" class="pill" onClick={onDismissSubmit}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="pill primary"
-                disabled={state.submitting}
-                onClick={() => onSubmit(answer)}
-              >
-                {state.submitting ? "Submitting…" : "Submit"}
-              </button>
-            </div>
-          </div>
+          <ConfirmSubmit
+            part={part}
+            printed={answer}
+            submitting={state.submitting}
+            onSubmit={onSubmit}
+            onDismiss={onDismissSubmit}
+          />
         ) : (
           <button type="button" class="pill primary wide" onClick={onAskSubmit}>
-            Submit part {part}: {answer}
+            {answer === null ? `Submit part ${part}` : `Submit part ${part}: ${answer}`}
           </button>
         )
       ) : null}
@@ -244,5 +234,53 @@ export function RunSheet({
       {state.submitted ? <p class="submitted">{describeSubmission(state.submitted)}</p> : null}
       {part === null ? <p class="muted">Both stars earned for this day. ★★</p> : null}
     </div>
+  );
+}
+
+/** Asks before submitting, with the answer editable, as some answers are read off a drawing the
+ * code prints rather than printed themselves. */
+function ConfirmSubmit({
+  part,
+  printed,
+  submitting,
+  onSubmit,
+  onDismiss,
+}: {
+  part: number;
+  printed: string | null;
+  submitting: boolean;
+  onSubmit: (answer: string) => void;
+  onDismiss: () => void;
+}) {
+  const [draft, setDraft] = useState(printed ?? "");
+  const answer = draft.trim();
+  return (
+    <form
+      class="confirm"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (answer !== "" && !submitting) onSubmit(answer);
+      }}
+    >
+      <label class="submit-answer">
+        Submit for part {part}:
+        <input
+          type="text"
+          value={draft}
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck={false}
+          onInput={(event) => setDraft(event.currentTarget.value)}
+        />
+      </label>
+      <div class="run-buttons">
+        <button type="button" class="pill" onClick={onDismiss}>
+          Cancel
+        </button>
+        <button type="submit" class="pill primary" disabled={submitting || answer === ""}>
+          {submitting ? "Submitting…" : "Submit"}
+        </button>
+      </div>
+    </form>
   );
 }

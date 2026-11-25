@@ -219,6 +219,79 @@ test("warns when an answer is printed as a decimal", async () => {
   await expect(editor()).not.toContainText("/ 1");
 });
 
+test("submits an answer read off a drawing the code prints, rather than printed", async () => {
+  const runResult = (stdout: string, stderr: string) => ({
+    phase: "run",
+    ending: { status: "exited", code: 0 },
+    stdout,
+    stderr,
+    duration_ms: 10,
+    // As the server reads answers: each non-empty line, trimmed.
+    answers: stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== ""),
+    warnings: [],
+  });
+  // Rows far wider than the screen, as a drawing of letters is, with spaces where lines could wrap.
+  const drawing = Array.from({ length: 6 }, (_, i) => (i % 2 ? "# " : " #").repeat(60)).join("\n");
+  let output = runResult(`${drawing}\n`, "");
+  await page.route("**/api/puzzles/*/*/run", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(output) }),
+  );
+  const submitted: unknown[] = [];
+  await page.route("**/api/puzzles/*/*/submit", (route) => {
+    submitted.push(route.request().postDataJSON());
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        outcome: { result: "incorrect", hint: null, message: "" },
+        problem: null,
+        committed: null,
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByRole("button", { name: "Run real input" }).click();
+  // Each row stays on one line, scrolling sideways, so the drawing keeps its shape.
+  const shown = page.locator(".run-result pre.output");
+  await expect(shown).toContainText("# # #", RUN);
+  const fits = await shown.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const tops = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+    return { scrolls: el.scrollWidth > el.clientWidth, lines: tops.size };
+  });
+  expect(fits).toEqual({ scrolls: true, lines: 6 });
+
+  // The first row is offered as the answer, so it's replaced with what the drawing spells.
+  await page.getByRole("button", { name: /^Submit part 1: # #/ }).click();
+  const field = page.getByLabel("Submit for part 1:");
+  await expect(field).toHaveValue("# ".repeat(60).trim());
+  await field.fill(" HI ");
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
+  await expect(page.locator(".submitted")).toContainText("Not the right answer.");
+  expect(submitted).toEqual([{ part: 1, answer: "HI" }]);
+
+  // Drawn on stderr with nothing printed, it can still be submitted, once something's typed.
+  output = runResult("", drawing);
+  await page.getByRole("button", { name: "Run real input" }).click();
+  await expect(page.locator(".run-result")).toContainText("Nothing was printed", RUN);
+  await page.getByRole("button", { name: "Submit part 1", exact: true }).click();
+  await expect(field).toHaveValue("");
+  const submit = page.getByRole("button", { name: "Submit", exact: true });
+  await expect(submit).toBeDisabled();
+  await field.fill("HI");
+  await field.press("Enter");
+  await expect.poll(() => submitted.length).toBe(2);
+  expect(submitted[1]).toEqual({ part: 1, answer: "HI" });
+
+  await page.unroute("**/api/puzzles/*/*/run");
+  await page.unroute("**/api/puzzles/*/*/submit");
+  await page.getByRole("button", { name: "Close" }).click();
+});
+
 test("runs what was said, even when run before the edit is made", async () => {
   await send("slowly make it return seven");
   // Its card shows the edit is under way, and for how long, leaving the button free.
