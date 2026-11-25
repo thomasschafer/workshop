@@ -2197,7 +2197,8 @@ test("turns to other tabs in zen mode with two fingers, keeping the keyboard for
   // Sweeping over the code doesn't change its size, as pinching it does.
   expect(await phone.evaluate(() => localStorage.getItem("workshop:code-scale"))).toBeNull();
 
-  // The tabs can be tapped as well, faded as they are.
+  // The tabs can be tapped as well, once faded back as they are.
+  await expect(phone.locator(".zen-tabs")).toHaveCSS("opacity", "0.35");
   await phone.locator(".zen-tabs").getByRole("button", { name: "Notes" }).tap();
   await expect(phone.locator(".notes textarea")).toBeVisible();
   await expect(shown).toHaveText("Notes");
