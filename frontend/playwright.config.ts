@@ -35,7 +35,10 @@ export default defineConfig({
   testDir: "e2e",
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  // CI's runners vary in speed, so on CI a failed test gets a second go. One that passes then is
+  // reported as flaky rather than passed, and `scripts/ci-flakes` lists them across recent runs, so
+  // they're still found and fixed.
+  retries: process.env.CI ? 1 : 0,
   // On CI, the list too, so each test's output, and the servers' with it, is in the job's log.
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
   use: {

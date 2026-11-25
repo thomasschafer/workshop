@@ -61,6 +61,10 @@ description = "Run all the checks CI runs, including the browser tests"
 depends = ["check-fast"]
 run = "cargo build && cd frontend && npm run e2e && npm run e2e:webkit"
 
+[tasks.ci-flakes]
+description = "List the tests that failed or needed a retry in recent CI runs (needs gh, signed in)"
+run = "node scripts/ci-flakes.ts"
+
 [tasks.check-packages]
 description = "Check installing packages with the real toolchains (needs the network)"
 depends = ["build-frontend"]

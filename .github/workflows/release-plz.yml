@@ -1,8 +1,9 @@
 name: Release-plz
 
+# Run by hand when a release is wanted: on each push, the release PR it keeps up to date would
+# run CI a second time.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -12,6 +12,8 @@ mise run check-fast  # formatting, lints, types and unit tests, in seconds
 mise run check       # all of that and the browser tests, as CI does
 ```
 
+CI runs the Rust tests on Linux and macOS, and the browser tests in Chromium and WebKit on Linux and in WebKit on macOS. Running the CI workflow by hand, from the Actions tab or with `gh workflow run ci.yml`, adds Windows and Chromium on macOS. On CI, a browser test that fails gets one retry; `mise run ci-flakes` lists the tests that failed or only passed on a retry across recent runs, so they can be steadied rather than left to retry.
+
 A development build won't touch your real config and data: run without `WORKSHOP_HOME`, it refuses to start, so set it to a directory of its own, as `mise run dev`, the tests and the browser tests do. `mise run eval` and `mise run doctor` use a release build, as they're for your own setup.
 
 The Rust server is in `src/`, and what it shares between tracks is in crates of its own under `crates/`: the model providers, building and running code, toolchains and packages, the language server relay, Tailscale serving, the token that guards the server, Web Push notifications, and the tracks themselves. Packs and their checks are in `crates/pack`, building and running coding problems' and reading items' programs, in a sandbox where there is one, in `crates/coding`, the log of attempts and mistakes, scheduling and mastery in `crates/learning`, long items done in a sitting, design sessions and timed rounds with their clock, in `crates/sessions`, and the author's runs in `crates/author`. They're parts of the one binary, never published on their own. The TypeScript frontend, built with Vite and CodeMirror 6, is in `frontend/`, with the home screen and its tracks in `frontend/src/tracks/`, practising short items in `frontend/src/learning/`, the Coding track in `frontend/src/coding/`, the grader's screens and design sessions in `frontend/src/grading/`, timed rounds in `frontend/src/rounds/`, the mistake log and goals in `frontend/src/progress/`, and the Packs screen, with the author, in `frontend/src/pack/`. Advent of Code and the Coding track share the editor's settings through `useEditorSettings`, the keyboard for the code through `useCodeKeyboard`, zen mode through `useZen`, the language server through `useLanguageServer`, and the coaches' conversations through `useConversation`.
@@ -283,4 +285,4 @@ Use cheap, fast models for editing, since every utterance is a call. If the CLI 
 
 - Keep changes focused, and describe what changes for users.
 - Run `mise run check` before opening the pull request.
-- Releases are automated: version bumps and the changelog come from a release pull request, so don't edit the version or `CHANGELOG.md` by hand.
+- Version bumps and the changelog come from a release pull request, which the Release-plz workflow opens when it's run by hand, so don't edit the version or `CHANGELOG.md` by hand.

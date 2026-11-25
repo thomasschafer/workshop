@@ -1,9 +1,13 @@
 name: CI
 
+# Pushes and pull requests check Linux, and macOS where most people run the server, with WebKit
+# standing in for iPhones. Windows, and Chromium on macOS, add little on each push, so they only
+# run when the workflow is run by hand.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,47 +20,44 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
-    name: Rust
+  lint:
+    name: Rust lints
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: ./.github/actions/setup
         with:
-          toolchain: stable
-          components: clippy, rustfmt
+          rust-components: clippy, rustfmt
 
       - name: Check formatting
         run: cargo fmt --check
 
-      - name: Install Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      # The frontend is embedded into the binary at compile time, so it must exist before any cargo build.
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
+
+  rust:
+    name: Rust tests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"name":"Linux","os":"ubuntu-latest"},{"name":"macOS","os":"macos-15"},{"name":"Windows","os":"windows-2025"}]' || '[{"name":"Linux","os":"ubuntu-latest"},{"name":"macOS","os":"macos-15"}]') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
 
       # So the sample pack's Haskell items are checked, by the tests and by pack check, rather
       # than skipped. Ubuntu's GHC comes with the packages Haskell items can use.
       - name: Install GHC
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ghc
@@ -65,165 +66,46 @@ jobs:
         run: cargo test --locked
 
       - name: Check the sample pack
+        if: runner.os == 'Linux'
         run: cargo run --locked -- pack check packs/sample
         env:
           WORKSHOP_HOME: ${{ runner.temp }}/workshop-home
 
-      # End-to-end tests drive the real server and app in a browser, with a stand-in model and an
-      # invented puzzle, so they need no network, model access or language toolchain beyond Python.
-      - name: Build server
-        run: cargo build --locked
-
-      - name: Install browsers
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium webkit
-
-      - name: End-to-end tests
-        working-directory: frontend
-        run: npm run e2e
-
-      # Safari's engine, as a stand-in for iPhones.
-      - name: End-to-end tests in WebKit
-        working-directory: frontend
-        run: npm run e2e:webkit
-
-      # What a failed browser test leaves: a screenshot and page snapshot for each, and the test
-      # servers' logs.
-      - name: Keep what the end-to-end tests left
-        if: failure()
-        working-directory: frontend
-        run: node scripts/collect-e2e-logs.ts
-
-      - name: Store what the end-to-end tests left
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: e2e-results-linux
-          path: frontend/test-results/
-          if-no-files-found: ignore
-          retention-days: 14
-
       # Installs the latest release as the README says to.
       - name: Install script
+        if: runner.os != 'Windows'
         run: |
           WORKSHOP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
           "$RUNNER_TEMP/bin/workshop" --version
 
-  # Most people run the server on a Mac, so its tests, the app's and the install script run there too.
-  macos:
-    name: macOS
-    runs-on: macos-15
+  # End-to-end tests drive the real server and app in a browser, with a stand-in model and an
+  # invented puzzle, so they need no network, model access or language toolchain beyond Python.
+  e2e:
+    name: Browser tests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"name":"Linux, Chromium","os":"ubuntu-latest","browser":"chromium"},{"name":"Linux, WebKit","os":"ubuntu-latest","browser":"webkit"},{"name":"macOS, WebKit","os":"macos-15","browser":"webkit"},{"name":"macOS, Chromium","os":"macos-15","browser":"chromium"},{"name":"Windows, Chromium","os":"windows-2025","browser":"chromium"}]' || '[{"name":"Linux, Chromium","os":"ubuntu-latest","browser":"chromium"},{"name":"Linux, WebKit","os":"ubuntu-latest","browser":"webkit"},{"name":"macOS, WebKit","os":"macos-15","browser":"webkit"}]') }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          toolchain: stable
-
-      - name: Install Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - name: Test
-        run: cargo test --locked
-
-      - name: Build server
-        run: cargo build --locked
-
-      - name: Install browsers
-        working-directory: frontend
-        run: npx playwright install chromium webkit
-
-      - name: End-to-end tests
-        working-directory: frontend
-        run: npm run e2e
-
-      - name: End-to-end tests in WebKit
-        working-directory: frontend
-        run: npm run e2e:webkit
-
-      # What a failed browser test leaves: a screenshot and page snapshot for each, and the test
-      # servers' logs.
-      - name: Keep what the end-to-end tests left
-        if: failure()
-        working-directory: frontend
-        run: node scripts/collect-e2e-logs.ts
-
-      - name: Store what the end-to-end tests left
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: e2e-results-macos
-          path: frontend/test-results/
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Install script
-        run: |
-          WORKSHOP_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
-          "$RUNNER_TEMP/bin/workshop" --version
-
-  # The server can run on Windows, so its tests and the app's run there too: the end-to-end tests
-  # run solutions in Python, so they show whether running them works.
-  windows:
-    name: Windows
-    runs-on: windows-2025
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          toolchain: stable
-
-      - name: Install Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - name: Test
-        run: cargo test --locked
+      - uses: ./.github/actions/setup
 
       - name: Build server
         run: cargo build --locked
 
       - name: Install browser
         working-directory: frontend
-        run: npx playwright install chromium
+        shell: bash
+        run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} ${{ matrix.browser }}
 
       - name: End-to-end tests
         working-directory: frontend
-        run: npm run e2e
+        run: npx playwright test --project=${{ matrix.browser }}
 
       # What a failed browser test leaves: a screenshot and page snapshot for each, and the test
       # servers' logs.
@@ -236,7 +118,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-results-windows
+          name: e2e-results-${{ runner.os }}-${{ matrix.browser }}
           path: frontend/test-results/
           if-no-files-found: ignore
           retention-days: 14
@@ -274,3 +156,20 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # The one check branch rules require, so the jobs above can change without updating them.
+  passed:
+    name: CI passed
+    if: always()
+    needs: [lint, rust, e2e, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done
