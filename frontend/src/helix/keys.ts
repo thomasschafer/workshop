@@ -265,6 +265,9 @@ export function keyFromEvent(event: DomKeyEvent): Key | null {
     ctrl: event.ctrlKey,
   };
   const named = DOM_NAMED[event.key] ?? (/^F\d{1,2}$/.test(event.key) ? event.key : undefined);
+  // Shift with Escape, such as while typing capitals, is still Escape, so it always leaves insert
+  // mode and closes prompts.
+  if (named === "esc") return formatKey({ code: named, ...mods, shift: false });
   if (named !== undefined) return formatKey({ code: named, ...mods });
 
   let ch = event.key;

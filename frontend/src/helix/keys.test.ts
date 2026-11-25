@@ -39,6 +39,8 @@ describe("keys", () => {
     expect(keyFromEvent(event("X", "KeyX", { shift: true }))).toBe("X");
     expect(keyFromEvent(event("Enter", "Enter"))).toBe("ret");
     expect(keyFromEvent(event("Tab", "Tab", { shift: true }))).toBe("S-tab");
+    expect(keyFromEvent(event("Escape", "Escape", { shift: true }))).toBe("esc");
+    expect(keyFromEvent(event("Escape", "Escape", { shift: true, ctrl: true }))).toBe("C-esc");
     expect(keyFromEvent(event("ArrowUp", "ArrowUp", { alt: true }))).toBe("A-up");
     expect(keyFromEvent(event("w", "KeyW", { ctrl: true }))).toBe("C-w");
     // Option-x types ≈, Option-; types …, and Option-u starts an accent.
