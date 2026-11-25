@@ -1634,30 +1634,34 @@ test("glides the code when Helix's keys scroll it, ending where it would jump to
   const twoPagesCursor = await cursorLine();
   expect(await settledAfter("g", "g")).toBe(0);
 
-  // Otherwise they glide there, through the lines between.
+  // Otherwise they glide there, through the lines between. A slow runner can go a whole glide
+  // without drawing a frame, and so without showing any of the lines between, so the page's
+  // clock is held still and moved on a frame at a time.
   await helix.emulateMedia({ reducedMotion: "no-preference" });
-  await scroller.evaluate((s) => {
+  await helix.clock.install();
+  // A second on from the clock it started from, which it can't have passed yet.
+  await helix.clock.pauseAt(Date.now() + 1000);
+  /** Presses keys, then where the code is in each frame until a glide begun by them is over. */
+  const glidedAfter = async (...keys: string[]) => {
+    for (const key of keys) await helix.keyboard.press(key);
     const seen: number[] = [];
-    Object.assign(window, { scrollsSeen: seen });
-    const start = performance.now();
-    const watch = () => {
-      seen.push(s.scrollTop);
-      if (performance.now() - start < 1000) requestAnimationFrame(watch);
-    };
-    requestAnimationFrame(watch);
-  });
-  expect(await settledAfter("Control+d")).toBeCloseTo(half, 0);
-  const seen = await helix.evaluate(
-    () => (window as unknown as { scrollsSeen: number[] }).scrollsSeen,
-  );
-  expect(seen.some((top) => top > 1 && top < half - 1)).toBe(true);
+    for (let ms = 0; ms < GLIDE_MS + 100; ms += 16) {
+      await helix.clock.runFor(16);
+      seen.push(await scroller.evaluate((s) => s.scrollTop));
+    }
+    return seen;
+  };
+  const glided = await glidedAfter("Control+d");
+  expect(glided.at(-1)).toBeCloseTo(half, 0);
+  expect(glided.some((top) => top > 1 && top < half - 1)).toBe(true);
   // Pressed again before the first has finished, they go as far as both would, without stopping
   // short.
-  expect(await settledAfter("g", "g")).toBe(0);
-  expect(await settledAfter("Control+d", "Control+d")).toBeCloseTo(twoHalves, 0);
-  expect(await settledAfter("g", "g")).toBe(0);
-  expect(await settledAfter("PageDown", "PageDown")).toBeCloseTo(twoPages, 0);
+  expect((await glidedAfter("g", "g")).at(-1)).toBe(0);
+  expect((await glidedAfter("Control+d", "Control+d")).at(-1)).toBeCloseTo(twoHalves, 0);
+  expect((await glidedAfter("g", "g")).at(-1)).toBe(0);
+  expect((await glidedAfter("PageDown", "PageDown")).at(-1)).toBeCloseTo(twoPages, 0);
   expect(await cursorLine()).toBeCloseTo(twoPagesCursor, 0);
+  await helix.clock.resume();
 
   // Back at the start, where the cursor is kept for the tests after, which tap the code near
   // the top of the file.
