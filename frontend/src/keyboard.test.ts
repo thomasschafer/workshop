@@ -77,6 +77,7 @@ describe("keyFor", () => {
     [char("a"), mods({ ctrl: true, shift: true }), "C-A"],
     [char("w"), mods({ ctrl: true, alt: true }), "A-C-w"],
     [named("esc"), NO_MODIFIERS, "esc"],
+    [named("esc"), mods({ shift: true }), "esc"],
     [named("tab"), mods({ shift: true }), "S-tab"],
     [named("backspace"), mods({ alt: true }), "A-backspace"],
     [named("left"), mods({ ctrl: true, shift: true }), "S-C-left"],

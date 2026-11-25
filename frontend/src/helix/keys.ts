@@ -7,7 +7,8 @@
 
 /**
  * A key, written as Helix writes it: modifiers in the order `Meta-S-A-C-`, then the key. A
- * character carries its shift itself (`X`, never `S-x`), so equal keys are equal strings.
+ * character carries its shift itself (`X`, never `S-x`), and Escape has none (`esc`, never
+ * `S-esc`), so equal keys are equal strings.
  */
 export type Key = string & { readonly __key: unique symbol };
 
@@ -58,6 +59,9 @@ export function formatKey(key: ParsedKey): Key {
     shift = false;
     code = CHAR_NAMES[code] ?? code;
   }
+  // Escape never carries shift either, so it always leaves insert mode and closes prompts, even
+  // with shift on for typing capitals.
+  if (code === "esc") shift = false;
   return `${key.meta ? "Meta-" : ""}${shift ? "S-" : ""}${key.alt ? "A-" : ""}${key.ctrl ? "C-" : ""}${code}` as Key;
 }
 
@@ -265,9 +269,6 @@ export function keyFromEvent(event: DomKeyEvent): Key | null {
     ctrl: event.ctrlKey,
   };
   const named = DOM_NAMED[event.key] ?? (/^F\d{1,2}$/.test(event.key) ? event.key : undefined);
-  // Shift with Escape, such as while typing capitals, is still Escape, so it always leaves insert
-  // mode and closes prompts.
-  if (named === "esc") return formatKey({ code: named, ...mods, shift: false });
   if (named !== undefined) return formatKey({ code: named, ...mods });
 
   let ch = event.key;

@@ -22,6 +22,7 @@ describe("keys", () => {
     expect(parseKey("C-S-r")).toBe(parseKey("C-R"));
     expect(parseKey("ret")).toBe("ret");
     expect(parseKey("S-tab")).toBe("S-tab");
+    expect(parseKey("S-esc")).toBe("esc");
     expect(parseKey("minus")).toBe(parseKey("-"));
     expect(() => parseKey("A--")).toThrow(/minus/);
     expect(() => parseKey("Q-x")).toThrow(/modifier/);
