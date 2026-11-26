@@ -15,7 +15,7 @@ use crate::aoc::{Part, SubmitOutcome};
 const LIMIT: u32 = 100;
 
 const PART_ONE: &str = r#"<article class="day-desc"><h2>--- Practice: Sled Parcels ---</h2>
-<p>This is a practice puzzle, made up for Workshop, so you can try solving by voice without an Advent of Code account. It works like a real one: choose the sample, write a solution, run it, and submit.</p>
+<p>This is a practice puzzle, made up for Workshop, so you can try it without an Advent of Code account. It works like a real one: choose the sample, write a solution, run it, and submit.</p>
 <p>The elves are loading parcels onto sleds. Each line of your input lists the weights of the parcels on one sled, separated by spaces. A sled whose parcels weigh more than <code>100</code> in total is <em>overloaded</em>.</p>
 <p>For example:</p>
 <pre><code>40 30 20

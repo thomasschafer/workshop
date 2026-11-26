@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Workshop",
   "short_name": "Workshop",
-  "description": "Solve Advent of Code puzzles by voice, from your phone.",
+  "description": "A learning and coding platform built for your phone, with Advent of Code built in.",
   "display": "standalone",
   "start_url": "/",
   "scope": "/",

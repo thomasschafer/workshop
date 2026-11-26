@@ -23,7 +23,7 @@ url() {
 
 cat <<FORMULA
 class Workshop < Formula
-  desc "Solve Advent of Code puzzles by voice, from your phone"
+  desc "A learning and coding platform built for your phone, with Advent of Code built in"
   homepage "https://github.com/${repo}"
   license any_of: ["MIT", "Apache-2.0"]
 

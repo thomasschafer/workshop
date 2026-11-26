@@ -2,7 +2,7 @@
 name = "workshop"
 version = "0.8.1"
 edition.workspace = true
-description = "Solve Advent of Code puzzles by voice, from your phone"
+description = "A learning and coding platform built for your phone, with Advent of Code built in"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"

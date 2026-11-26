@@ -84,7 +84,7 @@ impl<Stars: Fn(Puzzle) -> Option<u8>> AdventOfCode<Stars> {
         let summary = match (today, self.last) {
             (Some(today), _) => format!("Day {} of {} is out", today.day, days_in(today.year)),
             (None, Some(last)) => format!("Last opened {}", label(last)),
-            (None, None) => "Puzzles from every year, by voice".to_owned(),
+            (None, None) => "Puzzles from every year".to_owned(),
         };
         let destination = match self.last {
             Some(puzzle) => Destination::Puzzle { puzzle },
