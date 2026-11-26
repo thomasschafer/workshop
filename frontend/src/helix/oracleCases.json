@@ -1,5 +1,5 @@
 {
-  "generatedFromHelixCommit": "18dbe190a0139f6c74320059146b2413b82b011c",
+  "generatedFromHelixCommit": "1a3fdfda6dfdda4567af6093a6249bb2bb422fc6",
   "generatedWith": "HELIX_SRC=<Helix checkout at generatedFromHelixCommit> scripts/helix-oracle/oracle.sh cases.json > results.json",
   "cases": [
     {
@@ -885,7 +885,7 @@
       "lang": "haskell",
       "expected": {
         "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
-        "ranges": [[5, 6]],
+        "ranges": [[0, 34]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -897,7 +897,7 @@
       "lang": "haskell",
       "expected": {
         "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
-        "ranges": [[5, 6]],
+        "ranges": [[0, 34]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -909,7 +909,7 @@
       "lang": "haskell",
       "expected": {
         "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
-        "ranges": [[127, 128]],
+        "ranges": [[122, 155]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -921,7 +921,7 @@
       "lang": "haskell",
       "expected": {
         "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
-        "ranges": [[127, 128]],
+        "ranges": [[122, 155]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -1197,7 +1197,7 @@
       "lang": "haskell",
       "expected": {
         "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
-        "ranges": [[155, 122]],
+        "ranges": [[34, 0]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -1724,8 +1724,8 @@
       "keys": "omore<esc>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\nmore\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
-        "ranges": [[21, 22]],
+        "text": "-- first comment\n-- more\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[24, 25]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -1784,8 +1784,8 @@
       "keys": "a<ret>",
       "lang": "python",
       "expected": {
-        "text": "def f(x):\n    if x > 0:\n\n",
-        "ranges": [[22, 25]],
+        "text": "def f(x):\n    if x > 0:\n        \n",
+        "ranges": [[22, 33]],
         "primary": 0,
         "mode": "Insert"
       }
@@ -1796,8 +1796,8 @@
       "keys": "o",
       "lang": "python",
       "expected": {
-        "text": "def f(x):\n    if x > 0:\n        return x\n\n",
-        "ranges": [[41, 42]],
+        "text": "def f(x):\n    if x > 0:\n        return x\n    \n",
+        "ranges": [[45, 46]],
         "primary": 0,
         "mode": "Insert"
       }
@@ -1856,8 +1856,8 @@
       "keys": "o",
       "lang": "python",
       "expected": {
-        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    \n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
-        "ranges": [[165, 166]],
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    # \n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[167, 168]],
         "primary": 0,
         "mode": "Insert"
       }
@@ -1941,7 +1941,7 @@
       "lang": "python",
       "expected": {
         "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
-        "ranges": [[142, 143]],
+        "ranges": [[138, 160]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -1965,7 +1965,7 @@
       "lang": "python",
       "expected": {
         "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
-        "ranges": [[0, 1]],
+        "ranges": [[31, 89]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -2108,8 +2108,8 @@
       "keys": "o",
       "lang": "typescript",
       "expected": {
-        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  \n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
-        "ranges": [[137, 138]],
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  // \n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[140, 141]],
         "primary": 0,
         "mode": "Insert"
       }
@@ -2217,7 +2217,7 @@
       "lang": "typescript",
       "expected": {
         "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
-        "ranges": [[115, 116]],
+        "ranges": [[111, 134]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -2241,7 +2241,7 @@
       "lang": "typescript",
       "expected": {
         "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
-        "ranges": [[0, 1]],
+        "ranges": [[53, 250]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -2384,8 +2384,8 @@
       "keys": "o",
       "lang": "go",
       "expected": {
-        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\t\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
-        "ranges": [[131, 132]],
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\t// \n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[134, 135]],
         "primary": 0,
         "mode": "Insert"
       }
@@ -2493,7 +2493,7 @@
       "lang": "go",
       "expected": {
         "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
-        "ranges": [[110, 111]],
+        "ranges": [[106, 129]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -2781,7 +2781,7 @@
       "lang": "rust",
       "expected": {
         "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
-        "ranges": [[103, 104]],
+        "ranges": [[99, 122]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -2948,8 +2948,8 @@
       "keys": "o",
       "lang": "cpp",
       "expected": {
-        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  \n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
-        "ranges": [[110, 111]],
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  // \n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[113, 114]],
         "primary": 0,
         "mode": "Insert"
       }
@@ -3057,7 +3057,7 @@
       "lang": "cpp",
       "expected": {
         "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
-        "ranges": [[88, 89]],
+        "ranges": [[84, 107]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3081,7 +3081,7 @@
       "lang": "cpp",
       "expected": {
         "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
-        "ranges": [[0, 1]],
+        "ranges": [[47, 220]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3273,7 +3273,7 @@
       "lang": "python",
       "expected": {
         "text": "    x\n",
-        "ranges": [[0, 2], [3, 4]],
+        "ranges": [[0, 1], [1, 2], [2, 3], [3, 4]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3285,7 +3285,7 @@
       "lang": "python",
       "expected": {
         "text": "ABCD\n",
-        "ranges": [[0, 2], [3, 4]],
+        "ranges": [[0, 1], [1, 2], [2, 3], [3, 4]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3297,7 +3297,7 @@
       "lang": "python",
       "expected": {
         "text": "AbCd\n",
-        "ranges": [[0, 2], [3, 4]],
+        "ranges": [[0, 1], [1, 2], [2, 3], [3, 4]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3309,7 +3309,7 @@
       "lang": "python",
       "expected": {
         "text": "ABCD\n",
-        "ranges": [[0, 1], [2, 4]],
+        "ranges": [[0, 2], [2, 4]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3321,7 +3321,7 @@
       "lang": "python",
       "expected": {
         "text": "xxxx\n",
-        "ranges": [[0, 2], [3, 4]],
+        "ranges": [[0, 1], [1, 2], [2, 3], [3, 4]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3345,7 +3345,7 @@
       "lang": "python",
       "expected": {
         "text": "abcd\n",
-        "ranges": [[0, 2], [4, 3]],
+        "ranges": [[1, 0], [2, 1], [3, 2], [4, 3]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3356,8 +3356,8 @@
       "keys": "CJ",
       "lang": "go",
       "expected": {
-        "text": "a",
-        "ranges": [[0, 1], [1, 1]],
+        "text": "a\n",
+        "ranges": [[0, 1], [2, 2]],
         "primary": 1,
         "mode": "Normal"
       }
@@ -3392,8 +3392,8 @@
       "keys": "CJuU",
       "lang": "go",
       "expected": {
-        "text": "a",
-        "ranges": [[0, 1], [1, 1]],
+        "text": "a\n",
+        "ranges": [[0, 1], [2, 2]],
         "primary": 1,
         "mode": "Normal"
       }
@@ -3404,8 +3404,8 @@
       "keys": "CJ)",
       "lang": "go",
       "expected": {
-        "text": "a",
-        "ranges": [[0, 1], [1, 1]],
+        "text": "a\n",
+        "ranges": [[0, 1], [2, 2]],
         "primary": 0,
         "mode": "Normal"
       }
@@ -3416,8 +3416,8 @@
       "keys": "CJiX<esc>",
       "lang": "go",
       "expected": {
-        "text": "XaX",
-        "ranges": [[2, 1], [3, 3]],
+        "text": "Xa\nX",
+        "ranges": [[2, 1], [4, 4]],
         "primary": 1,
         "mode": "Normal"
       }
@@ -3428,8 +3428,248 @@
       "keys": "CJd",
       "lang": "go",
       "expected": {
-        "text": "",
-        "ranges": [[0, 0]],
+        "text": "\n",
+        "ranges": [[0, 1], [1, 1]],
+        "primary": 1,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "keymap: [( and ]( are no-ops in upstream",
+      "input": "fn f() { let a = (1); #[l|]#et b = (2); }\n",
+      "keys": "[(](",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f() { let a = (1); let b = (2); }\n",
+        "ranges": [[22, 23]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "join: J on last line keeps trailing newline",
+      "input": "fn main() {\n    let #[x|]# = 1;\n}\n",
+      "keys": "jJ",
+      "lang": "rust",
+      "expected": {
+        "text": "fn main() {\n    let x = 1;\n}\n",
+        "ranges": [[28, 29]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "join: A-J on last line keeps trailing newline",
+      "input": "a\n#[b|]#\n",
+      "keys": "<A-J>",
+      "lang": "python",
+      "expected": {
+        "text": "a\nb\n",
+        "ranges": [[2, 3]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "textobject: mac across consecutive Rust line comments",
+      "input": "// first\n// se#[c|]#ond\nfn f() {}\n",
+      "keys": "mac",
+      "lang": "rust",
+      "expected": {
+        "text": "// first\n// second\nfn f() {}\n",
+        "ranges": [[0, 18]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "textobject: mic inside consecutive Rust line comments",
+      "input": "// first\n// se#[c|]#ond\nfn f() {}\n",
+      "keys": "mic",
+      "lang": "rust",
+      "expected": {
+        "text": "// first\n// second\nfn f() {}\n",
+        "ranges": [[9, 18]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "textobject: maf from inside Rust println! macro injection",
+      "input": "fn a() {\n    println!(\"{}\", #[x|]#);\n}\n",
+      "keys": "maf",
+      "lang": "rust",
+      "expected": {
+        "text": "fn a() {\n    println!(\"{}\", x);\n}\n",
+        "ranges": [[0, 33]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "goto: ]f from inside Rust comment",
+      "input": "fn a() {\n    // h#[e|]#llo\n}\nfn b() {}\n",
+      "keys": "]f",
+      "lang": "rust",
+      "expected": {
+        "text": "fn a() {\n    // hello\n}\nfn b() {}\n",
+        "ranges": [[24, 33]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "comment: o does not continue # inside Python string",
+      "input": "s = \"\"\"\n#[#|]# not a comment\n\"\"\"\n",
+      "keys": "ox<esc>",
+      "lang": "python",
+      "expected": {
+        "text": "s = \"\"\"\n# not a comment\nx\n\"\"\"\n",
+        "ranges": [[25, 26]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "comment: o does not continue #! shebang on line 1",
+      "input": "#[#|]#! /usr/bin/env python3\n",
+      "keys": "ox<esc>",
+      "lang": "python",
+      "expected": {
+        "text": "#! /usr/bin/env python3\nx\n",
+        "ranges": [[25, 26]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "comment: C-c uncomments lines with uneven indentation",
+      "input": "#[  # one\n    # two|]#\n",
+      "keys": "<C-c>",
+      "lang": "python",
+      "expected": {
+        "text": "  one\n    two\n",
+        "ranges": [[0, 13]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "surround: 2mi( from opening delimiter honors count",
+      "input": "(#[(|]#x))\n",
+      "keys": "2mi(",
+      "lang": "rust",
+      "expected": {
+        "text": "((x))\n",
+        "ranges": [[1, 4]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "surround: 2ma) from closing delimiter honors count",
+      "input": "((x#[)|]#)\n",
+      "keys": "2ma)",
+      "lang": "rust",
+      "expected": {
+        "text": "((x))\n",
+        "ranges": [[0, 5]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: Python trailing comment on if header",
+      "input": "def f(x):\n    if x > 0:  # chec#[k|]#\n        return x\n",
+      "keys": "oy = 1<esc>",
+      "lang": "python",
+      "expected": {
+        "text": "def f(x):\n    if x > 0:  # check\n        y = 1\n        return x\n",
+        "ranges": [[46, 47]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: Go switch case partially typed",
+      "input": "package p\nfunc f(x int) {\n\tswitch x {\n\tcase 1#[:|]#\n\t}\n}\n",
+      "keys": "a<ret>return<esc>",
+      "lang": "go",
+      "expected": {
+        "text": "package p\nfunc f(x int) {\n\tswitch x {\n\tcase 1:\n\t\treturn\n\t}\n}\n",
+        "ranges": [[45, 55]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: TypeScript switch case partially typed",
+      "input": "function f(x: number) {\n  switch (x) {\n    case 1#[:|]#\n  }\n}\n",
+      "keys": "a<ret>break;<esc>",
+      "lang": "typescript",
+      "expected": {
+        "text": "function f(x: number) {\n  switch (x) {\n    case 1:\n      break;\n  }\n}\n",
+        "ranges": [[49, 63]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "insert: I at multiple cursors after empty indented line",
+      "input": "fn f() {\n#[\n|]#\n    #(l|)#et x = 1;\n}\n",
+      "keys": "I// <esc>",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f() {\n    // \n    // let x = 1;\n}\n",
+        "ranges": [[16, 17], [24, 25]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "object: shrink_selection drops stale A-o history after edit",
+      "input": "fn f() {\n    let #[x|]# = 1 + 2;\n}\n",
+      "keys": "<A-o>a + 3<esc><A-i>",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f() {\n    let x = 1 + 2; + 3\n}\n",
+        "ranges": [[7, 8]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "increment: consecutive separators do not hang",
+      "input": "let n = #[9__9|]#;\n",
+      "keys": "<C-a>",
+      "lang": "rust",
+      "expected": {
+        "text": "let n = 10__0;\n",
+        "ranges": [[8, 13]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "reflow: greedy wrap preserves Rust doc comment marker",
+      "input": "#[/// doc comment that should wrap and keep the triple slash marker|]#\n",
+      "keys": ":reflow 30<ret>",
+      "lang": "rust",
+      "expected": {
+        "text": "/// doc comment that should\n/// wrap and keep the triple\n/// slash marker\n",
+        "ranges": [[0, 73]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "register: selected register passed to :yank-join",
+      "input": "#[a|]# #(b|)#\n",
+      "keys": "\"a:yank-join ,<ret>,\"ap",
+      "lang": "rust",
+      "expected": {
+        "text": "aa,b b\n",
+        "ranges": [[1, 4]],
         "primary": 0,
         "mode": "Normal"
       }

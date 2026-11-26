@@ -1,13 +1,13 @@
 {
   "helixRepo": "https://github.com/helix-editor/helix",
-  "helixCommit": "18dbe190a0139f6c74320059146b2413b82b011c",
+  "helixCommit": "1a3fdfda6dfdda4567af6093a6249bb2bb422fc6",
   "treeSitterCliVersion": "0.27.2",
   "grammars": {
     "haskell": {
       "helixLanguage": "haskell",
       "grammar": "haskell",
       "git": "https://github.com/tree-sitter/tree-sitter-haskell",
-      "rev": "0975ef72fc3c47b530309ca93937d7d143523628",
+      "rev": "97288e585b0bd44199720280d067fa35bacd81ff",
       "license": "MIT"
     },
     "python": {

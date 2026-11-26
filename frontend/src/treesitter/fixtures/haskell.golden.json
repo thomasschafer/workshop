@@ -15,7 +15,7 @@
     "from": 65,
     "to": 332,
     "text": "-- | Representative Haskell module for syntax highlighting parity with Helix.\n-- TODO(alice): keep this sample covering every Haskell construct (#42)\n-- FIXME: verify https://example.com/docs and @bob mentions\n-- WARN: watch out for edge cases; HINT: check locals too",
-    "scopes": ["comment.documentation"]
+    "scopes": ["comment"]
   },
   {
     "from": 333,

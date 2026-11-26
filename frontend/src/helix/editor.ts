@@ -438,7 +438,9 @@ export class HelixEditor {
   readonly registers: Registers = new Registers(this);
   readonly jumps: JumpList;
   /** Selection history pushed by `expand_selection` and popped by `shrink_selection`. */
-  readonly objectSelections: Selection[] = [];
+  readonly objectSelections: { readonly version: number; readonly selection: Selection }[] = [];
+  /** Incremented whenever document text changes, to detect stale `objectSelections`. */
+  docVersion = 0;
   /** The last motion, which `A-.` repeats. */
   lastMotion: ((editor: HelixEditor) => void) | null = null;
   /** The count typed so far, before a command. */
@@ -578,6 +580,7 @@ export class HelixEditor {
    */
   mapThroughChanges(changes: ChangeDesc): void {
     if (changes.empty) return;
+    this.docVersion++;
     const doc = this.doc;
     this.jumps.mapThrough((pos, assoc) => changes.mapPos(pos, assoc), doc);
     if (this.lastEditPos !== null)

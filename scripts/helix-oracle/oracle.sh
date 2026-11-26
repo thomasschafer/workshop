@@ -23,6 +23,9 @@ bin=$(cargo test -q "${features[@]}" --test oracle --no-run --message-format=jso
   jq -r 'select(.executable != null and .target.name == "oracle") | .executable')
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+# Isolate from the user's ~/.config/helix (whose runtime/ shadows HELIX_RUNTIME and whose
+# languages.toml would override the checkout's own language settings).
+export XDG_CONFIG_HOME="$work/config"
 n=$(jq length "$in")
 for ((s = 0; s < shards; s++)); do
   jq "[to_entries[] | select(.key % $shards == $s) | .value]" "$in" >"$work/in-$s.json"

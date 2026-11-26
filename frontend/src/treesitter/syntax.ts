@@ -571,6 +571,33 @@ export class SyntaxTree {
     }
   }
 
+  /**
+   * Returns every layer covering `[start, end]` from the root layer down to the innermost
+   * injection, matching tree-house's `Syntax::layers_for_byte_range`.
+   */
+  layersForRange(start: number, end: number): number[] {
+    const out: number[] = [this.rootLayer];
+    let current = this.rootLayer;
+    for (;;) {
+      const data = this.layer(current);
+      const atStart = injectionAt(data.injections, start);
+      const atEnd = injectionAt(data.injections, end);
+      if (atStart && atEnd && atStart.layer === atEnd.layer) {
+        current = atStart.layer;
+        out.push(current);
+      } else {
+        return out;
+      }
+    }
+  }
+
+  /** Returns `layerId`'s parse tree, lazily parsing it when `input` is provided. */
+  ensureLayerTree(layerId: number, input?: TextInput): Tree | null {
+    const data = this.layer(layerId);
+    if (data.managedTree) return data.managedTree.raw;
+    return input !== undefined ? this.ensureLayerParsed(layerId, input) : null;
+  }
+
   /** Finds the smallest layer with a parse tree covering `[start, end]`, parsing lazy layers if needed. */
   layerAndTreeForRange(
     start: number,

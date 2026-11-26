@@ -6,14 +6,7 @@
 // ui/prompt.rs handle keys, including counts, `.` and macros.
 
 import { TYPABLE_COMMANDS } from "./commandList";
-import {
-  COMMANDS,
-  type Context,
-  FALLBACKS,
-  insertChar,
-  type OnKeyKind,
-  UNSUPPORTED,
-} from "./commands";
+import { COMMANDS, type Context, insertChar, type OnKeyKind, UNSUPPORTED } from "./commands";
 import type { HelixEditor } from "./editor";
 import {
   commandName,
@@ -250,12 +243,6 @@ export class KeyHandler {
       case "pending":
         editor.autoinfo = infobox(result.node);
         return null;
-      case "fallback": {
-        const f = FALLBACKS[result.command];
-        if (f === undefined) throw new Error(`no fallback command named ${result.command}`);
-        f(cx, result.ch);
-        return null;
-      }
       case "notFound":
       case "cancelled":
         return result;

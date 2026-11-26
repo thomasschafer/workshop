@@ -419,6 +419,10 @@ function queryIndents(
   return { indentCaptures, extendCaptures, opaqueRanges };
 }
 
+function isExtra(node: Node): boolean {
+  return node.isExtra && node.type !== "ERROR";
+}
+
 function extendNodes(
   node: Node,
   initialPreceding: Node,
@@ -427,8 +431,10 @@ function extendNodes(
   line: number,
   tabWidth: number,
   width: number,
-): Node {
+): { node: Node; extended: boolean } {
   let stopExtend = false;
+  // Ancestors may also span trailing comments.
+  const contentEndLine = doc.lineOf(initialPreceding.endIndex);
   let deepestPreceding: Node = initialPreceding;
 
   while (deepestPreceding.id !== node.id) {
@@ -441,7 +447,7 @@ function extendNodes(
           stopExtend = true;
         } else {
           nodeCaptured = true;
-          if (doc.lineOf(deepestPreceding.endIndex) === line) {
+          if (contentEndLine === line) {
             extendNode = true;
           } else {
             const cursorIndent = indentLevelForLine(doc, line, tabWidth, width);
@@ -462,15 +468,49 @@ function extendNodes(
     if (nodeCaptured && stopExtend) {
       stopExtend = false;
     } else if (extendNode && !stopExtend) {
-      return deepestPreceding;
+      return { node: deepestPreceding, extended: true };
     }
 
     const parent = deepestPreceding.parent;
-    if (parent === null) return node;
+    if (parent === null) return { node, extended: false };
     deepestPreceding = parent;
   }
 
-  return node;
+  return { node, extended: false };
+}
+
+/**
+ * Returns the last child of `node` before `pos`, skipping extra nodes. If the parser closed both
+ * `node` and the child before it with MISSING tokens, that child is the innermost open node.
+ */
+function lastChild(node: Node, pos: number): Node | null {
+  let prev: Node | null = null;
+  let last: Node | null = null;
+  for (const child of node.children) {
+    if (child.endIndex <= pos && !isExtra(child)) {
+      prev = last;
+      last = child;
+    }
+  }
+  if (last === null) return null;
+  if (prev !== null && last.isMissing && prev.endIndex === last.startIndex && isUnclosed(prev)) {
+    return prev;
+  }
+  return last;
+}
+
+/** Whether `node` is an ERROR or its last non-extra token is MISSING. */
+function isUnclosed(initial: Node): boolean {
+  let node: Node = initial;
+  for (;;) {
+    if (node.isMissing || node.type === "ERROR") return true;
+    let last: Node | null = null;
+    for (const child of node.children) {
+      if (!isExtra(child)) last = child;
+    }
+    if (last === null) return false;
+    node = last;
+  }
 }
 
 function candidateBodyForNewLine(deepestPreceding: Node, pos: number): Node | null {
@@ -486,6 +526,12 @@ function candidateBodyForNewLine(deepestPreceding: Node, pos: number): Node | nu
         for (;;) {
           if (cursor.currentNode.id === node.id) {
             if (cursor.gotoNextSibling()) {
+              // Step over a trailing comment on the header line.
+              while (
+                isExtra(cursor.currentNode) &&
+                cursor.currentNode.endIndex <= pos &&
+                cursor.gotoNextSibling()
+              ) {}
               const child = cursor.currentNode;
               if (child.startIndex >= pos) {
                 return child;
@@ -516,22 +562,16 @@ function initIndentQuery(
   node: Node;
   captures: ReadonlyMap<number, readonly IndentCapture[]>;
   opaqueRanges: readonly { readonly start: number; readonly end: number }[];
+  openEnded: boolean;
 } | null {
   let node = root.descendantForIndex(pos, pos);
   if (node === null) return null;
 
-  let deepestPreceding: Node | null = null;
-  for (const child of node.children) {
-    if (child.endIndex <= pos) {
-      deepestPreceding = child;
-    }
-  }
-  if (deepestPreceding !== null) {
-    while (deepestPreceding.childCount > 0) {
-      const last = deepestPreceding.child(deepestPreceding.childCount - 1);
-      if (last === null) break;
-      deepestPreceding = last;
-    }
+  let deepestPreceding = lastChild(node, pos);
+  while (deepestPreceding !== null) {
+    const last = lastChild(deepestPreceding, pos);
+    if (last === null) break;
+    deepestPreceding = last;
   }
 
   const candidateBody =
@@ -552,8 +592,57 @@ function initIndentQuery(
     }
   }
 
+  // When the parser closes an unfinished node with a zero-width MISSING token,
+  // as it does for `struct S {`, the node is still open.
+  if (
+    deepestPreceding !== null &&
+    !descended &&
+    newLinePos !== null &&
+    deepestPreceding.isMissing
+  ) {
+    let open = deepestPreceding.parent;
+    while (open !== null && open.startIndex === deepestPreceding.startIndex) {
+      const parent = open.parent;
+      if (parent === null) break;
+      open = parent;
+    }
+    if (open !== null) {
+      return {
+        node: open,
+        captures: queryResult.indentCaptures,
+        opaqueRanges: queryResult.opaqueRanges,
+        openEnded: true,
+      };
+    }
+  }
+
+  // With auto-pairs off, a typed `{`, `(` or `[` has no closing bracket yet and
+  // ends up in an ERROR node. Indent the next line as if it were closed.
+  if (
+    deepestPreceding !== null &&
+    !descended &&
+    newLinePos !== null &&
+    (deepestPreceding.type === "{" ||
+      deepestPreceding.type === "(" ||
+      deepestPreceding.type === "[") &&
+    doc.lineOf(deepestPreceding.startIndex) === line &&
+    deepestPreceding.parent?.type === "ERROR"
+  ) {
+    const captures = queryResult.indentCaptures;
+    const list = captures.get(deepestPreceding.id) ?? [];
+    list.push({ captureType: { kind: "indent" }, header: false });
+    captures.set(deepestPreceding.id, list);
+    return {
+      node: deepestPreceding,
+      captures,
+      opaqueRanges: queryResult.opaqueRanges,
+      openEnded: true,
+    };
+  }
+
+  let extended = false;
   if (deepestPreceding !== null && !descended) {
-    node = extendNodes(
+    const res = extendNodes(
       node,
       deepestPreceding,
       queryResult.extendCaptures,
@@ -562,12 +651,26 @@ function initIndentQuery(
       tabWidth,
       width,
     );
+    node = res.node;
+    extended = res.extended;
   }
+
+  let firstChild: Node | null = null;
+  let lastNonExtra: Node | null = null;
+  for (const child of node.children) {
+    if (isExtra(child)) continue;
+    if (firstChild === null) firstChild = child;
+    else lastNonExtra = child;
+  }
+  const delimited =
+    firstChild !== null && lastNonExtra !== null && !firstChild.isNamed && !lastNonExtra.isNamed;
+  const openEnded = extended && !delimited;
 
   return {
     node,
     captures: queryResult.indentCaptures,
     opaqueRanges: queryResult.opaqueRanges,
+    openEnded,
   };
 }
 
@@ -600,6 +703,7 @@ function containmentAccounting(
   let outdentAlways = 0;
   let align: string | null = null;
   const countedStartLines: number[] = [];
+  let insideAlign: { alignStart: number; inner: number; innerAlways: number } | null = null;
 
   let node: Node | null = init.node;
   while (node !== null) {
@@ -635,13 +739,26 @@ function containmentAccounting(
       }
 
       const nodeStart = getNodeStartLine(doc, node, newLinePos);
-      const end = getNodeEndLine(doc, node, newLinePos);
+      let end = getNodeEndLine(doc, node, newLinePos);
+      if (init.openEnded && newLine) {
+        end = Math.max(end, targetLine);
+      }
       const start =
         headerScoped && node.parent !== null
           ? getNodeStartLine(doc, node.parent, newLinePos)
           : nodeStart;
       const contains = start < targetLine && targetLine <= end;
       const opensTarget = nodeStart === targetLine;
+
+      // Innermost containing alignment wins (first seen on the upward walk).
+      if (nodeAlign !== null && contains && align === null) {
+        align = nodeAlign;
+        insideAlign = {
+          alignStart: start,
+          inner: countedStartLines.length,
+          innerAlways: indentAlways,
+        };
+      }
 
       if ((hasIndent || hasIndentAlways) && (hasOutdent || hasOutdentAlways)) {
         // Indent + outdent on the same node cancel each other.
@@ -660,17 +777,17 @@ function containmentAccounting(
           outdentAlways++;
         }
       }
-
-      if (nodeAlign !== null && contains && align === null) {
-        align = nodeAlign;
-      }
     }
     node = node.parent;
   }
 
-  if (align !== null) {
-    indentLevels = 0;
-    indentAlways = 0;
+  // Only scopes inside the aligned node add to the anchor column, except one
+  // opening on the node's first line.
+  if (insideAlign !== null) {
+    indentLevels = countedStartLines
+      .slice(0, insideAlign.inner)
+      .filter((s) => s !== insideAlign.alignStart).length;
+    indentAlways = insideAlign.innerAlways;
   }
 
   return {
@@ -698,8 +815,12 @@ function injectionBaseLevel(
   let first: number;
   if (inLayer(bl)) {
     first = bl;
-    while (first > 0 && inLayer(first - 1)) {
-      first--;
+    for (let prev = bl - 1; prev >= 0; prev--) {
+      if (inLayer(prev)) {
+        first = prev;
+      } else if (firstNonWhitespace(doc, prev) !== null) {
+        break;
+      }
     }
   } else {
     first = Math.min(bl + 1, doc.lines - 1);
@@ -718,9 +839,10 @@ export function treesitterIndentForPos(
   width: number,
   doc: Doc,
   line: number,
-  pos: number,
+  rawPos: number,
   newLine: boolean,
 ): Indentation | null {
+  const pos = newLine && doc.str[rawPos] === "\r" ? rawPos + 1 : rawPos;
   const layer = syntax.layerForRange(pos, pos);
   const injectedRaw =
     layer !== syntax.rootLayer && syntax.layer(layer).language !== syntax.rootLanguage()

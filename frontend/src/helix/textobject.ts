@@ -6,7 +6,7 @@
 // surround.rs, match_brackets.rs and search.rs, using tree-sitter when a syntax tree is available
 // and plaintext fallbacks otherwise.
 
-import type { Node } from "web-tree-sitter";
+import type { Node, Query } from "web-tree-sitter";
 import { captureNodes, type SyntaxTree } from "../treesitter";
 import { Direction, Range, type Selection } from "./selection";
 import {
@@ -175,10 +175,9 @@ export function textobjectPairSurround(
   range: Range,
   textobject: TextObject,
   ch: string,
-  findType: FindType,
   count: number,
 ): Range {
-  const pos = findNthPairsPos(syntax, doc, ch, range, findType, count);
+  const pos = findNthPairsPos(syntax, doc, ch, range, count);
   return pos instanceof SurroundError ? range : pairRange(doc, pos, textobject);
 }
 
@@ -194,6 +193,29 @@ export function textobjectPairSurroundClosest(
 }
 
 /**
+ * Returns the textobject query and tree root of each injection layer containing `pos`, innermost
+ * first. Ported from `helix-core/src/textobject.rs` `textobject_layers`.
+ */
+export function textobjectLayers(
+  syntax: SyntaxTree,
+  doc: Doc,
+  pos: number,
+): { readonly query: Query; readonly root: Node }[] {
+  const layers = syntax.layersForRange(pos, pos);
+  const out: { readonly query: Query; readonly root: Node }[] = [];
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layerId = layers[i];
+    if (layerId === undefined) continue;
+    const query = syntax.queryForLayer(layerId, "textobjects");
+    if (query === null) continue;
+    const tree = syntax.ensureLayerTree(layerId, doc.str);
+    if (tree === null) continue;
+    out.push({ query, root: tree.rootNode });
+  }
+  return out;
+}
+
+/**
  * Selects a tree-sitter textobject (e.g. `function.inside`, `class.around`) containing the
  * cursor. Ported from `helix-core/src/textobject.rs` `textobject_treesitter`.
  */
@@ -205,25 +227,25 @@ export function textobjectTreesitter(
   syntax: SyntaxTree,
 ): Range {
   const pos = range.cursor(doc);
-  const { layer, tree } = syntax.layerAndTreeForRange(pos, pos, doc.str);
-  const query = syntax.queryForLayer(layer, "textobjects");
-  if (query === null) return range;
-
   const captureName = `${objectName}.${textobject === TextObject.Inside ? "inside" : "around"}`;
-  const nodes = captureNodes(query, captureName, tree.rootNode);
-  if (nodes === null) return range;
 
   let best: { startIndex: number; endIndex: number } | null = null;
-  let bestLen = Number.POSITIVE_INFINITY;
-  for (const n of nodes) {
-    if (n.startIndex <= pos && pos < n.endIndex) {
-      const len = n.endIndex - n.startIndex;
-      if (len < bestLen) {
-        best = n;
-        bestLen = len;
+  for (const { query, root } of textobjectLayers(syntax, doc, pos)) {
+    const nodes = captureNodes(query, captureName, root);
+    if (nodes === null) continue;
+    let bestLen = Number.POSITIVE_INFINITY;
+    for (const n of nodes) {
+      if (n.startIndex <= pos && pos < n.endIndex) {
+        const len = n.endIndex - n.startIndex;
+        if (len < bestLen) {
+          best = n;
+          bestLen = len;
+        }
       }
     }
+    if (best !== null) break;
   }
+
   if (best === null) return range;
   if (best.startIndex >= doc.length || best.endIndex >= doc.length) {
     return range;
@@ -509,12 +531,6 @@ export class SurroundError {
   static ambiguous = new SurroundError("Cursor on ambiguous surround pair");
 }
 
-export enum FindType {
-  Surround,
-  Next,
-  Prev,
-}
-
 /** The closest pair of brackets enclosing the range, as `(anchor, head)` in its direction. */
 export function findNthClosestPairsPos(
   syntax: SyntaxTree | null,
@@ -538,6 +554,7 @@ function findNthClosestPairsTs(
   let closing = range.to;
 
   while (skip > 0) {
+    const start = closing;
     const foundClose = findMatchingBracketFuzzy(syntax, doc, closing);
     if (foundClose === null) return SurroundError.pairNotFound;
     const foundOpen = findMatchingBracket(syntax, doc, foundClose);
@@ -556,6 +573,12 @@ function findNthClosestPairsTs(
         closing = nextGraphemeBoundary(doc, closing);
       }
     }
+
+    // A matched pair can lie before the search position, so stop when the search doesn't
+    // move forward, or this loops forever.
+    if (skip !== 0 && closing <= start) {
+      return SurroundError.pairNotFound;
+    }
   }
 
   return range.direction === Direction.Forward ? [opening, closing] : [closing, opening];
@@ -569,10 +592,8 @@ function findNthClosestPairsPlain(
   let skip = initialSkip;
   const stack: string[] = [];
   const pos = range.from;
-  let closePos = pos - 1;
-  for (let i = pos; i < doc.length; i++) {
-    const ch = doc.str.charAt(i);
-    closePos++;
+  for (let closePos = pos; closePos < doc.length; closePos++) {
+    const ch = doc.str.charAt(closePos);
     if (isOpenBracket(ch)) {
       // Step over the close pairs of open pairs found after the cursor, to find a lone close
       // pair whose open pair is before it.
@@ -599,35 +620,21 @@ function findNthClosestPairsPlain(
 }
 
 /**
- * The pair of `ch`, which may open or close it, around the range's cursor, or the next or
- * previous one. `n` skips `n - 1` pairs.
+ * The pair of `ch`, which may open or close it, around the range's cursor. `n` skips `n - 1`
+ * pairs.
  */
 export function findNthPairsPos(
   syntax: SyntaxTree | null,
   doc: Doc,
   ch: string,
   range: Range,
-  findType: FindType,
   n: number,
 ): [number, number] | SurroundError {
   if (doc.length < 2) return SurroundError.pairNotFound;
-  if (range.to > doc.length) return SurroundError.rangeExceedsText;
+  if (range.to >= doc.length) return SurroundError.rangeExceedsText;
 
   const [open, close] = getPair(ch);
-  let pos = range.cursor(doc);
-  let count = n;
-  if (findType === FindType.Next) {
-    const next = findNthChar(n, doc, open, pos, Direction.Forward);
-    if (next === null) return SurroundError.pairNotFound;
-    pos = next + 1;
-    count = 1;
-  } else if (findType === FindType.Prev) {
-    const prev = findNthChar(n, doc, close, pos, Direction.Backward);
-    if (prev === null) return SurroundError.pairNotFound;
-    if (prev === 0) return SurroundError.pairNotFound;
-    pos = prev - 1;
-    count = 1;
-  }
+  const pos = range.cursor(doc);
 
   let openPos: number | null;
   let closePos: number | null;
@@ -642,12 +649,12 @@ export function findNthPairsPos(
       if (matching === null) return SurroundError.ambiguous;
       [openPos, closePos] = matching > pos ? [pos, matching] : [matching, pos];
     } else {
-      openPos = findNthChar(count, doc, open, pos, Direction.Backward);
-      closePos = findNthChar(count, doc, close, pos, Direction.Forward);
+      openPos = findNthChar(n, doc, open, pos, Direction.Backward);
+      closePos = findNthChar(n, doc, close, pos, Direction.Forward);
     }
   } else {
-    openPos = findNthOpenPair(doc, open, close, pos, count);
-    closePos = findNthClosePair(doc, open, close, pos, count);
+    openPos = findNthOpenPair(doc, open, close, pos, n);
+    closePos = findNthClosePair(doc, open, close, pos, n);
   }
   if (openPos === null || closePos === null) return SurroundError.pairNotFound;
   return range.direction === Direction.Forward ? [openPos, closePos] : [closePos, openPos];
@@ -665,8 +672,10 @@ function findNthOpenPair(
   // Iterates backwards from just after `start`, so a cursor on the open character finds it.
   let i = start + 1;
   const prev = () => (i > 0 ? doc.str.charAt(--i) : undefined);
-  if (prev() === open) return pos;
-  for (let k = 0; k < n; k++) {
+  const first = prev();
+  if (first === undefined) return null;
+  const count = first === open ? Math.max(0, n - 1) : n;
+  for (let k = 0; k < count; k++) {
     let stepOver = 0;
     for (;;) {
       const c = prev();
@@ -695,8 +704,10 @@ function findNthClosePair(
   let pos = start;
   let i = start;
   const next = () => (i < doc.length ? doc.str.charAt(i++) : undefined);
-  if (next() === close) return pos;
-  for (let k = 0; k < n; k++) {
+  const first = next();
+  if (first === undefined) return null;
+  const count = first === close ? Math.max(0, n - 1) : n;
+  for (let k = 0; k < count; k++) {
     let stepOver = 0;
     for (;;) {
       const c = next();
@@ -729,7 +740,7 @@ export function getSurroundPos(
     const raw =
       ch === null
         ? findNthClosestPairsPos(syntax, doc, range, skip)
-        : findNthPairsPos(syntax, doc, ch, range, FindType.Surround, skip);
+        : findNthPairsPos(syntax, doc, ch, range, skip);
     if (raw instanceof SurroundError) return raw;
     const pair = new Range(raw[0], raw[1]);
     const openPos = pair.from;

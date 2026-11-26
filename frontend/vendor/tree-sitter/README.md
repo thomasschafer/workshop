@@ -6,12 +6,12 @@ revisions in `manifest.json`.
 
 ## Provenance
 
-- Helix queries: https://github.com/helix-editor/helix at commit `18dbe190a0139f6c74320059146b2413b82b011c`
+- Helix queries: https://github.com/helix-editor/helix at commit `1a3fdfda6dfdda4567af6093a6249bb2bb422fc6`
 - Built with: `tree-sitter-cli@0.27.2`
 
 | Mode | Role | Helix language | Grammar repository | Revision | Grammar licence |
 | --- | --- | --- | --- | --- | --- |
-| `haskell` | editor mode | `haskell` | https://github.com/tree-sitter/tree-sitter-haskell | `0975ef72fc3c` | MIT (`haskell/LICENSE`) |
+| `haskell` | editor mode | `haskell` | https://github.com/tree-sitter/tree-sitter-haskell | `97288e585b0b` | MIT (`haskell/LICENSE`) |
 | `python` | editor mode | `python` | https://github.com/tree-sitter/tree-sitter-python | `293fdc02038e` | MIT (`python/LICENSE`) |
 | `typescript` | editor mode | `typescript` | https://github.com/tree-sitter/tree-sitter-typescript | `75b3874edb2d` | MIT (`typescript/LICENSE`) |
 | `go` | editor mode | `go` | https://github.com/tree-sitter/tree-sitter-go | `2346a3ab1bb3` | MIT (`go/LICENSE`) |

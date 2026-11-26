@@ -48,7 +48,7 @@ export { getTreeStats } from "./managedTree";
 export type { SyntaxSnapshot } from "./syntax";
 export { changeSetToEdits, SyntaxTree } from "./syntax";
 export type { CapturedNode } from "./textObject";
-export { captureNodes, captureNodesAny } from "./textObject";
+export { captureCovers, captureNodes, captureNodesAny } from "./textObject";
 export {
   activeSyntaxScopeSet,
   buildHelixSyntaxCss,

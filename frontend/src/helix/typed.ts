@@ -5,6 +5,7 @@
 // Ported from Helix (https://github.com/helix-editor/helix): the commands in helix-term's
 // commands/typed.rs that make sense for a single file in Workshop.
 
+import type { Change } from "./changes";
 import { TYPABLE_COMMANDS } from "./commandList";
 import {
   type Context,
@@ -14,7 +15,7 @@ import {
 } from "./commands";
 import { type HelixEditor, type HelixOptions, IndentStyleKind } from "./editor";
 import { Movement } from "./movement";
-import { at, graphemes, nextGraphemeBoundary } from "./text";
+import { at, type Doc, graphemes, nextGraphemeBoundary } from "./text";
 
 type TypedFn = (cx: Context, args: string[]) => void | Promise<void>;
 
@@ -350,20 +351,20 @@ const TYPED: Readonly<Record<string, TypedFn>> = {
     );
   },
   reflow: (cx, args) => {
-    const width = args[0] === undefined ? 79 : Number(args[0]);
+    const width = args[0] === undefined ? 80 : Number(args[0]);
     if (!Number.isInteger(width) || width < 1) {
       cx.editor.setError("reflow needs a positive width");
       return;
     }
     const editor = cx.editor;
     const doc = editor.doc;
-    editor.apply(
-      editor.selection.ranges.map((r) => ({
-        from: r.from,
-        to: r.to,
-        insert: reflow(r.fragment(doc), width),
-      })),
-    );
+    const lineRanges = mergedLineRanges(doc, editor.selection.ranges);
+    const changes: Change[] = [];
+    for (const [start, end] of lineRanges) {
+      const commentTokens = editor.host.commentTokens(doc.lineStart(start)).line;
+      changes.push(...reflowLines(doc, start, end, width, editor.tabWidth, commentTokens));
+    }
+    editor.apply(changes);
   },
   "clear-register": (cx, args) => {
     if (args.length === 0) {
@@ -414,8 +415,6 @@ const UNSUPPORTED_TYPED: Readonly<Record<string, string>> = {
   ...Object.fromEntries(
     [
       "open",
-      "open-no-completions",
-      "open-recent",
       "buffer-close",
       "buffer-close!",
       "buffer-close-others",
@@ -424,8 +423,6 @@ const UNSUPPORTED_TYPED: Readonly<Record<string, string>> = {
       "buffer-close-all!",
       "buffer-next",
       "buffer-previous",
-      "buffer-move-left",
-      "buffer-move-right",
       "write-buffer-close",
       "write-buffer-close!",
       "new",
@@ -443,6 +440,7 @@ const UNSUPPORTED_TYPED: Readonly<Record<string, string>> = {
       "show-directory",
       "set-language",
       "encoding",
+      "line-ending",
     ].map((n) => [
       n,
       "works with files and buffers, and Workshop edits one file it chooses itself",
@@ -537,31 +535,126 @@ export function typedCommandUnsupportedReason(name: string): string | null {
   return canonical === undefined ? null : (UNSUPPORTED_TYPED[canonical] ?? null);
 }
 
-/** Wraps text at `width` columns, keeping each paragraph's indentation and comment leader. */
-function reflow(text: string, width: number): string {
-  const trailingNewline = text.endsWith("\n");
-  const paragraphs = (trailingNewline ? text.slice(0, -1) : text).split(/\n[ \t]*\n/);
-  const out = paragraphs.map((para) => {
-    const lines = para.split("\n");
-    const prefix = /^[ \t]*(?:(?:\/\/+|#+|--+|;+|\*)[ \t]?)?/.exec(at(lines, 0))?.[0] ?? "";
-    const words = lines
-      .map((l) => (l.startsWith(prefix) ? l.slice(prefix.length) : l.trimStart()))
-      .join(" ")
-      .split(/\s+/)
-      .filter((w) => w !== "");
-    const wrapped: string[] = [];
-    let current = "";
-    for (const word of words) {
-      const candidate = current === "" ? word : `${current} ${word}`;
-      if (graphemes(prefix + candidate).length > width && current !== "") {
-        wrapped.push(prefix + current);
-        current = word;
-      } else {
-        current = candidate;
+/** Merges overlapping/adjacent line ranges across selections, as `Selection::line_ranges` does. */
+function mergedLineRanges(
+  doc: Doc,
+  ranges: readonly { lineRange(doc: Doc): [number, number] }[],
+): [number, number][] {
+  const out: [number, number][] = [];
+  for (const r of ranges) {
+    const [start, end] = r.lineRange(doc);
+    const prev = out[out.length - 1];
+    if (prev !== undefined && start <= prev[1]) {
+      prev[1] = Math.max(prev[1], end);
+    } else {
+      out.push([start, end]);
+    }
+  }
+  return out;
+}
+
+function displayWidth(s: string, tabWidth: number): number {
+  let col = 0;
+  for (const g of graphemes(s)) {
+    col += g === "\t" ? tabWidth - (col % tabWidth) : 1;
+  }
+  return col;
+}
+
+function lineCommentToken(line: string, commentTokens: readonly string[]): string | null {
+  const trimmed = line.trimStart();
+  let best: string | null = null;
+  for (const token of commentTokens) {
+    if (trimmed.startsWith(token) && (best === null || token.length > best.length)) {
+      best = token;
+    }
+  }
+  return best;
+}
+
+function isSeparatorLine(line: string, commentTokens: readonly string[]): boolean {
+  const trimmed = line.trim();
+  return trimmed === "" || commentTokens.includes(trimmed);
+}
+
+/**
+ * Greedy paragraph reflow ported from upstream `helix-core/src/wrap.rs` `reflow`. Only edits the
+ * whitespace gaps between words.
+ */
+function reflowLines(
+  doc: Doc,
+  startLine: number,
+  endLine: number,
+  textWidth: number,
+  tabWidth: number,
+  commentTokens: readonly string[],
+): Change[] {
+  const lineText = (l: number) => doc.slice(doc.lineStart(l), doc.lineEnd(l));
+  const changes: Change[] = [];
+  let line = startLine;
+  while (line <= endLine) {
+    if (isSeparatorLine(lineText(line), commentTokens)) {
+      line++;
+      continue;
+    }
+    const paraStart = line;
+    while (line <= endLine && !isSeparatorLine(lineText(line), commentTokens)) {
+      line++;
+    }
+
+    const words: { start: number; end: number; width: number }[] = [];
+    for (let l = paraStart; l < line; l++) {
+      const lStart = doc.lineStart(l);
+      const content = lineText(l);
+      const leading = content.length - content.trimStart().length;
+      const body = leading + (lineCommentToken(content, commentTokens)?.length ?? 0);
+      let wordStart = -1;
+      for (let i = body; i < content.length; i++) {
+        if (!/\s/.test(content.charAt(i))) {
+          if (wordStart === -1) wordStart = i;
+        } else if (wordStart !== -1) {
+          words.push({
+            start: lStart + wordStart,
+            end: lStart + i,
+            width: displayWidth(content.slice(wordStart, i), tabWidth),
+          });
+          wordStart = -1;
+        }
+      }
+      if (wordStart !== -1) {
+        words.push({
+          start: lStart + wordStart,
+          end: lStart + content.length,
+          width: displayWidth(content.slice(wordStart), tabWidth),
+        });
       }
     }
-    if (current !== "" || wrapped.length === 0) wrapped.push(prefix + current);
-    return wrapped.join("\n");
-  });
-  return out.join("\n\n") + (trailingNewline ? "\n" : "");
+
+    const firstWord = words[0];
+    if (firstWord === undefined) continue;
+    const firstLine = lineText(paraStart);
+    const indent = firstLine.slice(0, firstLine.length - firstLine.trimStart().length);
+    const token = lineCommentToken(firstLine, commentTokens);
+    const prefix = token !== null ? `${indent}${token} ` : indent;
+    const prefixWidth = displayWidth(prefix, tabWidth);
+    const lineBreak = `\n${prefix}`;
+
+    let col = prefixWidth + firstWord.width;
+    for (let i = 1; i < words.length; i++) {
+      const prev = at(words, i - 1);
+      const word = at(words, i);
+      let gap: string;
+      if (col + 1 + word.width > textWidth) {
+        col = prefixWidth + word.width;
+        gap = lineBreak;
+      } else {
+        col += 1 + word.width;
+        gap = " ";
+      }
+      if (doc.slice(prev.end, word.start) !== gap) {
+        changes.push({ from: prev.end, to: word.start, insert: gap });
+      }
+    }
+  }
+  return changes;
 }

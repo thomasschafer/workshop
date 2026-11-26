@@ -65,10 +65,14 @@ export function toggleLineComments(doc: Doc, selection: Selection, token: string
   }
   const { commented, toChange, min, margin } = findLineComment(tok, doc, lines);
   return toChange.map((line) => {
-    const pos = doc.lineStart(line) + min;
-    return commented
-      ? { from: pos, to: pos + tok.length + margin, insert: "" }
-      : { from: pos, to: pos, insert: `${tok} ` };
+    const lineStart = doc.lineStart(line);
+    if (!commented) {
+      const pos = lineStart + min;
+      return { from: pos, to: pos, insert: `${tok} ` };
+    }
+    // Uncomment each line at its own indentation.
+    const pos = lineStart + (firstNonWhitespace(doc, line) ?? 0);
+    return { from: pos, to: pos + tok.length + margin, insert: "" };
   });
 }
 

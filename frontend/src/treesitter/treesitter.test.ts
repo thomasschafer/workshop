@@ -490,7 +490,7 @@ describe("capture precedence, locals, and injections", () => {
 describe("Helix tree-house golden parity", () => {
   // Each `fixtures/<lang>.golden.json` was produced by running Helix's `tree-house` 0.4.0 crate
   // directly against Helix's `runtime/grammars/*.dylib` and `runtime/queries/*/*.scm` at commit
-  // 18dbe190a0139f6c74320059146b2413b82b011c.
+  // 1a3fdfda6dfdda4567af6093a6249bb2bb422fc6.
   for (const fixture of GOLDEN_FIXTURES) {
     const source = readFileSync(join(HERE, "fixtures", fixture.sourceFile), "utf8");
     const golden = JSON.parse(

@@ -110,10 +110,9 @@ export function mapPos(changes: readonly Change[], pos: number, assoc: Assoc): n
       if (change.insert === "") return newFrom;
       // Within a replacement.
       if (pos === change.from && stayAtGaps(assoc)) return newFrom;
-      const ins = insertOffset(assoc, change.insert);
       // Keeps the offset into a replacement of exactly the same size.
-      if (deleted === ins && sticky(assoc)) return newFrom + (pos - change.from);
-      return newFrom + ins;
+      if (deleted === change.insert.length && sticky(assoc)) return newFrom + (pos - change.from);
+      return newFrom + insertOffset(assoc, change.insert);
     }
     delta += change.insert.length - deleted;
   }

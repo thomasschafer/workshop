@@ -81,7 +81,8 @@ export function incrementInteger(text: string, amount: number): string | null {
         : at(separators, 0);
     const prefix = radix === 10 ? 0 : 2;
     let index = out.indexOf(SEPARATOR);
-    if (index !== -1) {
+    // Consecutive separators give a zero spacing, which would never advance.
+    if (index !== -1 && spacing > 0) {
       while (index - prefix > spacing) {
         index -= spacing;
         out = out.slice(0, index) + SEPARATOR + out.slice(index);

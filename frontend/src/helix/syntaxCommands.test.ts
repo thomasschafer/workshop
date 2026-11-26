@@ -133,7 +133,7 @@ describe("no-tree graceful fallbacks", () => {
     expect(h.state()).toBe("foo (#[b|]#ar)\n");
 
     await h.keys("mif");
-    expect(h.editor.status?.message).toBe("Syntax information is not available in current buffer");
+    expect(h.state()).toBe("foo (#[b|]#ar)\n");
     await h.keys("]f");
     expect(h.editor.status?.message).toBe("Syntax-tree is not available in current buffer");
 
@@ -146,6 +146,10 @@ describe("no-tree graceful fallbacks", () => {
     // Plaintext closest-pair surround still works without a tree
     await h.keys("hmim");
     expect(h.state()).toBe("foo (#[bar|]#)\n");
+
+    // smart_tab inserts a tab when there is no syntax tree
+    await h.keys("a<tab><esc>");
+    expect(h.host.state.doc.toString()).toBe("foo (bar    )\n");
   });
 });
 

@@ -34,6 +34,10 @@
   (switch_default)
 ] @indent
 
+; Handle partially typed code.
+(switch_case ":" @indent @extend)
+(switch_default ":" @indent @extend)
+
 [
   "}"
   "]"

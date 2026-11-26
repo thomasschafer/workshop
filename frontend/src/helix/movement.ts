@@ -22,6 +22,7 @@ import {
   nthPrevGraphemeBoundary,
   prevGraphemeBoundary,
 } from "./text";
+import { textobjectLayers } from "./textobject";
 
 export enum Movement {
   Extend,
@@ -375,42 +376,38 @@ export function gotoTreesitterObject(
 ): Range {
   const step = (current: Range): Range | null => {
     const pos = current.cursor(doc);
-    const { layer, tree } = syntax.layerAndTreeForRange(pos, pos, doc.str);
-    const query = syntax.queryForLayer(layer, "textobjects");
-    if (query === null) return null;
-
-    const nodes = captureNodesAny(
-      query,
-      [`${objectName}.movement`, `${objectName}.around`, `${objectName}.inside`],
-      tree.rootNode,
-    );
-    if (nodes === null) return null;
+    const capNames = [`${objectName}.movement`, `${objectName}.around`, `${objectName}.inside`];
 
     let best: { startIndex: number; endIndex: number } | null = null;
-    if (dir === Direction.Forward) {
-      // min_by_key(|n| (n.start_byte(), Reverse(n.end_byte()))): keeps first minimum on ties.
-      for (const n of nodes) {
-        if (n.startIndex <= pos) continue;
-        if (
-          best === null ||
-          n.startIndex < best.startIndex ||
-          (n.startIndex === best.startIndex && n.endIndex > best.endIndex)
-        ) {
-          best = n;
+    for (const { query, root } of textobjectLayers(syntax, doc, pos)) {
+      const nodes = captureNodesAny(query, capNames, root);
+      if (nodes === null) continue;
+      if (dir === Direction.Forward) {
+        // min_by_key(|n| (n.start_byte(), Reverse(n.end_byte()))): keeps first minimum on ties.
+        for (const n of nodes) {
+          if (n.startIndex <= pos) continue;
+          if (
+            best === null ||
+            n.startIndex < best.startIndex ||
+            (n.startIndex === best.startIndex && n.endIndex > best.endIndex)
+          ) {
+            best = n;
+          }
+        }
+      } else {
+        // max_by_key(|n| (n.end_byte(), Reverse(n.start_byte()))): keeps last maximum on ties.
+        for (const n of nodes) {
+          if (n.endIndex >= pos) continue;
+          if (
+            best === null ||
+            n.endIndex > best.endIndex ||
+            (n.endIndex === best.endIndex && n.startIndex <= best.startIndex)
+          ) {
+            best = n;
+          }
         }
       }
-    } else {
-      // max_by_key(|n| (n.end_byte(), Reverse(n.start_byte()))): keeps last maximum on ties.
-      for (const n of nodes) {
-        if (n.endIndex >= pos) continue;
-        if (
-          best === null ||
-          n.endIndex > best.endIndex ||
-          (n.endIndex === best.endIndex && n.startIndex <= best.startIndex)
-        ) {
-          best = n;
-        }
-      }
+      if (best !== null) break;
     }
 
     if (best === null) return null;

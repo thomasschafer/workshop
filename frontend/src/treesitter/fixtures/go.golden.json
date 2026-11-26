@@ -181,8 +181,98 @@
   },
   {
     "from": 286,
+    "to": 287,
+    "text": "`",
+    "scopes": ["string"]
+  },
+  {
+    "from": 287,
+    "to": 288,
+    "text": "^",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 288,
+    "to": 290,
+    "text": "([",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 290,
+    "to": 291,
+    "text": "a",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 291,
+    "to": 292,
+    "text": "-",
+    "scopes": ["string", "operator"]
+  },
+  {
+    "from": 292,
+    "to": 294,
+    "text": "z_",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 294,
+    "to": 295,
+    "text": "]",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 295,
+    "to": 296,
+    "text": "+",
+    "scopes": ["string", "operator"]
+  },
+  {
+    "from": 296,
+    "to": 297,
+    "text": ")",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 297,
+    "to": 298,
+    "text": "=",
+    "scopes": ["string"]
+  },
+  {
+    "from": 298,
+    "to": 299,
+    "text": "(",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 299,
+    "to": 301,
+    "text": "\\d",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 301,
+    "to": 302,
+    "text": "+",
+    "scopes": ["string", "operator"]
+  },
+  {
+    "from": 302,
+    "to": 303,
+    "text": ")",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 303,
+    "to": 304,
+    "text": "$",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 304,
     "to": 305,
-    "text": "`^([a-z_]+)=(\\d+)$`",
+    "text": "`",
     "scopes": ["string"]
   },
   {

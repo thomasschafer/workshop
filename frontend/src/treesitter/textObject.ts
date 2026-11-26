@@ -60,3 +60,29 @@ export function captureNodesAny(
 export function captureNodes(query: Query, captureName: string, root: Node): CapturedNode[] | null {
   return captureNodesAny(query, [captureName], root);
 }
+
+/**
+ * Whether a node captured as `captureName` covers `pos`, or `null` if the query has no such
+ * capture. Ported from `helix-core/src/syntax.rs` `TextObjectQuery::capture_covers`.
+ */
+export function captureCovers(
+  query: Query,
+  captureName: string,
+  root: Node,
+  pos: number,
+): boolean | null {
+  if (query.captureIndexForName(captureName) === -1) return null;
+  const matches = query.matches(root, {
+    startIndex: pos,
+    endIndex: pos + 1,
+    matchLimit: TREE_SITTER_MATCH_LIMIT,
+  });
+  for (const match of matches) {
+    for (const cap of match.captures) {
+      if (cap.name === captureName && cap.node.startIndex <= pos && pos < cap.node.endIndex) {
+        return true;
+      }
+    }
+  }
+  return false;
+}

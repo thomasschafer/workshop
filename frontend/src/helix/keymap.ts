@@ -6,7 +6,7 @@
 // keymap/default.rs.
 
 import { STATIC_COMMANDS, TYPABLE_COMMANDS } from "./commandList";
-import { KEY, type Key, type KeyError, keyChar, parseKey, parseMacro } from "./keys";
+import { KEY, type Key, type KeyError, parseKey, parseMacro } from "./keys";
 
 export type Mode = "normal" | "select" | "insert";
 
@@ -25,8 +25,6 @@ export interface KeyTrieNode {
   /** In the order the keys were bound, which is the order the help lists them in. */
   readonly map: Map<Key, KeyTrie>;
   readonly sticky: boolean;
-  /** Run with the key pressed when it isn't bound in this node, if it's a character. */
-  readonly fallback: string | null;
 }
 
 export class CommandError extends Error {}
@@ -34,14 +32,6 @@ export class CommandError extends Error {}
 const TYPABLE_BY_NAME = new Map(
   TYPABLE_COMMANDS.flatMap((c) => [c.name, ...c.aliases].map((n) => [n, c] as const)),
 );
-
-/** Fallback commands, which take the character pressed. */
-export const FALLBACK_COMMANDS: Readonly<Record<string, string>> = {
-  select_textobject_inside_surrounding_pair: "Select inside any character pair",
-  select_textobject_around_surrounding_pair: "Select around any character pair",
-  select_textobject_inside_prev_pair: "Select inside previous character pair",
-  select_textobject_inside_next_pair: "Select inside next character pair",
-};
 
 /** Reads a command as a keymap names it: `name`, `:typable args`, or `@keys` for a macro. */
 export function parseCommand(s: string): MappableCommand {
@@ -90,15 +80,10 @@ type Spec = string | readonly string[] | NodeSpec;
 interface NodeSpec {
   readonly label: string;
   readonly sticky?: boolean;
-  readonly fallback?: string;
   readonly keys: readonly (readonly [string | readonly string[], Spec])[];
 }
 
-function node(
-  label: string,
-  keys: NodeSpec["keys"],
-  options: { sticky?: boolean; fallback?: string } = {},
-): NodeSpec {
+function node(label: string, keys: NodeSpec["keys"], options: { sticky?: boolean } = {}): NodeSpec {
   return { label, keys, ...options };
 }
 
@@ -118,7 +103,7 @@ function build(spec: Spec): KeyTrie {
   }
   return {
     kind: "node",
-    node: { name: n.label, map, sticky: n.sticky ?? false, fallback: n.fallback ?? null },
+    node: { name: n.label, map, sticky: n.sticky ?? false },
   };
 }
 
@@ -282,91 +267,45 @@ const NORMAL = node("Normal mode", [
       ["s", "surround_add"],
       ["r", "surround_replace"],
       ["d", "surround_delete"],
-      [
-        "i",
-        node(
-          "Match inside",
-          [
-            ["w", "select_textobject_inside_word"],
-            ["W", "select_textobject_inside_WORD"],
-            ["p", "select_textobject_inside_paragraph"],
-            ["t", "select_textobject_inside_type"],
-            ["f", "select_textobject_inside_function"],
-            ["a", "select_textobject_inside_parameter"],
-            ["c", "select_textobject_inside_comment"],
-            ["T", "select_textobject_inside_test"],
-            ["e", "select_textobject_inside_entry"],
-            ["m", "select_textobject_inside_closest_surrounding_pair"],
-            ["g", "select_textobject_inside_change"],
-          ],
-          { fallback: "select_textobject_inside_surrounding_pair" },
-        ),
-      ],
-      [
-        "a",
-        node(
-          "Match around",
-          [
-            ["w", "select_textobject_around_word"],
-            ["W", "select_textobject_around_WORD"],
-            ["p", "select_textobject_around_paragraph"],
-            ["t", "select_textobject_around_type"],
-            ["f", "select_textobject_around_function"],
-            ["a", "select_textobject_around_parameter"],
-            ["c", "select_textobject_around_comment"],
-            ["T", "select_textobject_around_test"],
-            ["e", "select_textobject_around_entry"],
-            ["m", "select_textobject_around_closest_surrounding_pair"],
-            ["g", "select_textobject_around_change"],
-          ],
-          { fallback: "select_textobject_around_surrounding_pair" },
-        ),
-      ],
+      ["a", "select_textobject_around"],
+      ["i", "select_textobject_inner"],
     ]),
   ],
   [
     "[",
-    node(
-      "Left bracket",
-      [
-        ["d", "goto_prev_diag"],
-        ["D", "goto_first_diag"],
-        ["g", "goto_prev_change"],
-        ["G", "goto_first_change"],
-        ["f", "goto_prev_function"],
-        ["t", "goto_prev_class"],
-        ["a", "goto_prev_parameter"],
-        ["c", "goto_prev_comment"],
-        ["e", "goto_prev_entry"],
-        ["T", "goto_prev_test"],
-        ["p", "goto_prev_paragraph"],
-        ["x", "goto_prev_xml_element"],
-        ["space", "add_newline_above"],
-      ],
-      { fallback: "select_textobject_inside_prev_pair" },
-    ),
+    node("Left bracket", [
+      ["d", "goto_prev_diag"],
+      ["D", "goto_first_diag"],
+      ["g", "goto_prev_change"],
+      ["G", "goto_first_change"],
+      ["f", "goto_prev_function"],
+      ["t", "goto_prev_class"],
+      ["a", "goto_prev_parameter"],
+      ["c", "goto_prev_comment"],
+      ["e", "goto_prev_entry"],
+      ["T", "goto_prev_test"],
+      ["p", "goto_prev_paragraph"],
+      ["x", "goto_prev_xml_element"],
+      ["space", "add_newline_above"],
+    ]),
   ],
   [
     "]",
-    node(
-      "Right bracket",
-      [
-        ["d", "goto_next_diag"],
-        ["D", "goto_last_diag"],
-        ["g", "goto_next_change"],
-        ["G", "goto_last_change"],
-        ["f", "goto_next_function"],
-        ["t", "goto_next_class"],
-        ["a", "goto_next_parameter"],
-        ["c", "goto_next_comment"],
-        ["e", "goto_next_entry"],
-        ["T", "goto_next_test"],
-        ["p", "goto_next_paragraph"],
-        ["x", "goto_next_xml_element"],
-        ["space", "add_newline_below"],
-      ],
-      { fallback: "select_textobject_inside_next_pair" },
-    ),
+    node("Right bracket", [
+      ["d", "goto_next_diag"],
+      ["D", "goto_last_diag"],
+      ["g", "goto_next_change"],
+      ["G", "goto_last_change"],
+      ["f", "goto_next_function"],
+      ["t", "goto_next_class"],
+      ["a", "goto_next_parameter"],
+      ["c", "goto_next_comment"],
+      ["e", "goto_next_entry"],
+      ["T", "goto_next_test"],
+      ["p", "goto_next_paragraph"],
+      ["x", "goto_next_xml_element"],
+      ["space", "add_newline_below"],
+    ]),
   ],
   ["/", "search"],
   ["?", "rsearch"],
@@ -618,7 +557,7 @@ function parseNode(path: string, value: unknown, problems: KeymapProblem[]): Key
     const trie = parseTrie(keyPath, binding, problems);
     if (trie) map.set(key, trie);
   }
-  return { name: "", map, sticky: false, fallback: null };
+  return { name: "", map, sticky: false };
 }
 
 function parseTrie(path: string, value: unknown, problems: KeymapProblem[]): KeyTrie | null {
@@ -655,8 +594,7 @@ export type KeymapResult =
   | { readonly kind: "sequence"; readonly commands: readonly MappableCommand[] }
   | { readonly kind: "notFound" }
   /** The keys so far, including the one that didn't match. */
-  | { readonly kind: "cancelled"; readonly keys: readonly Key[] }
-  | { readonly kind: "fallback"; readonly command: string; readonly ch: string };
+  | { readonly kind: "cancelled"; readonly keys: readonly Key[] };
 
 /** The keymaps, and the keys pressed so far that haven't yet matched a command. */
 export class Keymaps {
@@ -707,14 +645,6 @@ export class Keymaps {
       this.state = [];
       return { kind: "sequence", commands: found.commands };
     }
-    const ch = keyChar(key);
-    if (ch !== null) {
-      const fallback = searchFallback(trie, this.state.slice(1));
-      if (fallback !== null) {
-        this.state = [];
-        return { kind: "fallback", command: fallback, ch };
-      }
-    }
     return { kind: "cancelled", keys: this.state.splice(0) };
   }
 }
@@ -728,17 +658,6 @@ function search(trie: KeyTrie, keys: readonly Key[]): KeyTrie | null {
     current = next;
   }
   return current;
-}
-
-function searchFallback(trie: KeyTrie, keys: readonly Key[]): string | null {
-  let current: KeyTrie = trie;
-  for (const [i, key] of keys.entries()) {
-    if (current.kind !== "node") return null;
-    const next = current.node.map.get(key);
-    if (next === undefined) return i === keys.length - 1 ? current.node.fallback : null;
-    current = next;
-  }
-  return null;
 }
 
 /** The lines of help for a node: its keys, grouped where they do the same thing. */
@@ -762,6 +681,5 @@ export function infobox(node: KeyTrieNode): { title: string; body: [string, stri
     }
   }
   const lines: [string, string][] = body.map(([keys, desc]) => [keys.join(", "), desc]);
-  if (node.fallback) lines.push(["...", FALLBACK_COMMANDS[node.fallback] ?? node.fallback]);
   return { title: node.name, body: lines };
 }
