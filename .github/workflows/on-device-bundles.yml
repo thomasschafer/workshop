@@ -52,7 +52,7 @@ jobs:
       - name: Smoke-test built bundle with dyld.mjs
         run: node scripts/smoke-test-ghc-wasm-bundle.mjs dist-bundle
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: haskell-ghc-wasm-${{ inputs.version }}
           path: dist-bundle/
