@@ -105,13 +105,17 @@ export function plain(text: string, selection: Selection): string {
     const primary = i === selection.primaryIndex;
     const [open, close] = primary ? ["#[", "]#"] : ["#(", ")#"];
     if (range.head < range.anchor) {
-      marks.push([range.head, 0, `${open}|`], [range.anchor, 1, close]);
+      marks.push([range.head, 1, `${open}|`], [range.anchor, 0, close]);
     } else {
-      marks.push([range.anchor, 0, open], [range.head, 1, `|${close}`]);
+      // An empty range's own closing mark comes after its opening one.
+      marks.push(
+        [range.anchor, 1, open],
+        [range.head, range.head === range.anchor ? 2 : 0, `|${close}`],
+      );
     }
   });
-  // Closing marks come before opening ones at the same place.
-  marks.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  // Otherwise closing marks come before opening ones at the same place.
+  marks.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   let out = "";
   let last = 0;
   for (const [pos, , mark] of marks) {
