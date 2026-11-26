@@ -1975,9 +1975,8 @@ function jumpToLabel(cx: Context, labels: Range[], movement: Movement): void {
       if (range === undefined) return;
       if (movement === Movement.Extend) {
         let anchor: number;
-        if (range.anchor < range.head)
-          anchor = range.anchor < primary.from ? range.anchor : primary.from;
-        else anchor = range.anchor > primary.to ? range.anchor : primary.to;
+        if (range.anchor < range.head) anchor = Math.min(range.anchor, primary.from);
+        else anchor = Math.max(range.anchor, primary.to);
         range = new Range(anchor, range.head);
       } else {
         range = range.withDirection(Direction.Forward);

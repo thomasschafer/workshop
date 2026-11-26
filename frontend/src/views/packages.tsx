@@ -6,7 +6,7 @@ import { isUpToDate, type MissingModule } from "../packages";
 import { InstallProgress, LastInstallLog } from "./install";
 
 /** What's under way, in a few words. */
-function describe(activity: PackagesActivity | null): string {
+function activityLabel(activity: PackagesActivity | null): string {
   switch (activity?.kind) {
     case "add":
       return `Installing ${activity.package}…`;
@@ -20,7 +20,7 @@ function describe(activity: PackagesActivity | null): string {
 function PackagesProgress({ packages }: { packages: Packages }) {
   return (
     <InstallProgress
-      label={describe(packages.activity)}
+      label={activityLabel(packages.activity)}
       since={packages.installingSince}
       progress={packages.progress}
       onCancel={packages.cancel}
