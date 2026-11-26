@@ -23,6 +23,12 @@ import {
 } from "./index";
 import { installNodeWasmLoader } from "./nodeTestLoader";
 
+/**
+ * Timings depend on how busy the machine is, as on shared CI runners, so they're always reported
+ * but only checked when asked for: `TREESITTER_PERF=1 npx vitest run src/treesitter`.
+ */
+const CHECK_TIMINGS = process.env.TREESITTER_PERF === "1";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 interface GoldenSpan {
@@ -788,9 +794,11 @@ describe("300-line parse and highlight performance across all languages", () => 
           `postEditHighlight=${postEditHlMs.toFixed(2)}ms`,
       );
 
-      expect(incrementalMs).toBeLessThan(10);
-      expect(viewportMs).toBeLessThan(10);
-      expect(postEditHlMs).toBeLessThan(10);
+      if (CHECK_TIMINGS) {
+        expect(incrementalMs).toBeLessThan(10);
+        expect(viewportMs).toBeLessThan(10);
+        expect(postEditHlMs).toBeLessThan(10);
+      }
     });
   }
 });
@@ -913,9 +921,11 @@ describe("Haskell parse and highlight performance", () => {
         `postEditHighlight=${postEditHighlightMs.toFixed(2)}ms`,
     );
 
-    expect(incremental100Ms).toBeLessThan(2);
-    expect(viewportHighlightMs).toBeLessThan(5);
-    expect(postEditHighlightMs).toBeLessThan(5);
-    expect(incremental1000Ms).toBeLessThan(15);
+    if (CHECK_TIMINGS) {
+      expect(incremental100Ms).toBeLessThan(2);
+      expect(viewportHighlightMs).toBeLessThan(5);
+      expect(postEditHighlightMs).toBeLessThan(5);
+      expect(incremental1000Ms).toBeLessThan(15);
+    }
   });
 });
