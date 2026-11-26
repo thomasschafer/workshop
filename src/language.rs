@@ -432,7 +432,7 @@ mod tests {
     fn builtin_profiles_parse() {
         let profile = haskell();
         assert_eq!(profile.name, "Haskell");
-        assert!(profile.template.starts_with("module Main where"));
+        assert!(profile.template.starts_with("module Main (main) where"));
         assert_eq!(profile.required_programs(), vec!["ghc"]);
     }
 

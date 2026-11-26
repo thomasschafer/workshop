@@ -18,8 +18,10 @@ lsp = ["haskell-language-server-wrapper", "--lsp"]
 # reports internal errors as code changes, which would cover the code.
 lsp_options = { haskell = { plugin = { notes = { globalOn = false } } } }
 
+# The export list lets haskell-language-server rename, which it refuses to do in a module without
+# one.
 template = '''
-module Main where
+module Main (main) where
 
 main :: IO ()
 main = do

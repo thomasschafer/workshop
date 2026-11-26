@@ -1,4 +1,4 @@
-module Main where
+module Main (main) where
 
 lowestBalance :: [Int] -> Int
 lowestBalance changes = undefined
