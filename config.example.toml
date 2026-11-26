@@ -7,6 +7,8 @@
 bind = "127.0.0.1:7878"
 # Check GitHub once a day for a newer release of Workshop, and say so in Settings when there is.
 check_for_updates = true
+# On macOS, keep the Mac from sleeping while Workshop is served to your phone over Tailscale.
+keep_awake = true
 
 [solutions]
 # A git repo for your solutions. Created on first use if it doesn't exist.

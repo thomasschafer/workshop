@@ -47,7 +47,7 @@ use clap::{Parser, Subcommand};
 use crate::config::Config;
 use crate::paths::Paths;
 
-/// Solve Advent of Code puzzles by voice, from your phone.
+/// A learning and coding platform built for your phone, with Advent of Code built in.
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
@@ -306,7 +306,8 @@ async fn main() -> Result<()> {
         Command::Token { tailscale } => {
             let token = workshop_auth::load_or_create_token(&paths.token_file())?;
             if let Some(https_port) = tailscale.https_port() {
-                print_phone_link(config.server.bind, &token, https_port).await
+                let base = serve_on_tailscale(config.server.bind, https_port).await?;
+                print_phone_link(&base, &token)
             } else {
                 println!("{}", open_url(config.server.bind, &token));
                 Ok(())
@@ -371,6 +372,7 @@ async fn serve(
         config.server.bind = bind;
     }
     let bind = config.server.bind;
+    let stay_awake = config.server.keep_awake;
     if !bind.ip().is_loopback() {
         tracing::warn!(
             "listening on {bind}, which is reachable from other machines. Anyone with the token can run code on this machine."
@@ -395,13 +397,24 @@ async fn serve(
         "Workshop is running. On this computer, open {}",
         open_url(bind, &token)
     );
-    if let Some(https_port) = tailscale_https_port {
-        print_phone_link(bind, &token, https_port).await?;
-    } else {
-        println!(
-            "To use it from your phone, run `workshop serve --tailscale`, or put it behind another HTTPS proxy, which browsers need for the microphone."
-        );
-    }
+    let phone_base = match tailscale_https_port {
+        Some(https_port) => Some(serve_on_tailscale(bind, https_port).await?),
+        // `tailscale serve --bg` outlives Workshop, so once it's been set up, it's still served.
+        None => workshop_tailscale::serving_url(bind.port()).await,
+    };
+    // Held until Workshop stops, which stops `caffeinate` with it.
+    let _awake = match &phone_base {
+        Some(base) => {
+            print_phone_link(base, &token)?;
+            stay_awake.then(keep_awake).flatten()
+        }
+        None => {
+            println!(
+                "To use it from your phone, run `workshop serve --tailscale` once, or put it behind another HTTPS proxy, which browsers need for the microphone."
+            );
+            None
+        }
+    };
     let warm = app.clone();
     tokio::spawn(async move { warm.warm_up().await });
     let notifier = app.notifier.clone();
@@ -443,21 +456,50 @@ async fn shutdown_signal() {
     }
 }
 
-async fn print_phone_link(
+/// Serves Workshop over HTTPS on the tailnet, returning its base URL there.
+async fn serve_on_tailscale(
     bind: SocketAddr,
-    token: &str,
     https_port: workshop_tailscale::HttpsPort,
-) -> Result<()> {
+) -> Result<String> {
     if !(bind.ip().is_loopback() || bind.ip().is_unspecified()) {
         anyhow::bail!("`--tailscale` forwards to 127.0.0.1, so Workshop must listen there");
     }
-    let base = workshop_tailscale::serve(bind.port(), https_port).await?;
+    workshop_tailscale::serve(bind.port(), https_port).await
+}
+
+fn print_phone_link(base: &str, token: &str) -> Result<()> {
     let url = format!("{base}/?token={token}");
     println!(
         "\nOn your phone, open {url}\nor scan:\n\n{}",
         qr_code(&url)?
     );
     Ok(())
+}
+
+/// Keeps the machine from sleeping while Workshop runs, where `caffeinate` can, so it can still
+/// be reached from a phone. `caffeinate -w` also stops by itself if Workshop exits without
+/// dropping the child.
+fn keep_awake() -> Option<tokio::process::Child> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let pid = std::process::id().to_string();
+    match tokio::process::Command::new("caffeinate")
+        .args(["-i", "-w", &pid])
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(child) => {
+            println!(
+                "Keeping this Mac awake while Workshop runs; set `keep_awake = false` under [server] to stop this."
+            );
+            Some(child)
+        }
+        Err(err) => {
+            tracing::warn!("couldn't keep this Mac awake with caffeinate: {err}");
+            None
+        }
+    }
 }
 
 #[cfg(test)]

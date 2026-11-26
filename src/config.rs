@@ -124,6 +124,9 @@ pub struct ServerConfig {
     pub bind: SocketAddr,
     /// Whether to check GitHub once a day for a newer release.
     pub check_for_updates: bool,
+    /// Whether to keep the machine from sleeping while Workshop is served to other devices, on
+    /// macOS, where `caffeinate` does it.
+    pub keep_awake: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -306,6 +309,7 @@ impl Default for ServerConfig {
         Self {
             bind: SocketAddr::from(([127, 0, 0, 1], 7878)),
             check_for_updates: true,
+            keep_awake: true,
         }
     }
 }
