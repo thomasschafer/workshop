@@ -121,12 +121,38 @@ export interface HomeOptions {
   model: "fake" | "default";
   /** More config, appended. */
   extra?: string;
+  /** Whether to give Helix's keybindings the tests' own options and keys, rather than its defaults. */
+  helix?: boolean;
   /**
    * The author's settings. Its reviewer is set, so the server never checks whether a real
    * model CLI is installed and logged in to choose one.
    */
   author?: string;
 }
+
+/** Options and keys of one's own for Helix's keybindings, which the tests check are followed. */
+const HELIX_CONFIG = `# Off until a device turns them on, with keys of one's own.
+[editor.helix]
+line-number = "relative"
+color-modes = true
+
+[editor.helix.keys.normal]
+X = "extend_line_above"
+A-up = [
+  "ensure_selections_forward",
+  "extend_to_line_bounds",
+  "extend_char_right",
+  "extend_char_left",
+  "delete_selection",
+  "move_line_up",
+  "add_newline_above",
+  "move_line_up",
+  "replace_with_yanked",
+]
+
+[editor.helix.keys.normal.space]
+x = ["yank_to_clipboard", "delete_selection"]
+`;
 
 /** Writes a Workshop home for Python, with the puzzle and input already in the cache. */
 export function writeHome(options: HomeOptions): void {
@@ -140,6 +166,7 @@ export function writeHome(options: HomeOptions): void {
     stars,
     model,
     extra = "",
+    helix = true,
     author = model === "fake" ? '[author]\nreviewer = { provider = "fake", model = "fake" }\n' : "",
   } = options;
   rmSync(home, { recursive: true, force: true });
@@ -178,28 +205,7 @@ language = "python"
 [aoc]
 base_url = "http://127.0.0.1:9"
 
-# Off until a device turns them on, with keys of one's own.
-[editor.helix]
-line-number = "relative"
-color-modes = true
-
-[editor.helix.keys.normal]
-X = "extend_line_above"
-A-up = [
-  "ensure_selections_forward",
-  "extend_to_line_bounds",
-  "extend_char_right",
-  "extend_char_left",
-  "delete_selection",
-  "move_line_up",
-  "add_newline_above",
-  "move_line_up",
-  "replace_with_yanked",
-]
-
-[editor.helix.keys.normal.space]
-x = ["yank_to_clipboard", "delete_selection"]
-${models}
+${helix ? HELIX_CONFIG : ""}${models}
 ${author}
 ${extra}
 ${pythonProfile()}

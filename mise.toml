@@ -85,6 +85,11 @@ description = "Record docs/demo.gif on an emulated phone (makes real calls to yo
 depends = ["build-frontend"]
 run = "cargo build && cd frontend && node demo/record.ts"
 
+[tasks.screenshots]
+description = "Take the README's screenshots, in docs/screenshots, on an emulated phone and computer"
+depends = ["build-frontend"]
+run = "cargo build && cd frontend && node demo/screenshots.ts"
+
 [tasks.doctor]
 description = "Check your setup"
 run = "cargo run --release -- doctor"

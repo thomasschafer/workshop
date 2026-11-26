@@ -10,28 +10,13 @@ import { join, resolve } from "node:path";
 import { chromium, devices, type Page } from "@playwright/test";
 import { writeHome } from "../e2e/fixture.ts";
 import { installSimulatedSpeech } from "../e2e/speech.ts";
+import { DAY, INPUT, PUZZLE, STARS, YEAR } from "./puzzle.ts";
 
 const PORT = 7898;
 const HOME = join(tmpdir(), "workshop-demo");
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const FRAMES_DIR = join(HOME, "frames");
 const OUTPUT = join(ROOT, "docs", "demo.gif");
-const YEAR = 2025;
-const DAY = 9;
-
-// Invented for the demo. Never put a real puzzle or input here.
-const PUZZLE = `<html><body><main>
-<article class="day-desc"><h2>--- Day ${DAY}: Lantern Rows ---</h2>
-<p>Each line lists the lanterns on one row of the market stalls. Which row has the most?</p>
-<p>For example:</p>
-<pre><code>3 4
-10
-1 2 3
-</code></pre>
-<p>The rows have 7, 10 and 6 lanterns, so the answer is <code><em>10</em></code>.</p>
-</article>
-</main></body></html>`;
-const INPUT = "5 8 13\n21 1\n2 2 2 2\n40\n9 9 9\n";
 
 /** Words spoken per second, roughly a brisk speaking pace. */
 const WORDS_PER_SECOND = 3.5;
@@ -171,7 +156,7 @@ async function record(): Promise<string> {
     day: DAY,
     puzzle: PUZZLE,
     input: INPUT,
-    stars: { 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 1, 8: 2, 9: 0 },
+    stars: { ...STARS },
     model: "default",
   });
   // Before the server starts, so a browser that won't launch doesn't leave it running.
