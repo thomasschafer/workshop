@@ -1,6 +1,8 @@
 import { micromark } from "micromark";
 import { gfm, gfmHtml } from "micromark-extension-gfm";
-import { highlightedHtml } from "./syntax";
+import { highlightedHtml, onSyntaxHighlightUpdate } from "./syntax";
+
+export { onSyntaxHighlightUpdate as onMarkdownHighlightUpdate };
 
 /** A code block as micromark writes it, marked with a language. Its text is escaped. */
 const CODE_BLOCK = /<pre><code class="language-([^"]+)">([\s\S]*?)<\/code><\/pre>/g;

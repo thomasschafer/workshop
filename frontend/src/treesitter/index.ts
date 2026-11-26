@@ -1,3 +1,4 @@
+import { indentService, indentUnit } from "@codemirror/language";
 import { EditorState, type Extension, StateEffect, StateField, type Text } from "@codemirror/state";
 import {
   Decoration,
@@ -8,7 +9,16 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import type { Query, Tree } from "web-tree-sitter";
-import { LANGUAGES as HELIX_LANGUAGES } from "../helix/languages";
+import {
+  autoDetectIndentStyle,
+  compileIndentQuery,
+  indentForNewline,
+  indentString,
+  indentWidth,
+  treesitterIndentForPos,
+} from "../helix/indent";
+import { LANGUAGES as HELIX_LANGUAGES, PLAIN_TEXT } from "../helix/languages";
+import { Doc, firstNonWhitespace } from "../helix/text";
 import { buildHighlightDecorations, highlightRange } from "./highlighter";
 import {
   getLoadedLanguageBundle,
@@ -23,12 +33,22 @@ import { activeSyntaxScopeSet, onSyntaxThemeChange } from "./theme";
 
 export type { HighlightSpan } from "./highlighter";
 export { buildHighlightDecorations, highlightRange } from "./highlighter";
-export type { QueryKind, WasmBytesLoader } from "./languages";
-export { hasTreeSitterMode, loadLanguageBundle, setWasmBytesLoader } from "./languages";
+export type { LanguageBundle, QueryKind, WasmBytesLoader } from "./languages";
+export {
+  getLoadedLanguageBundle,
+  hasTreeSitterMode,
+  loadLanguageBundle,
+  onLanguageBundleLoaded,
+  registeredTreeSitterModes,
+  setWasmBytesLoader,
+} from "./languages";
+export { TREE_SITTER_MATCH_LIMIT } from "./locals";
 export type { TreeStats } from "./managedTree";
 export { getTreeStats } from "./managedTree";
 export type { SyntaxSnapshot } from "./syntax";
 export { changeSetToEdits, SyntaxTree } from "./syntax";
+export type { CapturedNode } from "./textObject";
+export { captureNodes, captureNodesAny } from "./textObject";
 export {
   activeSyntaxScopeSet,
   buildHelixSyntaxCss,
@@ -38,6 +58,7 @@ export {
   setActiveSyntaxThemes,
   WORKSHOP_SYNTAX_SCOPES,
 } from "./theme";
+export { SyntaxTreeCursor } from "./treeCursor";
 
 /** Extra lines highlighted above and below the viewport to keep scrolling smooth. */
 const VIEWPORT_MARGIN_LINES = 20;
@@ -201,14 +222,108 @@ function computeDecorations(view: EditorView): DecorationSet {
   return buildHighlightDecorations(spans);
 }
 
-function commentLanguageData(mode: string): Extension {
-  const helixLang = HELIX_LANGUAGES[mode];
-  if (!helixLang) return [];
+function indentColumns(text: string, tabWidth: number): number {
+  let cols = 0;
+  for (let i = 0; i < text.length; i++) {
+    cols += text[i] === "\t" ? tabWidth - (cols % tabWidth) : 1;
+  }
+  return cols;
+}
+
+/**
+ * Provides CodeMirror's `indentUnit`, `indentService`, `indentOnInput`, and `commentTokens`
+ * from Helix's language config and ported `indents.scm` engine, so non-Helix keybindings
+ * (Enter, closing brackets, comment toggle) and LSP formatting agree with Helix.
+ */
+function languageMetadata(mode: string): Extension {
+  const helixLang = HELIX_LANGUAGES[mode] ?? PLAIN_TEXT;
+  const data: {
+    commentTokens?: { line?: string; block?: { open: string; close: string } };
+    indentOnInput?: RegExp;
+  } = {
+    indentOnInput: /^\s*[}\])]$/,
+  };
   const commentTokens: { line?: string; block?: { open: string; close: string } } = {};
   if (helixLang.lineComments[0]) commentTokens.line = helixLang.lineComments[0];
   if (helixLang.blockComments[0]) commentTokens.block = helixLang.blockComments[0];
-  if (!commentTokens.line && !commentTokens.block) return [];
-  return EditorState.languageData.of(() => [{ commentTokens }]);
+  if (commentTokens.line || commentTokens.block) data.commentTokens = commentTokens;
+
+  const helixIndentService = indentService.of((context, pos) => {
+    const snapshot = getSyntaxTree(context.state);
+    const doc = new Doc(context.state.doc);
+    const indentStyle = autoDetectIndentStyle(doc) ?? helixLang.indent;
+    const tabWidth = helixLang.tabWidth;
+    if (context.simulatedBreak !== null) {
+      const breakPos = context.simulatedBreak;
+      const lineBefore = doc.lineOf(breakPos);
+      const ws = indentForNewline(
+        snapshot?.syntax ?? null,
+        indentStyle,
+        tabWidth,
+        doc,
+        lineBefore,
+        breakPos,
+        lineBefore,
+      );
+      return indentColumns(ws, tabWidth);
+    }
+    if (snapshot === null) return null;
+    const rawQuery = snapshot.syntax.queryForLayer(snapshot.syntax.rootLayer, "indents");
+    if (rawQuery === null) return null;
+    const compiled = compileIndentQuery(rawQuery);
+    const lineIdx = doc.lineOf(pos);
+    const fnw = firstNonWhitespace(doc, lineIdx);
+    const targetPos = fnw !== null ? doc.lineStart(lineIdx) + fnw : pos;
+    const width = indentWidth(indentStyle, tabWidth);
+    const computed = treesitterIndentForPos(
+      compiled,
+      snapshot.syntax,
+      tabWidth,
+      width,
+      doc,
+      lineIdx,
+      targetPos,
+      false,
+    );
+    if (computed === null) return null;
+    return indentColumns(computed.toString(indentStyle, tabWidth), tabWidth);
+  });
+
+  return [
+    indentUnit.of(indentString(helixLang.indent)),
+    helixIndentService,
+    EditorState.languageData.of(() => [data]),
+  ];
+}
+
+function initSyntaxField(mode: string): { fieldExtension: Extension; pool: SnapshotPool } {
+  const pool = new SnapshotPool();
+  const cachedOnCreate = getLoadedLanguageBundle(mode);
+  const fieldExtension = cachedOnCreate
+    ? syntaxTreeField.init((state) => {
+        const syntax = SyntaxTree.parse(textSourceFromDoc(state.doc), mode);
+        return createPooledSnapshot(mode, cachedOnCreate, state.doc, pool, syntax);
+      })
+    : syntaxTreeField;
+  return { fieldExtension, pool };
+}
+
+/**
+ * StateField-only tree-sitter extension for headless `EditorState` instances (such as tests),
+ * returning a `dispose` callback that immediately releases the pool's WASM trees.
+ */
+export function createSyntaxStateField(mode: string): {
+  readonly extension: Extension;
+  dispose(): void;
+} {
+  if (!hasTreeSitterMode(mode)) {
+    throw new Error(`tree-sitter mode ${JSON.stringify(mode)} is not registered`);
+  }
+  const { fieldExtension, pool } = initSyntaxField(mode);
+  return {
+    extension: fieldExtension,
+    dispose: () => pool.clear(),
+  };
 }
 
 /**
@@ -220,14 +335,7 @@ export function treeSitterExtension(mode: string): Extension {
     throw new Error(`tree-sitter mode ${JSON.stringify(mode)} is not registered`);
   }
 
-  const pool = new SnapshotPool();
-  const cachedOnCreate = getLoadedLanguageBundle(mode);
-  const fieldExtension = cachedOnCreate
-    ? syntaxTreeField.init((state) => {
-        const syntax = SyntaxTree.parse(textSourceFromDoc(state.doc), mode);
-        return createPooledSnapshot(mode, cachedOnCreate, state.doc, pool, syntax);
-      })
-    : syntaxTreeField;
+  const { fieldExtension, pool } = initSyntaxField(mode);
 
   const plugin = ViewPlugin.fromClass(
     class implements PluginValue {
@@ -275,5 +383,5 @@ export function treeSitterExtension(mode: string): Extension {
     { decorations: (v) => v.decorations },
   );
 
-  return [fieldExtension, plugin, commentLanguageData(mode)];
+  return [fieldExtension, plugin, languageMetadata(mode)];
 }

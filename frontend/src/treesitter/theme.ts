@@ -84,14 +84,15 @@ function styleToCssDecls(style: SyntaxScopeStyle): string {
 
 function schemeCss(scheme: "light" | "dark", scopes: HelixSyntaxScopes): string {
   const rules: string[] = [
-    // Clear Workshop's default `.syntax-*` rules inside the editor so a Helix theme's absence of
-    // italic (e.g. on comments) isn't overridden by `styles.css`.
-    ".cm-content .ts-hl{color:inherit;font-style:inherit;font-weight:inherit;text-decoration:none;}",
+    // Clear Workshop's default `.syntax-*` rules inside the editor and Markdown code blocks so a
+    // Helix theme's absence of italic (e.g. on comments) isn't overridden by `styles.css`.
+    ".cm-content .ts-hl,.markdown .ts-hl{color:inherit;font-style:inherit;font-weight:inherit;text-decoration:none;}",
   ];
   for (const [scope, style] of Object.entries(scopes)) {
     const decls = styleToCssDecls(style);
     if (!decls) continue;
-    rules.push(`.cm-content .ts-hl.${scopeToClass(scope)}{${decls}}`);
+    const cls = scopeToClass(scope);
+    rules.push(`.cm-content .ts-hl.${cls},.markdown .ts-hl.${cls}{${decls}}`);
   }
   return `@media (prefers-color-scheme: ${scheme}) {\n${rules.join("\n")}\n}`;
 }

@@ -16,11 +16,21 @@ import {
   type TransactionSpec,
 } from "@codemirror/state";
 import { errorMessage } from "../errors";
+import { getSyntaxTree, type SyntaxTree } from "../treesitter";
 import { type Change, mapSelection, normalizeChanges } from "./changes";
 import type { BlockCommentToken } from "./comment";
 import { helixUndoGroup } from "./history";
+import {
+  autoDetectIndentStyle,
+  indentForNewline as computeIndentForNewline,
+  type IndentStyle,
+  IndentStyleKind,
+  indentString,
+  indentWidth,
+} from "./indent";
 import type { Mode } from "./keymap";
 import type { Key } from "./keys";
+import { LANGUAGES as HELIX_LANGUAGES } from "./languages";
 import type { Picker } from "./picker";
 import { Range, Selection } from "./selection";
 import { at, Doc, isEmptyLine, prevGraphemeBoundary } from "./text";
@@ -35,8 +45,8 @@ export interface HelixOptions {
   readonly wrapAround: boolean;
   /** Typing an opening bracket or quote also types the closing one. */
   readonly autoPairs: boolean;
-  /** Tab moves past the end of the enclosing brackets when there's text before the cursor. */
-  readonly smartTab: boolean;
+  /** Tab moves to the end of the enclosing syntax node when there's text before the cursor. */
+  readonly smartTab: SmartTabConfig;
   readonly lineNumbers: "absolute" | "relative";
   /** Colour the mode shown under the code, and the cursor, by mode. */
   readonly colorModes: boolean;
@@ -45,6 +55,11 @@ export interface HelixOptions {
   readonly jumpLabelAlphabet: string;
   /** Vertical guides drawn over leading whitespace at each indentation level. */
   readonly indentGuides: IndentGuidesConfig;
+}
+
+export interface SmartTabConfig {
+  readonly enable: boolean;
+  readonly supersedeMenu: boolean;
 }
 
 export type CursorShape = "block" | "bar" | "underline" | "hidden";
@@ -59,7 +74,7 @@ export const DEFAULT_OPTIONS: HelixOptions = {
   smartCase: true,
   wrapAround: true,
   autoPairs: true,
-  smartTab: false,
+  smartTab: { enable: true, supersedeMenu: false },
   lineNumbers: "absolute",
   colorModes: false,
   cursorShape: { normal: "block", select: "block", insert: "block" },
@@ -109,11 +124,8 @@ export interface Host {
   readClipboard(): Promise<string>;
   writeClipboard(text: string): Promise<void>;
   diagnostics(): readonly HelixDiagnostic[];
-  /**
-   * The indentation the language would give a new line broken at `pos`, in columns, or null if
-   * it has no opinion.
-   */
-  languageIndent(pos: number): number | null;
+  /** Whether a running language server advertises `documentSymbolProvider`. */
+  hasLspDocumentSymbols(): boolean;
   /** The tokens that start a line comment and surround a block comment in the language. */
   commentTokens(pos: number): {
     readonly line: readonly string[];
@@ -146,87 +158,13 @@ export type HostAction =
   | "code_action"
   | "symbol_picker";
 
-export enum IndentStyleKind {
-  Tabs,
-  Spaces,
-}
-
-export type IndentStyle =
-  | { kind: IndentStyleKind.Tabs }
-  | { kind: IndentStyleKind.Spaces; n: number };
-
-export function indentString(style: IndentStyle): string {
-  return style.kind === IndentStyleKind.Tabs
-    ? "\t"
-    : " ".repeat(Math.min(16, Math.max(1, style.n)));
-}
-
-export function indentWidth(style: IndentStyle, tabWidth: number): number {
-  return style.kind === IndentStyleKind.Tabs ? tabWidth : style.n;
-}
-
-const MAX_INDENT = 16;
-
-/** Guesses the indentation a document uses from how much its lines are indented by. */
-export function autoDetectIndentStyle(doc: Doc): IndentStyle | null {
-  const histogram = new Array<number>(MAX_INDENT + 1).fill(0);
-  let prevIsTabs = false;
-  let prevLeading = 0;
-  outer: for (let line = 0; line < Math.min(doc.lines, 1000); line++) {
-    const text = doc.line(line);
-    const first = text[0];
-    let isTabs: boolean;
-    if (first === "\t") {
-      isTabs = true;
-    } else if (first === " ") {
-      isTabs = false;
-    } else if (first === "\n" || first === "\r") {
-      continue;
-    } else {
-      prevIsTabs = false;
-      prevLeading = 0;
-      continue;
-    }
-    let leading = 1;
-    let done = false;
-    for (let i = 1; i < text.length; i++) {
-      const c = text[i];
-      if (c === "\t" && isTabs && !done) {
-        leading++;
-      } else if (c === " " && !isTabs && !done) {
-        leading++;
-      } else if (c === "\n" || c === "\r") {
-        continue outer;
-      } else if (c === " " || c === "\t") {
-        done = true;
-      } else {
-        break;
-      }
-      if (leading > 256) continue outer;
-    }
-    if ((prevIsTabs === isTabs || prevLeading === 0) && prevLeading < leading) {
-      const bucket = isTabs ? 0 : leading - prevLeading;
-      if (bucket <= MAX_INDENT) histogram[bucket] = at(histogram, bucket) + 1;
-    }
-    prevIsTabs = isTabs;
-    prevLeading = leading;
-  }
-  histogram[0] = at(histogram, 0) * 2;
-  // Single spaces are often used in comments, and rarely as indentation.
-  if (at(histogram, 1) > 1) histogram[1] = Math.floor(at(histogram, 1) / 2);
-
-  let indent = 0;
-  for (let i = 1; i < histogram.length; i++)
-    if (at(histogram, i) > at(histogram, indent)) indent = i;
-  const freq = at(histogram, indent);
-  const freq2 = Math.max(...histogram.filter((_, i) => i !== indent));
-  if (freq >= 1 && freq2 / freq < 0.66) {
-    return indent === 0
-      ? { kind: IndentStyleKind.Tabs }
-      : { kind: IndentStyleKind.Spaces, n: indent };
-  }
-  return null;
-}
+export {
+  autoDetectIndentStyle,
+  type IndentStyle,
+  IndentStyleKind,
+  indentString,
+  indentWidth,
+} from "./indent";
 
 // ---- Registers ----
 
@@ -496,6 +434,8 @@ export class HelixEditor {
   mode: Mode = "normal";
   readonly registers: Registers = new Registers(this);
   readonly jumps: JumpList;
+  /** Selection history pushed by `expand_selection` and popped by `shrink_selection`. */
+  readonly objectSelections: Selection[] = [];
   /** The last motion, which `A-.` repeats. */
   lastMotion: ((editor: HelixEditor) => void) | null = null;
   /** The count typed so far, before a command. */
@@ -547,6 +487,11 @@ export class HelixEditor {
 
   get selection(): Selection {
     return helixSelection(this.host.state);
+  }
+
+  /** The current document's tree-sitter syntax tree, or `null` if unavailable or still loading. */
+  get syntax(): SyntaxTree | null {
+    return getSyntaxTree(this.host.state)?.syntax ?? null;
   }
 
   get tabWidth(): number {
@@ -743,39 +688,36 @@ export class HelixEditor {
     });
   }
 
-  /** The indentation for a new line after `line`, broken at `pos`. */
-  indentForNewline(line: number, pos: number): string {
-    const fromLanguage = this.host.languageIndent(pos);
-    if (fromLanguage !== null) return this.indentOfColumns(fromLanguage);
-    // Helix's fallback, without a syntax tree: the current line's indentation, in whole levels.
-    const level = indentLevelForLine(this.doc, line, this.tabWidth, this.indentWidth);
-    return this.indentUnit.repeat(level);
+  /** The indentation for a new line after `lineBefore`, broken at `lineBeforeEndPos`. */
+  indentForNewline(lineBefore: number, lineBeforeEndPos: number, currentLine: number): string {
+    return computeIndentForNewline(
+      this.syntax,
+      this.indentStyle,
+      this.tabWidth,
+      this.doc,
+      lineBefore,
+      lineBeforeEndPos,
+      currentLine,
+    );
   }
 
-  /** Indentation `columns` wide, in the document's style. */
-  indentOfColumns(columns: number): string {
-    const style = this.indentStyle;
-    if (style.kind === IndentStyleKind.Spaces) return " ".repeat(columns);
-    return "\t".repeat(Math.floor(columns / this.tabWidth)) + " ".repeat(columns % this.tabWidth);
+  /** Comment tokens of the syntax layer at `pos` (`doc.language_config_at`), or host's fallback. */
+  commentTokensAt(pos: number): {
+    readonly line: readonly string[];
+    readonly block: readonly BlockCommentToken[];
+  } {
+    const syntax = this.syntax;
+    if (syntax !== null) {
+      const layer = syntax.layerForRange(pos, pos);
+      const cfg = HELIX_LANGUAGES[syntax.layer(layer).language];
+      return cfg ? { line: cfg.lineComments, block: cfg.blockComments } : { line: [], block: [] };
+    }
+    return this.host.commentTokens(pos);
   }
 
   isLineEmpty(line: number): boolean {
     return isEmptyLine(this.doc, line);
   }
-}
-
-function indentLevelForLine(doc: Doc, line: number, tabWidth: number, width: number): number {
-  let len = 0;
-  for (const ch of doc.line(line)) {
-    if (ch === "\t") {
-      len += tabWidth - (len % tabWidth);
-    } else if (ch === " ") {
-      len++;
-    } else {
-      break;
-    }
-  }
-  return Math.floor(len / width);
 }
 
 function sameGoals(a: Selection, b: Selection): boolean {

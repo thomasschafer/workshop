@@ -1,27 +1,46 @@
 import { useEffect, useState } from "preact/hooks";
 
-export type Renderer = typeof import("../markdown").renderMarkdown;
+type MarkdownModule = typeof import("../markdown");
+export type Renderer = MarkdownModule["renderMarkdown"];
 
 // The renderer is loaded when first needed, so pages that never show markdown don't pay for it.
-let renderer: Renderer | null = null;
+let loadedModule: MarkdownModule | null = null;
 
 /** Loads the markdown renderer, such as ahead of going offline, so it's there when needed. */
 export function loadMarkdown(): Promise<Renderer> {
   return import("../markdown").then((module) => {
-    renderer = module.renderMarkdown;
+    loadedModule = module;
     return module.renderMarkdown;
   });
 }
 
-/** The markdown renderer, or null until it's loaded. */
+/**
+ * The markdown renderer, or null until it's loaded. Returns a fresh function reference whenever a
+ * tree-sitter grammar finishes loading or the syntax theme changes, so callers re-render with
+ * highlighted code blocks without layout jumps.
+ */
 export function useMarkdown(): Renderer | null {
-  const [loaded, setLoaded] = useState(() => renderer);
+  const [mod, setMod] = useState<MarkdownModule | null>(() => loadedModule);
+  const [, setVersion] = useState(0);
+
   useEffect(() => {
-    if (loaded !== null) return;
-    loadMarkdown()
-      .then((render) => setLoaded(() => render))
+    if (mod !== null) {
+      return mod.onMarkdownHighlightUpdate(() => setVersion((v) => v + 1));
+    }
+    let cancelled = false;
+    import("../markdown")
+      .then((module) => {
+        loadedModule = module;
+        if (!cancelled) setMod(module);
+      })
       // What would be formatted still shows, as plain text.
       .catch((e: unknown) => console.error("Couldn't load the markdown renderer", e));
-  }, [loaded]);
-  return loaded;
+    return () => {
+      cancelled = true;
+    };
+  }, [mod]);
+
+  if (mod === null) return null;
+  const render = mod.renderMarkdown;
+  return (text: string) => render(text);
 }

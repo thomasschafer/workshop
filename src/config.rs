@@ -248,9 +248,12 @@ pub enum LineNumber {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default, rename_all = "kebab-case")]
 pub struct SmartTab {
-    pub enable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersede_menu: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -654,7 +657,7 @@ mod tests {
             [editor.helix]
             line-number = "relative"
             color-modes = true
-            smart-tab.enable = false
+            smart-tab = { enable = false, supersede-menu = true }
             indent-guides = { render = false, skip-levels = 1 }
 
             [editor.helix.keys.normal]
@@ -669,7 +672,13 @@ mod tests {
         let helix = &config.editor.helix;
         assert_eq!(helix.line_number, Some(LineNumber::Relative));
         assert_eq!(helix.color_modes, Some(true));
-        assert_eq!(helix.smart_tab, Some(SmartTab { enable: false }));
+        assert_eq!(
+            helix.smart_tab,
+            Some(SmartTab {
+                enable: Some(false),
+                supersede_menu: Some(true),
+            })
+        );
         assert_eq!(
             helix.indent_guides,
             Some(IndentGuidesConfig {

@@ -66,8 +66,7 @@ format_automatically = true
 # color-modes = false
 # auto-pairs = true
 # jump-label-alphabet = "abcdefghijklmnopqrstuvwxyz"
-# smart-tab.enable = false    # Helix's default is true; without a syntax tree, Tab after text
-#                             # moves past the closing bracket around the cursor instead
+# smart-tab = { enable = true, supersede-menu = false }
 # search.smart-case = true
 # search.wrap-around = true
 # cursor-shape = { normal = "block", insert = "block", select = "block" }

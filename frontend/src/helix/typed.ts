@@ -121,8 +121,12 @@ const OPTIONS: Record<
     set: (e, v) => setOption(e, "autoPairs", parseBool(v)),
   },
   "smart-tab.enable": {
-    get: (e) => e.options.smartTab,
-    set: (e, v) => setOption(e, "smartTab", parseBool(v)),
+    get: (e) => e.options.smartTab.enable,
+    set: (e, v) => setOption(e, "smartTab", { ...e.options.smartTab, enable: parseBool(v) }),
+  },
+  "smart-tab.supersede-menu": {
+    get: (e) => e.options.smartTab.supersedeMenu,
+    set: (e, v) => setOption(e, "smartTab", { ...e.options.smartTab, supersedeMenu: parseBool(v) }),
   },
   "search.smart-case": {
     get: (e) => e.options.smartCase,
@@ -456,7 +460,7 @@ const UNSUPPORTED_TYPED: Readonly<Record<string, string>> = {
       "tree-sitter-highlight-name",
       "tree-sitter-layers",
       "tree-sitter-subtree",
-    ].map((n) => [n, "needs a syntax tree, which Workshop's editor doesn't have"]),
+    ].map((n) => [n, "is a tree-sitter query debugging command, which Workshop doesn't expose"]),
   ),
   ...Object.fromEntries(
     ["debug-start", "debug-remote", "debug-eval"].map((n) => [

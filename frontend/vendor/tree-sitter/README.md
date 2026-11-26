@@ -12,7 +12,17 @@ revisions in `manifest.json`.
 | Mode | Role | Helix language | Grammar repository | Revision | Grammar licence |
 | --- | --- | --- | --- | --- | --- |
 | `haskell` | editor mode | `haskell` | https://github.com/tree-sitter/tree-sitter-haskell | `0975ef72fc3c` | MIT (`haskell/LICENSE`) |
+| `python` | editor mode | `python` | https://github.com/tree-sitter/tree-sitter-python | `293fdc02038e` | MIT (`python/LICENSE`) |
+| `typescript` | editor mode | `typescript` | https://github.com/tree-sitter/tree-sitter-typescript | `75b3874edb2d` | MIT (`typescript/LICENSE`) |
+| `go` | editor mode | `go` | https://github.com/tree-sitter/tree-sitter-go | `2346a3ab1bb3` | MIT (`go/LICENSE`) |
+| `rust` | editor mode | `rust` | https://github.com/tree-sitter/tree-sitter-rust | `77a3747266f4` | MIT (`rust/LICENSE`) |
+| `cpp` | editor mode | `cpp` | https://github.com/tree-sitter/tree-sitter-cpp | `8b5b49eb196b` | MIT (`cpp/LICENSE`) |
 | `comment` | injection | `comment` | https://github.com/stsewd/tree-sitter-comment | `66272d2b6c73` | MIT (`comment/LICENSE`) |
+| `regex` | injection | `regex` | https://github.com/tree-sitter/tree-sitter-regex | `b2ac15e27fce` | MIT (`regex/LICENSE`) |
+| `jsdoc` | injection | `jsdoc` | https://github.com/tree-sitter/tree-sitter-jsdoc | `658d18dcdddb` | MIT (`jsdoc/LICENSE`) |
+| `rust-format-args` | injection | `rust-format-args` | https://github.com/nik-rev/tree-sitter-rust-format-args | `84ffe550e261` | MIT (`rust-format-args/LICENSE`) |
+| `rust-format-args-macro` | injection | `rust-format-args-macro` | reuses `rust` | — | see `rust` |
+| `go-format-string` | injection | `go-format-string` | https://codeberg.org/kpbaks/tree-sitter-go-format-string | `06587ea64115` | MIT (`go-format-string/LICENSE`) |
 
 ## Licences
 

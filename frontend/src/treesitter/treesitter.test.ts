@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EditorState } from "@codemirror/state";
+import { insertNewlineAndIndent } from "@codemirror/commands";
+import { getIndentUnit, indentOnInput, indentUnit } from "@codemirror/language";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   buildHelixSyntaxCss,
@@ -13,16 +14,16 @@ import {
   type HighlightSpan,
   highlightRange,
   loadLanguageBundle,
+  registeredTreeSitterModes,
   resolveScope,
   SyntaxTree,
   scopeToClass,
-  setWasmBytesLoader,
   treeSitterExtension,
   WORKSHOP_SYNTAX_SCOPES,
 } from "./index";
+import { installNodeWasmLoader } from "./nodeTestLoader";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const GOLDEN_SOURCE = readFileSync(join(HERE, "fixtures", "haskell.hs"), "utf8");
 
 interface GoldenSpan {
   from: number;
@@ -31,24 +32,62 @@ interface GoldenSpan {
   scopes: string[];
 }
 
-const GOLDEN_SPANS = JSON.parse(
-  readFileSync(join(HERE, "fixtures", "haskell.golden.json"), "utf8"),
-) as GoldenSpan[];
+interface GoldenFixture {
+  readonly mode: string;
+  readonly sourceFile: string;
+  readonly goldenFile: string;
+  readonly sliceFrom: string;
+  readonly sliceTo: string;
+}
+
+const GOLDEN_FIXTURES: readonly GoldenFixture[] = [
+  {
+    mode: "haskell",
+    sourceFile: "haskell.hs",
+    goldenFile: "haskell.golden.json",
+    sliceFrom: "{- Block comment",
+    sliceTo: "compose ::",
+  },
+  {
+    mode: "python",
+    sourceFile: "python.py",
+    goldenFile: "python.golden.json",
+    sliceFrom: "def evaluate(",
+    sliceTo: "async def run_all(",
+  },
+  {
+    mode: "typescript",
+    sourceFile: "typescript.ts",
+    goldenFile: "typescript.golden.json",
+    sliceFrom: "const TOKEN_RE",
+    sliceTo: "export async function evaluate",
+  },
+  {
+    mode: "go",
+    sourceFile: "go.go",
+    goldenFile: "go.golden.json",
+    sliceFrom: "func Evaluate(",
+    sliceTo: "func Demo(",
+  },
+  {
+    mode: "rust",
+    sourceFile: "rust.rs",
+    goldenFile: "rust.golden.json",
+    sliceFrom: "pub fn evaluate(",
+    sliceTo: "pub fn demo(",
+  },
+  {
+    mode: "cpp",
+    sourceFile: "cpp.cpp",
+    goldenFile: "cpp.golden.json",
+    sliceFrom: "class Evaluator",
+    sliceTo: "inline const char*",
+  },
+];
 
 beforeAll(async () => {
-  setWasmBytesLoader(async (url) => {
-    let filePath = url;
-    if (filePath.startsWith("file://")) {
-      filePath = fileURLToPath(filePath);
-    } else if (filePath.startsWith("/@fs/")) {
-      filePath = filePath.slice("/@fs".length);
-    } else if (filePath.startsWith("/")) {
-      filePath = resolve(process.cwd(), filePath.slice(1));
-    }
-    const buf = await readFile(filePath);
-    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-  });
-  await loadLanguageBundle("haskell");
+  installNodeWasmLoader();
+  await Promise.all(registeredTreeSitterModes().map((mode) => loadLanguageBundle(mode)));
 });
 
 describe("theme scope lookup", () => {
@@ -75,12 +114,14 @@ describe("theme scope lookup", () => {
       },
     });
     expect(css).toContain("@media (prefers-color-scheme: dark)");
-    expect(css).toContain(".cm-content .ts-hl.syntax-keyword{color:#cba6f7;font-weight:700;}");
     expect(css).toContain(
-      ".cm-content .ts-hl.syntax-comment{color:#6c7086;font-style:italic;opacity:0.65;}",
+      ".cm-content .ts-hl.syntax-keyword,.markdown .ts-hl.syntax-keyword{color:#cba6f7;font-weight:700;}",
     );
     expect(css).toContain(
-      ".cm-content .ts-hl.syntax-markup-link-url{color:#89b4fa;text-decoration:underline line-through;}",
+      ".cm-content .ts-hl.syntax-comment,.markdown .ts-hl.syntax-comment{color:#6c7086;font-style:italic;opacity:0.65;}",
+    );
+    expect(css).toContain(
+      ".cm-content .ts-hl.syntax-markup-link-url,.markdown .ts-hl.syntax-markup-link-url{color:#89b4fa;text-decoration:underline line-through;}",
     );
     expect(buildHelixSyntaxCss({})).toBeNull();
   });
@@ -441,55 +482,317 @@ describe("capture precedence, locals, and injections", () => {
 });
 
 describe("Helix tree-house golden parity", () => {
-  // `fixtures/haskell.golden.json` was produced by running Helix's `tree-house` 0.4.0 crate
-  // directly against Helix's `runtime/grammars/{haskell,comment}.dylib` and
-  // `runtime/queries/{haskell,comment}/*.scm` at commit 18dbe190a0139f6c74320059146b2413b82b011c.
-  it("matches Helix tree-house 0.4.0 output on every span of fixtures/haskell.hs", () => {
-    const syntax = SyntaxTree.parse(GOLDEN_SOURCE, "haskell");
-    try {
-      const actual: GoldenSpan[] = highlightRange(
-        syntax,
-        GOLDEN_SOURCE,
-        0,
-        GOLDEN_SOURCE.length,
-        WORKSHOP_SYNTAX_SCOPES,
-      ).map((span) => ({
-        from: span.from,
-        to: span.to,
-        text: GOLDEN_SOURCE.slice(span.from, span.to),
-        scopes: [...span.scopes],
-      }));
+  // Each `fixtures/<lang>.golden.json` was produced by running Helix's `tree-house` 0.4.0 crate
+  // directly against Helix's `runtime/grammars/*.dylib` and `runtime/queries/*/*.scm` at commit
+  // 18dbe190a0139f6c74320059146b2413b82b011c.
+  for (const fixture of GOLDEN_FIXTURES) {
+    const source = readFileSync(join(HERE, "fixtures", fixture.sourceFile), "utf8");
+    const golden = JSON.parse(
+      readFileSync(join(HERE, "fixtures", fixture.goldenFile), "utf8"),
+    ) as GoldenSpan[];
 
-      expect(actual).toEqual(GOLDEN_SPANS);
-    } finally {
-      syntax.delete();
-    }
+    it(`matches Helix tree-house 0.4.0 output on every span of fixtures/${fixture.sourceFile}`, () => {
+      const syntax = SyntaxTree.parse(source, fixture.mode);
+      try {
+        const actual: GoldenSpan[] = highlightRange(
+          syntax,
+          source,
+          0,
+          source.length,
+          WORKSHOP_SYNTAX_SCOPES,
+        ).map((span) => ({
+          from: span.from,
+          to: span.to,
+          text: source.slice(span.from, span.to),
+          scopes: [...span.scopes],
+        }));
+
+        expect(actual).toEqual(golden);
+      } finally {
+        syntax.delete();
+      }
+    });
+
+    it(`produces identical highlights for a middle viewport slice of fixtures/${fixture.sourceFile}`, () => {
+      const syntax = SyntaxTree.parse(source, fixture.mode);
+      try {
+        const sliceStart = source.indexOf(fixture.sliceFrom);
+        const sliceEnd = source.indexOf(fixture.sliceTo);
+        expect(sliceStart).toBeGreaterThan(-1);
+        expect(sliceEnd).toBeGreaterThan(sliceStart);
+        const sliced = highlightRange(syntax, source, sliceStart, sliceEnd, WORKSHOP_SYNTAX_SCOPES);
+        const expected = golden
+          .filter((s) => s.to > sliceStart && s.from < sliceEnd)
+          .map((s) => ({
+            from: Math.max(s.from, sliceStart),
+            to: Math.min(s.to, sliceEnd),
+            scopes: s.scopes,
+          }));
+        expect(sliced).toEqual(expected);
+      } finally {
+        syntax.delete();
+      }
+    });
+  }
+});
+
+describe("CodeMirror language metadata and non-Helix indentation", () => {
+  function pressEnter(mode: string, doc: string, pos: number): string {
+    let state = EditorState.create({
+      doc,
+      selection: EditorSelection.cursor(pos),
+      extensions: [treeSitterExtension(mode)],
+    });
+    const handled = insertNewlineAndIndent({
+      state,
+      dispatch: (tr) => {
+        state = tr.state;
+      },
+    });
+    expect(handled).toBe(true);
+    return state.doc.toString();
+  }
+
+  it("indents on Enter using Helix's indents.scm for non-Helix keybindings", () => {
+    expect(pressEnter("python", "def f(x):\n    return x", 9)).toBe(
+      "def f(x):\n    \n    return x",
+    );
+    expect(pressEnter("typescript", "function f() {\n}", 14)).toBe("function f() {\n  \n}");
+    expect(pressEnter("go", "func main() {\n}", 13)).toBe("func main() {\n\t\n}");
+    expect(pressEnter("rust", "fn main() {\n}", 11)).toBe("fn main() {\n    \n}");
+    expect(pressEnter("cpp", "int main() {\n}", 12)).toBe("int main() {\n  \n}");
+    expect(pressEnter("haskell", "  x = 1", 7)).toBe("  x = 1\n  ");
   });
 
-  it("produces identical highlights when restricted to a middle viewport slice", () => {
-    const syntax = SyntaxTree.parse(GOLDEN_SOURCE, "haskell");
-    try {
-      const sliceStart = GOLDEN_SOURCE.indexOf("{- Block comment");
-      const sliceEnd = GOLDEN_SOURCE.indexOf("compose ::");
-      const sliced = highlightRange(
-        syntax,
-        GOLDEN_SOURCE,
-        sliceStart,
-        sliceEnd,
-        WORKSHOP_SYNTAX_SCOPES,
-      );
-      const expected = GOLDEN_SPANS.filter((s) => s.to > sliceStart && s.from < sliceEnd).map(
-        (s) => ({
-          from: Math.max(s.from, sliceStart),
-          to: Math.min(s.to, sliceEnd),
-          scopes: s.scopes,
-        }),
-      );
-      expect(sliced).toEqual(expected);
-    } finally {
-      syntax.delete();
+  it("outdents closing braces via indentOnInput in non-Helix mode", () => {
+    const doc = "fn main() {\n    ";
+    let state = EditorState.create({
+      doc,
+      selection: EditorSelection.cursor(doc.length),
+      extensions: [treeSitterExtension("rust"), indentOnInput()],
+    });
+    state = state.update({
+      changes: { from: doc.length, to: doc.length, insert: "}" },
+      selection: EditorSelection.cursor(doc.length + 1),
+      userEvent: "input.type",
+    }).state;
+    expect(state.doc.toString()).toBe("fn main() {\n}");
+  });
+
+  it("exposes indentUnit and commentTokens for every tree-sitter mode", () => {
+    const expected: Record<string, { unit: string; width: number; lineComment: string }> = {
+      haskell: { unit: "  ", width: 2, lineComment: "--" },
+      python: { unit: "    ", width: 4, lineComment: "#" },
+      typescript: { unit: "  ", width: 2, lineComment: "//" },
+      go: { unit: "\t", width: 4, lineComment: "//" },
+      rust: { unit: "    ", width: 4, lineComment: "//" },
+      cpp: { unit: "  ", width: 2, lineComment: "//" },
+    };
+    for (const [mode, cfg] of Object.entries(expected)) {
+      const state = EditorState.create({
+        doc: "",
+        extensions: [EditorState.tabSize.of(cfg.width), treeSitterExtension(mode)],
+      });
+      expect(state.facet(indentUnit), mode).toBe(cfg.unit);
+      expect(getIndentUnit(state), mode).toBe(cfg.width);
+      const tokens = state.languageDataAt<{ line?: string }>("commentTokens", 0);
+      expect(tokens[0]?.line, mode).toBe(cfg.lineComment);
     }
   });
+});
+
+describe("300-line parse and highlight performance across all languages", () => {
+  function median(values: number[]): number {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)] ?? 0;
+  }
+
+  function make300LineDoc(mode: string): { doc: string; editNeedle: string } {
+    const blocks: string[] = [];
+    switch (mode) {
+      case "haskell":
+        blocks.push("module Perf where\n");
+        for (let i = 0; i < 30; i++) {
+          blocks.push(
+            `-- TODO: benchmark block ${i} (#${i})\n` +
+              `data Record${i} = Record${i} { fieldA${i} :: Int, fieldB${i} :: String }\n` +
+              `  deriving (Eq, Show)\n` +
+              `compute${i} :: Record${i} -> [Int] -> Int\n` +
+              `compute${i} (Record${i} a _) xs =\n` +
+              `  let ys = map (\\n -> n * 2 + a) xs\n` +
+              `      zs = (+ 1) <$> ys\n` +
+              `   in if null zs then 0 else sum zs + ${i}\n` +
+              `helper${i} :: Int -> Int\n` +
+              `helper${i} k = compute${i} (Record${i} k "hi") [1, 2, 3]\n`,
+          );
+        }
+        return { doc: blocks.join(""), editNeedle: "compute15 (Record15 a _) xs =" };
+      case "python":
+        blocks.push("import re\n");
+        for (let i = 0; i < 30; i++) {
+          blocks.push(
+            `# TODO: benchmark block ${i} (#${i})\n` +
+              `class Record${i}:\n` +
+              `    def __init__(self, a: int, b: str) -> None:\n` +
+              `        self.a = a\n` +
+              `        self.b = b\n` +
+              `    def compute(self, xs: list[int]) -> int:\n` +
+              `        pat = re.compile(r"^[a-z]+\\d+$")\n` +
+              `        ys = [n * 2 + self.a for n in xs if pat.match(self.b)]\n` +
+              `        return sum(ys) + ${i}\n\n`,
+          );
+        }
+        return { doc: blocks.join(""), editNeedle: "class Record15:" };
+      case "typescript":
+        blocks.push("export type Pair = [number, string];\n");
+        for (let i = 0; i < 30; i++) {
+          blocks.push(
+            `/** Computes block ${i}. @param xs values */\n` +
+              `export class Record${i} {\n` +
+              `  private readonly re = /^([a-z]+)(\\d+)$/i;\n` +
+              `  constructor(public readonly a: number, public readonly b: string) {}\n` +
+              `  compute(xs: readonly number[]): number {\n` +
+              `    const bonus = this.re.test(this.b) ? 1 : 0;\n` +
+              `    return xs.reduce((acc, n) => acc + n * 2 + this.a, bonus) + ${i};\n` +
+              `  }\n` +
+              `}\n\n`,
+          );
+        }
+        return { doc: blocks.join(""), editNeedle: "export class Record15 {" };
+      case "go":
+        blocks.push('package perf\n\nimport (\n\t"fmt"\n\t"regexp"\n)\n\n');
+        for (let i = 0; i < 30; i++) {
+          blocks.push(
+            `// TODO: benchmark block ${i} (#${i})\n` +
+              `type Record${i} struct {\n` +
+              `\tA int\n` +
+              `\tB string\n` +
+              `}\n` +
+              `func (r Record${i}) Compute(xs []int) string {\n` +
+              `\tre := regexp.MustCompile("^([a-z]+)$")\n` +
+              `\ttotal := ${i}\n` +
+              `\tfor _, n := range xs { total += n*2 + r.A }\n` +
+              `\treturn fmt.Sprintf("%s=%d (%t)", r.B, total, re.MatchString(r.B))\n` +
+              `}\n`,
+          );
+        }
+        return { doc: blocks.join(""), editNeedle: "func (r Record15) Compute(xs []int) string {" };
+      case "rust":
+        blocks.push("use std::fmt;\n");
+        for (let i = 0; i < 30; i++) {
+          blocks.push(
+            `// TODO: benchmark block ${i} (#${i})\n` +
+              `pub struct Record${i} { pub a: i32, pub b: &'static str }\n` +
+              `impl Record${i} {\n` +
+              `    pub fn compute(&self, xs: &[i32]) -> String {\n` +
+              `        let sum: i32 = xs.iter().map(|n| n * 2 + self.a).sum();\n` +
+              `        format!("{}={sum:+04}", self.b)\n` +
+              `    }\n` +
+              `}\n` +
+              `pub fn helper_${i}(x: i32) -> i32 { x + ${i} }\n\n`,
+          );
+        }
+        return { doc: blocks.join(""), editNeedle: "pub struct Record15" };
+      case "cpp":
+        blocks.push("#include <vector>\n#include <string>\n");
+        for (let i = 0; i < 30; i++) {
+          blocks.push(
+            `// TODO: benchmark block ${i} (#${i})\n` +
+              `struct Record${i} {\n` +
+              `  int a;\n` +
+              `  std::string b;\n` +
+              `  int compute(const std::vector<int>& xs) const {\n` +
+              `    int total = ${i};\n` +
+              `    for (int n : xs) { total += n * 2 + a; }\n` +
+              `    return total;\n` +
+              `  }\n` +
+              `};\n`,
+          );
+        }
+        return { doc: blocks.join(""), editNeedle: "struct Record15 {" };
+      default:
+        throw new Error(`unexpected benchmark mode ${mode}`);
+    }
+  }
+
+  for (const mode of ["haskell", "python", "typescript", "go", "rust", "cpp"] as const) {
+    it(`incrementally edits and viewport-highlights a 300-line ${mode} file quickly`, () => {
+      const { doc, editNeedle } = make300LineDoc(mode);
+      const lineCount = doc.split("\n").length - 1;
+      expect(lineCount).toBeGreaterThanOrEqual(300);
+
+      const t0 = performance.now();
+      let state = EditorState.create({
+        doc,
+        extensions: [treeSitterExtension(mode)],
+      });
+      const initialMs = performance.now() - t0;
+
+      const vpStart = state.doc.line(101).from;
+      const vpEnd = state.doc.line(200).to;
+
+      const hlTimes: number[] = [];
+      let spanCount = 0;
+      for (let i = 0; i < 12; i++) {
+        const snap = getSyntaxTree(state);
+        expect(snap).not.toBeNull();
+        if (!snap) break;
+        const t = performance.now();
+        const spans = highlightRange(
+          snap.syntax,
+          state.doc,
+          vpStart,
+          vpEnd,
+          WORKSHOP_SYNTAX_SCOPES,
+        );
+        const dt = performance.now() - t;
+        spanCount = spans.length;
+        if (i >= 2) hlTimes.push(dt);
+      }
+      expect(spanCount).toBeGreaterThan(50);
+      const viewportMs = median(hlTimes);
+
+      const pos = doc.indexOf(editNeedle) + editNeedle.length;
+      expect(pos).toBeGreaterThan(editNeedle.length);
+      const editTimes: number[] = [];
+      const postEditHlTimes: number[] = [];
+      for (let i = 0; i < 12; i++) {
+        const del = i % 2 === 1;
+        const tEdit = performance.now();
+        state = state.update({
+          changes: del
+            ? { from: pos, to: pos + 1, insert: "" }
+            : { from: pos, to: pos, insert: " " },
+        }).state;
+        const dtEdit = performance.now() - tEdit;
+
+        const snap = getSyntaxTree(state);
+        expect(snap).not.toBeNull();
+        const tHl = performance.now();
+        if (snap) {
+          highlightRange(snap.syntax, state.doc, vpStart, vpEnd, WORKSHOP_SYNTAX_SCOPES);
+        }
+        const dtHl = performance.now() - tHl;
+        if (i >= 2) {
+          editTimes.push(dtEdit);
+          postEditHlTimes.push(dtHl);
+        }
+      }
+      const incrementalMs = median(editTimes);
+      const postEditHlMs = median(postEditHlTimes);
+
+      console.info(
+        `[treesitter perf 300L] ${mode} (${lineCount}L): initialParse=${initialMs.toFixed(2)}ms, ` +
+          `incrementalEdit=${incrementalMs.toFixed(2)}ms, ` +
+          `viewportHighlight=${viewportMs.toFixed(2)}ms, ` +
+          `postEditHighlight=${postEditHlMs.toFixed(2)}ms`,
+      );
+
+      expect(incrementalMs).toBeLessThan(10);
+      expect(viewportMs).toBeLessThan(10);
+      expect(postEditHlMs).toBeLessThan(10);
+    });
+  }
 });
 
 describe("Haskell parse and highlight performance", () => {

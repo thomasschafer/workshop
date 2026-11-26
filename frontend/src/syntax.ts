@@ -1,24 +1,18 @@
-import { StreamLanguage } from "@codemirror/language";
-import { cpp } from "@codemirror/legacy-modes/mode/clike";
-import { go } from "@codemirror/legacy-modes/mode/go";
-import { haskell } from "@codemirror/legacy-modes/mode/haskell";
-import { typescript } from "@codemirror/legacy-modes/mode/javascript";
-import { python } from "@codemirror/legacy-modes/mode/python";
-import { rust } from "@codemirror/legacy-modes/mode/rust";
-import { highlightCode, tagHighlighter, tags } from "@lezer/highlight";
-
-/** Syntax modes, by a language profile's `editor_mode`. */
-export const LANGUAGES: Record<string, () => StreamLanguage<unknown>> = {
-  haskell: () => StreamLanguage.define(haskell),
-  python: () => StreamLanguage.define(python),
-  typescript: () => StreamLanguage.define(typescript),
-  go: () => StreamLanguage.define(go),
-  rust: () => StreamLanguage.define(rust),
-  cpp: () => StreamLanguage.define(cpp),
-};
+import {
+  activeSyntaxScopeSet,
+  getLoadedLanguageBundle,
+  type HighlightSpan,
+  hasTreeSitterMode,
+  highlightRange,
+  loadLanguageBundle,
+  onLanguageBundleLoaded,
+  onSyntaxThemeChange,
+  SyntaxTree,
+  scopeToClass,
+} from "./treesitter";
 
 /** Other names a Markdown code block can be marked with, as packs' reading items allow. */
-const ALIASES: Record<string, string> = {
+const ALIASES: Readonly<Record<string, string>> = {
   py: "python",
   rs: "rust",
   "c++": "cpp",
@@ -26,46 +20,99 @@ const ALIASES: Record<string, string> = {
   ts: "typescript",
 };
 
-/** Classes for highlighted code, styled in styles.css, in the editor and in Markdown alike. */
-export const syntaxHighlighter = tagHighlighter([
-  { tag: [tags.keyword, tags.operatorKeyword, tags.controlKeyword], class: "syntax-keyword" },
-  { tag: [tags.string, tags.character], class: "syntax-string" },
-  { tag: [tags.number, tags.bool, tags.atom], class: "syntax-number" },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], class: "syntax-comment" },
-  { tag: [tags.typeName, tags.className], class: "syntax-type" },
-  { tag: [tags.operator, tags.punctuation], class: "syntax-operator" },
-]);
-
-const parsers = new Map<string, StreamLanguage<unknown>>();
+/** Maps a Markdown code fence language marker to a registered tree-sitter mode, or null. */
+export function resolveSyntaxMode(marked: string): string | null {
+  const normalized = marked.trim().toLowerCase();
+  const mode = ALIASES[normalized] ?? normalized;
+  return hasTreeSitterMode(mode) ? mode : null;
+}
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**
- * Code as HTML, its text escaped and highlighted for the language a Markdown code block is
- * marked with, or null for a language there's no mode for.
+ * Renders stacked `HighlightSpan`s as nested `<span class="ts-hl syntax-...">` HTML with all
+ * code text escaped, preserving outer-to-inner scope cascade order identically to the editor.
+ */
+function renderSpansHtml(code: string, spans: readonly HighlightSpan[]): string {
+  let html = "";
+  let pos = 0;
+  const open: string[] = [];
+
+  const closeTo = (depth: number): void => {
+    while (open.length > depth) {
+      open.pop();
+      html += "</span>";
+    }
+  };
+
+  for (const span of spans) {
+    if (span.from > pos) {
+      closeTo(0);
+      html += escapeHtml(code.slice(pos, span.from));
+      pos = span.from;
+    }
+    let common = 0;
+    while (
+      common < open.length &&
+      common < span.scopes.length &&
+      open[common] === span.scopes[common]
+    ) {
+      common++;
+    }
+    closeTo(common);
+    for (let d = common; d < span.scopes.length; d++) {
+      const scope = span.scopes[d];
+      if (!scope) continue;
+      open.push(scope);
+      html += `<span class="ts-hl ${scopeToClass(scope)}">`;
+    }
+    html += escapeHtml(code.slice(span.from, span.to));
+    pos = span.to;
+  }
+
+  closeTo(0);
+  if (pos < code.length) {
+    html += escapeHtml(code.slice(pos));
+  }
+  return html;
+}
+
+/**
+ * Code as HTML, its text escaped and highlighted with tree-sitter and Helix's queries for the
+ * language a Markdown code block is marked with, or null if the language is unsupported or its
+ * grammar hasn't finished loading yet (in which case loading is started in the background).
  */
 export function highlightedHtml(code: string, marked: string): string | null {
-  const mode = ALIASES[marked] ?? marked;
-  const define = LANGUAGES[mode];
-  if (!define) return null;
-  let language = parsers.get(mode);
-  if (!language) {
-    language = define();
-    parsers.set(mode, language);
+  const mode = resolveSyntaxMode(marked);
+  if (mode === null) return null;
+
+  if (getLoadedLanguageBundle(mode) === null) {
+    void loadLanguageBundle(mode).catch((error: unknown) => {
+      console.error(`[syntax] failed to load ${mode} grammar:`, error);
+    });
+    return null;
   }
-  let html = "";
-  highlightCode(
-    code,
-    language.parser.parse(code),
-    syntaxHighlighter,
-    (text, classes) => {
-      html += classes ? `<span class="${classes}">${escapeHtml(text)}</span>` : escapeHtml(text);
-    },
-    () => {
-      html += "\n";
-    },
-  );
-  return html;
+
+  const syntax = SyntaxTree.parse(code, mode);
+  try {
+    const spans = highlightRange(syntax, code, 0, code.length, activeSyntaxScopeSet());
+    return renderSpansHtml(code, spans);
+  } finally {
+    syntax.delete();
+  }
+}
+
+/**
+ * Subscribes to events that affect `highlightedHtml` output: a grammar finishing loading or the
+ * active Helix syntax theme / colour scheme changing. Returns an unsubscribe function.
+ */
+export function onSyntaxHighlightUpdate(listener: () => void): () => void {
+  const offBundle = onLanguageBundleLoaded(() => listener());
+  const offTheme = onSyntaxThemeChange(listener);
+  return () => {
+    offBundle();
+    offTheme();
+  };
 }

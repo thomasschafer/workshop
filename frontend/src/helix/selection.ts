@@ -224,6 +224,34 @@ export class Selection {
     return new Selection(this.ranges.map(f), this.primaryIndex);
   }
 
+  /** Maps each range to one or more ranges, preserving `primaryIndex` before normalizing. */
+  transformIter(f: (range: Range, index: number) => readonly Range[]): Selection {
+    const out: Range[] = [];
+    this.ranges.forEach((range, i) => {
+      out.push(...f(range, i));
+    });
+    return new Selection(out, this.primaryIndex);
+  }
+
+  /** Whether every range in `other` is contained within a range of `this` (`this ⊇ other`). */
+  contains(other: Selection): boolean {
+    let i = 0;
+    let j = 0;
+    while (j < other.ranges.length) {
+      const superRange = this.ranges[i];
+      if (superRange === undefined) return false;
+      const subRange = at(other.ranges, j);
+      if (superRange.to <= subRange.from && superRange.from !== subRange.from) {
+        i++;
+      } else if (superRange.from <= subRange.from && subRange.to <= superRange.to) {
+        j++;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /** Merges every range into one, from the first to the last. */
   mergeRanges(): Selection {
     const first = at(this.ranges, 0);

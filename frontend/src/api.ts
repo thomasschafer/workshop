@@ -38,7 +38,7 @@ export interface HelixConfigJson {
   "color-modes"?: boolean;
   "auto-pairs"?: boolean;
   "jump-label-alphabet"?: string;
-  "smart-tab"?: { enable: boolean };
+  "smart-tab"?: { enable?: boolean; "supersede-menu"?: boolean };
   search?: { "smart-case"?: boolean; "wrap-around"?: boolean };
   "cursor-shape"?: {
     normal?: "block" | "bar" | "underline" | "hidden";

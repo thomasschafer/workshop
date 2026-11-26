@@ -1948,7 +1948,7 @@ html[data-tab-turn] .content {
   padding: 0;
 }
 
-/* Highlighted code, in the editor (tree-sitter + legacy modes) and in Markdown. */
+/* Highlighted code, in the editor and in Markdown. */
 .syntax-keyword {
   color: var(--syntax-keyword);
 }

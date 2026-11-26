@@ -1,0 +1,2144 @@
+[
+  {
+    "from": 0,
+    "to": 72,
+    "text": "// Representative Rust module for syntax highlighting parity with Helix.",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 73,
+    "to": 76,
+    "text": "// ",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 76,
+    "to": 80,
+    "text": "TODO",
+    "scopes": ["comment", "info"]
+  },
+  {
+    "from": 80,
+    "to": 81,
+    "text": "(",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 81,
+    "to": 86,
+    "text": "alice",
+    "scopes": ["comment", "constant"]
+  },
+  {
+    "from": 86,
+    "to": 134,
+    "text": "): cover common Rust constructs and injections (",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 134,
+    "to": 137,
+    "text": "#42",
+    "scopes": ["comment", "constant.numeric"]
+  },
+  {
+    "from": 137,
+    "to": 138,
+    "text": ")",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 139,
+    "to": 142,
+    "text": "// ",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 142,
+    "to": 147,
+    "text": "FIXME",
+    "scopes": ["comment", "error"]
+  },
+  {
+    "from": 147,
+    "to": 155,
+    "text": ": check ",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 155,
+    "to": 179,
+    "text": "https://example.com/docs",
+    "scopes": ["comment", "markup.link.url"]
+  },
+  {
+    "from": 179,
+    "to": 184,
+    "text": " and ",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 184,
+    "to": 188,
+    "text": "@bob",
+    "scopes": ["comment", "tag"]
+  },
+  {
+    "from": 188,
+    "to": 197,
+    "text": " mentions",
+    "scopes": ["comment"]
+  },
+  {
+    "from": 199,
+    "to": 202,
+    "text": "use",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 203,
+    "to": 206,
+    "text": "std",
+    "scopes": ["namespace"]
+  },
+  {
+    "from": 206,
+    "to": 208,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 208,
+    "to": 219,
+    "text": "collections",
+    "scopes": ["namespace"]
+  },
+  {
+    "from": 219,
+    "to": 221,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 221,
+    "to": 228,
+    "text": "HashMap",
+    "scopes": ["type"]
+  },
+  {
+    "from": 228,
+    "to": 229,
+    "text": ";",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 231,
+    "to": 233,
+    "text": "#[",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 233,
+    "to": 239,
+    "text": "derive",
+    "scopes": ["special"]
+  },
+  {
+    "from": 239,
+    "to": 240,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 240,
+    "to": 245,
+    "text": "Debug",
+    "scopes": ["type"]
+  },
+  {
+    "from": 245,
+    "to": 246,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 247,
+    "to": 252,
+    "text": "Clone",
+    "scopes": ["type"]
+  },
+  {
+    "from": 252,
+    "to": 253,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 254,
+    "to": 263,
+    "text": "PartialEq",
+    "scopes": ["type"]
+  },
+  {
+    "from": 263,
+    "to": 265,
+    "text": ")]",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 266,
+    "to": 269,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 270,
+    "to": 274,
+    "text": "enum",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 275,
+    "to": 281,
+    "text": "Colour",
+    "scopes": ["type"]
+  },
+  {
+    "from": 282,
+    "to": 283,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 288,
+    "to": 291,
+    "text": "Red",
+    "scopes": ["type"]
+  },
+  {
+    "from": 291,
+    "to": 292,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 297,
+    "to": 302,
+    "text": "Green",
+    "scopes": ["type"]
+  },
+  {
+    "from": 302,
+    "to": 303,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 308,
+    "to": 312,
+    "text": "Blue",
+    "scopes": ["type"]
+  },
+  {
+    "from": 312,
+    "to": 313,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 314,
+    "to": 315,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 317,
+    "to": 320,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 321,
+    "to": 326,
+    "text": "trait",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 327,
+    "to": 338,
+    "text": "Describable",
+    "scopes": ["type"]
+  },
+  {
+    "from": 339,
+    "to": 340,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 345,
+    "to": 347,
+    "text": "fn",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 348,
+    "to": 356,
+    "text": "describe",
+    "scopes": ["function"]
+  },
+  {
+    "from": 356,
+    "to": 357,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 357,
+    "to": 358,
+    "text": "&",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 358,
+    "to": 362,
+    "text": "self",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 362,
+    "to": 363,
+    "text": ")",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 364,
+    "to": 366,
+    "text": "->",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 367,
+    "to": 368,
+    "text": "&",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 368,
+    "to": 375,
+    "text": "'static",
+    "scopes": ["label"]
+  },
+  {
+    "from": 376,
+    "to": 379,
+    "text": "str",
+    "scopes": ["type"]
+  },
+  {
+    "from": 379,
+    "to": 380,
+    "text": ";",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 381,
+    "to": 382,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 384,
+    "to": 388,
+    "text": "impl",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 389,
+    "to": 400,
+    "text": "Describable",
+    "scopes": ["type"]
+  },
+  {
+    "from": 401,
+    "to": 404,
+    "text": "for",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 405,
+    "to": 411,
+    "text": "Colour",
+    "scopes": ["type"]
+  },
+  {
+    "from": 412,
+    "to": 413,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 418,
+    "to": 420,
+    "text": "fn",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 421,
+    "to": 429,
+    "text": "describe",
+    "scopes": ["function"]
+  },
+  {
+    "from": 429,
+    "to": 430,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 430,
+    "to": 431,
+    "text": "&",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 431,
+    "to": 435,
+    "text": "self",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 435,
+    "to": 436,
+    "text": ")",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 437,
+    "to": 439,
+    "text": "->",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 440,
+    "to": 441,
+    "text": "&",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 441,
+    "to": 448,
+    "text": "'static",
+    "scopes": ["label"]
+  },
+  {
+    "from": 449,
+    "to": 452,
+    "text": "str",
+    "scopes": ["type"]
+  },
+  {
+    "from": 453,
+    "to": 454,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 463,
+    "to": 468,
+    "text": "match",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 469,
+    "to": 473,
+    "text": "self",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 474,
+    "to": 475,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 488,
+    "to": 494,
+    "text": "Colour",
+    "scopes": ["type"]
+  },
+  {
+    "from": 494,
+    "to": 496,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 496,
+    "to": 499,
+    "text": "Red",
+    "scopes": ["type"]
+  },
+  {
+    "from": 500,
+    "to": 502,
+    "text": "=>",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 503,
+    "to": 508,
+    "text": "\"red\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 508,
+    "to": 509,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 522,
+    "to": 528,
+    "text": "Colour",
+    "scopes": ["type"]
+  },
+  {
+    "from": 528,
+    "to": 530,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 530,
+    "to": 535,
+    "text": "Green",
+    "scopes": ["type"]
+  },
+  {
+    "from": 536,
+    "to": 538,
+    "text": "=>",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 539,
+    "to": 546,
+    "text": "\"green\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 546,
+    "to": 547,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 560,
+    "to": 566,
+    "text": "Colour",
+    "scopes": ["type"]
+  },
+  {
+    "from": 566,
+    "to": 568,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 568,
+    "to": 572,
+    "text": "Blue",
+    "scopes": ["type"]
+  },
+  {
+    "from": 573,
+    "to": 575,
+    "text": "=>",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 576,
+    "to": 582,
+    "text": "\"blue\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 582,
+    "to": 583,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 592,
+    "to": 593,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 598,
+    "to": 599,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 600,
+    "to": 601,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 603,
+    "to": 605,
+    "text": "#[",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 605,
+    "to": 611,
+    "text": "derive",
+    "scopes": ["special"]
+  },
+  {
+    "from": 611,
+    "to": 612,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 612,
+    "to": 617,
+    "text": "Debug",
+    "scopes": ["type"]
+  },
+  {
+    "from": 617,
+    "to": 618,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 619,
+    "to": 623,
+    "text": "Copy",
+    "scopes": ["type"]
+  },
+  {
+    "from": 623,
+    "to": 624,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 625,
+    "to": 630,
+    "text": "Clone",
+    "scopes": ["type"]
+  },
+  {
+    "from": 630,
+    "to": 632,
+    "text": ")]",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 633,
+    "to": 636,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 637,
+    "to": 643,
+    "text": "struct",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 644,
+    "to": 649,
+    "text": "Point",
+    "scopes": ["type"]
+  },
+  {
+    "from": 649,
+    "to": 650,
+    "text": "<",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 650,
+    "to": 652,
+    "text": "'a",
+    "scopes": ["label"]
+  },
+  {
+    "from": 652,
+    "to": 653,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 654,
+    "to": 655,
+    "text": "T",
+    "scopes": ["type"]
+  },
+  {
+    "from": 655,
+    "to": 656,
+    "text": ">",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 657,
+    "to": 658,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 663,
+    "to": 666,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 667,
+    "to": 672,
+    "text": "label",
+    "scopes": ["variable.other.member"]
+  },
+  {
+    "from": 672,
+    "to": 673,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 674,
+    "to": 675,
+    "text": "&",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 675,
+    "to": 677,
+    "text": "'a",
+    "scopes": ["label"]
+  },
+  {
+    "from": 678,
+    "to": 681,
+    "text": "str",
+    "scopes": ["type"]
+  },
+  {
+    "from": 681,
+    "to": 682,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 687,
+    "to": 690,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 691,
+    "to": 692,
+    "text": "x",
+    "scopes": ["variable.other.member"]
+  },
+  {
+    "from": 692,
+    "to": 693,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 694,
+    "to": 695,
+    "text": "T",
+    "scopes": ["type"]
+  },
+  {
+    "from": 695,
+    "to": 696,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 701,
+    "to": 704,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 705,
+    "to": 706,
+    "text": "y",
+    "scopes": ["variable.other.member"]
+  },
+  {
+    "from": 706,
+    "to": 707,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 708,
+    "to": 709,
+    "text": "T",
+    "scopes": ["type"]
+  },
+  {
+    "from": 709,
+    "to": 710,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 711,
+    "to": 712,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 714,
+    "to": 717,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 718,
+    "to": 720,
+    "text": "fn",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 721,
+    "to": 729,
+    "text": "evaluate",
+    "scopes": ["function"]
+  },
+  {
+    "from": 729,
+    "to": 730,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 730,
+    "to": 736,
+    "text": "values",
+    "scopes": ["variable.parameter"]
+  },
+  {
+    "from": 736,
+    "to": 737,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 738,
+    "to": 739,
+    "text": "&",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 739,
+    "to": 740,
+    "text": "[",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 740,
+    "to": 743,
+    "text": "i32",
+    "scopes": ["type"]
+  },
+  {
+    "from": 743,
+    "to": 745,
+    "text": "],",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 746,
+    "to": 752,
+    "text": "factor",
+    "scopes": ["variable.parameter"]
+  },
+  {
+    "from": 752,
+    "to": 753,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 754,
+    "to": 757,
+    "text": "i32",
+    "scopes": ["type"]
+  },
+  {
+    "from": 757,
+    "to": 758,
+    "text": ")",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 759,
+    "to": 761,
+    "text": "->",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 762,
+    "to": 768,
+    "text": "Result",
+    "scopes": ["type"]
+  },
+  {
+    "from": 768,
+    "to": 769,
+    "text": "<",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 769,
+    "to": 772,
+    "text": "i32",
+    "scopes": ["type"]
+  },
+  {
+    "from": 772,
+    "to": 773,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 774,
+    "to": 780,
+    "text": "String",
+    "scopes": ["type"]
+  },
+  {
+    "from": 780,
+    "to": 781,
+    "text": ">",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 782,
+    "to": 783,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 788,
+    "to": 791,
+    "text": "let",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 792,
+    "to": 795,
+    "text": "mut",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 796,
+    "to": 801,
+    "text": "total",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 802,
+    "to": 803,
+    "text": "=",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 804,
+    "to": 809,
+    "text": "0_i32",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 809,
+    "to": 810,
+    "text": ";",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 815,
+    "to": 818,
+    "text": "for",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 819,
+    "to": 820,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 820,
+    "to": 823,
+    "text": "idx",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 823,
+    "to": 824,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 825,
+    "to": 826,
+    "text": "&",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 826,
+    "to": 827,
+    "text": "v",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 827,
+    "to": 828,
+    "text": ")",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 829,
+    "to": 831,
+    "text": "in",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 832,
+    "to": 838,
+    "text": "values",
+    "scopes": ["variable.parameter"]
+  },
+  {
+    "from": 838,
+    "to": 839,
+    "text": ".",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 839,
+    "to": 843,
+    "text": "iter",
+    "scopes": ["function"]
+  },
+  {
+    "from": 843,
+    "to": 846,
+    "text": "().",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 846,
+    "to": 855,
+    "text": "enumerate",
+    "scopes": ["function"]
+  },
+  {
+    "from": 855,
+    "to": 857,
+    "text": "()",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 858,
+    "to": 859,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 868,
+    "to": 870,
+    "text": "if",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 871,
+    "to": 872,
+    "text": "v",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 873,
+    "to": 874,
+    "text": "<",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 875,
+    "to": 876,
+    "text": "0",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 877,
+    "to": 878,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 891,
+    "to": 897,
+    "text": "return",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 898,
+    "to": 901,
+    "text": "Err",
+    "scopes": ["type"]
+  },
+  {
+    "from": 901,
+    "to": 902,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 902,
+    "to": 909,
+    "text": "format!",
+    "scopes": ["function"]
+  },
+  {
+    "from": 909,
+    "to": 910,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 910,
+    "to": 926,
+    "text": "\"negative value ",
+    "scopes": ["string"]
+  },
+  {
+    "from": 926,
+    "to": 927,
+    "text": "{",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 927,
+    "to": 928,
+    "text": "v",
+    "scopes": ["string", "variable"]
+  },
+  {
+    "from": 928,
+    "to": 929,
+    "text": "}",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 929,
+    "to": 939,
+    "text": " at index ",
+    "scopes": ["string"]
+  },
+  {
+    "from": 939,
+    "to": 940,
+    "text": "{",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 940,
+    "to": 943,
+    "text": "idx",
+    "scopes": ["string", "variable"]
+  },
+  {
+    "from": 943,
+    "to": 944,
+    "text": ":",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 944,
+    "to": 946,
+    "text": "02",
+    "scopes": ["string", "constant.numeric"]
+  },
+  {
+    "from": 946,
+    "to": 947,
+    "text": "}",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 947,
+    "to": 948,
+    "text": "\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 948,
+    "to": 951,
+    "text": "));",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 960,
+    "to": 961,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 970,
+    "to": 973,
+    "text": "let",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 974,
+    "to": 978,
+    "text": "step",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 979,
+    "to": 980,
+    "text": "=",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 981,
+    "to": 982,
+    "text": "|",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 982,
+    "to": 983,
+    "text": "n",
+    "scopes": ["variable.parameter"]
+  },
+  {
+    "from": 983,
+    "to": 984,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 985,
+    "to": 988,
+    "text": "i32",
+    "scopes": ["type"]
+  },
+  {
+    "from": 988,
+    "to": 989,
+    "text": "|",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 990,
+    "to": 991,
+    "text": "n",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 992,
+    "to": 993,
+    "text": "*",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 994,
+    "to": 1000,
+    "text": "factor",
+    "scopes": ["variable.parameter"]
+  },
+  {
+    "from": 1001,
+    "to": 1002,
+    "text": "+",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1003,
+    "to": 1004,
+    "text": "1",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1004,
+    "to": 1005,
+    "text": ";",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1014,
+    "to": 1019,
+    "text": "total",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1020,
+    "to": 1022,
+    "text": "+=",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1023,
+    "to": 1025,
+    "text": "if",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1026,
+    "to": 1027,
+    "text": "v",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1028,
+    "to": 1029,
+    "text": "%",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1030,
+    "to": 1031,
+    "text": "2",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1032,
+    "to": 1034,
+    "text": "==",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1035,
+    "to": 1036,
+    "text": "0",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1037,
+    "to": 1038,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1039,
+    "to": 1043,
+    "text": "step",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1043,
+    "to": 1044,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1044,
+    "to": 1045,
+    "text": "v",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1045,
+    "to": 1046,
+    "text": ")",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1047,
+    "to": 1048,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1049,
+    "to": 1053,
+    "text": "else",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1054,
+    "to": 1055,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1056,
+    "to": 1057,
+    "text": "v",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1058,
+    "to": 1060,
+    "text": "};",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1065,
+    "to": 1066,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1071,
+    "to": 1073,
+    "text": "Ok",
+    "scopes": ["type"]
+  },
+  {
+    "from": 1073,
+    "to": 1074,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1074,
+    "to": 1079,
+    "text": "total",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1079,
+    "to": 1080,
+    "text": ")",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1081,
+    "to": 1082,
+    "text": "}",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1084,
+    "to": 1087,
+    "text": "pub",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1088,
+    "to": 1090,
+    "text": "fn",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1091,
+    "to": 1095,
+    "text": "demo",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1095,
+    "to": 1097,
+    "text": "()",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1098,
+    "to": 1099,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1104,
+    "to": 1107,
+    "text": "let",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1108,
+    "to": 1111,
+    "text": "_re",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1112,
+    "to": 1113,
+    "text": "=",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1114,
+    "to": 1119,
+    "text": "Regex",
+    "scopes": ["type"]
+  },
+  {
+    "from": 1119,
+    "to": 1121,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1121,
+    "to": 1124,
+    "text": "new",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1124,
+    "to": 1125,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1125,
+    "to": 1127,
+    "text": "r\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1127,
+    "to": 1128,
+    "text": "^",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 1128,
+    "to": 1130,
+    "text": "([",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1130,
+    "to": 1131,
+    "text": "a",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 1131,
+    "to": 1132,
+    "text": "-",
+    "scopes": ["string", "operator"]
+  },
+  {
+    "from": 1132,
+    "to": 1134,
+    "text": "z_",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 1134,
+    "to": 1135,
+    "text": "]",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1135,
+    "to": 1136,
+    "text": "+",
+    "scopes": ["string", "operator"]
+  },
+  {
+    "from": 1136,
+    "to": 1137,
+    "text": ")",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1137,
+    "to": 1138,
+    "text": "=",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1138,
+    "to": 1139,
+    "text": "(",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1139,
+    "to": 1141,
+    "text": "\\d",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 1141,
+    "to": 1142,
+    "text": "+",
+    "scopes": ["string", "operator"]
+  },
+  {
+    "from": 1142,
+    "to": 1143,
+    "text": ")",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1143,
+    "to": 1144,
+    "text": "$",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 1144,
+    "to": 1145,
+    "text": "\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1145,
+    "to": 1147,
+    "text": ");",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1152,
+    "to": 1155,
+    "text": "let",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1156,
+    "to": 1159,
+    "text": "mut",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1160,
+    "to": 1166,
+    "text": "counts",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1166,
+    "to": 1167,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1168,
+    "to": 1175,
+    "text": "HashMap",
+    "scopes": ["type"]
+  },
+  {
+    "from": 1175,
+    "to": 1176,
+    "text": "<",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1176,
+    "to": 1177,
+    "text": "&",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1177,
+    "to": 1180,
+    "text": "str",
+    "scopes": ["type"]
+  },
+  {
+    "from": 1180,
+    "to": 1181,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1182,
+    "to": 1187,
+    "text": "usize",
+    "scopes": ["type"]
+  },
+  {
+    "from": 1187,
+    "to": 1188,
+    "text": ">",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1189,
+    "to": 1190,
+    "text": "=",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1191,
+    "to": 1198,
+    "text": "HashMap",
+    "scopes": ["type"]
+  },
+  {
+    "from": 1198,
+    "to": 1200,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1200,
+    "to": 1203,
+    "text": "new",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1203,
+    "to": 1206,
+    "text": "();",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1211,
+    "to": 1217,
+    "text": "counts",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1217,
+    "to": 1218,
+    "text": ".",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1218,
+    "to": 1224,
+    "text": "insert",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1224,
+    "to": 1225,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1225,
+    "to": 1232,
+    "text": "\"alpha\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1232,
+    "to": 1233,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1234,
+    "to": 1235,
+    "text": "1",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1235,
+    "to": 1237,
+    "text": ");",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1242,
+    "to": 1245,
+    "text": "let",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1246,
+    "to": 1248,
+    "text": "pt",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1249,
+    "to": 1250,
+    "text": "=",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1251,
+    "to": 1256,
+    "text": "Point",
+    "scopes": ["constructor"]
+  },
+  {
+    "from": 1257,
+    "to": 1258,
+    "text": "{",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1259,
+    "to": 1264,
+    "text": "label",
+    "scopes": ["variable.other.member"]
+  },
+  {
+    "from": 1264,
+    "to": 1265,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1266,
+    "to": 1274,
+    "text": "\"origin\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1274,
+    "to": 1275,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1276,
+    "to": 1277,
+    "text": "x",
+    "scopes": ["variable.other.member"]
+  },
+  {
+    "from": 1277,
+    "to": 1278,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1279,
+    "to": 1286,
+    "text": "0.0_f64",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1286,
+    "to": 1287,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1288,
+    "to": 1289,
+    "text": "y",
+    "scopes": ["variable.other.member"]
+  },
+  {
+    "from": 1289,
+    "to": 1290,
+    "text": ":",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1291,
+    "to": 1292,
+    "text": "-",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1292,
+    "to": 1295,
+    "text": "0.0",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1296,
+    "to": 1298,
+    "text": "};",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1303,
+    "to": 1306,
+    "text": "let",
+    "scopes": ["keyword"]
+  },
+  {
+    "from": 1307,
+    "to": 1310,
+    "text": "val",
+    "scopes": ["variable"]
+  },
+  {
+    "from": 1311,
+    "to": 1312,
+    "text": "=",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1313,
+    "to": 1321,
+    "text": "evaluate",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1321,
+    "to": 1322,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1322,
+    "to": 1323,
+    "text": "&",
+    "scopes": ["operator"]
+  },
+  {
+    "from": 1323,
+    "to": 1324,
+    "text": "[",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1324,
+    "to": 1325,
+    "text": "1",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1325,
+    "to": 1326,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1327,
+    "to": 1328,
+    "text": "2",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1328,
+    "to": 1329,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1330,
+    "to": 1331,
+    "text": "3",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1331,
+    "to": 1333,
+    "text": "],",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1334,
+    "to": 1335,
+    "text": "2",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1335,
+    "to": 1337,
+    "text": ").",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1337,
+    "to": 1346,
+    "text": "unwrap_or",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1346,
+    "to": 1347,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1347,
+    "to": 1348,
+    "text": "0",
+    "scopes": ["constant.numeric"]
+  },
+  {
+    "from": 1348,
+    "to": 1350,
+    "text": ");",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1355,
+    "to": 1363,
+    "text": "println!",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1363,
+    "to": 1364,
+    "text": "(",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1364,
+    "to": 1368,
+    "text": "\"pt=",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1368,
+    "to": 1369,
+    "text": "{",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1369,
+    "to": 1371,
+    "text": "pt",
+    "scopes": ["string", "variable"]
+  },
+  {
+    "from": 1371,
+    "to": 1372,
+    "text": ":",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1372,
+    "to": 1373,
+    "text": "?",
+    "scopes": ["string", "special"]
+  },
+  {
+    "from": 1373,
+    "to": 1374,
+    "text": "}",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1374,
+    "to": 1382,
+    "text": " colour=",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1382,
+    "to": 1384,
+    "text": "{}",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1384,
+    "to": 1389,
+    "text": " val=",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1389,
+    "to": 1390,
+    "text": "{",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1390,
+    "to": 1393,
+    "text": "val",
+    "scopes": ["string", "variable"]
+  },
+  {
+    "from": 1393,
+    "to": 1394,
+    "text": ":",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1394,
+    "to": 1395,
+    "text": "#",
+    "scopes": ["string", "special"]
+  },
+  {
+    "from": 1395,
+    "to": 1397,
+    "text": "06",
+    "scopes": ["string", "constant.numeric"]
+  },
+  {
+    "from": 1397,
+    "to": 1398,
+    "text": "x",
+    "scopes": ["string", "special"]
+  },
+  {
+    "from": 1398,
+    "to": 1399,
+    "text": "}",
+    "scopes": ["string", "punctuation"]
+  },
+  {
+    "from": 1399,
+    "to": 1408,
+    "text": " escaped=",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1408,
+    "to": 1412,
+    "text": "{{}}",
+    "scopes": ["string", "constant.character"]
+  },
+  {
+    "from": 1412,
+    "to": 1413,
+    "text": "\"",
+    "scopes": ["string"]
+  },
+  {
+    "from": 1413,
+    "to": 1414,
+    "text": ",",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1415,
+    "to": 1421,
+    "text": "Colour",
+    "scopes": ["type"]
+  },
+  {
+    "from": 1421,
+    "to": 1423,
+    "text": "::",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1423,
+    "to": 1426,
+    "text": "Red",
+    "scopes": ["constructor"]
+  },
+  {
+    "from": 1426,
+    "to": 1427,
+    "text": ".",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1427,
+    "to": 1435,
+    "text": "describe",
+    "scopes": ["function"]
+  },
+  {
+    "from": 1435,
+    "to": 1439,
+    "text": "());",
+    "scopes": ["punctuation"]
+  },
+  {
+    "from": 1440,
+    "to": 1441,
+    "text": "}",
+    "scopes": ["punctuation"]
+  }
+]

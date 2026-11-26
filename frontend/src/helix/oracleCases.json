@@ -1,0 +1,3174 @@
+{
+  "generatedFromHelixCommit": "18dbe190a0139f6c74320059146b2413b82b011c",
+  "generatedWith": "~/.cache/helix-oracle/oracle.sh cases.json > results.json",
+  "cases": [
+    {
+      "name": "expand: inside identifier",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = la#[b|]#el n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "<A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[180, 185]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: start of identifier",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = #[l|]#abel n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "<A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[180, 185]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: end of identifier",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = labe#[l|]# n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "<A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[180, 185]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: on whitespace before guard",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n#[ |]# | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "<A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[108, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: chain 4 levels",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ s#[h|]#ow x\n",
+      "keys": "<A-o><A-o><A-o><A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[208, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: via A-up",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-up><A-up>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 85]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: count 3 (check Helix count behaviour)",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "3<A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 84]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: repeat last motion",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-o><A-.><A-.>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 89]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: inside record field",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { #[p|]#x :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "<A-o><A-o><A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[50, 79]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: inside comment (injection boundary)",
+      "input": "module Demo (classify) where\n\n-- | Cl#[a|]#ssify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "<A-o><A-o><A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[0, 227]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: backward selection preserves direction",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[|a +]# b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[84, 79]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: select mode",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> No#[t|]#hing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "v<A-o><A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[108, 118]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "expand: multiple selections",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (#(x|)# + 1))\n",
+      "keys": "<A-o><A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 85], [138, 145]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: multiple selections merge into parent",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + #(b|)#) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-o><A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 85]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "expand: all the way to root and beyond",
+      "input": "newtype UserId = #[U|]#serId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "<A-o><A-o><A-o><A-o><A-o><A-o>",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[0, 243]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "shrink: pops history after 2 expands",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ s#[h|]#ow x\n",
+      "keys": "<A-o><A-o><A-i>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[220, 224]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "shrink: pops all history then shrinks to child",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ s#[h|]#ow x\n",
+      "keys": "<A-o><A-o><A-i><A-i><A-i>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[220, 224]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "shrink: via A-down",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-o><A-o><A-down>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 84]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "shrink: without history shrinks to first child",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> #[(a + b)|]# * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-i>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 79]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "shrink: on leaf node stays",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> #[Nothing|]#\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-i>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[111, 118]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "shrink: history invalidated after moving away",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-o><A-o>jj<A-i>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[106, 118]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "shrink: multiple selections history",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (#(x|)# + 1))\n",
+      "keys": "<A-o><A-o><A-i>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 84], [139, 144]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: list elements",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-n>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[94, 95]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: chain across list",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-n><A-n><A-n>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[97, 98]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "prev_sibling: list elements",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, #[3|]#])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-p>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[95, 94]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "prev_sibling: climbs when at first child",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-p><A-p>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[91, 90]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: climbs when at last child",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, #[3|]#])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-n><A-n>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[98, 99]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: record fields",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { #[p|]#x :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "<A-o><A-o><A-n>",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[64, 65]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: do statements",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  #[x|]# <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-o><A-o><A-n>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[0, 147]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: A-right and A-left",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-right><A-left>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[80, 79]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: repeat last motion",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-n><A-.>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[83, 84]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "next_sibling: multiple selections",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (#(4|)#, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-n>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[94, 95], [104, 105]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_siblings: inside tuple",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-a>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[93, 94], [96, 97]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_siblings: inside record",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { #[p|]#x :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "<A-o><A-o><A-a>",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[52, 61], [66, 75]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_siblings: climbs single-child parent",
+      "input": "newtype UserId = UserId #[I|]#nt\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "<A-a>",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[17, 23], [24, 27]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_siblings: backward direction",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[|2]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-a>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[94, 93], [97, 96]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_siblings: multiple selections",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (#(x|)# + 1))\n",
+      "keys": "<A-a>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 80], [81, 82], [83, 84], [139, 140], [141, 142], [143, 144]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_children: on list",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[2, 3]|]#)), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-I>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[93, 94], [96, 97]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_children: on do block",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  #[x|]# <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-o><A-o><A-o><A-I>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[47, 146]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_children: on leaf node stays",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> #[Nothing|]#\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-I>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[111, 118]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "all_children: on function after expand",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ #[s|]#how x\n",
+      "keys": "<A-o><A-o><A-I>",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[220, 224], [225, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_end: inside identifier",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> No#[t|]#hing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[118, 119]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_end: inside parens twice",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-e><A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[84, 85]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_end: on whitespace",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n#[ |]# x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[146, 147]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_end: backward selection",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[|a]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[81, 80]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_end: non-ASCII unicode",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"#[\u03bb|]#\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "<A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[112, 113]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_start: inside identifier",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Noth#[i|]#ng\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-b>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[111, 112]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_start: at start climbs to parent",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> #[N|]#othing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-b>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[108, 109]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "move_parent_node_start: twice from inside parens",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + #[b|]#) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "<A-b><A-b>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 79]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "extend_parent_node_end: select mode",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "v<A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 81]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "extend_parent_node_end: select mode twice",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "v<A-e><A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 85]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "extend_parent_node_start: select mode",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + #[b|]#) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "v<A-b>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[83, 79]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "extend_parent_node_start: select mode twice",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + #[b|]#) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "v<A-b><A-b>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[83, 78]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "move_parent_node_end: multiple selections",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (#(x|)# + 1))\n",
+      "keys": "<A-e>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[80, 81], [140, 141]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mif: top-level function with guards",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = l#[a|]#bel n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mif",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[180, 187]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "maf: top-level function with guards",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = l#[a|]#bel n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "maf",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[108, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mif: local where function",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ s#[h|]#ow x\n",
+      "keys": "mif",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[210, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "maf: local where function",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ s#[h|]#ow x\n",
+      "keys": "maf",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[200, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mif: inside lambda",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mif",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 89]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "maf: inside lambda",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "maf",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[70, 89]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mif: inside do block outside lambda",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> N#[o|]#thing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mif",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[47, 146]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "maf: inside do block outside lambda",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> N#[o|]#thing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "maf",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[34, 146]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mif: at start of function name",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\n#[c|]#lassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mif",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[108, 109]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "maf: at start of function name",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\n#[c|]#lassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "maf",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[108, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mif: on whitespace outside function",
+      "input": "#[m|]#odule Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mif",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[0, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mit: data declaration",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { #[p|]#x :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "mit",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[42, 79]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mat: data declaration",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { #[p|]#x :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "mat",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[29, 99]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mit: newtype declaration",
+      "input": "newtype UserId = UserId #[I|]#nt\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "mit",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[24, 27]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mat: newtype declaration",
+      "input": "newtype UserId = UserId #[I|]#nt\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "mat",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[0, 27]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mia: function parameter",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify #[n|]#\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mia",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[117, 118]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "maa: function parameter (no around query in Haskell)",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify #[n|]#\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "maa",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[117, 118]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mia: lambda parameter",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a #[b|]# -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mia",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[73, 74]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mia: infix function parameter",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
+      "keys": "mia",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[181, 182]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mic: inside single line comment",
+      "input": "-- fi#[r|]#st comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mic",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[5, 6]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mac: consecutive line comments",
+      "input": "-- fi#[r|]#st comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mac",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[5, 6]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mic: inside block comment",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- bl#[o|]#ck comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mic",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[127, 128]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mac: inside block comment",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- bl#[o|]#ck comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mac",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[127, 128]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "miT: undefined in Haskell",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = l#[a|]#bel n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "miT",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[181, 182]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mie: undefined in Haskell",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = l#[a|]#bel n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mie",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[181, 182]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mif: multiple selections",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> #(N|)#othing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mif",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[47, 146]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "]f: from top of file",
+      "input": "#[m|]#odule Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "]f",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[108, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2]f: count 2 from top",
+      "input": "#[m|]#odule Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "2]f",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[108, 226]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "[f: from end of file",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show #[x|]#\n",
+      "keys": "[f",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[226, 225]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2[f: count 2 backwards",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + #[1|]#))\n",
+      "keys": "2[f",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[89, 70]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "v]f: select mode forward",
+      "input": "#[m|]#odule Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "v]f",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[0, 226]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "v[f: select mode backward",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show #[x|]#\n",
+      "keys": "v[f",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[225, 226]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "]f: when no next function",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    #[l|]#abel x = \"pos:\" ++ show x\n",
+      "keys": "]f",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[200, 201]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "]t: from top of TYPES",
+      "input": "#[n|]#ewtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "]t",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[29, 99]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "[t: from instance to data",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\n#[i|]#nstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "[t",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[99, 29]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2[t: from instance to newtype",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\n#[i|]#nstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "2[t",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[27, 0]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "v]t: select mode to data",
+      "input": "#[n|]#ewtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "v]t",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[0, 99]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "]a: next parameter",
+      "input": "runStep :: Maybe Int -> Maybe Int\n#[r|]#unStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "]a",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[42, 44]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2]a: count 2 next parameter",
+      "input": "runStep :: Maybe Int -> Maybe Int\n#[r|]#unStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "2]a",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[71, 72]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "3]a: count 3 next parameter",
+      "input": "runStep :: Maybe Int -> Maybe Int\n#[r|]#unStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "3]a",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[73, 74]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "[a: prev parameter",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> #[N|]#othing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "[a",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[74, 73]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2[a: count 2 prev parameter",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> #[N|]#othing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "2[a",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[72, 71]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "v]a: select mode next parameter",
+      "input": "runStep :: Maybe Int -> Maybe Int\n#[r|]#unStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "v]a",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[34, 44]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "]c: next comment",
+      "input": "-- first comment\n-- second comment\n#[n|]#ested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "]c",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[122, 155]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "[c: prev comment",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
+      "keys": "[c",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[155, 122]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2[c: count 2 prev comment",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
+      "keys": "2[c",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[155, 122]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "v]c: select mode next comment",
+      "input": "-- first comment\n-- second comment\n#[n|]#ested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "v]c",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[35, 155]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "]T: undefined in Haskell",
+      "input": "#[m|]#odule Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "]T",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[0, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "]e: undefined in Haskell",
+      "input": "#[m|]#odule Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "]e",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[0, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "]x: undefined in Haskell",
+      "input": "#[m|]#odule Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "]x",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[0, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "]a: multiple selections",
+      "input": "runStep :: Maybe Int -> Maybe Int\n#[r|]#unStep mx = do\n  x <- mx\n  #(l|)#et f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "]a",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[42, 44], [71, 72]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on opening paren",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just #[(|]#f x (x + 1))\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[145, 146]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on closing paren",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1)#[)|]#\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[133, 134]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: inside parens fuzzy",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x#[ |]#+ 1))\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[144, 145]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on opening bracket",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[|]#2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[97, 98]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on closing brace",
+      "input": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  #[}|]# deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "newtype UserId = UserId Int\n\ndata Point = Point\n  { px :: Int\n  , py :: Int\n  } deriving (Eq, Show)\n\nclass Printable a where\n  render :: a -> String\n\ninstance Printable Point where\n  render (Point x y) = \"(\" ++ show x ++ \", \" ++ show y ++ \")\"\n",
+        "ranges": [[50, 51]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on opening string quote",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = #[\"|]#pos:\" ++ show x\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[210, 211]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on closing string quote",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:#[\"|]# ++ show x\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[215, 216]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: inside string literal",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"p#[o|]#s:\" ++ show x\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[212, 213]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on paren inside string literal",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"#[(|]#a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[98, 99]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: on paren inside block comment",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment #[(|]#with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[151, 152]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mm: select mode extends to matching",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> #[(|]#a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "vmm",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 85]],
+        "primary": 0,
+        "mode": "Select"
+      }
+    },
+    {
+      "name": "mm: multiple selections",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[|]#2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", #([|)#5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mm",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[97, 98], [116, 117]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mim: inside parens",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a#[ |]#+ b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mim",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 84]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mam: inside parens",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a#[ |]#+ b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mam",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[78, 85]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2mim: nested parens count 2",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x#[ |]#+ 1))\n",
+      "keys": "2mim",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[134, 145]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2mam: nested parens count 2",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x#[ |]#+ 1))\n",
+      "keys": "2mam",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[133, 146]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mim: inside string literal",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"z#[e|]#ro\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mim",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[159, 160]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mam: inside string literal",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"z#[e|]#ro\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mam",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[159, 160]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mim: inside list",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2#[,|]# 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "mim",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[93, 97]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mi\": cursor directly on opening quote",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = #[\"|]#zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mi\"",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[157, 158]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "ma\": cursor directly on opening quote",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = #[\"|]#zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "ma\"",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[157, 158]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mi\": cursor directly on closing quote",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero#[\"|]#\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mi\"",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[162, 163]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mi(: inside nested parens",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x#[ |]#+ 1))\n",
+      "keys": "mi(",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[139, 144]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "2ma(: count 2 around parens",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x#[ |]#+ 1))\n",
+      "keys": "2ma(",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[133, 146]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mdm: delete closest surrounding pair",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a#[ |]#+ b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mdm",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> a + b * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[79, 80]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mrm[: replace closest pair with brackets",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a#[ |]#+ b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "mrm[",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> [a + b] * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[80, 81]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "md\": delete quotes with cursor on opening quote",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = #[\"|]#zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "md\"",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[157, 158]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "mr\"(: replace quotes with parens from closing quote",
+      "input": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero#[\"|]#\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+      "keys": "mr\"(",
+      "lang": "haskell",
+      "expected": {
+        "text": "module Demo (classify) where\n\n-- | Classify an integer.\n-- Uses guards and where.\nclassify :: Int -> String\nclassify n\n  | n < 0     = \"neg\"\n  | n == 0    = \"zero\"\n  | otherwise = label n\n  where\n    label x = \"pos:\" ++ show x\n",
+        "ranges": [[162, 163]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "smart_tab: after text inside parens",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "a<tab><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[84, 85]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "smart_tab: double tab climbs out of parens",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (#[a|]# + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "a<tab><tab><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[85, 86]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "smart_tab: after text inside list",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "a<tab><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[98, 99]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "smart_tab: after whitespace inserts spaces",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  #[x|]# <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "i<tab><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n    x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[55, 54]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "smart_tab: at line start inserts spaces",
+      "input": "runStep :: Maybe Int -> Maybe Int\n#[r|]#unStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "i<tab><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\n  runStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[37, 36]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "smart_tab: S-tab after text inserts spaces",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a#[ |]#+ b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "i<S-tab><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a   + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[83, 82]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: open_below indented line",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x#[ |]#<- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "o<esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[60, 61]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: open_below and type",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x#[ |]#<- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "oy<esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  y\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[63, 64]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: open_above indented line and type",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    #[0|]# -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "Oz<esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    z\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[107, 108]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: insert_newline inside indented line",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <#[-|]# mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "i<ret><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <\n  - mx\n  let f = \\a b -> (a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[59, 58]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: open_below comment continues comment",
+      "input": "-- f#[i|]#rst comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "keys": "omore<esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "-- first comment\nmore\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "ranges": [[21, 22]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: insert_newline between auto-pairs",
+      "input": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> #[(|]#a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+      "keys": "i()<left><ret><esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "runStep :: Maybe Int -> Maybe Int\nrunStep mx = do\n  x <- mx\n  let f = \\a b -> (\n    \n  )(a + b) * 2\n  case x of\n    0 -> Nothing\n    _ -> Just (f x (x + 1))\n",
+        "ranges": [[84, 85]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "indent: I on empty line",
+      "input": "  a\n#[\n|]#  b\n",
+      "keys": "Ix<esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "  a\nx\n  b\n",
+        "ranges": [[5, 6]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: indent: o after def colon with body",
+      "input": "def f(x)#[:|]#\n    return x\n",
+      "keys": "o",
+      "lang": "python",
+      "expected": {
+        "text": "def f(x):\n    \n    return x\n",
+        "ranges": [[14, 15]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: enter after def colon inside incomplete def",
+      "input": "def f(x):\n    if x > #[0|]#:\n        pass\n",
+      "keys": "a<ret>",
+      "lang": "python",
+      "expected": {
+        "text": "def f(x):\n    if x > 0\n        :\n        pass\n",
+        "ranges": [[21, 32]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: enter after if colon",
+      "input": "def f(x):\n    if x > 0#[:|]#\n",
+      "keys": "a<ret>",
+      "lang": "python",
+      "expected": {
+        "text": "def f(x):\n    if x > 0:\n\n",
+        "ranges": [[22, 25]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: o after return (extend.prevent-once)",
+      "input": "def f(x):\n    if x > 0:\n        #[r|]#eturn x\n",
+      "keys": "o",
+      "lang": "python",
+      "expected": {
+        "text": "def f(x):\n    if x > 0:\n        return x\n\n",
+        "ranges": [[41, 42]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: o after blank line in function",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n#[\n|]#        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "o",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        \n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[260, 261]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: o inside multi-line call (align)",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            #[a|]#lpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "o",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            \n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[235, 236]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: o after closing paren of multi-line call",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        #[)|]#\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "o",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n        \n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[259, 260]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: O above indented line",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        #[r|]#eturn result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "O",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        \n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[260, 261]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: o continuing comment",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    #[#|]# Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "o",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    \n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[165, 166]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: enter after open bracket",
+      "input": "xs = #[[|]#1, 2]\n",
+      "keys": "a<ret>",
+      "lang": "python",
+      "expected": {
+        "text": "xs = [\n    1, 2]\n",
+        "ranges": [[5, 12]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: expand: inside identifier",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        re#[s|]#ult = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "<A-o>",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[187, 193]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: expand+shrink: 3 levels then shrink",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        re#[s|]#ult = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "<A-o><A-o><A-o><A-i>",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[187, 250]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: textobject: mif",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        re#[t|]#urn result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "mif",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[165, 286]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: textobject: maf",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        re#[t|]#urn result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "maf",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[91, 286]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: textobject: mia",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(a#[l|]#pha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "mia",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[103, 113]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: textobject: mic",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Co#[m|]#pute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "mic",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[142, 143]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: textobject: mit",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        se#[l|]#f.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "mit",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[31, 89]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: goto: ]f",
+      "input": "#[#|]# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "]f",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[0, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: goto: [f",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    #[r|]#eturn (x + (y * 2))\n",
+      "keys": "[f",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[286, 91]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: match_brackets: mm skipping string paren",
+      "input": "def f():\n    s = \"(\" + str#[(|]#1)\n",
+      "keys": "mm",
+      "lang": "python",
+      "expected": {
+        "text": "def f():\n    s = \"(\" + str(1)\n",
+        "ranges": [[28, 29]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: textobject: mi(",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (#[y|]# * 2))\n",
+      "keys": "mi(",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[340, 345]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: smart_tab: after non-whitespace moves to parent end",
+      "input": "def f(#[x|]#):\n    return helper(x)\n",
+      "keys": "a<tab>",
+      "lang": "python",
+      "expected": {
+        "text": "def f(x):\n    return helper(x)\n",
+        "ranges": [[8, 9]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: smart_tab: on leading whitespace indents",
+      "input": "def f(x):\n#[ |]#   return x\n",
+      "keys": "i<tab>",
+      "lang": "python",
+      "expected": {
+        "text": "def f(x):\n        return x\n",
+        "ranges": [[15, 14]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "python: indent: >",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    #[i|]#f alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "<gt>",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n        if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[169, 170]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "python: unindent: <",
+      "input": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n        #[r|]#eturn result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+      "keys": "<lt>",
+      "lang": "python",
+      "expected": {
+        "text": "# Helper module\nclass Box:\n    def __init__(self, value: int):\n        self.value = value\n\ndef compute(alpha: int, beta: int) -> int:\n    # Compute weighted sum\n    if alpha > 0:\n        result = helper(\n            alpha,\n            beta,\n        )\n\n    return result\n    return 0\n\ndef helper(x: int, y: int) -> int:\n    return (x + (y * 2))\n",
+        "ranges": [[256, 257]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: indent: o after open brace",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) #[{|]#\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    \n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[158, 159]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: enter after open brace",
+      "input": "function f() #[{|]#\n}\n",
+      "keys": "a<ret>",
+      "lang": "typescript",
+      "expected": {
+        "text": "function f() {\n  \n}\n",
+        "ranges": [[13, 18]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: enter after open paren",
+      "input": "const r = helper#[(|]#a, b);\n",
+      "keys": "a<ret>",
+      "lang": "typescript",
+      "expected": {
+        "text": "const r = helper(\n  a, b);\n",
+        "ranges": [[16, 21]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: o after closing brace of block",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  #[}|]#\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  \n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[239, 240]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: o continuing comment",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // C#[o|]#mpute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  \n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[137, 138]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: o after blank line in function",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n#[\n|]#    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    \n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[218, 219]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: o inside multi-line call",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      #[a|]#lpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      \n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[200, 201]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: O above indented line",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    #[r|]#eturn result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "O",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    \n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[218, 219]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: expand: inside identifier",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const re#[s|]#ult = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "<A-o>",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[164, 170]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: expand+shrink: 3 levels then shrink",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const re#[s|]#ult = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "<A-o><A-o><A-o><A-i>",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[164, 211]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: textobject: mif",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    re#[t|]#urn result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "mif",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[107, 250]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: textobject: maf",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    re#[t|]#urn result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "maf",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[53, 250]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: textobject: mia",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(a#[l|]#pha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "mia",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[70, 83]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: textobject: mic",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // C#[o|]#mpute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "mic",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[115, 116]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: textobject: mit",
+      "input": "// Helper module\ninterface Box {\n  va#[l|]#ue: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "mit",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[31, 51]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: goto: ]f",
+      "input": "#[/|]#/ Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "]f",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[0, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: goto: [f",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  #[r|]#eturn (x + (y * 2));\n}\n",
+      "keys": "[f",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[250, 53]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: match_brackets: mm skipping string paren",
+      "input": "function f() { const s = \"(\" + String#[(|]#1); }\n",
+      "keys": "mm",
+      "lang": "typescript",
+      "expected": {
+        "text": "function f() { const s = \"(\" + String(1); }\n",
+        "ranges": [[39, 40]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: textobject: mi(",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (#[y|]# * 2));\n}\n",
+      "keys": "mi(",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[315, 320]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: smart_tab: after non-whitespace moves to parent end",
+      "input": "function f(x: number) {\n  return helper(#[x|]#);\n}\n",
+      "keys": "a<tab>",
+      "lang": "typescript",
+      "expected": {
+        "text": "function f(x: number) {\n  return helper(x);\n}\n",
+        "ranges": [[42, 43]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: smart_tab: on leading whitespace indents",
+      "input": "function f(x: number) {\n#[ |]# return x;\n}\n",
+      "keys": "i<tab>",
+      "lang": "typescript",
+      "expected": {
+        "text": "function f(x: number) {\n    return x;\n}\n",
+        "ranges": [[27, 26]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "typescript: indent: >",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  #[i|]#f (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "<gt>",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n    if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[139, 140]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "typescript: unindent: <",
+      "input": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n    #[r|]#eturn result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+      "keys": "<lt>",
+      "lang": "typescript",
+      "expected": {
+        "text": "// Helper module\ninterface Box {\n  value: number;\n}\n\nfunction compute(alpha: number, beta: number): number {\n  // Compute weighted sum\n  if (alpha > 0) {\n    const result = helper(\n      alpha,\n      beta,\n    );\n\n  return result;\n  }\n  return 0;\n}\n\nfunction helper(x: number, y: number): number {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[216, 217]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: indent: o after open brace",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 #[{|]#\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\t\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[148, 149]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: enter after open brace",
+      "input": "package p\nfunc f() #[{|]#\n}\n",
+      "keys": "a<ret>",
+      "lang": "go",
+      "expected": {
+        "text": "package p\nfunc f() {\n\t\n}\n",
+        "ranges": [[19, 23]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: enter after open paren",
+      "input": "package p\nfunc f() { helper#[(|]#a, b) }\n",
+      "keys": "a<ret>",
+      "lang": "go",
+      "expected": {
+        "text": "package p\nfunc f() { helper(\n\ta, b) }\n",
+        "ranges": [[27, 31]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: o after closing brace of block",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t#[}|]#\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\t\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[210, 211]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: o continuing comment",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// C#[o|]#mpute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\t\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[131, 132]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: o after blank line in function",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n#[\n|]#\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\t\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[192, 193]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: o inside multi-line call",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\t#[a|]#lpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\t\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[179, 180]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: O above indented line",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\t#[r|]#eturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "O",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\t\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[192, 193]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: expand: inside identifier",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tre#[s|]#ult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "<A-o>",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[148, 154]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: expand+shrink: 3 levels then shrink",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tre#[s|]#ult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "<A-o><A-o><A-o><A-i>",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[148, 188]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: textobject: mif",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\tre#[t|]#urn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "mif",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[103, 220]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: textobject: maf",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\tre#[t|]#urn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "maf",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[65, 220]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: textobject: mia",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(a#[l|]#pha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "mia",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[78, 87]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: textobject: mic",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// C#[o|]#mpute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "mic",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[110, 111]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: textobject: mit",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tVa#[l|]#ue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "mit",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[49, 63]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: goto: ]f",
+      "input": "#[p|]#ackage sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "]f",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[65, 220]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: goto: [f",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\t#[r|]#eturn (x + (y * 2))\n}\n",
+      "keys": "[f",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[220, 65]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: match_brackets: mm skipping string paren",
+      "input": "package p\nfunc f() { s := \"(\" + g#[(|]#1) }\n",
+      "keys": "mm",
+      "lang": "go",
+      "expected": {
+        "text": "package p\nfunc f() { s := \"(\" + g(1) }\n",
+        "ranges": [[35, 36]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: textobject: mi(",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (#[y|]# * 2))\n}\n",
+      "keys": "mi(",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[268, 273]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: smart_tab: after non-whitespace moves to parent end",
+      "input": "package p\nfunc f(x int) int {\n\treturn helper(#[x|]#)\n}\n",
+      "keys": "a<tab>",
+      "lang": "go",
+      "expected": {
+        "text": "package p\nfunc f(x int) int {\n\treturn helper(x)\n}\n",
+        "ranges": [[47, 48]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: smart_tab: on leading whitespace indents",
+      "input": "package p\nfunc f(x int) int {\n#[\t|]#return x\n}\n",
+      "keys": "i<tab>",
+      "lang": "go",
+      "expected": {
+        "text": "package p\nfunc f(x int) int {\n\t\treturn x\n}\n",
+        "ranges": [[32, 31]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "go: indent: >",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\t#[i|]#f alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "<gt>",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\t\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[132, 133]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "go: unindent: <",
+      "input": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\t\t#[r|]#eturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+      "keys": "<lt>",
+      "lang": "go",
+      "expected": {
+        "text": "package sample\n\n// Helper module\ntype Box struct {\n\tValue int\n}\n\nfunc compute(alpha int, beta int) int {\n\t// Compute weighted sum\n\tif alpha > 0 {\n\t\tresult := helper(\n\t\t\talpha,\n\t\t\tbeta,\n\t\t)\n\n\treturn result\n\t}\n\treturn 0\n}\n\nfunc helper(x int, y int) int {\n\treturn (x + (y * 2))\n}\n",
+        "ranges": [[191, 192]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: indent: o after open brace",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 #[{|]#\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        \n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[150, 151]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: enter after open brace",
+      "input": "fn f() #[{|]#\n}\n",
+      "keys": "a<ret>",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f() {\n    \n}\n",
+        "ranges": [[7, 14]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: enter after open paren",
+      "input": "fn f() { helper#[(|]#a, b); }\n",
+      "keys": "a<ret>",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f() { helper(\n    a, b); }\n",
+        "ranges": [[15, 22]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: o after closing brace of block",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    #[}|]#\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    \n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[253, 254]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: o continuing comment",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // C#[o|]#mpute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    // \n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[130, 131]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: o continuing doc comment",
+      "input": "/// #[D|]#oc line\nfn f() {}\n",
+      "keys": "o",
+      "lang": "rust",
+      "expected": {
+        "text": "/// Doc line\n/// \nfn f() {}\n",
+        "ranges": [[17, 18]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: o after blank line in function",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n#[\n|]#        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        \n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[228, 229]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: o inside multi-line call",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            #[a|]#lpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "o",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            \n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[202, 203]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: O above indented line",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        #[r|]#eturn result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "O",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        \n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[228, 229]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: expand: inside identifier",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let re#[s|]#ult = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "<A-o>",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[154, 160]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: expand+shrink: 3 levels then shrink",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let re#[s|]#ult = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "<A-o><A-o><A-o><A-i>",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[150, 218]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: textobject: mif",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        re#[t|]#urn result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "mif",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[93, 256]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: textobject: maf",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        re#[t|]#urn result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "maf",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[52, 256]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: textobject: mia",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(a#[l|]#pha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "mia",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[63, 73]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: textobject: mic",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // C#[o|]#mpute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "mic",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[103, 104]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: textobject: mit",
+      "input": "// Helper module\nstruct BoxVal {\n    va#[l|]#ue: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "mit",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[31, 50]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: goto: ]f",
+      "input": "#[/|]#/ Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "]f",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[52, 256]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: goto: [f",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (#[x|]# + (y * 2))\n}\n",
+      "keys": "[f",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[256, 52]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: match_brackets: mm skipping string paren",
+      "input": "fn f() { let s = \"(\"; let n = g#[(|]#1); }\n",
+      "keys": "mm",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f() { let s = \"(\"; let n = g(1); }\n",
+        "ranges": [[33, 34]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: textobject: mi(",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (#[y|]# * 2))\n}\n",
+      "keys": "mi(",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[303, 308]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: smart_tab: after non-whitespace moves to parent end",
+      "input": "fn f(x: i32) -> i32 {\n    helper(#[x|]#)\n}\n",
+      "keys": "a<tab>",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f(x: i32) -> i32 {\n    helper(x)\n}\n",
+        "ranges": [[35, 36]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: smart_tab: on leading whitespace indents",
+      "input": "fn f(x: i32) -> i32 {\n#[ |]#   x\n}\n",
+      "keys": "i<tab>",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f(x: i32) -> i32 {\n        x\n}\n",
+        "ranges": [[27, 26]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "rust: indent: >",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    #[i|]#f alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "<gt>",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n        if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[131, 132]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "rust: unindent: <",
+      "input": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n        #[r|]#eturn result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+      "keys": "<lt>",
+      "lang": "rust",
+      "expected": {
+        "text": "// Helper module\nstruct BoxVal {\n    value: i32,\n}\n\nfn compute(alpha: i32, beta: i32) -> i32 {\n    // Compute weighted sum\n    if alpha > 0 {\n        let result = helper(\n            alpha,\n            beta,\n        );\n\n    return result;\n    }\n    0\n}\n\nfn helper(x: i32, y: i32) -> i32 {\n    (x + (y * 2))\n}\n",
+        "ranges": [[224, 225]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: indent: o after open brace",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) #[{|]#\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    \n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[131, 132]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: enter after open brace",
+      "input": "int f() #[{|]#\n}\n",
+      "keys": "a<ret>",
+      "lang": "cpp",
+      "expected": {
+        "text": "int f() {\n  \n}\n",
+        "ranges": [[8, 13]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: enter after open paren",
+      "input": "int f() { return helper#[(|]#a, b); }\n",
+      "keys": "a<ret>",
+      "lang": "cpp",
+      "expected": {
+        "text": "int f() { return helper(\n                        a, b); }\n",
+        "ranges": [[23, 50]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: o after closing brace of block",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  #[}|]#\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  \n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[209, 210]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: o continuing comment",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // C#[o|]#mpute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  \n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[110, 111]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: o after blank line in function",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n#[\n|]#    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    \n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[188, 189]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: o inside multi-line call",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      #[a|]#lpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "o",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      \n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[171, 172]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: O above indented line",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    #[r|]#eturn result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "O",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    \n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[188, 189]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: expand: inside identifier",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int re#[s|]#ult = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "<A-o>",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[135, 141]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: expand+shrink: 3 levels then shrink",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int re#[s|]#ult = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "<A-o><A-o><A-o><A-i>",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[135, 181]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: textobject: mif",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    re#[t|]#urn result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "mif",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[80, 220]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: textobject: maf",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    re#[t|]#urn result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "maf",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[47, 220]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: textobject: mia",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int #[a|]#lpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "mia",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[59, 68]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: textobject: mic",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // C#[o|]#mpute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "mic",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[88, 89]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: textobject: mit",
+      "input": "// Helper module\nstruct Box {\n  int #[v|]#alue;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "mit",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[28, 44]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: goto: ]f",
+      "input": "#[/|]#/ Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "]f",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[0, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: goto: [f",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  #[r|]#eturn (x + (y * 2));\n}\n",
+      "keys": "[f",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[220, 47]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: match_brackets: mm skipping string paren",
+      "input": "int f() { const char* s = \"(\"; return g#[(|]#1); }\n",
+      "keys": "mm",
+      "lang": "cpp",
+      "expected": {
+        "text": "int f() { const char* s = \"(\"; return g(1); }\n",
+        "ranges": [[41, 42]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: textobject: mi(",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (#[y|]# * 2));\n}\n",
+      "keys": "mi(",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[264, 269]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: smart_tab: after non-whitespace moves to parent end",
+      "input": "int f(int x) {\n  return helper(#[x|]#);\n}\n",
+      "keys": "a<tab>",
+      "lang": "cpp",
+      "expected": {
+        "text": "int f(int x) {\n  return helper(x);\n}\n",
+        "ranges": [[33, 34]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: smart_tab: on leading whitespace indents",
+      "input": "int f(int x) {\n#[ |]# return x;\n}\n",
+      "keys": "i<tab>",
+      "lang": "cpp",
+      "expected": {
+        "text": "int f(int x) {\n    return x;\n}\n",
+        "ranges": [[18, 17]],
+        "primary": 0,
+        "mode": "Insert"
+      }
+    },
+    {
+      "name": "cpp: indent: >",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  #[i|]#f (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "<gt>",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n    if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[112, 113]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "cpp: unindent: <",
+      "input": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n    #[r|]#eturn result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+      "keys": "<lt>",
+      "lang": "cpp",
+      "expected": {
+        "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n  return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
+        "ranges": [[186, 187]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    }
+  ]
+}

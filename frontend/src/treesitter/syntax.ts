@@ -10,7 +10,15 @@
 //   `injections.scm` (for non-combined layers) and `locals.scm` to the affected declarations.
 
 import type { ChangeSet, Text } from "@codemirror/state";
-import { Edit, type Node, Parser, type Query, type Range, type Tree } from "web-tree-sitter";
+import {
+  Edit,
+  type Node,
+  Parser,
+  type Query,
+  type QueryMatch,
+  type Range,
+  type Tree,
+} from "web-tree-sitter";
 import {
   getLoadedLanguageBundle,
   IncludedChildren,
@@ -33,6 +41,7 @@ import {
   type TextInput,
   type TextSource,
 } from "./textSource";
+import { SyntaxTreeCursor } from "./treeCursor";
 
 /** Typed snapshot exposed synchronously via CodeMirror's `StateField` for later tree commands. */
 export interface SyntaxSnapshot {
@@ -458,11 +467,32 @@ export class SyntaxTree {
     return data;
   }
 
+  /** Language name of the root parse layer. */
+  rootLanguage(): string {
+    return this.layer(this.rootLayer).language;
+  }
+
   /** Root parse tree. Always present after `parse` / `update`. */
   tree(): Tree {
     const rootTree = this.layer(this.rootLayer).managedTree;
     if (!rootTree) throw new Error("root syntax layer has no parse tree");
     return rootTree.raw;
+  }
+
+  /** Returns the direct injection in `layerId` covering `pos`, if any. */
+  layerInjectionAt(layerId: number, pos: number): Injection | null {
+    return injectionAt(this.layer(layerId).injections, pos);
+  }
+
+  /** Compiles/returns the auxiliary query `kind` for `layerId`, or `null` if unavailable. */
+  queryForLayer(layerId: number, kind: QueryKind): Query | null {
+    const bundle = getLoadedLanguageBundle(this.layer(layerId).language);
+    return bundle?.query(kind) ?? null;
+  }
+
+  /** Creates a multi-layer tree cursor starting at the root node. Call `.delete()` when done. */
+  walk(input?: TextInput): SyntaxTreeCursor {
+    return new SyntaxTreeCursor(this, input);
   }
 
   /**
@@ -541,19 +571,112 @@ export class SyntaxTree {
     }
   }
 
-  /** Finds the smallest parse tree covering `[start, end]`, parsing lazy layers if needed. */
-  treeForRange(start: number, end: number, input?: TextInput): Tree {
+  /** Finds the smallest layer with a parse tree covering `[start, end]`, parsing lazy layers if needed. */
+  layerAndTreeForRange(
+    start: number,
+    end: number,
+    input?: TextInput,
+  ): { layer: number; tree: Tree } {
     let id = this.layerForRange(start, end);
     for (;;) {
       const data = this.layer(id);
-      if (data.managedTree) return data.managedTree.raw;
+      if (data.managedTree) return { layer: id, tree: data.managedTree.raw };
       if (input !== undefined) {
         const parsed = this.ensureLayerParsed(id, input);
-        if (parsed) return parsed;
+        if (parsed) return { layer: id, tree: parsed };
       }
       if (data.parent === null) throw new Error("root layer has no tree");
       id = data.parent;
     }
+  }
+
+  /** Finds the smallest parse tree covering `[start, end]`, parsing lazy layers if needed. */
+  treeForRange(start: number, end: number, input?: TextInput): Tree {
+    return this.layerAndTreeForRange(start, end, input).tree;
+  }
+
+  /** Smallest node covering `[start, end]` in the innermost parse tree covering that range. */
+  descendantForRange(start: number, end: number, input?: TextInput): Node | null {
+    return this.treeForRange(start, end, input).rootNode.descendantForIndex(start, end);
+  }
+
+  /** Smallest named node covering `[start, end]` in the innermost parse tree covering that range. */
+  namedDescendantForRange(start: number, end: number, input?: TextInput): Node | null {
+    return this.treeForRange(start, end, input).rootNode.namedDescendantForIndex(start, end);
+  }
+
+  /**
+   * Executes auxiliary query `kind` across the root layer and any nested injection layers in
+   * document order, matching tree-house's `QueryMatchIter` (used by `tags.scm`).
+   */
+  matchesAcrossLayers(
+    kind: QueryKind,
+    input: TextInput,
+  ): { readonly language: string; readonly query: Query; readonly match: QueryMatch }[] {
+    const out: { readonly language: string; readonly query: Query; readonly match: QueryMatch }[] =
+      [];
+    const source = asTextSource(input);
+    const visit = (layerId: number, boundStart: number, boundEnd: number): void => {
+      const data = this.layer(layerId);
+      const tree = data.managedTree?.raw ?? this.ensureLayerParsed(layerId, source);
+      if (!tree) return;
+      const query = this.queryForLayer(layerId, kind);
+      const matches = query
+        ? query.matches(tree.rootNode, {
+            startIndex: boundStart,
+            endIndex: boundEnd,
+            matchLimit: TREE_SITTER_MATCH_LIMIT,
+          })
+        : [];
+      const injections = data.injections.filter(
+        (inj) => inj.range.end > boundStart && inj.range.start < boundEnd,
+      );
+      let mi = 0;
+      let ii = 0;
+      const matchBounds = (m: QueryMatch): { start: number; end: number } => {
+        let start = Number.MAX_SAFE_INTEGER;
+        let end = 0;
+        for (const cap of m.captures) {
+          if (cap.node.startIndex < start) start = cap.node.startIndex;
+          if (cap.node.endIndex > end) end = cap.node.endIndex;
+        }
+        return start === Number.MAX_SAFE_INTEGER ? { start: 0, end: 0 } : { start, end };
+      };
+
+      while (mi < matches.length || ii < injections.length) {
+        const m = matches[mi];
+        const inj = injections[ii];
+        if (m !== undefined) {
+          const b = matchBounds(m);
+          if (b.start === b.end) {
+            mi++;
+            continue;
+          }
+          if (inj === undefined || b.start < inj.range.end) {
+            mi++;
+            if (
+              query &&
+              (inj === undefined || b.start <= inj.range.start || inj.range.end < b.end)
+            ) {
+              out.push({ language: data.language, query, match: m });
+            }
+            continue;
+          }
+        }
+        if (inj !== undefined) {
+          ii++;
+          visit(
+            inj.layer,
+            Math.max(boundStart, inj.range.start),
+            Math.min(boundEnd, inj.range.end),
+          );
+        }
+      }
+    };
+
+    const rootNode = this.tree().rootNode;
+    visit(this.rootLayer, rootNode.startIndex, rootNode.endIndex);
+    return out;
   }
 
   /**

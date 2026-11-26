@@ -9,9 +9,11 @@ import { redo, undo } from "@codemirror/commands";
 import {
   type ChangeDesc,
   EditorState,
+  type Extension,
   type Transaction,
   type TransactionSpec,
 } from "@codemirror/state";
+import { createSyntaxStateField, hasTreeSitterMode } from "../treesitter";
 import {
   type HelixDiagnostic,
   HelixEditor,
@@ -25,7 +27,7 @@ import { KeyHandler } from "./handler";
 import { helixHistory } from "./history";
 import { defaultKeymaps, type KeyTrieNode, type Mode } from "./keymap";
 import { parseMacro } from "./keys";
-import { type LanguageConfig, PLAIN_TEXT } from "./languages";
+import { LANGUAGES, type LanguageConfig, PLAIN_TEXT } from "./languages";
 import { Range, Selection } from "./selection";
 import { graphemes } from "./text";
 
@@ -133,19 +135,37 @@ export class TestHost implements Host {
   actions: string[] = [];
   language: LanguageConfig = PLAIN_TEXT;
   diagnosticList: HelixDiagnostic[] = [];
+  lspDocumentSymbols = false;
   wrap = false;
   readonly documentName = "[scratch]";
+  private readonly disposeSyntax: (() => void) | null;
 
-  constructor(text: string, selection: Selection) {
+  constructor(text: string, selection: Selection, treeSitterMode?: string, tabSize?: number) {
+    const extensions: Extension[] = [
+      helixHistory(),
+      insertSelectionField,
+      EditorState.allowMultipleSelections.of(true),
+    ];
+    if (tabSize !== undefined) {
+      extensions.push(EditorState.tabSize.of(tabSize));
+    }
+    if (treeSitterMode !== undefined && hasTreeSitterMode(treeSitterMode)) {
+      const syntaxField = createSyntaxStateField(treeSitterMode);
+      extensions.push(syntaxField.extension);
+      this.disposeSyntax = syntaxField.dispose;
+    } else {
+      this.disposeSyntax = null;
+    }
     this.state = EditorState.create({
       doc: text,
       selection: toEditorSelection(selection),
-      extensions: [
-        helixHistory(),
-        insertSelectionField,
-        EditorState.allowMultipleSelections.of(true),
-      ],
+      extensions,
     });
+  }
+
+  /** Frees any WASM syntax trees held by this host's snapshot pool. */
+  dispose(): void {
+    this.disposeSyntax?.();
   }
 
   /** Told of every change, as a view tells the editor. */
@@ -193,8 +213,8 @@ export class TestHost implements Host {
     return this.diagnosticList;
   }
 
-  languageIndent(): null {
-    return null;
+  hasLspDocumentSymbols(): boolean {
+    return this.lspDocumentSymbols;
   }
 
   commentTokens() {
@@ -230,6 +250,8 @@ export interface Harness {
   /** The text with the selection written in. */
   state(): string;
   mode(): Mode;
+  /** Releases any WASM syntax trees owned by this harness. */
+  dispose(): void;
 }
 
 /** An editor on `annotated` text, as `print` reads it. */
@@ -239,12 +261,15 @@ export function harness(
     options?: Partial<HelixOptions>;
     keymaps?: Record<Mode, KeyTrieNode>;
     language?: LanguageConfig;
+    /** Language mode ID (e.g. `"haskell"`), enabling its config and tree-sitter tree if loaded. */
+    lang?: string;
   } = {},
 ): Harness {
   const { text, selection } = print(annotated);
-  const host = new TestHost(text, selection);
-  if (options.language) host.language = options.language;
-  const language = options.language ?? PLAIN_TEXT;
+  const language =
+    options.language ?? (options.lang ? (LANGUAGES[options.lang] ?? PLAIN_TEXT) : PLAIN_TEXT);
+  const host = new TestHost(text, selection, options.lang, language.tabWidth);
+  host.language = language;
   const editor = new HelixEditor(host, options.options ?? {}, language.indent);
   host.onChanges = (changes) => editor.mapThroughChanges(changes);
   const handler = new KeyHandler(editor, options.keymaps ?? defaultKeymaps());
@@ -257,5 +282,6 @@ export function harness(
     },
     state: () => plain(host.state.doc.toString(), editor.selection),
     mode: () => editor.mode,
+    dispose: () => host.dispose(),
   };
 }

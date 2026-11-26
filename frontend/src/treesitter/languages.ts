@@ -2,6 +2,25 @@ import { Language, Parser, Query } from "web-tree-sitter";
 import runtimeWasmUrl from "web-tree-sitter/web-tree-sitter.wasm?url";
 import commentHighlights from "../../vendor/tree-sitter/comment/highlights.scm?raw";
 import commentWasmUrl from "../../vendor/tree-sitter/comment/tree-sitter-comment.wasm?url";
+import cppHighlights from "../../vendor/tree-sitter/cpp/highlights.scm?raw";
+import cppIndents from "../../vendor/tree-sitter/cpp/indents.scm?raw";
+import cppInjections from "../../vendor/tree-sitter/cpp/injections.scm?raw";
+import cppLocals from "../../vendor/tree-sitter/cpp/locals.scm?raw";
+import cppRainbows from "../../vendor/tree-sitter/cpp/rainbows.scm?raw";
+import cppTags from "../../vendor/tree-sitter/cpp/tags.scm?raw";
+import cppTextobjects from "../../vendor/tree-sitter/cpp/textobjects.scm?raw";
+import cppWasmUrl from "../../vendor/tree-sitter/cpp/tree-sitter-cpp.wasm?url";
+import goHighlights from "../../vendor/tree-sitter/go/highlights.scm?raw";
+import goIndents from "../../vendor/tree-sitter/go/indents.scm?raw";
+import goInjections from "../../vendor/tree-sitter/go/injections.scm?raw";
+import goLocals from "../../vendor/tree-sitter/go/locals.scm?raw";
+import goRainbows from "../../vendor/tree-sitter/go/rainbows.scm?raw";
+import goTags from "../../vendor/tree-sitter/go/tags.scm?raw";
+import goTextobjects from "../../vendor/tree-sitter/go/textobjects.scm?raw";
+import goWasmUrl from "../../vendor/tree-sitter/go/tree-sitter-go.wasm?url";
+import goFormatStringHighlights from "../../vendor/tree-sitter/go-format-string/highlights.scm?raw";
+import goFormatStringRainbows from "../../vendor/tree-sitter/go-format-string/rainbows.scm?raw";
+import goFormatStringWasmUrl from "../../vendor/tree-sitter/go-format-string/tree-sitter-go-format-string.wasm?url";
 import haskellHighlights from "../../vendor/tree-sitter/haskell/highlights.scm?raw";
 import haskellInjections from "../../vendor/tree-sitter/haskell/injections.scm?raw";
 import haskellLocals from "../../vendor/tree-sitter/haskell/locals.scm?raw";
@@ -9,6 +28,44 @@ import haskellRainbows from "../../vendor/tree-sitter/haskell/rainbows.scm?raw";
 import haskellTags from "../../vendor/tree-sitter/haskell/tags.scm?raw";
 import haskellTextobjects from "../../vendor/tree-sitter/haskell/textobjects.scm?raw";
 import haskellWasmUrl from "../../vendor/tree-sitter/haskell/tree-sitter-haskell.wasm?url";
+import jsdocHighlights from "../../vendor/tree-sitter/jsdoc/highlights.scm?raw";
+import jsdocInjections from "../../vendor/tree-sitter/jsdoc/injections.scm?raw";
+import jsdocWasmUrl from "../../vendor/tree-sitter/jsdoc/tree-sitter-jsdoc.wasm?url";
+import pythonHighlights from "../../vendor/tree-sitter/python/highlights.scm?raw";
+import pythonIndents from "../../vendor/tree-sitter/python/indents.scm?raw";
+import pythonInjections from "../../vendor/tree-sitter/python/injections.scm?raw";
+import pythonLocals from "../../vendor/tree-sitter/python/locals.scm?raw";
+import pythonRainbows from "../../vendor/tree-sitter/python/rainbows.scm?raw";
+import pythonTags from "../../vendor/tree-sitter/python/tags.scm?raw";
+import pythonTextobjects from "../../vendor/tree-sitter/python/textobjects.scm?raw";
+import pythonWasmUrl from "../../vendor/tree-sitter/python/tree-sitter-python.wasm?url";
+import regexHighlights from "../../vendor/tree-sitter/regex/highlights.scm?raw";
+import regexRainbows from "../../vendor/tree-sitter/regex/rainbows.scm?raw";
+import regexWasmUrl from "../../vendor/tree-sitter/regex/tree-sitter-regex.wasm?url";
+import rustHighlights from "../../vendor/tree-sitter/rust/highlights.scm?raw";
+import rustIndents from "../../vendor/tree-sitter/rust/indents.scm?raw";
+import rustInjections from "../../vendor/tree-sitter/rust/injections.scm?raw";
+import rustLocals from "../../vendor/tree-sitter/rust/locals.scm?raw";
+import rustRainbows from "../../vendor/tree-sitter/rust/rainbows.scm?raw";
+import rustTags from "../../vendor/tree-sitter/rust/tags.scm?raw";
+import rustTextobjects from "../../vendor/tree-sitter/rust/textobjects.scm?raw";
+import rustWasmUrl from "../../vendor/tree-sitter/rust/tree-sitter-rust.wasm?url";
+import rustFormatArgsHighlights from "../../vendor/tree-sitter/rust-format-args/highlights.scm?raw";
+import rustFormatArgsWasmUrl from "../../vendor/tree-sitter/rust-format-args/tree-sitter-rust-format-args.wasm?url";
+import rustFormatArgsMacroHighlights from "../../vendor/tree-sitter/rust-format-args-macro/highlights.scm?raw";
+import rustFormatArgsMacroIndents from "../../vendor/tree-sitter/rust-format-args-macro/indents.scm?raw";
+import rustFormatArgsMacroInjections from "../../vendor/tree-sitter/rust-format-args-macro/injections.scm?raw";
+import rustFormatArgsMacroLocals from "../../vendor/tree-sitter/rust-format-args-macro/locals.scm?raw";
+import rustFormatArgsMacroRainbows from "../../vendor/tree-sitter/rust-format-args-macro/rainbows.scm?raw";
+import rustFormatArgsMacroTextobjects from "../../vendor/tree-sitter/rust-format-args-macro/textobjects.scm?raw";
+import typescriptHighlights from "../../vendor/tree-sitter/typescript/highlights.scm?raw";
+import typescriptIndents from "../../vendor/tree-sitter/typescript/indents.scm?raw";
+import typescriptInjections from "../../vendor/tree-sitter/typescript/injections.scm?raw";
+import typescriptLocals from "../../vendor/tree-sitter/typescript/locals.scm?raw";
+import typescriptRainbows from "../../vendor/tree-sitter/typescript/rainbows.scm?raw";
+import typescriptTags from "../../vendor/tree-sitter/typescript/tags.scm?raw";
+import typescriptTextobjects from "../../vendor/tree-sitter/typescript/textobjects.scm?raw";
+import typescriptWasmUrl from "../../vendor/tree-sitter/typescript/tree-sitter-typescript.wasm?url";
 
 /** Auxiliary query kinds exposed for downstream syntax commands (textobjects, indent, symbols). */
 export type QueryKind = "textobjects" | "indents" | "tags" | "rainbows";
@@ -91,6 +148,76 @@ const REGISTRY: Readonly<Record<string, LanguageSpec>> = {
       rainbows: haskellRainbows,
     },
   },
+  python: {
+    name: "python",
+    wasmUrl: pythonWasmUrl,
+    injectionRegex: /^py(thon)?$/,
+    queries: {
+      highlights: pythonHighlights,
+      locals: pythonLocals,
+      injections: pythonInjections,
+      textobjects: pythonTextobjects,
+      indents: pythonIndents,
+      tags: pythonTags,
+      rainbows: pythonRainbows,
+    },
+  },
+  typescript: {
+    name: "typescript",
+    wasmUrl: typescriptWasmUrl,
+    injectionRegex: /^(ts|typescript)$/,
+    queries: {
+      highlights: typescriptHighlights,
+      locals: typescriptLocals,
+      injections: typescriptInjections,
+      textobjects: typescriptTextobjects,
+      indents: typescriptIndents,
+      tags: typescriptTags,
+      rainbows: typescriptRainbows,
+    },
+  },
+  go: {
+    name: "go",
+    wasmUrl: goWasmUrl,
+    injectionRegex: /^go$/,
+    queries: {
+      highlights: goHighlights,
+      locals: goLocals,
+      injections: goInjections,
+      textobjects: goTextobjects,
+      indents: goIndents,
+      tags: goTags,
+      rainbows: goRainbows,
+    },
+  },
+  rust: {
+    name: "rust",
+    wasmUrl: rustWasmUrl,
+    injectionRegex: /^(rs|rust)$/,
+    queries: {
+      highlights: rustHighlights,
+      locals: rustLocals,
+      injections: rustInjections,
+      textobjects: rustTextobjects,
+      indents: rustIndents,
+      tags: rustTags,
+      rainbows: rustRainbows,
+    },
+  },
+  cpp: {
+    name: "cpp",
+    wasmUrl: cppWasmUrl,
+    injectionRegex: /^cpp$/,
+    queries: {
+      highlights: cppHighlights,
+      locals: cppLocals,
+      injections: cppInjections,
+      textobjects: cppTextobjects,
+      indents: cppIndents,
+      tags: cppTags,
+      rainbows: cppRainbows,
+    },
+  },
   comment: {
     name: "comment",
     wasmUrl: commentWasmUrl,
@@ -100,12 +227,72 @@ const REGISTRY: Readonly<Record<string, LanguageSpec>> = {
       highlights: commentHighlights,
     },
   },
+  regex: {
+    name: "regex",
+    wasmUrl: regexWasmUrl,
+    injectionRegex: /^regex$/,
+    injectionOnly: true,
+    queries: {
+      highlights: regexHighlights,
+      rainbows: regexRainbows,
+    },
+  },
+  jsdoc: {
+    name: "jsdoc",
+    wasmUrl: jsdocWasmUrl,
+    injectionRegex: /^jsdoc$/,
+    injectionOnly: true,
+    queries: {
+      highlights: jsdocHighlights,
+      injections: jsdocInjections,
+    },
+  },
+  "rust-format-args": {
+    name: "rust-format-args",
+    wasmUrl: rustFormatArgsWasmUrl,
+    injectionRegex: /^rust-format-args$/,
+    injectionOnly: true,
+    queries: {
+      highlights: rustFormatArgsHighlights,
+    },
+  },
+  "rust-format-args-macro": {
+    name: "rust-format-args-macro",
+    wasmUrl: rustWasmUrl,
+    injectionRegex: /^rust-format-args-macro$/,
+    injectionOnly: true,
+    queries: {
+      highlights: rustFormatArgsMacroHighlights,
+      locals: rustFormatArgsMacroLocals,
+      injections: rustFormatArgsMacroInjections,
+      textobjects: rustFormatArgsMacroTextobjects,
+      indents: rustFormatArgsMacroIndents,
+      rainbows: rustFormatArgsMacroRainbows,
+    },
+  },
+  "go-format-string": {
+    name: "go-format-string",
+    wasmUrl: goFormatStringWasmUrl,
+    injectionRegex: /^go-format-string$/,
+    injectionOnly: true,
+    queries: {
+      highlights: goFormatStringHighlights,
+      rainbows: goFormatStringRainbows,
+    },
+  },
 };
 
 /** Whether Workshop has a tree-sitter grammar for this editor mode. */
 export function hasTreeSitterMode(mode: string): boolean {
   const spec = REGISTRY[mode];
   return spec !== undefined && !spec.injectionOnly;
+}
+
+/** All registered non-injection editor modes backed by tree-sitter. */
+export function registeredTreeSitterModes(): readonly string[] {
+  return Object.values(REGISTRY)
+    .filter((spec) => !spec.injectionOnly)
+    .map((spec) => spec.name);
 }
 
 /** Resolves an injection language marker to a shipped language name, or null if not shipped. */
@@ -127,9 +314,14 @@ export function resolveInjectionLanguage(kind: "name" | "match", marker: string)
   return best;
 }
 
+type BundleListener = (name: string) => void;
+
 let initPromise: Promise<void> | null = null;
+const languagePromises = new Map<string, Promise<Language>>();
+const singleBundlePromises = new Map<string, Promise<LanguageBundle>>();
 const bundlePromises = new Map<string, Promise<LanguageBundle>>();
 const loadedBundles = new Map<string, LanguageBundle>();
+const bundleListeners = new Set<BundleListener>();
 
 export type WasmBytesLoader = (url: string) => Promise<Uint8Array>;
 
@@ -138,6 +330,18 @@ let customWasmLoader: WasmBytesLoader | null = null;
 /** Overrides how `.wasm` asset URLs are loaded (used by Node/Vitest tests). */
 export function setWasmBytesLoader(loader: WasmBytesLoader | null): void {
   customWasmLoader = loader;
+}
+
+/** Subscribes to language bundles finishing loading (including their static injections). */
+export function onLanguageBundleLoaded(listener: BundleListener): () => void {
+  bundleListeners.add(listener);
+  return () => {
+    bundleListeners.delete(listener);
+  };
+}
+
+function notifyBundleLoaded(name: string): void {
+  for (const listener of bundleListeners) listener(name);
 }
 
 async function loadWasmBytes(url: string): Promise<Uint8Array> {
@@ -154,7 +358,7 @@ async function loadWasmBytes(url: string): Promise<Uint8Array> {
 /** Initialises the web-tree-sitter WASM runtime once. */
 export function initTreeSitter(): Promise<void> {
   if (!initPromise) {
-    initPromise = (async () => {
+    const promise = (async () => {
       if (customWasmLoader) {
         const wasmBinary = await customWasmLoader(runtimeWasmUrl);
         await Parser.init({ wasmBinary });
@@ -162,8 +366,27 @@ export function initTreeSitter(): Promise<void> {
         await Parser.init({ locateFile: () => runtimeWasmUrl });
       }
     })();
+    initPromise = promise;
+    promise.catch(() => {
+      if (initPromise === promise) initPromise = null;
+    });
   }
   return initPromise;
+}
+
+function loadWasmLanguage(wasmUrl: string): Promise<Language> {
+  const existing = languagePromises.get(wasmUrl);
+  if (existing) return existing;
+  const promise = (async () => {
+    await initTreeSitter();
+    const bytes = await loadWasmBytes(wasmUrl);
+    return Language.load(bytes);
+  })();
+  languagePromises.set(wasmUrl, promise);
+  promise.catch(() => {
+    if (languagePromises.get(wasmUrl) === promise) languagePromises.delete(wasmUrl);
+  });
+  return promise;
 }
 
 function compileHighlightQuery(
@@ -279,9 +502,8 @@ function compileInjectionQuery(
   };
 }
 
-/** Loads and caches a language's grammar and compiled queries, plus any shipped static injections. */
-export function loadLanguageBundle(name: string): Promise<LanguageBundle> {
-  const existing = bundlePromises.get(name);
+function loadSingleBundle(name: string): Promise<LanguageBundle> {
+  const existing = singleBundlePromises.get(name);
   if (existing) return existing;
 
   const spec = REGISTRY[name];
@@ -292,9 +514,7 @@ export function loadLanguageBundle(name: string): Promise<LanguageBundle> {
   }
 
   const promise = (async () => {
-    await initTreeSitter();
-    const bytes = await loadWasmBytes(spec.wasmUrl);
-    const language = await Language.load(bytes);
+    const language = await loadWasmLanguage(spec.wasmUrl);
     const highlightQuery = compileHighlightQuery(
       language,
       spec.queries.highlights,
@@ -324,15 +544,52 @@ export function loadLanguageBundle(name: string): Promise<LanguageBundle> {
       },
     };
     loadedBundles.set(name, bundle);
-
-    // Preload any shipped static injection grammars (such as `comment`) in parallel.
-    await Promise.all(
-      staticInjections.filter((dep) => dep !== name).map((dep) => loadLanguageBundle(dep)),
-    );
     return bundle;
   })();
 
+  singleBundlePromises.set(name, promise);
+  promise.catch(() => {
+    if (singleBundlePromises.get(name) === promise) singleBundlePromises.delete(name);
+  });
+  return promise;
+}
+
+/** Loads and caches a language's grammar and compiled queries, plus any shipped static injections. */
+export function loadLanguageBundle(name: string): Promise<LanguageBundle> {
+  const existing = bundlePromises.get(name);
+  if (existing) return existing;
+
+  if (!Object.hasOwn(REGISTRY, name)) {
+    return Promise.reject(
+      new Error(`no tree-sitter grammar registered for ${JSON.stringify(name)}`),
+    );
+  }
+
+  const promise = (async () => {
+    const root = await loadSingleBundle(name);
+    // BFS over transitive static injections so mutually-injecting languages (such as `rust` and
+    // `rust-format-args-macro`) load without deadlocking.
+    const visited = new Set<string>([name]);
+    let frontier = root.staticInjections.filter((dep) => !visited.has(dep));
+    while (frontier.length > 0) {
+      for (const dep of frontier) visited.add(dep);
+      const loaded = await Promise.all(frontier.map((dep) => loadSingleBundle(dep)));
+      const next: string[] = [];
+      for (const depBundle of loaded) {
+        for (const dep of depBundle.staticInjections) {
+          if (!visited.has(dep)) next.push(dep);
+        }
+      }
+      frontier = next;
+    }
+    notifyBundleLoaded(name);
+    return root;
+  })();
+
   bundlePromises.set(name, promise);
+  promise.catch(() => {
+    if (bundlePromises.get(name) === promise) bundlePromises.delete(name);
+  });
   return promise;
 }
 

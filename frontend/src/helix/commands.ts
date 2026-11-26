@@ -27,9 +27,11 @@ import { incrementInteger } from "./increment";
 import type { MappableCommand, Mode } from "./keymap";
 import { KEY, type Key, keyCharWithModifiers, parseMacro, unparseKey } from "./keys";
 import {
+  gotoTreesitterObject,
   Movement,
   moveHorizontally,
   moveNextParagraph,
+  moveParentNodeEnd,
   movePrevParagraph,
   moveVertically,
   posAtVisualColumn,
@@ -37,6 +39,14 @@ import {
   WordMotionTarget,
   wordMove,
 } from "./movement";
+import {
+  expandSelection,
+  selectAllChildren,
+  selectAllSiblings,
+  selectNextSibling,
+  selectPrevSibling,
+  shrinkSelection,
+} from "./object";
 import type { PickerItem } from "./picker";
 import { buildRegex, escapeRegex } from "./regex";
 import {
@@ -49,6 +59,7 @@ import {
   splitOnMatches,
   splitOnNewline,
 } from "./selection";
+import { collectSyntaxTags } from "./tags";
 import {
   at,
   backwardsSkipWhile,
@@ -71,6 +82,7 @@ import {
 import {
   FindType,
   findMatchingBracketFuzzy,
+  findMatchingBracketPlaintext,
   findNthChar,
   getPair,
   getSurroundPos,
@@ -79,6 +91,7 @@ import {
   textobjectPairSurround,
   textobjectPairSurroundClosest,
   textobjectParagraph,
+  textobjectTreesitter,
   textobjectWord,
 } from "./textobject";
 
@@ -927,7 +940,7 @@ function insertWithIndent(cx: Context, fallback: "start" | "end"): void {
     const lineStart = doc.lineStart(line);
     if (doc.lineEnd(line) === lineStart) {
       // The line is empty, so indent it.
-      const indent = editor.indentForNewline(line, lineStart);
+      const indent = editor.indentForNewline(line, lineStart, line);
       ranges.push(Range.point(offs + lineStart + indent.length));
       offs += indent.length;
       changes.push({ from: lineStart, to: lineStart, insert: indent });
@@ -955,16 +968,21 @@ export function open(cx: Context, where: "below" | "above", commentContinuation:
     );
     const nextNewLine = where === "below" ? currLine + 1 : currLine;
     const aboveNextNewLine = Math.max(0, nextNewLine - 1);
-    const token = commentContinuation
-      ? getCommentToken(doc, editor.host.commentTokens(doc.lineStart(currLine)).line, currLine)
-      : null;
+    const firstNonWs = firstNonWhitespace(doc, currLine);
+    const token =
+      commentContinuation && firstNonWs !== null
+        ? getCommentToken(
+            doc,
+            editor.commentTokensAt(doc.lineStart(currLine) + firstNonWs).line,
+            currLine,
+          )
+        : null;
     const [aboveEnd, aboveEndWidth] =
       nextNewLine === 0 ? [0, 0] : [doc.lineEnd(aboveNextNewLine), 1];
-    const firstNonWs = firstNonWhitespace(doc, currLine);
     const indent =
       token !== null && firstNonWs !== null
         ? doc.line(currLine).slice(0, firstNonWs)
-        : editor.indentForNewline(currLine, aboveEnd);
+        : editor.indentForNewline(aboveNextNewLine, aboveEnd, currLine);
     let text: string;
     if (where === "above" && nextNewLine === 0) {
       text = `${indent}${token !== null ? `${token} ` : ""}\n`;
@@ -1196,7 +1214,11 @@ function insertNewline(cx: Context): void {
     const curr = doc.char(pos) ?? " ";
     const currentLine = doc.lineOf(pos);
     const lineStart = doc.lineStart(currentLine);
-    const token = getCommentToken(doc, editor.host.commentTokens(lineStart).line, currentLine);
+    const firstNonWs = firstNonWhitespace(doc, currentLine);
+    const token =
+      firstNonWs !== null
+        ? getCommentToken(doc, editor.commentTokensAt(lineStart + firstNonWs).line, currentLine)
+        : null;
     let newText = "";
     let from: number;
     let to: number;
@@ -1205,11 +1227,10 @@ function insertNewline(cx: Context): void {
     if (lastNonWs !== null && lastNonWs > lineStart) {
       const firstTrailingWs = Math.min(Math.max(lastNonWs, lastPos), pos);
       lastPos = pos;
-      const firstNonWs = firstNonWhitespace(doc, currentLine);
       const indent =
         token !== null && firstNonWs !== null
           ? doc.line(currentLine).slice(0, firstNonWs)
-          : editor.indentForNewline(currentLine, pos);
+          : editor.indentForNewline(currentLine, pos, currentLine);
       // Between a pair, such as brackets, add a line indented a level more, with the cursor on it.
       const pair = autoPair(prev);
       const onAutoPair =
@@ -1305,7 +1326,7 @@ function insertTabImpl(cx: Context, n: number): void {
 
 function smartTab(cx: Context): void {
   const editor = cx.editor;
-  if (editor.options.smartTab) {
+  if (editor.options.smartTab.enable) {
     const doc = editor.doc;
     const afterWhitespace = editor.selection.ranges.every((range) => {
       const cursor = range.cursor(doc);
@@ -1313,26 +1334,11 @@ function smartTab(cx: Context): void {
       return /^\s*$/.test(doc.slice(lineStart, cursor));
     });
     if (!afterWhitespace) {
-      moveParentNodeEndPlain(cx);
+      moveNodeBoundImpl(cx, Direction.Forward, Movement.Move);
       return;
     }
   }
   insertTabImpl(cx, 1);
-}
-
-/**
- * Moves each cursor past the bracket closing the innermost pair around it. Helix moves to the end
- * of the syntax node around the cursor; brackets stand in for nodes here.
- */
-function moveParentNodeEndPlain(cx: Context): void {
-  transform(cx, (range, doc) => {
-    const pair = findMatchingBracketFuzzy(doc, range.cursor(doc));
-    if (pair === null || pair < range.cursor(doc)) return range;
-    const end = nextGraphemeBoundary(doc, pair);
-    return range.direction === Direction.Forward
-      ? new Range(end, nextGraphemeBoundary(doc, end))
-      : new Range(nextGraphemeBoundary(doc, end), end);
-  });
 }
 
 function insertSelectionInteractive(cx: Context, oldMode: Mode): void {
@@ -1623,6 +1629,130 @@ function reorderSelectionContents(cx: Context, strategy: "forward" | "backward" 
   );
 }
 
+// ---- Syntax-tree selection and navigation ----
+
+function expandSelectionCmd(cx: Context): void {
+  applyMotion(cx, (editor) => {
+    const syntax = editor.syntax;
+    if (syntax === null) return;
+    const doc = editor.doc;
+    const currentSelection = editor.selection;
+    const selection = expandSelection(syntax, doc, currentSelection);
+    if (!currentSelection.equals(selection)) {
+      editor.objectSelections.push(currentSelection);
+      editor.pushJump();
+      editor.setSelection(selection);
+    }
+  });
+}
+
+function shrinkSelectionCmd(cx: Context): void {
+  applyMotion(cx, (editor) => {
+    const currentSelection = editor.selection;
+    const prevSelection = editor.objectSelections.pop();
+    if (prevSelection !== undefined) {
+      if (currentSelection.contains(prevSelection)) {
+        editor.pushJump();
+        editor.setSelection(prevSelection);
+        return;
+      }
+      editor.objectSelections.length = 0;
+    }
+    const syntax = editor.syntax;
+    if (syntax !== null) {
+      const selection = shrinkSelection(syntax, editor.doc, currentSelection);
+      editor.pushJump();
+      editor.setSelection(selection);
+    }
+  });
+}
+
+function selectSiblingImpl(
+  cx: Context,
+  siblingFn: (
+    syntax: NonNullable<HelixEditor["syntax"]>,
+    doc: Doc,
+    selection: Selection,
+  ) => Selection,
+): void {
+  applyMotion(cx, (editor) => {
+    const syntax = editor.syntax;
+    if (syntax === null) return;
+    editor.setSelection(siblingFn(syntax, editor.doc, editor.selection));
+  });
+}
+
+function moveNodeBoundImpl(cx: Context, dir: Direction, movement: Movement): void {
+  applyMotion(cx, (editor) => {
+    const syntax = editor.syntax;
+    if (syntax === null) return;
+    editor.setSelection(moveParentNodeEnd(syntax, editor.doc, editor.selection, dir, movement));
+  });
+}
+
+function gotoTsObjectImpl(cx: Context, objectName: string, direction: Direction): void {
+  const n = count(cx);
+  applyMotion(cx, (editor) => {
+    const syntax = editor.syntax;
+    if (syntax === null) {
+      editor.setStatus("Syntax-tree is not available in current buffer");
+      return;
+    }
+    const doc = editor.doc;
+    const selection = editor.selection.transform((range) => {
+      const newRange = gotoTreesitterObject(doc, range, objectName, direction, syntax, n);
+      if (editor.mode === "select") {
+        const head = newRange.head < range.anchor ? newRange.anchor : newRange.head;
+        return new Range(range.anchor, head);
+      }
+      return newRange.withDirection(direction);
+    });
+    editor.pushJump();
+    editor.setSelection(selection);
+  });
+}
+
+function textobjectTreesitterCmd(cx: Context, objType: TextObject, objectName: string): void {
+  applyMotion(cx, (editor) => {
+    const syntax = editor.syntax;
+    if (syntax === null) {
+      editor.setStatus("Syntax information is not available in current buffer");
+      return;
+    }
+    const doc = editor.doc;
+    editor.setSelection(
+      editor.selection.transform((range) =>
+        textobjectTreesitter(doc, range, objType, objectName, syntax),
+      ),
+    );
+  });
+}
+
+function syntaxSymbolPicker(cx: Context): void {
+  const editor = cx.editor;
+  const syntax = editor.syntax;
+  if (syntax === null) {
+    editor.setError("Syntax tree is not available on this buffer");
+    return;
+  }
+  const doc = editor.doc;
+  const tags = collectSyntaxTags(syntax, doc);
+  if (tags.length === 0) {
+    editor.setStatus("No symbols found");
+    return;
+  }
+  const items: PickerItem[] = tags.map((tag) => ({
+    label: tag.name,
+    detail: `${tag.kind}  line ${tag.startLine + 1}`,
+    run: (cx2) => {
+      cx2.editor.pushJump();
+      cx2.editor.setSelection(Selection.single(tag.start, tag.end));
+      cx2.editor.host.scroll({ kind: "align", pos: tag.start, align: "center" });
+    },
+  }));
+  cx.openPicker("Symbols", items);
+}
+
 // ---- Textobjects ----
 
 function textobjectMotion(cx: Context, f: (doc: Doc, range: Range) => Range): void {
@@ -1646,9 +1776,15 @@ function textobjectSurroundingPair(
       : direction === Direction.Forward
         ? FindType.Next
         : FindType.Prev;
-  textobjectMotion(cx, (doc, range) => {
-    const r = textobjectPairSurround(doc, range, textobject, ch, findType, n);
-    return direction === null ? r : r.withDirection(direction);
+  applyMotion(cx, (editor) => {
+    const doc = editor.doc;
+    const syntax = editor.syntax;
+    editor.setSelection(
+      editor.selection.transform((range) => {
+        const r = textobjectPairSurround(syntax, doc, range, textobject, ch, findType, n);
+        return direction === null ? r : r.withDirection(direction);
+      }),
+    );
   });
 }
 
@@ -1722,7 +1858,7 @@ function surroundReplace(cx: Context): void {
     const surroundCh = raw === "m" ? null : raw;
     const doc = editor.doc;
     const selection = editor.selection;
-    const changePos = getSurroundPos(doc, selection, surroundCh, n);
+    const changePos = getSurroundPos(editor.syntax, doc, selection, surroundCh, n);
     if (changePos instanceof SurroundError) {
       editor.setError(changePos.message);
       return;
@@ -1764,7 +1900,7 @@ function surroundDelete(cx: Context): void {
     const raw = keyCharWithModifiers(key);
     if (raw === null) return;
     const surroundCh = raw === "m" ? null : raw;
-    const changePos = getSurroundPos(editor.doc, editor.selection, surroundCh, n);
+    const changePos = getSurroundPos(editor.syntax, editor.doc, editor.selection, surroundCh, n);
     if (changePos instanceof SurroundError) {
       editor.setError(changePos.message);
       return;
@@ -2257,6 +2393,8 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
   move_prev_sub_word_start: (cx) => moveWordImpl(cx, WordMotionTarget.PrevSubWordStart),
   move_next_sub_word_end: (cx) => moveWordImpl(cx, WordMotionTarget.NextSubWordEnd),
   move_prev_sub_word_end: (cx) => moveWordImpl(cx, WordMotionTarget.PrevSubWordEnd),
+  move_parent_node_end: (cx) => moveNodeBoundImpl(cx, Direction.Forward, Movement.Move),
+  move_parent_node_start: (cx) => moveNodeBoundImpl(cx, Direction.Backward, Movement.Move),
   extend_next_word_start: (cx) => extendWordImpl(cx, WordMotionTarget.NextWordStart),
   extend_prev_word_start: (cx) => extendWordImpl(cx, WordMotionTarget.PrevWordStart),
   extend_next_word_end: (cx) => extendWordImpl(cx, WordMotionTarget.NextWordEnd),
@@ -2269,6 +2407,8 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
   extend_prev_sub_word_start: (cx) => extendWordImpl(cx, WordMotionTarget.PrevSubWordStart),
   extend_next_sub_word_end: (cx) => extendWordImpl(cx, WordMotionTarget.NextSubWordEnd),
   extend_prev_sub_word_end: (cx) => extendWordImpl(cx, WordMotionTarget.PrevSubWordEnd),
+  extend_parent_node_end: (cx) => moveNodeBoundImpl(cx, Direction.Forward, Movement.Extend),
+  extend_parent_node_start: (cx) => moveNodeBoundImpl(cx, Direction.Backward, Movement.Extend),
   find_till_char: (cx) => findChar(cx, Direction.Forward, false, false),
   find_next_char: (cx) => findChar(cx, Direction.Forward, true, false),
   extend_till_char: (cx) => findChar(cx, Direction.Forward, false, true),
@@ -2565,6 +2705,12 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
   rotate_selection_contents_forward: (cx) => reorderSelectionContents(cx, "forward"),
   rotate_selection_contents_backward: (cx) => reorderSelectionContents(cx, "backward"),
   reverse_selection_contents: (cx) => reorderSelectionContents(cx, "reverse"),
+  expand_selection: expandSelectionCmd,
+  shrink_selection: shrinkSelectionCmd,
+  select_next_sibling: (cx) => selectSiblingImpl(cx, selectNextSibling),
+  select_prev_sibling: (cx) => selectSiblingImpl(cx, selectPrevSibling),
+  select_all_siblings: (cx) => selectSiblingImpl(cx, selectAllSiblings),
+  select_all_children: (cx) => selectSiblingImpl(cx, selectAllChildren),
   jump_forward: (cx) => {
     const jump = cx.editor.jumps.forward(count(cx));
     if (jump) {
@@ -2624,8 +2770,13 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
   match_brackets: (cx) => {
     const editor = cx.editor;
     const doc = editor.doc;
+    const syntax = editor.syntax;
     const selection = editor.selection.transform((range) => {
-      const matched = findMatchingBracketFuzzy(doc, range.cursor(doc));
+      const pos = range.cursor(doc);
+      const matched =
+        syntax !== null
+          ? findMatchingBracketFuzzy(syntax, doc, pos)
+          : findMatchingBracketPlaintext(doc, pos);
       return matched === null ? range : range.putCursor(doc, matched, isSelect(cx));
     });
     editor.pushJump();
@@ -2634,6 +2785,24 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
   surround_add: surroundAdd,
   surround_replace: surroundReplace,
   surround_delete: surroundDelete,
+  select_textobject_inside_type: (cx) => textobjectTreesitterCmd(cx, TextObject.Inside, "class"),
+  select_textobject_around_type: (cx) => textobjectTreesitterCmd(cx, TextObject.Around, "class"),
+  select_textobject_inside_function: (cx) =>
+    textobjectTreesitterCmd(cx, TextObject.Inside, "function"),
+  select_textobject_around_function: (cx) =>
+    textobjectTreesitterCmd(cx, TextObject.Around, "function"),
+  select_textobject_inside_parameter: (cx) =>
+    textobjectTreesitterCmd(cx, TextObject.Inside, "parameter"),
+  select_textobject_around_parameter: (cx) =>
+    textobjectTreesitterCmd(cx, TextObject.Around, "parameter"),
+  select_textobject_inside_comment: (cx) =>
+    textobjectTreesitterCmd(cx, TextObject.Inside, "comment"),
+  select_textobject_around_comment: (cx) =>
+    textobjectTreesitterCmd(cx, TextObject.Around, "comment"),
+  select_textobject_inside_test: (cx) => textobjectTreesitterCmd(cx, TextObject.Inside, "test"),
+  select_textobject_around_test: (cx) => textobjectTreesitterCmd(cx, TextObject.Around, "test"),
+  select_textobject_inside_entry: (cx) => textobjectTreesitterCmd(cx, TextObject.Inside, "entry"),
+  select_textobject_around_entry: (cx) => textobjectTreesitterCmd(cx, TextObject.Around, "entry"),
   select_textobject_inside_paragraph: (cx) => {
     const n = count(cx);
     textobjectMotion(cx, (doc, r) => textobjectParagraph(doc, r, TextObject.Inside, n));
@@ -2644,11 +2813,27 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
   },
   select_textobject_inside_closest_surrounding_pair: (cx) => {
     const n = count(cx);
-    textobjectMotion(cx, (doc, r) => textobjectPairSurroundClosest(doc, r, TextObject.Inside, n));
+    applyMotion(cx, (editor) => {
+      const doc = editor.doc;
+      const syntax = editor.syntax;
+      editor.setSelection(
+        editor.selection.transform((r) =>
+          textobjectPairSurroundClosest(syntax, doc, r, TextObject.Inside, n),
+        ),
+      );
+    });
   },
   select_textobject_around_closest_surrounding_pair: (cx) => {
     const n = count(cx);
-    textobjectMotion(cx, (doc, r) => textobjectPairSurroundClosest(doc, r, TextObject.Around, n));
+    applyMotion(cx, (editor) => {
+      const doc = editor.doc;
+      const syntax = editor.syntax;
+      editor.setSelection(
+        editor.selection.transform((r) =>
+          textobjectPairSurroundClosest(syntax, doc, r, TextObject.Around, n),
+        ),
+      );
+    });
   },
   select_textobject_inside_word: (cx) =>
     textobjectMotion(cx, (doc, r) => textobjectWord(doc, r, TextObject.Inside, false)),
@@ -2658,6 +2843,20 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
     textobjectMotion(cx, (doc, r) => textobjectWord(doc, r, TextObject.Inside, true)),
   select_textobject_around_WORD: (cx) =>
     textobjectMotion(cx, (doc, r) => textobjectWord(doc, r, TextObject.Around, true)),
+  goto_next_function: (cx) => gotoTsObjectImpl(cx, "function", Direction.Forward),
+  goto_prev_function: (cx) => gotoTsObjectImpl(cx, "function", Direction.Backward),
+  goto_next_class: (cx) => gotoTsObjectImpl(cx, "class", Direction.Forward),
+  goto_prev_class: (cx) => gotoTsObjectImpl(cx, "class", Direction.Backward),
+  goto_next_parameter: (cx) => gotoTsObjectImpl(cx, "parameter", Direction.Forward),
+  goto_prev_parameter: (cx) => gotoTsObjectImpl(cx, "parameter", Direction.Backward),
+  goto_next_comment: (cx) => gotoTsObjectImpl(cx, "comment", Direction.Forward),
+  goto_prev_comment: (cx) => gotoTsObjectImpl(cx, "comment", Direction.Backward),
+  goto_next_test: (cx) => gotoTsObjectImpl(cx, "test", Direction.Forward),
+  goto_prev_test: (cx) => gotoTsObjectImpl(cx, "test", Direction.Backward),
+  goto_next_xml_element: (cx) => gotoTsObjectImpl(cx, "xml-element", Direction.Forward),
+  goto_prev_xml_element: (cx) => gotoTsObjectImpl(cx, "xml-element", Direction.Backward),
+  goto_next_entry: (cx) => gotoTsObjectImpl(cx, "entry", Direction.Forward),
+  goto_prev_entry: (cx) => gotoTsObjectImpl(cx, "entry", Direction.Backward),
   goto_next_paragraph: (cx) => gotoParaImpl(cx, moveNextParagraph),
   goto_prev_paragraph: (cx) => gotoParaImpl(cx, movePrevParagraph),
   rename_symbol: hostAction("rename_symbol"),
@@ -2717,7 +2916,17 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
     cx.openPicker("Jumplist", items);
   },
   symbol_picker: hostAction("symbol_picker"),
-  lsp_or_syntax_symbol_picker: hostAction("symbol_picker"),
+  syntax_symbol_picker: syntaxSymbolPicker,
+  lsp_or_syntax_symbol_picker: (cx) => {
+    if (cx.editor.host.hasLspDocumentSymbols()) {
+      return cx.editor.host.action("symbol_picker", "");
+    }
+    if (cx.editor.syntax !== null) {
+      syntaxSymbolPicker(cx);
+      return;
+    }
+    cx.editor.setError("No language server supporting document symbols or syntax info available");
+  },
   command_mode: (cx) => {
     cx.editor.prompt = {
       label: ":",
@@ -2735,46 +2944,6 @@ export const COMMANDS: Readonly<Record<string, CommandFn>> = {
  * explains rather than doing nothing.
  */
 export const UNSUPPORTED: Readonly<Record<string, string>> = Object.fromEntries([
-  ...[
-    "move_parent_node_end",
-    "move_parent_node_start",
-    "extend_parent_node_end",
-    "extend_parent_node_start",
-    "expand_selection",
-    "shrink_selection",
-    "select_next_sibling",
-    "select_prev_sibling",
-    "select_all_siblings",
-    "select_all_children",
-    "select_textobject_inside_type",
-    "select_textobject_around_type",
-    "select_textobject_inside_function",
-    "select_textobject_around_function",
-    "select_textobject_inside_parameter",
-    "select_textobject_around_parameter",
-    "select_textobject_inside_comment",
-    "select_textobject_around_comment",
-    "select_textobject_inside_test",
-    "select_textobject_around_test",
-    "select_textobject_inside_entry",
-    "select_textobject_around_entry",
-    "goto_next_function",
-    "goto_prev_function",
-    "goto_next_class",
-    "goto_prev_class",
-    "goto_next_parameter",
-    "goto_prev_parameter",
-    "goto_next_comment",
-    "goto_prev_comment",
-    "goto_next_test",
-    "goto_prev_test",
-    "goto_next_xml_element",
-    "goto_prev_xml_element",
-    "goto_next_entry",
-    "goto_prev_entry",
-    "syntax_symbol_picker",
-    "syntax_workspace_symbol_picker",
-  ].map((name) => [name, "needs a syntax tree, which Workshop's editor doesn't have"]),
   ...[
     "goto_next_change",
     "goto_prev_change",
@@ -2802,6 +2971,7 @@ export const UNSUPPORTED: Readonly<Record<string, string>> = Object.fromEntries(
     "global_search",
     "global_search_fixed_strings",
     "workspace_symbol_picker",
+    "syntax_workspace_symbol_picker",
     "lsp_or_syntax_workspace_symbol_picker",
     "workspace_diagnostics_picker",
     "last_picker",

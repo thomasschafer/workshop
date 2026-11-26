@@ -9,7 +9,6 @@ import {
   startCompletion,
 } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
-import { getIndentation, IndentContext } from "@codemirror/language";
 import { forEachDiagnostic } from "@codemirror/lint";
 import { showSignatureHelp, signatureHelp } from "@codemirror/lsp-client";
 import {
@@ -48,7 +47,7 @@ import {
   type Position,
   type WorkspaceEdit,
 } from "../lspActions";
-import { renderMarkdown } from "../markdown";
+import { onMarkdownHighlightUpdate, renderMarkdown } from "../markdown";
 import { headline, problemAt, problemsIn } from "../problems";
 import { pasteImpl } from "./commands";
 import {
@@ -710,9 +709,9 @@ class HelixView implements PluginValue, Host {
     return out.sort((a, b) => a.from - b.from || a.to - b.to);
   }
 
-  languageIndent(pos: number): number | null {
-    const state = this.view.state;
-    return getIndentation(new IndentContext(state, { simulateBreak: pos }), pos);
+  hasLspDocumentSymbols(): boolean {
+    const caps = this.config.lsp?.client.serverCapabilities as Record<string, unknown> | null;
+    return Boolean(caps?.documentSymbolProvider);
   }
 
   commentTokens() {
@@ -1199,13 +1198,19 @@ class StatusPanel {
     else host.replaceChildren(this.status);
   }
 
+  private clearInfoSubscription: (() => void) | null = null;
+
   destroy(): void {
+    this.clearInfoSubscription?.();
+    this.clearInfoSubscription = null;
     this.status.remove();
   }
 
   render(): void {
     const { editor, handler } = this.helix;
     this.dom.style.marginBottom = `${this.helix.bottomInset}px`;
+    this.clearInfoSubscription?.();
+    this.clearInfoSubscription = null;
     this.extra.replaceChildren();
     if (editor.picker) {
       this.extra.append(
@@ -1215,7 +1220,11 @@ class StatusPanel {
         }),
       );
       revealPickerSelection(this.extra);
-    } else if (editor.autoinfo) this.extra.append(renderInfo(editor.autoinfo));
+    } else if (editor.autoinfo) {
+      const { element, unsubscribe } = renderInfo(editor.autoinfo);
+      this.clearInfoSubscription = unsubscribe;
+      this.extra.append(element);
+    }
     this.status.replaceChildren();
     if (editor.prompt) {
       const prompt = editor.prompt;
@@ -1298,17 +1307,21 @@ function button(className: string, text: string, onPress: () => void): HTMLEleme
   return el;
 }
 
-function renderInfo(info: Info): HTMLElement {
+function renderInfo(info: Info): { element: HTMLElement; unsubscribe: (() => void) | null } {
   const box = document.createElement("div");
   box.className = `cm-helix-info cm-helix-info-${info.kind ?? "keys"}`;
   if (info.title) box.append(span("cm-helix-info-title", info.title));
   if (info.markdown !== undefined) {
+    const markdown = info.markdown;
     const text = document.createElement("div");
     text.className = "cm-helix-info-markdown markdown";
     // Rendered with raw HTML escaped, so it's safe to put in the page.
-    text.innerHTML = renderMarkdown(info.markdown);
+    text.innerHTML = renderMarkdown(markdown);
+    const unsubscribe = onMarkdownHighlightUpdate(() => {
+      text.innerHTML = renderMarkdown(markdown);
+    });
     box.append(text);
-    return box;
+    return { element: box, unsubscribe };
   }
   const table = document.createElement("div");
   table.className = "cm-helix-info-body";
@@ -1316,7 +1329,7 @@ function renderInfo(info: Info): HTMLElement {
     table.append(span("cm-helix-info-key", key), span("cm-helix-info-desc", desc));
   }
   box.append(table);
-  return box;
+  return { element: box, unsubscribe: null };
 }
 
 const PICKER_ROWS = 12;
@@ -1399,6 +1412,10 @@ const COMPLETION_KEYS: Readonly<Record<string, (view: EditorView) => boolean>> =
 function completionTakes(helix: HelixView, key: Key): boolean {
   const view = helix.view;
   if (completionStatus(view.state) !== "active" || helix.editor.mode !== "insert") return false;
+  const smartTab = helix.editor.options.smartTab;
+  if ((key === "tab" || key === "S-tab") && smartTab.enable && smartTab.supersedeMenu) {
+    return false;
+  }
   if (COMPLETION_KEYS[key]?.(view)) return true;
   if (key === "esc") closeCompletion(view);
   return false;

@@ -1,11 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { highlightedHtml } from "./syntax";
+import { beforeAll, describe, expect, it } from "vitest";
+import { highlightedHtml, resolveSyntaxMode } from "./syntax";
+import { loadLanguageBundle, registeredTreeSitterModes } from "./treesitter";
+import { installNodeWasmLoader } from "./treesitter/nodeTestLoader";
+
+beforeAll(async () => {
+  installNodeWasmLoader();
+  await Promise.all(registeredTreeSitterModes().map((mode) => loadLanguageBundle(mode)));
+});
 
 describe("highlightedHtml", () => {
   it("highlights each language by the name its code block is marked with", () => {
     for (const [marked, code, keyword] of <[string, string, string][]>[
       ["python", "def f(x):\n    return x", "def"],
       ["py", "def f(x):\n    return x", "def"],
+      ["typescript", "export function f(x: number): number { return x; }", "export"],
+      ["ts", "const x: number = 1;", "const"],
+      ["go", "package main\nfunc main() { return }", "func"],
       ["rust", "fn main() { let x = 1; }", "fn"],
       ["rs", "fn main() { let x = 1; }", "let"],
       ["cpp", "int main() { return 0; }", "return"],
@@ -14,15 +24,21 @@ describe("highlightedHtml", () => {
       ["hs", "data Colour = Red | Green", "data"],
     ]) {
       expect(highlightedHtml(code, marked), marked).toContain(
-        `<span class="syntax-keyword">${keyword}</span>`,
+        `<span class="ts-hl syntax-keyword">${keyword}</span>`,
       );
     }
     expect(highlightedHtml('s = "hi"  # note', "python")).toContain(
-      '<span class="syntax-string">"hi"</span>',
+      '<span class="ts-hl syntax-string">"hi"</span>',
     );
     expect(highlightedHtml("x = 1  # note", "python")).toContain(
-      '<span class="syntax-comment"># note</span>',
+      '<span class="ts-hl syntax-comment"># note</span>',
     );
+  });
+
+  it("highlights injected spans (such as comment tags) with nested classes", () => {
+    const html = highlightedHtml("# TODO: check this\n", "python") ?? "";
+    expect(html).toContain('<span class="ts-hl syntax-comment">');
+    expect(html).toContain('<span class="ts-hl syntax-info">TODO</span>');
   });
 
   it("keeps the code's text, escaped, and its lines", () => {
@@ -34,6 +50,7 @@ describe("highlightedHtml", () => {
   });
 
   it("leaves code in other languages alone", () => {
+    expect(resolveSyntaxMode("sql")).toBeNull();
     expect(highlightedHtml("SELECT 1", "sql")).toBeNull();
   });
 });

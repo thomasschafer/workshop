@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { renderMarkdown } from "./markdown";
+import { loadLanguageBundle } from "./treesitter";
+import { installNodeWasmLoader } from "./treesitter/nodeTestLoader";
+
+beforeAll(async () => {
+  installNodeWasmLoader();
+  await Promise.all([loadLanguageBundle("haskell"), loadLanguageBundle("rust")]);
+});
 
 describe("renderMarkdown", () => {
   it("formats what coaches write", () => {
@@ -19,7 +26,7 @@ describe("renderMarkdown", () => {
       'What does this print?\n\n```rust\nfn main() {\n    println!("a < b");\n}\n```\n',
     );
     expect(html).toContain(
-      '<pre><code class="language-rust"><span class="syntax-keyword">fn</span>',
+      '<pre><code class="language-rust"><span class="ts-hl syntax-keyword">fn</span>',
     );
     expect(html).toContain("&lt;");
     expect(html).not.toContain("a < b");

@@ -3,9 +3,11 @@
 // https://mozilla.org/MPL/2.0/.
 //
 // Ported from Helix (https://github.com/helix-editor/helix): helix-core's textobject.rs,
-// surround.rs, match_brackets.rs and search.rs, without tree-sitter, as Helix behaves in a file
-// with no syntax tree.
+// surround.rs, match_brackets.rs and search.rs, using tree-sitter when a syntax tree is available
+// and plaintext fallbacks otherwise.
 
+import type { Node } from "web-tree-sitter";
+import { captureNodes, type SyntaxTree } from "../treesitter";
 import { Direction, Range, type Selection } from "./selection";
 import {
   CharCategory,
@@ -168,6 +170,7 @@ export function textobjectParagraph(
 }
 
 export function textobjectPairSurround(
+  syntax: SyntaxTree | null,
   doc: Doc,
   range: Range,
   textobject: TextObject,
@@ -175,18 +178,57 @@ export function textobjectPairSurround(
   findType: FindType,
   count: number,
 ): Range {
-  const pos = findNthPairsPos(doc, ch, range, findType, count);
+  const pos = findNthPairsPos(syntax, doc, ch, range, findType, count);
   return pos instanceof SurroundError ? range : pairRange(doc, pos, textobject);
 }
 
 export function textobjectPairSurroundClosest(
+  syntax: SyntaxTree | null,
   doc: Doc,
   range: Range,
   textobject: TextObject,
   count: number,
 ): Range {
-  const pos = findNthClosestPairsPos(doc, range, count);
+  const pos = findNthClosestPairsPos(syntax, doc, range, count);
   return pos instanceof SurroundError ? range : pairRange(doc, pos, textobject);
+}
+
+/**
+ * Selects a tree-sitter textobject (e.g. `function.inside`, `class.around`) containing the
+ * cursor. Ported from `helix-core/src/textobject.rs` `textobject_treesitter`.
+ */
+export function textobjectTreesitter(
+  doc: Doc,
+  range: Range,
+  textobject: TextObject,
+  objectName: string,
+  syntax: SyntaxTree,
+): Range {
+  const pos = range.cursor(doc);
+  const { layer, tree } = syntax.layerAndTreeForRange(pos, pos, doc.str);
+  const query = syntax.queryForLayer(layer, "textobjects");
+  if (query === null) return range;
+
+  const captureName = `${objectName}.${textobject === TextObject.Inside ? "inside" : "around"}`;
+  const nodes = captureNodes(query, captureName, tree.rootNode);
+  if (nodes === null) return range;
+
+  let best: { startIndex: number; endIndex: number } | null = null;
+  let bestLen = Number.POSITIVE_INFINITY;
+  for (const n of nodes) {
+    if (n.startIndex <= pos && pos < n.endIndex) {
+      const len = n.endIndex - n.startIndex;
+      if (len < bestLen) {
+        best = n;
+        bestLen = len;
+      }
+    }
+  }
+  if (best === null) return range;
+  if (best.startIndex >= doc.length || best.endIndex >= doc.length) {
+    return range;
+  }
+  return new Range(best.startIndex, best.endIndex);
 }
 
 function pairRange(doc: Doc, [anchor, head]: [number, number], textobject: TextObject): Range {
@@ -203,6 +245,7 @@ function pairRange(doc: Doc, [anchor, head]: [number, number], textobject: TextO
 // ---- Brackets ----
 
 const MAX_PLAINTEXT_SCAN = 10_000;
+const MATCH_LIMIT = 16;
 
 export const BRACKETS: readonly (readonly [string, string])[] = [
   ["(", ")"],
@@ -243,18 +286,180 @@ function isValidBracket(ch: string): boolean {
   return BRACKETS.some(([open, close]) => open === ch || close === ch);
 }
 
-/** The bracket matching the one at `pos`, ignoring syntax. */
-export function findMatchingBracketPlaintext(doc: Doc, pos: number): number | null {
-  const bracket = doc.char(pos);
-  if (bracket === undefined || !isValidBracket(bracket)) return null;
+function isValidPair(ch: string): boolean {
+  return PAIRS.some(([open, close]) => open === ch || close === ch);
+}
+
+function asChar(doc: Doc, node: Node): [number, string] | null {
+  if (node.endIndex - node.startIndex !== 1) return null;
+  const pos = node.startIndex;
+  if (pos >= doc.length) return null;
+  const code = doc.str.charCodeAt(pos);
+  if (code >= 128) return null;
+  return [pos, doc.str.charAt(pos)];
+}
+
+function asClosePair(doc: Doc, node: Node): [string, string] | null {
+  const ch = asChar(doc, node);
+  if (ch === null) return null;
+  const close = ch[1];
+  const pair = PAIRS.find(([, c]) => c === close);
+  return pair ? [close, pair[0]] : null;
+}
+
+function asOpenPair(doc: Doc, node: Node): [string, string] | null {
+  const ch = asChar(doc, node);
+  if (ch === null) return null;
+  const open = ch[1];
+  const pair = PAIRS.find(([o]) => o === open);
+  return pair ? [open, pair[1]] : null;
+}
+
+function findPairEnd(
+  doc: Doc,
+  startNode: Node | null,
+  startChar: string,
+  endChar: string,
+  direction: Direction,
+): number | null {
+  let depth = 0;
+  let node = startNode;
+  for (let steps = 0; steps < MATCH_LIMIT && node !== null; steps++) {
+    const ch = asChar(doc, node);
+    if (ch !== null) {
+      const [pos, c] = ch;
+      if (c === endChar) {
+        if (depth === 0) return pos;
+        depth--;
+      } else if (c === startChar) {
+        depth++;
+      }
+    }
+    node = direction === Direction.Forward ? node.nextSibling : node.previousSibling;
+  }
+  return null;
+}
+
+function findPair(
+  syntax: SyntaxTree,
+  doc: Doc,
+  pos: number,
+  traverseParents: boolean,
+): number | null {
+  const root = syntax.treeForRange(pos, pos, doc.str).rootNode;
+  let node: Node | null = root.descendantForIndex(pos, pos);
+
+  while (node !== null) {
+    if (node.isNamed && node.childCount >= 2) {
+      const openNode = node.child(0);
+      const closeNode = node.child(node.childCount - 1);
+      if (openNode !== null && closeNode !== null) {
+        const openChar = asChar(doc, openNode);
+        const closeChar = asChar(doc, closeNode);
+        if (openChar !== null && closeChar !== null) {
+          const [startPos, open] = openChar;
+          const [endPos, close] = closeChar;
+          if (
+            PAIRS.some(([o, c]) => o === open && c === close) &&
+            startPos <= pos &&
+            pos <= endPos
+          ) {
+            if (endPos === pos) return startPos;
+            if (traverseParents || startPos === pos) return endPos;
+          }
+        }
+      }
+    }
+
+    const closePair = asClosePair(doc, node);
+    if (closePair !== null) {
+      const pairStart = findPairEnd(
+        doc,
+        node.previousSibling,
+        closePair[0],
+        closePair[1],
+        Direction.Backward,
+      );
+      if (pairStart !== null) return pairStart;
+    }
+    const openPair = asOpenPair(doc, node);
+    if (openPair !== null) {
+      const pairEnd = findPairEnd(
+        doc,
+        node.nextSibling,
+        openPair[0],
+        openPair[1],
+        Direction.Forward,
+      );
+      if (pairEnd !== null) return pairEnd;
+    }
+
+    if (traverseParents) {
+      let sibling = node.nextSibling;
+      for (let steps = 0; steps < MATCH_LIMIT && sibling !== null; steps++) {
+        const sibClose = asClosePair(doc, sibling);
+        if (sibClose !== null) {
+          if (
+            findPairEnd(
+              doc,
+              sibling.previousSibling,
+              sibClose[0],
+              sibClose[1],
+              Direction.Backward,
+            ) !== null
+          ) {
+            return sibling.startIndex;
+          }
+        }
+        sibling = sibling.nextSibling;
+      }
+    } else if (node.isNamed) {
+      break;
+    }
+
+    node = node.parent;
+  }
+
+  if (pos >= doc.length) return null;
+  const leaf = root.namedDescendantForIndex(pos, pos + 1);
+  if (leaf === null || leaf.childCount !== 0) return null;
+  const nodeStart = leaf.startIndex;
+  const nodeEnd = leaf.endIndex;
+  return findMatchingBracketPlaintextInSlice(doc.str, nodeStart, nodeEnd, pos);
+}
+
+/** Matching bracket at `pos` using the syntax tree (`helix-core/src/match_brackets.rs`). */
+export function findMatchingBracket(syntax: SyntaxTree, doc: Doc, pos: number): number | null {
+  const ch = doc.char(pos);
+  if (ch === undefined || !isValidPair(ch)) return null;
+  return findPair(syntax, doc, pos, false);
+}
+
+/**
+ * Matching bracket at `pos` or closing bracket of the enclosing syntax pair
+ * (`helix-core/src/match_brackets.rs` `find_matching_bracket_fuzzy`).
+ */
+export function findMatchingBracketFuzzy(syntax: SyntaxTree, doc: Doc, pos: number): number | null {
+  return findPair(syntax, doc, pos, true);
+}
+
+function findMatchingBracketPlaintextInSlice(
+  str: string,
+  sliceStart: number,
+  sliceEnd: number,
+  pos: number,
+): number | null {
+  if (pos < sliceStart || pos >= sliceEnd) return null;
+  const bracket = str.charAt(pos);
+  if (!isValidBracket(bracket)) return null;
   const [open, close] = getPair(bracket);
   const matching = open === bracket ? close : open;
   const forward = isOpenBracket(bracket);
   let depth = 1;
   for (let i = 0; i < MAX_PLAINTEXT_SCAN; i++) {
     const p = forward ? pos + 1 + i : pos - 1 - i;
-    const candidate = doc.char(p);
-    if (candidate === undefined) return null;
+    if (p < sliceStart || p >= sliceEnd) return null;
+    const candidate = str.charAt(p);
     if (candidate === bracket) {
       depth++;
     } else if (candidate === matching) {
@@ -265,15 +470,9 @@ export function findMatchingBracketPlaintext(doc: Doc, pos: number): number | nu
   return null;
 }
 
-/**
- * The bracket matching the one at `pos` or, away from brackets, the one closing the innermost
- * pair around it. Helix finds that pair from the syntax tree; this finds it in the plain text.
- */
-export function findMatchingBracketFuzzy(doc: Doc, pos: number): number | null {
-  const ch = doc.char(pos);
-  if (ch !== undefined && isValidBracket(ch)) return findMatchingBracketPlaintext(doc, pos);
-  const pair = findNthClosestPairsPlain(doc, Range.point(pos), 1);
-  return pair instanceof SurroundError ? null : Math.max(pair[0], pair[1]);
+/** The bracket matching the one at `pos`, ignoring syntax. */
+export function findMatchingBracketPlaintext(doc: Doc, pos: number): number | null {
+  return findMatchingBracketPlaintextInSlice(doc.str, 0, doc.length, pos);
 }
 
 /** Helix's `search::find_nth_char`, from the gap at `pos`. */
@@ -318,11 +517,48 @@ export enum FindType {
 
 /** The closest pair of brackets enclosing the range, as `(anchor, head)` in its direction. */
 export function findNthClosestPairsPos(
+  syntax: SyntaxTree | null,
   doc: Doc,
   range: Range,
   skip: number,
 ): [number, number] | SurroundError {
-  return findNthClosestPairsPlain(doc, range, skip);
+  return syntax !== null
+    ? findNthClosestPairsTs(syntax, doc, range, skip)
+    : findNthClosestPairsPlain(doc, range, skip);
+}
+
+function findNthClosestPairsTs(
+  syntax: SyntaxTree,
+  doc: Doc,
+  range: Range,
+  initialSkip: number,
+): [number, number] | SurroundError {
+  let skip = initialSkip;
+  let opening = range.from;
+  let closing = range.to;
+
+  while (skip > 0) {
+    const foundClose = findMatchingBracketFuzzy(syntax, doc, closing);
+    if (foundClose === null) return SurroundError.pairNotFound;
+    const foundOpen = findMatchingBracket(syntax, doc, foundClose);
+    if (foundOpen === null) return SurroundError.pairNotFound;
+    opening = foundOpen;
+    closing = foundClose;
+    if (closing < opening) {
+      [opening, closing] = [closing, opening];
+    }
+
+    if (range.from < opening || closing < Math.max(0, range.to - 1)) {
+      closing = nextGraphemeBoundary(doc, closing);
+    } else {
+      skip--;
+      if (skip !== 0) {
+        closing = nextGraphemeBoundary(doc, closing);
+      }
+    }
+  }
+
+  return range.direction === Direction.Forward ? [opening, closing] : [closing, opening];
 }
 
 function findNthClosestPairsPlain(
@@ -367,6 +603,7 @@ function findNthClosestPairsPlain(
  * previous one. `n` skips `n - 1` pairs.
  */
 export function findNthPairsPos(
+  syntax: SyntaxTree | null,
   doc: Doc,
   ch: string,
   range: Range,
@@ -397,8 +634,11 @@ export function findNthPairsPos(
   if (open === close) {
     if (doc.char(pos) === open) {
       // On a character that both opens and closes, such as `"`, which side to search is
-      // ambiguous.
-      const matching = findMatchingBracketPlaintext(doc, pos);
+      // ambiguous without a syntax tree.
+      const matching =
+        syntax !== null
+          ? findMatchingBracketFuzzy(syntax, doc, pos)
+          : findMatchingBracketPlaintext(doc, pos);
       if (matching === null) return SurroundError.ambiguous;
       [openPos, closePos] = matching > pos ? [pos, matching] : [matching, pos];
     } else {
@@ -478,6 +718,7 @@ function findNthClosePair(
  * each, or an error if any can't be found or two ranges share a pair.
  */
 export function getSurroundPos(
+  syntax: SyntaxTree | null,
   doc: Doc,
   selection: Selection,
   ch: string | null,
@@ -487,8 +728,8 @@ export function getSurroundPos(
   for (const range of selection.ranges) {
     const raw =
       ch === null
-        ? findNthClosestPairsPos(doc, range, skip)
-        : findNthPairsPos(doc, ch, range, FindType.Surround, skip);
+        ? findNthClosestPairsPos(syntax, doc, range, skip)
+        : findNthPairsPos(syntax, doc, ch, range, FindType.Surround, skip);
     if (raw instanceof SurroundError) return raw;
     const pair = new Range(raw[0], raw[1]);
     const openPos = pair.from;

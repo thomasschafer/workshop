@@ -7,7 +7,7 @@ import {
   redo,
   undo,
 } from "@codemirror/commands";
-import { bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, indentOnInput } from "@codemirror/language";
 import { nextDiagnostic, previousDiagnostic, setDiagnostics } from "@codemirror/lint";
 import {
   findReferencesKeymap,
@@ -77,7 +77,6 @@ import type { WorkerHelperFile } from "./onDevice/ghcWorker";
 import { pinchToZoom } from "./pinch";
 import type { OnDeviceMode } from "./preferences";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
-import { LANGUAGES, syntaxHighlighter } from "./syntax";
 import { hasTreeSitterMode, treeSitterExtension } from "./treesitter";
 import { roundCodeScale } from "./zoom";
 
@@ -323,12 +322,9 @@ export class CodeEditor {
   constructor(parent: HTMLElement, options: EditorOptions) {
     this.options = options;
     this.codeScale = options.codeScale;
-    const language = LANGUAGES[options.mode];
     const languageExtension = hasTreeSitterMode(options.mode)
       ? treeSitterExtension(options.mode)
-      : language
-        ? language()
-        : [];
+      : [];
     const helixLanguage = HELIX_LANGUAGES[options.mode] ?? PLAIN_TEXT;
     const cursor = Math.min(options.cursor ?? 0, options.doc.length);
     this.view = new EditorView({
@@ -342,9 +338,7 @@ export class CodeEditor {
         this.numbers.of(this.lineNumbersFor(options.helix)),
         drawSelection(),
         highlightActiveLine(),
-        indentOnInput(),
         bracketMatching(),
-        syntaxHighlighting(syntaxHighlighter),
         this.keys.of(this.keysFor(options.helix)),
         this.guides.of(this.indentGuidesFor(options.helix)),
         theme,
@@ -485,6 +479,7 @@ export class CodeEditor {
     if (helix === null) {
       return [
         history(),
+        indentOnInput(),
         lsp ? languageServerKeys() : [],
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         // Shift-Alt-F formats, read by where the key is rather than what it types, which on a Mac

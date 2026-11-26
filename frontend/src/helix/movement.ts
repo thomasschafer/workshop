@@ -4,7 +4,9 @@
 //
 // Ported from Helix (https://github.com/helix-editor/helix): helix-core's movement.rs.
 
-import { Direction, Range } from "./selection";
+import type { Node } from "web-tree-sitter";
+import { captureNodesAny, type SyntaxTree } from "../treesitter";
+import { Direction, Range, type Selection } from "./selection";
 import {
   CharCategory,
   categorizeChar,
@@ -355,4 +357,125 @@ export function moveNextParagraph(
     anchor = range.putCursor(doc, head, true).anchor;
   }
   return new Range(anchor, head);
+}
+
+// ---- Syntax-tree motions ----
+
+/**
+ * Finds the range of the next or previous textobject in the syntax tree, returning it in the
+ * forward direction. Ported from `helix-core/src/movement.rs` `goto_treesitter_object`.
+ */
+export function gotoTreesitterObject(
+  doc: Doc,
+  range: Range,
+  objectName: string,
+  dir: Direction,
+  syntax: SyntaxTree,
+  count: number,
+): Range {
+  const step = (current: Range): Range | null => {
+    const pos = current.cursor(doc);
+    const { layer, tree } = syntax.layerAndTreeForRange(pos, pos, doc.str);
+    const query = syntax.queryForLayer(layer, "textobjects");
+    if (query === null) return null;
+
+    const nodes = captureNodesAny(
+      query,
+      [`${objectName}.movement`, `${objectName}.around`, `${objectName}.inside`],
+      tree.rootNode,
+    );
+    if (nodes === null) return null;
+
+    let best: { startIndex: number; endIndex: number } | null = null;
+    if (dir === Direction.Forward) {
+      // min_by_key(|n| (n.start_byte(), Reverse(n.end_byte()))): keeps first minimum on ties.
+      for (const n of nodes) {
+        if (n.startIndex <= pos) continue;
+        if (
+          best === null ||
+          n.startIndex < best.startIndex ||
+          (n.startIndex === best.startIndex && n.endIndex > best.endIndex)
+        ) {
+          best = n;
+        }
+      }
+    } else {
+      // max_by_key(|n| (n.end_byte(), Reverse(n.start_byte()))): keeps last maximum on ties.
+      for (const n of nodes) {
+        if (n.endIndex >= pos) continue;
+        if (
+          best === null ||
+          n.endIndex > best.endIndex ||
+          (n.endIndex === best.endIndex && n.startIndex <= best.startIndex)
+        ) {
+          best = n;
+        }
+      }
+    }
+
+    if (best === null) return null;
+    if (best.startIndex >= doc.length || best.endIndex >= doc.length) {
+      return null;
+    }
+    return new Range(best.startIndex, best.endIndex);
+  };
+
+  let lastRange = range;
+  for (let i = 0; i < count; i++) {
+    const next = step(lastRange);
+    if (next === null || next.equals(lastRange)) break;
+    lastRange = next;
+  }
+  return lastRange;
+}
+
+function findParentStart(node: Node): Node | null {
+  const start = node.startIndex;
+  let cur: Node = node;
+  while (cur.startIndex >= start || !cur.isNamed) {
+    const parent = cur.parent;
+    if (parent === null) return null;
+    cur = parent;
+  }
+  return cur;
+}
+
+/**
+ * Moves or extends each selection to the end or start of the enclosing named syntax node.
+ * Ported from `helix-core/src/movement.rs` `move_parent_node_end`.
+ */
+export function moveParentNodeEnd(
+  syntax: SyntaxTree,
+  doc: Doc,
+  selection: Selection,
+  dir: Direction,
+  movement: Movement,
+): Selection {
+  return selection.transform((range) => {
+    let node = syntax.namedDescendantForRange(range.from, range.to, doc.str);
+    if (node === null) return range;
+
+    let endHead: number;
+    if (dir === Direction.Forward) {
+      endHead = node.endIndex;
+    } else {
+      endHead = node.startIndex;
+      if (endHead === range.cursor(doc)) {
+        node = findParentStart(node) ?? node;
+        endHead = node.startIndex;
+      }
+    }
+
+    if (movement === Movement.Move) {
+      const nextPos = nextGraphemeBoundary(doc, endHead);
+      return range.direction === Direction.Forward
+        ? new Range(endHead, nextPos)
+        : new Range(nextPos, endHead);
+    }
+
+    if (endHead >= range.anchor) {
+      endHead = nextGraphemeBoundary(doc, endHead);
+    }
+    return new Range(range.anchor, endHead);
+  });
 }

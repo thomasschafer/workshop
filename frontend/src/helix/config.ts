@@ -20,7 +20,11 @@ export function helixSettings(config: HelixConfigJson): HelixSettings {
     smartCase: config.search?.["smart-case"] ?? DEFAULT_OPTIONS.smartCase,
     wrapAround: config.search?.["wrap-around"] ?? DEFAULT_OPTIONS.wrapAround,
     autoPairs: config["auto-pairs"] ?? DEFAULT_OPTIONS.autoPairs,
-    smartTab: config["smart-tab"]?.enable ?? DEFAULT_OPTIONS.smartTab,
+    smartTab: {
+      enable: config["smart-tab"]?.enable ?? DEFAULT_OPTIONS.smartTab.enable,
+      supersedeMenu:
+        config["smart-tab"]?.["supersede-menu"] ?? DEFAULT_OPTIONS.smartTab.supersedeMenu,
+    },
     lineNumbers: config["line-number"] ?? DEFAULT_OPTIONS.lineNumbers,
     colorModes: config["color-modes"] ?? DEFAULT_OPTIONS.colorModes,
     cursorShape: {

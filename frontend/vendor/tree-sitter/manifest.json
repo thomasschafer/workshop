@@ -10,11 +10,84 @@
       "rev": "0975ef72fc3c47b530309ca93937d7d143523628",
       "license": "MIT"
     },
+    "python": {
+      "helixLanguage": "python",
+      "grammar": "python",
+      "git": "https://github.com/tree-sitter/tree-sitter-python",
+      "rev": "293fdc02038ee2bf0e2e206711b69c90ac0d413f",
+      "license": "MIT"
+    },
+    "typescript": {
+      "helixLanguage": "typescript",
+      "grammar": "typescript",
+      "git": "https://github.com/tree-sitter/tree-sitter-typescript",
+      "rev": "75b3874edb2dc714fb1fd77a32013d0f8699989f",
+      "subpath": "typescript",
+      "license": "MIT"
+    },
+    "go": {
+      "helixLanguage": "go",
+      "grammar": "go",
+      "git": "https://github.com/tree-sitter/tree-sitter-go",
+      "rev": "2346a3ab1bb3857b48b29d779a1ef9799a248cd7",
+      "license": "MIT"
+    },
+    "rust": {
+      "helixLanguage": "rust",
+      "grammar": "rust",
+      "git": "https://github.com/tree-sitter/tree-sitter-rust",
+      "rev": "77a3747266f4d621d0757825e6b11edcbf991ca5",
+      "license": "MIT"
+    },
+    "cpp": {
+      "helixLanguage": "cpp",
+      "grammar": "cpp",
+      "git": "https://github.com/tree-sitter/tree-sitter-cpp",
+      "rev": "8b5b49eb196bec7040441bee33b2c9a4838d6967",
+      "license": "MIT"
+    },
     "comment": {
       "helixLanguage": "comment",
       "grammar": "comment",
       "git": "https://github.com/stsewd/tree-sitter-comment",
       "rev": "66272d2b6c73fb61157541b69dd0a7ce7b42a5ad",
+      "license": "MIT",
+      "injectionOnly": true
+    },
+    "regex": {
+      "helixLanguage": "regex",
+      "grammar": "regex",
+      "git": "https://github.com/tree-sitter/tree-sitter-regex",
+      "rev": "b2ac15e27fce703d2f37a79ccd94a5c0cbe9720b",
+      "license": "MIT",
+      "injectionOnly": true
+    },
+    "jsdoc": {
+      "helixLanguage": "jsdoc",
+      "grammar": "jsdoc",
+      "git": "https://github.com/tree-sitter/tree-sitter-jsdoc",
+      "rev": "658d18dcdddb75c760363faa4963427a7c6b52db",
+      "license": "MIT",
+      "injectionOnly": true
+    },
+    "rust-format-args": {
+      "helixLanguage": "rust-format-args",
+      "grammar": "rust-format-args",
+      "git": "https://github.com/nik-rev/tree-sitter-rust-format-args",
+      "rev": "84ffe550e261cf5ea40a0ec31849ba2443bae99f",
+      "license": "MIT",
+      "injectionOnly": true
+    },
+    "rust-format-args-macro": {
+      "helixLanguage": "rust-format-args-macro",
+      "reuseGrammar": "rust",
+      "injectionOnly": true
+    },
+    "go-format-string": {
+      "helixLanguage": "go-format-string",
+      "grammar": "go-format-string",
+      "git": "https://codeberg.org/kpbaks/tree-sitter-go-format-string",
+      "rev": "06587ea641155db638f46a32c959d68796cd36bb",
       "license": "MIT",
       "injectionOnly": true
     }

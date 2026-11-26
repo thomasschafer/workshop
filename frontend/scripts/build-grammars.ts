@@ -21,11 +21,13 @@ import { fileURLToPath } from "node:url";
 
 interface GrammarEntry {
   readonly helixLanguage: string;
-  readonly grammar: string;
-  readonly git: string;
-  readonly rev: string;
+  readonly grammar?: string;
+  readonly git?: string;
+  readonly rev?: string;
   readonly subpath?: string;
-  readonly license: string;
+  readonly license?: string;
+  /** Reuse another manifest entry's compiled WASM grammar (queries-only alias, e.g. rust-format-args-macro). */
+  readonly reuseGrammar?: string;
   readonly injectionOnly?: boolean;
 }
 
@@ -124,9 +126,13 @@ function parseHelixDirArg(argv: readonly string[]): string | null {
 function buildReadme(manifest: Manifest, licensesByMode: ReadonlyMap<string, string[]>): string {
   const rows = Object.entries(manifest.grammars)
     .map(([mode, entry]) => {
-      const files = (licensesByMode.get(mode) ?? []).map((f) => `\`${mode}/${f}\``).join(", ");
       const role = entry.injectionOnly ? "injection" : "editor mode";
-      return `| \`${mode}\` | ${role} | \`${entry.helixLanguage}\` | ${entry.git} | \`${entry.rev.slice(0, 12)}\` | ${entry.license} (${files}) |`;
+      if (entry.reuseGrammar) {
+        return `| \`${mode}\` | ${role} | \`${entry.helixLanguage}\` | reuses \`${entry.reuseGrammar}\` | — | see \`${entry.reuseGrammar}\` |`;
+      }
+      const files = (licensesByMode.get(mode) ?? []).map((f) => `\`${mode}/${f}\``).join(", ");
+      const rev = entry.rev ? `\`${entry.rev.slice(0, 12)}\`` : "—";
+      return `| \`${mode}\` | ${role} | \`${entry.helixLanguage}\` | ${entry.git ?? "—"} | ${rev} | ${entry.license ?? "—"} (${files}) |`;
     })
     .join("\n");
 
@@ -176,30 +182,44 @@ function main(): void {
     const licensesByMode = new Map<string, string[]>();
 
     for (const [mode, entry] of Object.entries(manifest.grammars)) {
-      console.log(`\nBuilding ${mode} (${entry.grammar} @ ${entry.rev.slice(0, 12)})...`);
       const outDir = join(VENDOR_DIR, mode);
       rmSync(outDir, { recursive: true, force: true });
       mkdirSync(outDir, { recursive: true });
 
-      const grammarCheckout = join(workDir, `grammar-${mode}`);
-      fetchGitRev(entry.git, entry.rev, grammarCheckout);
-      const buildDir = entry.subpath ? join(grammarCheckout, entry.subpath) : grammarCheckout;
-      const wasmOut = join(outDir, `tree-sitter-${entry.grammar}.wasm`);
+      if (entry.reuseGrammar) {
+        if (!Object.hasOwn(manifest.grammars, entry.reuseGrammar)) {
+          throw new Error(
+            `${mode}: reuseGrammar ${JSON.stringify(entry.reuseGrammar)} not in manifest`,
+          );
+        }
+        console.log(`\nCopying queries for ${mode} (reuses ${entry.reuseGrammar} grammar)...`);
+      } else {
+        if (!entry.grammar || !entry.git || !entry.rev || !entry.license) {
+          throw new Error(
+            `${mode}: grammar, git, rev and license are required unless reuseGrammar is set`,
+          );
+        }
+        console.log(`\nBuilding ${mode} (${entry.grammar} @ ${entry.rev.slice(0, 12)})...`);
+        const grammarCheckout = join(workDir, `grammar-${mode}`);
+        fetchGitRev(entry.git, entry.rev, grammarCheckout);
+        const buildDir = entry.subpath ? join(grammarCheckout, entry.subpath) : grammarCheckout;
+        const wasmOut = join(outDir, `tree-sitter-${entry.grammar}.wasm`);
 
-      run(
-        "npx",
-        [
-          "-y",
-          `tree-sitter-cli@${manifest.treeSitterCliVersion}`,
-          "build",
-          "--wasm",
-          "-o",
-          wasmOut,
-        ],
-        buildDir,
-      );
+        run(
+          "npx",
+          [
+            "-y",
+            `tree-sitter-cli@${manifest.treeSitterCliVersion}`,
+            "build",
+            "--wasm",
+            "-o",
+            wasmOut,
+          ],
+          buildDir,
+        );
 
-      licensesByMode.set(mode, copyLicenseFiles(grammarCheckout, outDir));
+        licensesByMode.set(mode, copyLicenseFiles(grammarCheckout, outDir));
+      }
 
       for (const queryFile of QUERY_FILES) {
         const sourcePath = join(queriesRoot, entry.helixLanguage, queryFile);

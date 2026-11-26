@@ -6,7 +6,7 @@
 // indentation of the languages Workshop has built in, by Workshop's editor mode.
 
 import type { BlockCommentToken } from "./comment";
-import { type IndentStyle, IndentStyleKind } from "./editor";
+import { type IndentStyle, IndentStyleKind } from "./indent";
 
 export interface LanguageConfig {
   readonly lineComments: readonly string[];
@@ -44,6 +44,12 @@ export const LANGUAGES: Readonly<Record<string, LanguageConfig>> = {
   haskell: {
     lineComments: ["--"],
     blockComments: [{ open: "{-", close: "-}" }],
+    indent: SPACES(2),
+    tabWidth: 2,
+  },
+  cpp: {
+    lineComments: ["//"],
+    blockComments: [{ open: "/*", close: "*/" }],
     indent: SPACES(2),
     tabWidth: 2,
   },
