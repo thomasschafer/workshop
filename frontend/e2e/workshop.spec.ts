@@ -1,5 +1,5 @@
 import { createECDH, randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -649,7 +649,11 @@ test("keeps the code scrolled where it was when an edit makes a line long, unles
   expect(await scrolledSideways()).toBe(0);
   // Wait for both the active puzzle and the edit to finish saving before reloading, so a slow
   // keepalive write on exit can't race with the reloaded page's bootstrap.
-  await expect.poll(() => readFileSync(uiState, "utf8")).toMatch(/"day": *4/);
+  // The app's state is first saved a moment after it settles, so it may not be there yet; and
+  // `expect.poll` gives up at once if reading it throws.
+  await expect
+    .poll(() => (existsSync(uiState) ? readFileSync(uiState, "utf8") : ""))
+    .toMatch(/"day": *4/);
   await expect.poll(() => readFileSync(solution, "utf8")).toContain("well past the right edge");
   // Coming back puts the cursor where it was, at the end of the long line.
   await page.reload();
