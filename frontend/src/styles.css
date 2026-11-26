@@ -1,5 +1,7 @@
 :root {
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  /* Bundled with the app, as phones don't have it. */
+  --mono:
+    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --code-size: 15px;
   /* Fields that are a little smaller than the text around them. */
   --small-field-size: 13px;

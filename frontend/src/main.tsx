@@ -9,6 +9,8 @@ import {
 } from "./api";
 import { errorMessage } from "./errors";
 import { readCachedBootstrap, writeCachedBootstrap } from "./offline/bootstrap";
+import "@fontsource-variable/jetbrains-mono/wght.css";
+import "@fontsource-variable/jetbrains-mono/wght-italic.css";
 import "./styles.css";
 import { applyThemeCss } from "./theme";
 import { Shell } from "./tracks/shell";

@@ -83,7 +83,16 @@ const theme = EditorView.theme({
     background: "transparent",
     color: "var(--fg)",
   },
-  ".cm-scroller": { fontFamily: "var(--mono)", lineHeight: "1.55", overscrollBehavior: "contain" },
+  ".cm-scroller": {
+    fontFamily: "var(--mono)",
+    // A touch heavier than regular, as terminals thicken their text, and with JetBrains Mono's
+    // ligatures off so that code reads as typed.
+    fontWeight: "450",
+    fontVariantLigatures: "none",
+    fontFeatureSettings: '"calt" 0',
+    lineHeight: "1.55",
+    overscrollBehavior: "contain",
+  },
   ".cm-content": { caretColor: "var(--accent)", paddingBottom: "40vh" },
   ".cm-cursor": { borderLeft: "2px solid var(--accent)" },
   "&.cm-focused .cm-cursor": { borderLeftColor: "var(--accent)" },
