@@ -1,6 +1,6 @@
 {
   "generatedFromHelixCommit": "18dbe190a0139f6c74320059146b2413b82b011c",
-  "generatedWith": "~/.cache/helix-oracle/oracle.sh cases.json > results.json",
+  "generatedWith": "HELIX_SRC=<Helix checkout at generatedFromHelixCommit> scripts/helix-oracle/oracle.sh cases.json > results.json",
   "cases": [
     {
       "name": "expand: inside identifier",

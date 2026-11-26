@@ -35,6 +35,10 @@ Each case is one call to your edit model, so the evals aren't part of CI. When y
 
 When a change alters what the demo shows, re-record `docs/demo.gif` with `mise run demo`. It plays an invented puzzle on an emulated phone, with simulated speech, and makes a few calls to your edit model.
 
+## Checking the Helix keybindings against Helix
+
+Workshop's Helix keybindings, in `frontend/src/helix/`, are ported from Helix, and its syntax highlighting uses the grammars and queries Helix pins, built into `frontend/vendor/tree-sitter` by `mise run grammars`. To check a change against Helix itself, `scripts/helix-oracle/oracle.sh` runs cases (text with a selection, and keys) through a Helix checkout's own test harness and records the text and selections it ends with. `frontend/src/helix/oracleCases.json` holds cases with Helix's results, which the unit tests check Workshop against; when you add a case, generate its result with the script rather than writing it by hand.
+
 ## A local content check
 
 `scripts/content-check` refuses a commit that adds a phrase from a denylist of your own, in its changes or its message, such as names or details that shouldn't go into a public repo. To use it, install it as both of the repo's pre-commit and commit-msg hooks, from the repo's root:
