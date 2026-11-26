@@ -7,10 +7,14 @@ Thanks for helping. Bug reports, language profiles and model providers are all e
 Install [mise](https://mise.jdx.dev), then:
 
 ```sh
-mise run dev         # rebuild and restart on every change, alongside any Workshop you use (see the README)
+mise run dev         # rebuild and restart on every change; refresh the page to see it
+mise run serve       # an optimised build, for when you're just using Workshop
 mise run check-fast  # formatting, lints, types and unit tests, in seconds
 mise run check       # all of that and the browser tests, as CI does
+mise run build       # a release binary with the frontend embedded
 ```
+
+`serve` serves to your phone over Tailscale when it's installed, and takes `--https-port` as `workshop serve` does. `dev` runs alongside any Workshop you already use: on port 7879, with its own settings and history in `.dev`, starting from a copy of your config and Advent of Code cookie. `mise run dev --tailscale` serves it to your phone too, on its own HTTPS port. Both keep macOS awake while they run.
 
 CI runs the Rust tests on Linux and macOS, and the browser tests in Chromium and WebKit on Linux and in WebKit on macOS. Running the CI workflow by hand, from the Actions tab or with `gh workflow run ci.yml`, adds Windows and Chromium on macOS. On CI, a browser test that fails gets one retry; `mise run ci-flakes` lists the tests that failed or only passed on a retry across recent runs, so they can be steadied rather than left to retry.
 
@@ -33,7 +37,7 @@ cargo run --release -- eval --filter before-that    # just the cases whose names
 
 Each case is one call to your edit model, so the evals aren't part of CI. When you find an utterance that goes wrong, add it as a new case to the file for its language in `evals/`. A new language profile should come with its own eval file.
 
-When a change alters what the demo shows, re-record `docs/demo.gif` with `mise run demo`. It plays an invented puzzle on an emulated phone, with simulated speech, and makes a few calls to your edit model.
+When a change alters what the README's screenshots show, take them again with `mise run screenshots`, which drives the app on an emulated phone and computer, with the sample pack, an invented puzzle and the browser tests' stand-in model, so it makes no model calls. The dictation demo, `docs/demo.gif`, is re-recorded with `mise run demo`. It plays an invented puzzle on an emulated phone, with simulated speech, and makes a few calls to your edit model.
 
 ## Checking the Helix keybindings against Helix
 
