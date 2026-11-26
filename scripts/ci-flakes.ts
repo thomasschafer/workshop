@@ -20,9 +20,11 @@ function gh(args: string[]): string {
 }
 
 type Run = { databaseId: number; createdAt: string; displayTitle: string };
-type Job = { id: number; name: string; conclusion: string | null };
+type Job = { id: number; name: string; conclusion: string | null; html_url: string };
 type Outcome = "failed" | "flaky";
-type Tally = { failed: number; flaky: number; jobs: Set<string>; last: string };
+/** The latest time a test failed or needed a retry: when, in which job, and its error. */
+type Latest = { at: string; job: string; error: string };
+type Tally = { failed: number; flaky: number; jobs: Set<string>; latest: Latest };
 
 const repo = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).trim();
 const runs: Run[] = JSON.parse(
@@ -45,14 +47,54 @@ const runs: Run[] = JSON.parse(
 const SUMMARY = /^ {2}\d+ (failed|flaky)$/;
 const SUMMARY_TEST = /^ {4}\[(\w+)\] › (\S+?):\d+:\d+ › (.+?)\s*(?:─+)?$/;
 const RUST_FAILURE = /^---- (\S+) stdout ----$/;
+// Before the summary, each test that failed a try has its error under a numbered heading.
+const FAILURE_HEADING = /^ {2}\d+\) \[(\w+)\] › (\S+?):\d+:\d+ › (.+?)\s*(?:─+)?$/;
+const PLAYWRIGHT_ERROR = /^\s+((?:\w*Error:|Test timeout).*)$/;
+const RUST_PANIC = /^thread '.*'.* panicked at /;
+const COLOUR_CODE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
-function outcomes(log: string): [string, Outcome][] {
+/** A line short enough to read at a glance; assertions can print whole documents. */
+function truncated(line: string, length = 160): string {
+  return line.length > length ? `${line.slice(0, length - 1)}…` : line;
+}
+
+function testName(match: RegExpExecArray): string {
+  // Windows writes the file's path with backslashes.
+  return `${match[1]} ${match[2].replaceAll("\\", "/")} › ${match[3]}`;
+}
+
+/** What happened to each test in a job's log, and the first error each one gave. */
+function outcomes(log: string): { found: [string, Outcome][]; errors: Map<string, string> } {
   const found: [string, Outcome][] = [];
+  const errors = new Map<string, string>();
   let section: Outcome | null = null;
+  // The test whose error is still to be found, and for a Rust test, whether its panic is next.
+  let erring: { test: string; rust: boolean; panicked: boolean } | null = null;
   for (const raw of log.split("\n")) {
     // Each line starts with a timestamp, and some have colour codes.
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: removes terminal colour codes
-    const line = raw.replace(/^\S+Z /, "").replace(/\u001b\[[0-9;]*m/g, "").trimEnd();
+    const line = raw
+      .replace(/^\S+Z /, "")
+      .replace(COLOUR_CODE, "")
+      .trimEnd();
+    if (erring && !errors.has(erring.test)) {
+      if (erring.rust && !erring.panicked) {
+        erring.panicked = RUST_PANIC.test(line);
+      } else if (erring.rust && line.trim() !== "") {
+        errors.set(erring.test, line.trim());
+        erring = null;
+      } else {
+        const error = PLAYWRIGHT_ERROR.exec(line);
+        if (error) {
+          errors.set(erring.test, error[1]);
+          erring = null;
+        }
+      }
+    }
+    const heading = FAILURE_HEADING.exec(line);
+    if (heading) {
+      erring = { test: testName(heading), rust: false, panicked: false };
+      continue;
+    }
     const summary = SUMMARY.exec(line);
     if (summary) {
       section = summary[1] as Outcome;
@@ -60,16 +102,18 @@ function outcomes(log: string): [string, Outcome][] {
     }
     const test = SUMMARY_TEST.exec(line);
     if (section && test) {
-      found.push([`${test[1]} ${test[2]} › ${test[3]}`, section]);
+      found.push([testName(test), section]);
       continue;
     }
     section = null;
     const rust = RUST_FAILURE.exec(line);
     if (rust) {
-      found.push([`rust ${rust[1]}`, "failed"]);
+      const test = `rust ${rust[1]}`;
+      found.push([test, "failed"]);
+      erring = { test, rust: true, panicked: false };
     }
   }
-  return found;
+  return { found, errors };
 }
 
 const tallies = new Map<string, Tally>();
@@ -81,7 +125,7 @@ for (const run of runs) {
     "--paginate",
     `repos/${repo}/actions/runs/${run.databaseId}/jobs`,
     "-q",
-    ".jobs[] | {id, name, conclusion}",
+    ".jobs[] | {id, name, conclusion, html_url}",
   ])
     .split("\n")
     .filter((line) => line !== "")
@@ -91,13 +135,19 @@ for (const run of runs) {
       continue;
     }
     jobsRead += 1;
-    const log = gh(["api", "--allow-escape-sequences", `repos/${repo}/actions/jobs/${job.id}/logs`]);
+    const log = gh([
+      "api",
+      "--allow-escape-sequences",
+      `repos/${repo}/actions/jobs/${job.id}/logs`,
+    ]);
+    const { found, errors } = outcomes(log);
     // A Rust test's failure is printed twice, so each test counts once per job.
-    for (const [test, outcome] of new Map(outcomes(log))) {
-      const tally = tallies.get(test) ?? { failed: 0, flaky: 0, jobs: new Set(), last: "" };
+    for (const [test, outcome] of new Map(found)) {
+      const latest = { at: run.createdAt, job: job.html_url, error: errors.get(test) ?? "" };
+      const tally = tallies.get(test) ?? { failed: 0, flaky: 0, jobs: new Set(), latest };
       tally[outcome] += 1;
       tally.jobs.add(job.name);
-      tally.last = tally.last > run.createdAt ? tally.last : run.createdAt;
+      if (latest.at > tally.latest.at) tally.latest = latest;
       tallies.set(test, tally);
     }
   }
@@ -108,11 +158,18 @@ if (tallies.size === 0) {
   console.log("No test failed or needed a retry.");
 } else {
   const sorted = [...tallies].sort(
-    ([, a], [, b]) => b.failed + b.flaky - (a.failed + a.flaky) || b.last.localeCompare(a.last),
+    ([, a], [, b]) =>
+      b.failed + b.flaky - (a.failed + a.flaky) || b.latest.at.localeCompare(a.latest.at),
   );
-  for (const [test, tally] of sorted) {
+  const indent = " ".repeat(39);
+  for (const [test, { failed, flaky, jobs, latest }] of sorted) {
     console.log(
-      `${String(tally.failed).padStart(3)} failed ${String(tally.flaky).padStart(3)} flaky  last ${tally.last.slice(0, 10)}  ${test}\n${" ".repeat(39)}in ${[...tally.jobs].join(", ")}`,
+      [
+        `${String(failed).padStart(3)} failed ${String(flaky).padStart(3)} flaky  last ${latest.at.slice(0, 10)}  ${test}`,
+        `${indent}in ${[...jobs].join(", ")}`,
+        ...(latest.error ? [`${indent}${truncated(latest.error)}`] : []),
+        `${indent}${latest.job}`,
+      ].join("\n"),
     );
   }
 }
