@@ -14,6 +14,7 @@ export interface HelixSettings {
 export function helixSettings(config: HelixConfigJson): HelixSettings {
   const { keymaps, problems } = keymapsWithConfig(config.keys);
   const shapes = config["cursor-shape"] ?? {};
+  const guides = config["indent-guides"] ?? {};
   const options: HelixOptions = {
     scrolloff: config.scrolloff ?? DEFAULT_OPTIONS.scrolloff,
     smartCase: config.search?.["smart-case"] ?? DEFAULT_OPTIONS.smartCase,
@@ -28,6 +29,10 @@ export function helixSettings(config: HelixConfigJson): HelixSettings {
       select: shapes.select ?? DEFAULT_OPTIONS.cursorShape.select,
     },
     jumpLabelAlphabet: config["jump-label-alphabet"] ?? DEFAULT_OPTIONS.jumpLabelAlphabet,
+    indentGuides: {
+      render: guides.render ?? DEFAULT_OPTIONS.indentGuides.render,
+      skipLevels: guides["skip-levels"] ?? DEFAULT_OPTIONS.indentGuides.skipLevels,
+    },
   };
   return { keymaps, options, problems };
 }

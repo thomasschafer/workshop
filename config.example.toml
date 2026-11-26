@@ -71,6 +71,7 @@ format_automatically = true
 # search.smart-case = true
 # search.wrap-around = true
 # cursor-shape = { normal = "block", insert = "block", select = "block" }
+# indent-guides = { render = false, skip-levels = 0 }
 #
 # [editor.helix.keys.normal]
 # X = "extend_line_above"

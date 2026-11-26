@@ -233,6 +233,8 @@ pub struct HelixConfig {
     pub search: Option<HelixSearch>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_shape: Option<CursorShapes>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_guides: Option<IndentGuidesConfig>,
     /// Keymaps by mode, in Helix's format, which the app reads and checks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
@@ -278,6 +280,15 @@ pub enum CursorShape {
     Bar,
     Underline,
     Hidden,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct IndentGuidesConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_levels: Option<u8>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -644,6 +655,7 @@ mod tests {
             line-number = "relative"
             color-modes = true
             smart-tab.enable = false
+            indent-guides = { render = false, skip-levels = 1 }
 
             [editor.helix.keys.normal]
             X = "extend_line_above"
@@ -658,6 +670,13 @@ mod tests {
         assert_eq!(helix.line_number, Some(LineNumber::Relative));
         assert_eq!(helix.color_modes, Some(true));
         assert_eq!(helix.smart_tab, Some(SmartTab { enable: false }));
+        assert_eq!(
+            helix.indent_guides,
+            Some(IndentGuidesConfig {
+                render: Some(false),
+                skip_levels: Some(1),
+            })
+        );
         let keys = helix.keys.as_ref().unwrap();
         assert_eq!(keys["normal"]["X"], "extend_line_above");
         assert_eq!(keys["normal"]["space"]["p"], "paste_after");

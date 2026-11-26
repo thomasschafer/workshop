@@ -80,10 +80,14 @@ export function useEditorSettings(config: EditorConfig, editor: RefObject<CodeEd
   };
 
   /** What a new editor starts with, of these settings. */
-  const editorOptions = (): Pick<EditorOptions, "lineWrapping" | "codeScale" | "onCodeScale"> => ({
+  const editorOptions = (): Pick<
+    EditorOptions,
+    "lineWrapping" | "codeScale" | "onCodeScale" | "indentGuides"
+  > => ({
     lineWrapping: preferences.lineWrapping.get(),
     codeScale: preferences.codeScale.get(),
     onCodeScale: (scale) => changeCodeScaleRef.current(scale),
+    indentGuides: helix.options.indentGuides,
   });
 
   return {

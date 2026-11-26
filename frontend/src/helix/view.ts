@@ -1469,7 +1469,7 @@ const theme = EditorView.theme({
     background: "transparent !important",
   },
   // Helix shows selections clearly, and highlights no line of its own, which would hide them.
-  "&.cm-helix .cm-activeLine": { background: "transparent" },
+  "&.cm-helix .cm-activeLine": { backgroundColor: "transparent" },
   "&.cm-helix .cm-selectionBackground, &.cm-helix.cm-focused .cm-selectionBackground": {
     background: "transparent !important",
   },

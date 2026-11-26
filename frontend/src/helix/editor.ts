@@ -43,9 +43,16 @@ export interface HelixOptions {
   readonly cursorShape: Readonly<Record<Mode, CursorShape>>;
   /** The characters `gw` labels words with. */
   readonly jumpLabelAlphabet: string;
+  /** Vertical guides drawn over leading whitespace at each indentation level. */
+  readonly indentGuides: IndentGuidesConfig;
 }
 
 export type CursorShape = "block" | "bar" | "underline" | "hidden";
+
+export interface IndentGuidesConfig {
+  readonly render: boolean;
+  readonly skipLevels: number;
+}
 
 export const DEFAULT_OPTIONS: HelixOptions = {
   scrolloff: 5,
@@ -57,6 +64,7 @@ export const DEFAULT_OPTIONS: HelixOptions = {
   colorModes: false,
   cursorShape: { normal: "block", select: "block", insert: "block" },
   jumpLabelAlphabet: "abcdefghijklmnopqrstuvwxyz",
+  indentGuides: { render: false, skipLevels: 0 },
 };
 
 export type Severity = "info" | "error";

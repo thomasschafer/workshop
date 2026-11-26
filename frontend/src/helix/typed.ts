@@ -149,6 +149,16 @@ const OPTIONS: Record<
     get: (e) => e.options.jumpLabelAlphabet,
     set: (e, v) => setOption(e, "jumpLabelAlphabet", v),
   },
+  "indent-guides.render": {
+    get: (e) => e.options.indentGuides.render,
+    set: (e, v) =>
+      setOption(e, "indentGuides", { ...e.options.indentGuides, render: parseBool(v) }),
+  },
+  "indent-guides.skip-levels": {
+    get: (e) => e.options.indentGuides.skipLevels,
+    set: (e, v) =>
+      setOption(e, "indentGuides", { ...e.options.indentGuides, skipLevels: parseNumber(v) }),
+  },
 };
 
 function setOption<K extends keyof HelixOptions>(
@@ -231,6 +241,7 @@ const TYPED: Readonly<Record<string, TypedFn>> = {
     }
     if (arg === "t" || arg === "tabs") {
       editor.indentOverride = { kind: IndentStyleKind.Tabs };
+      editor.onChange();
       return;
     }
     const n = Number(arg);
@@ -239,6 +250,7 @@ const TYPED: Readonly<Record<string, TypedFn>> = {
       return;
     }
     editor.indentOverride = { kind: IndentStyleKind.Spaces, n };
+    editor.onChange();
   },
   earlier: undoSteps(false),
   later: undoSteps(true),

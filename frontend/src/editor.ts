@@ -48,10 +48,16 @@ import {
   isFormatting,
   languageServerFormatter,
 } from "./format";
-import type { HelixOptions } from "./helix/editor";
-import { isHelixTransaction } from "./helix/editor";
+import {
+  DEFAULT_OPTIONS,
+  type HelixOptions,
+  type IndentGuidesConfig,
+  isHelixTransaction,
+} from "./helix/editor";
+import { indentGuides } from "./helix/indentGuides";
 import type { KeyTrieNode, Mode } from "./helix/keymap";
 import type { Key } from "./helix/keys";
+import { LANGUAGES as HELIX_LANGUAGES, PLAIN_TEXT } from "./helix/languages";
 import {
   type HelixActions,
   helixCursor,
@@ -97,7 +103,7 @@ const theme = EditorView.theme({
   ".cm-cursor": { borderLeft: "2px solid var(--accent)" },
   "&.cm-focused .cm-cursor": { borderLeftColor: "var(--accent)" },
   ".cm-gutters": { background: "var(--bg)", border: "none", color: "var(--muted)" },
-  ".cm-activeLine": { background: "var(--active-line)" },
+  ".cm-activeLine": { backgroundColor: "var(--active-line)" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
     background: "var(--selection) !important",
   },
@@ -270,6 +276,8 @@ export interface EditorOptions {
   formatAutomatically: boolean;
   /** Helix's keybindings, or null for CodeMirror's own. */
   helix: HelixSetup | null;
+  /** Indent guide configuration when Helix keybindings aren't active. */
+  indentGuides?: IndentGuidesConfig;
   onChange: (text: string) => void;
   onCursor: (pos: number) => void;
   onDiagnostics: (diagnostics: Diagnostics) => void;
@@ -294,6 +302,7 @@ export class CodeEditor {
   private readonly inset = new Compartment();
   private readonly keys = new Compartment();
   private readonly numbers = new Compartment();
+  private readonly guides = new Compartment();
   private insetPx = 0;
   private flashTimer: number | undefined;
   /** The text most recently inserted by voice, which "that" refers to. */
@@ -314,6 +323,7 @@ export class CodeEditor {
     this.options = options;
     this.codeScale = options.codeScale;
     const language = LANGUAGES[options.mode];
+    const helixLanguage = HELIX_LANGUAGES[options.mode] ?? PLAIN_TEXT;
     const cursor = Math.min(options.cursor ?? 0, options.doc.length);
     this.view = new EditorView({
       parent,
@@ -322,6 +332,7 @@ export class CodeEditor {
       extensions: [
         // So screen readers say what the text box is.
         EditorView.contentAttributes.of({ "aria-label": "Code" }),
+        EditorState.tabSize.of(helixLanguage.tabWidth),
         this.numbers.of(this.lineNumbersFor(options.helix)),
         drawSelection(),
         highlightActiveLine(),
@@ -329,6 +340,7 @@ export class CodeEditor {
         bracketMatching(),
         syntaxHighlighting(syntaxHighlighter),
         this.keys.of(this.keysFor(options.helix)),
+        this.guides.of(this.indentGuidesFor(options.helix)),
         theme,
         this.wrapping.of(wrapping(options.lineWrapping)),
         this.scale.of(scaled(options.codeScale)),
@@ -456,6 +468,7 @@ export class CodeEditor {
       effects: [
         this.keys.reconfigure(this.keysFor(helix)),
         this.numbers.reconfigure(this.lineNumbersFor(helix)),
+        this.guides.reconfigure(this.indentGuidesFor(helix)),
       ],
     });
     this.applyInset();
@@ -499,6 +512,13 @@ export class CodeEditor {
 
   private lineNumbersFor(helix: HelixSetup | null): Extension {
     return helix?.options.lineNumbers === "relative" ? relativeLineNumbers() : lineNumbers();
+  }
+
+  private indentGuidesFor(helix: HelixSetup | null): Extension {
+    const language = HELIX_LANGUAGES[this.options.mode] ?? PLAIN_TEXT;
+    const config =
+      helix?.options.indentGuides ?? this.options.indentGuides ?? DEFAULT_OPTIONS.indentGuides;
+    return indentGuides({ defaultIndent: language.indent, config });
   }
 
   /**

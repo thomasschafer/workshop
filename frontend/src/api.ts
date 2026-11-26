@@ -45,6 +45,7 @@ export interface HelixConfigJson {
     insert?: "block" | "bar" | "underline" | "hidden";
     select?: "block" | "bar" | "underline" | "hidden";
   };
+  "indent-guides"?: { render?: boolean; "skip-levels"?: number };
   keys?: unknown;
 }
 

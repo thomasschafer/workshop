@@ -1321,6 +1321,17 @@ test("edits with Helix's keybindings, and keys from the config", async ({ browse
   await keys("Enter");
   await expect(helix.locator(".cm-helix-message")).toContainText("written");
 
+  // Indent guides are off by default, as in Helix, and can be toggled from the command line.
+  await expect(helix.locator(".cm-indent-guides")).toHaveCount(0);
+  await keys(":");
+  await helix.keyboard.type("toggle indent-guides.render");
+  await keys("Enter");
+  await expect(helix.locator(".cm-indent-guides").first()).toBeVisible();
+  await keys(":");
+  await helix.keyboard.type("toggle indent-guides.render");
+  await keys("Enter");
+  await expect(helix.locator(".cm-indent-guides")).toHaveCount(0);
+
   // Each key is one undo step, so undoing both edits puts the file back as it was.
   await keys("u", "u");
   await expect.poll(saved).toBe(original);

@@ -18,6 +18,8 @@
   --accent: #2f62c9;
   --accent-fg: #ffffff;
   --active-line: rgba(0, 0, 0, 0.035);
+  /* Derived from --fg so custom terminal themes carry their own faint indent guide colour. */
+  --indent-guide: color-mix(in srgb, var(--fg) 12%, transparent);
   --selection: rgba(47, 98, 201, 0.18);
   --changed: rgba(47, 98, 201, 0.16);
   --error: #c4352b;
@@ -59,6 +61,7 @@
     --accent: #7da3f7;
     --accent-fg: #121216;
     --active-line: rgba(255, 255, 255, 0.035);
+    --indent-guide: color-mix(in srgb, var(--fg) 14%, transparent);
     --selection: rgba(125, 163, 247, 0.25);
     --changed: rgba(125, 163, 247, 0.22);
     --error: #f2766b;
