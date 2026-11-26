@@ -36,6 +36,7 @@ async fn oracle() -> anyhow::Result<()> {
             Some("rust") => "rs",
             Some("go") => "go",
             Some("typescript") => "ts",
+            Some("cpp") => "cpp",
             _ => "txt",
         };
         let path = dir.path().join(format!("case.{ext}"));

@@ -58,8 +58,8 @@ import {
   type Host,
   type HostAction,
   helixSelection,
+  helixSelectionExtension,
   type Info,
-  insertSelectionField,
   isHelixTransaction,
   type ScrollRequest,
   toEditorSelection,
@@ -129,7 +129,7 @@ export function helixCursor(state: EditorState): number {
 const keepSelectionsWide = EditorState.transactionFilter.of((tr) => {
   if (isHelixTransaction(tr) || (!tr.selection && !tr.docChanged)) return tr;
   // In insert mode, CodeMirror's selection is just the cursors.
-  if (tr.startState.field(insertSelectionField, false)) return tr;
+  if (tr.startState.field(modeField, false) === "insert") return tr;
   const doc = new Doc(tr.newDoc);
   const selection = fromEditorSelection(tr.newSelection);
   const wide = selection.ensureInvariants(doc);
@@ -421,7 +421,13 @@ class HelixView implements PluginValue, Host {
 
   update(update: ViewUpdate): void {
     for (const tr of update.transactions) this.editor.mapThroughChanges(tr.changes);
-    if (update.docChanged || update.selectionSet || update.viewportChanged || this.needsRedraw) {
+    if (
+      update.docChanged ||
+      update.selectionSet ||
+      update.viewportChanged ||
+      this.needsRedraw ||
+      !helixSelection(update.startState).equals(helixSelection(update.state))
+    ) {
       this.needsRedraw = false;
       this.decorations = cursorDecorations(update.view, this.editor);
       this.selections = selectionDecorations(update.view);
@@ -1609,7 +1615,7 @@ export function helixKeybindings(config: HelixConfig): Extension {
     keepSelectionsWide,
     EditorState.allowMultipleSelections.of(true),
     helixHistory(),
-    insertSelectionField,
+    helixSelectionExtension(),
     touch ? EditorView.editable.of(false) : [],
     plugin,
     // Outside the cursors' marks, so a cursor shows over the selection it's in.

@@ -19,7 +19,7 @@ import {
   HelixEditor,
   type HelixOptions,
   type Host,
-  insertSelectionField,
+  helixSelectionExtension,
   type ScrollRequest,
   toEditorSelection,
 } from "./editor";
@@ -143,7 +143,7 @@ export class TestHost implements Host {
   constructor(text: string, selection: Selection, treeSitterMode?: string, tabSize?: number) {
     const extensions: Extension[] = [
       helixHistory(),
-      insertSelectionField,
+      helixSelectionExtension(selection),
       EditorState.allowMultipleSelections.of(true),
     ];
     if (tabSize !== undefined) {

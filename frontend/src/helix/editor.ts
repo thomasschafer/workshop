@@ -5,11 +5,14 @@
 // Ported from Helix (https://github.com/helix-editor/helix): the parts of helix-view's editor,
 // document, view and register modules that commands use.
 
+import { invertedEffects } from "@codemirror/commands";
 import {
+  Annotation,
   type ChangeDesc,
   ChangeSet,
   EditorSelection,
   type EditorState,
+  type Extension,
   StateEffect,
   StateField,
   Transaction,
@@ -461,6 +464,8 @@ export class HelixEditor {
   readonly defaultIndent: IndentStyle;
   /** The undo step changes are in now; changes in the same step undo together. */
   private undoGroup = 0;
+  /** Redo selection for the open undo step, finalized when `commitUndoCheckpoint` closes it. */
+  private openUndoRedoSelection: SelectionBox | null = null;
   /** Called whenever something shown changes, such as the mode or status. */
   onChange: () => void = () => {};
 
@@ -548,11 +553,19 @@ export class HelixEditor {
     const newDoc = new Doc(newText);
     const mapped = (selection ?? mapSelection(normalized, oldSelection)).ensureInvariants(newDoc);
     if (this.mode === "insert") this.insertChanges.push(normalized);
+    if (this.openUndoRedoSelection === null) {
+      this.openUndoRedoSelection = { selection: mapped };
+    } else {
+      this.openUndoRedoSelection.selection = mapped;
+    }
     this.host.dispatch({
       changes: changeSet,
       ...this.selectionSpec(mapped, this.mode, newDoc),
       userEvent: HELIX_CHANGE_EVENT,
-      annotations: helixUndoGroup.of(this.undoGroup),
+      annotations: [
+        helixUndoGroup.of(this.undoGroup),
+        redoSelectionBox.of(this.openUndoRedoSelection),
+      ],
     });
     // After the dispatch, which maps the previous one through these changes.
     const last = at(normalized, normalized.length - 1);
@@ -573,6 +586,10 @@ export class HelixEditor {
 
   /** Ends the current undo step, so what comes next undoes separately. */
   commitUndoCheckpoint(): void {
+    if (this.openUndoRedoSelection !== null) {
+      this.openUndoRedoSelection.selection = this.selection;
+      this.openUndoRedoSelection = null;
+    }
     this.undoGroup++;
   }
 
@@ -611,19 +628,17 @@ export class HelixEditor {
   /**
    * How CodeMirror holds `selection` in `mode`. In insert mode its selection is just the cursors,
    * where the browser, and a phone's keyboard in particular, then makes any change of its own,
-   * as typing goes at Helix's cursors; Helix's ranges are kept beside it.
+   * as typing goes at Helix's cursors; Helix's exact ranges live in `helixSelectionField`.
    */
   private selectionSpec(
     selection: Selection,
     mode: Mode,
     doc: Doc = this.doc,
   ): Pick<TransactionSpec, "selection" | "effects"> {
-    if (mode !== "insert") {
-      return { selection: toEditorSelection(selection), effects: setInsertSelection.of(null) };
-    }
+    const cmSelection = mode === "insert" ? selection.cursors(doc) : selection;
     return {
-      selection: toEditorSelection(selection.cursors(doc)),
-      effects: setInsertSelection.of(selection),
+      selection: toEditorSelection(cmSelection),
+      effects: setHelixSelection.of(selection),
     };
   }
 
@@ -724,7 +739,39 @@ function sameGoals(a: Selection, b: Selection): boolean {
   return a.ranges.every((r, i) => r.goalColumn === b.ranges[i]?.goalColumn);
 }
 
-const setInsertSelection = StateEffect.define<Selection | null>();
+const setHelixSelection = StateEffect.define<Selection>();
+
+interface SelectionBox {
+  selection: Selection;
+}
+
+const redoSelectionBox = Annotation.define<SelectionBox>();
+
+interface HistorySelection {
+  readonly target: Selection;
+  readonly inverse: SelectionBox;
+}
+
+function mapSelectionDesc(selection: Selection, changes: ChangeDesc): Selection {
+  return selection.transform((r) => {
+    if (r.anchor === r.head) return Range.point(changes.mapPos(r.anchor, 1));
+    return r.anchor < r.head
+      ? new Range(changes.mapPos(r.anchor, 1), changes.mapPos(r.head, -1))
+      : new Range(changes.mapPos(r.anchor, -1), changes.mapPos(r.head, 1));
+  });
+}
+
+/**
+ * Restores Helix's exact `Selection` across undo/redo via CodeMirror's `invertedEffects`.
+ * Only `target` is mapped when history joins or shifts events; `inverse` already holds the
+ * coordinates for the opposite direction.
+ */
+const restoreHelixSelection = StateEffect.define<HistorySelection>({
+  map: (value, changes) => ({
+    target: mapSelectionDesc(value.target, changes),
+    inverse: value.inverse,
+  }),
+});
 
 /** The changes in a CodeMirror change set, as Helix's commands describe changes. */
 function changesOf(tr: Transaction): Change[] {
@@ -735,26 +782,69 @@ function changesOf(tr: Transaction): Change[] {
   return out;
 }
 
+function selectionAfterTransaction(tr: Transaction, prev: Selection): Selection {
+  let restored: Selection | null = null;
+  let explicit: Selection | null = null;
+  for (const e of tr.effects) {
+    if (e.is(restoreHelixSelection)) restored = e.value.target;
+    else if (e.is(setHelixSelection)) explicit = e.value;
+  }
+  if (restored !== null) return restored.ensureInvariants(new Doc(tr.newDoc));
+  if (explicit !== null) return explicit;
+  if (isHelixTransaction(tr)) return prev;
+  const doc = new Doc(tr.newDoc);
+  if (tr.selection) return fromEditorSelection(tr.newSelection).ensureInvariants(doc);
+  if (!tr.docChanged) return prev;
+  return mapSelection(changesOf(tr), prev).ensureInvariants(doc);
+}
+
+function invertHelixSelection(tr: Transaction): readonly StateEffect<unknown>[] {
+  if (!tr.docChanged) return [];
+  if (tr.isUserEvent("undo") || tr.isUserEvent("redo")) {
+    let first: HistorySelection | null = null;
+    let last: HistorySelection | null = null;
+    for (const e of tr.effects) {
+      if (e.is(restoreHelixSelection)) {
+        if (first === null) first = e.value;
+        last = e.value;
+      }
+    }
+    if (first !== null && last !== null) {
+      return [
+        restoreHelixSelection.of({
+          target: first.inverse.selection,
+          inverse: { selection: last.target },
+        }),
+      ];
+    }
+  }
+  const before = helixSelection(tr.startState);
+  const after = selectionAfterTransaction(tr, before);
+  const box = tr.annotation(redoSelectionBox) ?? { selection: after };
+  return [restoreHelixSelection.of({ target: before, inverse: box })];
+}
+
 /**
- * Helix's selection while in insert mode, when CodeMirror's is collapsed to its cursors. Follows
- * changes made other than by Helix's commands, as Helix maps selections, and taps, which put a
- * cursor where they are.
+ * Helix's canonical selection, held separately from CodeMirror's `EditorSelection` because
+ * CodeMirror merges a zero-width range touching the right edge of a non-empty range (whereas
+ * Helix's `Range::overlaps` does not) and insert mode collapses CodeMirror's selection to cursors.
  */
-export const insertSelectionField = StateField.define<Selection | null>({
-  create: () => null,
-  update(value, tr) {
-    for (const e of tr.effects) if (e.is(setInsertSelection)) return e.value;
-    if (value === null || isHelixTransaction(tr)) return value;
-    const doc = new Doc(tr.newDoc);
-    if (tr.selection) return fromEditorSelection(tr.newSelection).ensureInvariants(doc);
-    if (!tr.docChanged) return value;
-    return mapSelection(changesOf(tr), value).ensureInvariants(doc);
-  },
+export const helixSelectionField = StateField.define<Selection>({
+  create: (state) => fromEditorSelection(state.selection),
+  update: (value, tr) => selectionAfterTransaction(tr, value),
 });
+
+/** Extension keeping Helix's exact `Selection` in state and restoring it on undo/redo. */
+export function helixSelectionExtension(initial?: Selection): Extension {
+  return [
+    initial ? helixSelectionField.init(() => initial) : helixSelectionField,
+    invertedEffects.of(invertHelixSelection),
+  ];
+}
 
 /** Helix's selection in a state, wherever it's kept. */
 export function helixSelection(state: EditorState): Selection {
-  return state.field(insertSelectionField, false) ?? fromEditorSelection(state.selection);
+  return state.field(helixSelectionField, false) ?? fromEditorSelection(state.selection);
 }
 
 export function fromEditorSelection(selection: EditorSelection): Selection {

@@ -268,11 +268,11 @@
     },
     {
       "name": "next_sibling: list elements",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-n>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[94, 95]],
         "primary": 0,
         "mode": "Normal"
@@ -280,11 +280,11 @@
     },
     {
       "name": "next_sibling: chain across list",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-n><A-n><A-n>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[97, 98]],
         "primary": 0,
         "mode": "Normal"
@@ -292,11 +292,11 @@
     },
     {
       "name": "prev_sibling: list elements",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, #[3|]#])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, #[3|]#])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-p>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[95, 94]],
         "primary": 0,
         "mode": "Normal"
@@ -304,11 +304,11 @@
     },
     {
       "name": "prev_sibling: climbs when at first child",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-p><A-p>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[91, 90]],
         "primary": 0,
         "mode": "Normal"
@@ -316,11 +316,11 @@
     },
     {
       "name": "next_sibling: climbs when at last child",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, #[3|]#])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, #[3|]#])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-n><A-n>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[98, 99]],
         "primary": 0,
         "mode": "Normal"
@@ -376,11 +376,11 @@
     },
     {
       "name": "next_sibling: multiple selections",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (#(4|)#, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (#(4|)#, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-n>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[94, 95], [104, 105]],
         "primary": 0,
         "mode": "Normal"
@@ -388,11 +388,11 @@
     },
     {
       "name": "all_siblings: inside tuple",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-a>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[93, 94], [96, 97]],
         "primary": 0,
         "mode": "Normal"
@@ -424,11 +424,11 @@
     },
     {
       "name": "all_siblings: backward direction",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[|2]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[|2]#, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-a>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[94, 93], [97, 96]],
         "primary": 0,
         "mode": "Normal"
@@ -448,11 +448,11 @@
     },
     {
       "name": "all_children: on list",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[2, 3]|]#)), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[2, 3]|]#)), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-I>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[93, 94], [96, 97]],
         "primary": 0,
         "mode": "Normal"
@@ -544,11 +544,11 @@
     },
     {
       "name": "move_parent_node_end: non-ASCII unicode",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"#[\u03bb|]#\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"#[λ|]#→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "<A-e>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[112, 113]],
         "primary": 0,
         "mode": "Normal"
@@ -868,11 +868,11 @@
     },
     {
       "name": "mia: infix function parameter",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
       "keys": "mia",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[181, 182]],
         "primary": 0,
         "mode": "Normal"
@@ -880,11 +880,11 @@
     },
     {
       "name": "mic: inside single line comment",
-      "input": "-- fi#[r|]#st comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- fi#[r|]#st comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mic",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[5, 6]],
         "primary": 0,
         "mode": "Normal"
@@ -892,11 +892,11 @@
     },
     {
       "name": "mac: consecutive line comments",
-      "input": "-- fi#[r|]#st comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- fi#[r|]#st comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mac",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[5, 6]],
         "primary": 0,
         "mode": "Normal"
@@ -904,11 +904,11 @@
     },
     {
       "name": "mic: inside block comment",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- bl#[o|]#ck comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- bl#[o|]#ck comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mic",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[127, 128]],
         "primary": 0,
         "mode": "Normal"
@@ -916,11 +916,11 @@
     },
     {
       "name": "mac: inside block comment",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- bl#[o|]#ck comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- bl#[o|]#ck comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mac",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[127, 128]],
         "primary": 0,
         "mode": "Normal"
@@ -1168,11 +1168,11 @@
     },
     {
       "name": "]c: next comment",
-      "input": "-- first comment\n-- second comment\n#[n|]#ested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\n#[n|]#ested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "]c",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[122, 155]],
         "primary": 0,
         "mode": "Normal"
@@ -1180,11 +1180,11 @@
     },
     {
       "name": "[c: prev comment",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
       "keys": "[c",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[155, 122]],
         "primary": 0,
         "mode": "Normal"
@@ -1192,11 +1192,11 @@
     },
     {
       "name": "2[c: count 2 prev comment",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\n#[a|]# `add` b = a + b\n",
       "keys": "2[c",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[155, 122]],
         "primary": 0,
         "mode": "Normal"
@@ -1204,11 +1204,11 @@
     },
     {
       "name": "v]c: select mode next comment",
-      "input": "-- first comment\n-- second comment\n#[n|]#ested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\n#[n|]#ested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "v]c",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[35, 155]],
         "primary": 0,
         "mode": "Select"
@@ -1300,11 +1300,11 @@
     },
     {
       "name": "mm: on opening bracket",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[|]#2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[|]#2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mm",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[97, 98]],
         "primary": 0,
         "mode": "Normal"
@@ -1360,11 +1360,11 @@
     },
     {
       "name": "mm: on paren inside string literal",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"#[(|]#a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"#[(|]#a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mm",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[98, 99]],
         "primary": 0,
         "mode": "Normal"
@@ -1372,11 +1372,11 @@
     },
     {
       "name": "mm: on paren inside block comment",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment #[(|]#with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment #[(|]#with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mm",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[151, 152]],
         "primary": 0,
         "mode": "Normal"
@@ -1396,11 +1396,11 @@
     },
     {
       "name": "mm: multiple selections",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[|]#2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", #([|)#5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", #[[|]#2, 3])), (4, (\"λ→😀\", #([|)#5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mm",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[97, 98], [116, 117]],
         "primary": 0,
         "mode": "Normal"
@@ -1480,11 +1480,11 @@
     },
     {
       "name": "mim: inside list",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2#[,|]# 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2#[,|]# 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "mim",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[93, 97]],
         "primary": 0,
         "mode": "Normal"
@@ -1624,11 +1624,11 @@
     },
     {
       "name": "smart_tab: after text inside list",
-      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [#[2|]#, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "a<tab><esc>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[98, 99]],
         "primary": 0,
         "mode": "Normal"
@@ -1720,11 +1720,11 @@
     },
     {
       "name": "indent: open_below comment continues comment",
-      "input": "-- f#[i|]#rst comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+      "input": "-- f#[i|]#rst comment\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
       "keys": "omore<esc>",
       "lang": "haskell",
       "expected": {
-        "text": "-- first comment\nmore\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"\u03bb\u2192\ud83d\ude00\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
+        "text": "-- first comment\nmore\n-- second comment\nnested :: [(Int, (String, [Int]))]\nnested = [(1, (\"(a)\", [2, 3])), (4, (\"λ→😀\", [5]))]\n\n{- block comment (with parens) -}\nadd :: Int -> Int -> Int\na `add` b = a + b\n",
         "ranges": [[21, 22]],
         "primary": 0,
         "mode": "Normal"
@@ -3166,6 +3166,270 @@
       "expected": {
         "text": "// Helper module\nstruct Box {\n  int value;\n};\n\nint compute(int alpha, int beta) {\n  // Compute weighted sum\n  if (alpha > 0) {\n    int result = helper(\n      alpha,\n      beta\n    );\n\n  return result;\n  }\n  return 0;\n}\n\nint helper(int x, int y) {\n  return (x + (y * 2));\n}\n",
         "ranges": [[186, 187]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo: open above restores 1-wide selection before insert mode",
+      "input": "a\n#[ |]# b\n",
+      "keys": "O<esc>u<esc>",
+      "lang": "haskell",
+      "expected": {
+        "text": "a\n  b\n",
+        "ranges": [[2, 3]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo: open below restores 1-wide selection before insert mode",
+      "input": "f x =\n#[ |]# y\n",
+      "keys": "o<esc>u",
+      "lang": "haskell",
+      "expected": {
+        "text": "f x =\n  y\n",
+        "ranges": [[6, 7]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo/redo: open above then undo and redo",
+      "input": "a\n#[ |]# b\n",
+      "keys": "O<esc>uU",
+      "lang": "haskell",
+      "expected": {
+        "text": "a\n\n  b\n",
+        "ranges": [[2, 3]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo: open above with typed text restores pre-insert selection",
+      "input": "a\n#[ |]# b\n",
+      "keys": "Ofoo<esc>u",
+      "lang": "haskell",
+      "expected": {
+        "text": "a\n  b\n",
+        "ranges": [[2, 3]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo: insert mode with multi-char selection restores flipped range",
+      "input": "#[hello|]# world\n",
+      "keys": "iX<esc>u",
+      "lang": "haskell",
+      "expected": {
+        "text": "hello world\n",
+        "ranges": [[5, 0]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo/redo: insert mode then move away, undo and redo",
+      "input": "#[hello|]#\nworld\n",
+      "keys": "iab<esc>juU",
+      "lang": "haskell",
+      "expected": {
+        "text": "abhello\nworld\n",
+        "ranges": [[7, 2]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo: append mode restores widened pre-edit selection",
+      "input": "#[hello|]# world\n",
+      "keys": "aX<esc>u",
+      "lang": "haskell",
+      "expected": {
+        "text": "hello world\n",
+        "ranges": [[0, 6]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "undo/redo: append mode then undo and redo",
+      "input": "#[hello|]# world\n",
+      "keys": "aX<esc>uU",
+      "lang": "haskell",
+      "expected": {
+        "text": "helloX world\n",
+        "ranges": [[0, 6]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "changes: adjacent 1-char replacements merge on lowercase after split",
+      "input": "#[    |]#x\n",
+      "keys": "S\\s<ret>`<esc>",
+      "lang": "python",
+      "expected": {
+        "text": "    x\n",
+        "ranges": [[0, 2], [3, 4]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "changes: adjacent 1-char replacements merge on uppercase",
+      "input": "#[abcd|]#\n",
+      "keys": "s.<ret><A-`>",
+      "lang": "python",
+      "expected": {
+        "text": "ABCD\n",
+        "ranges": [[0, 2], [3, 4]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "changes: adjacent 1-char replacements merge on switch case",
+      "input": "#[aBcD|]#\n",
+      "keys": "s.<ret>~",
+      "lang": "python",
+      "expected": {
+        "text": "AbCd\n",
+        "ranges": [[0, 2], [3, 4]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "changes: adjacent 2-char replacements merge on switch case",
+      "input": "#[abcd|]#\n",
+      "keys": "s..<ret>~",
+      "lang": "python",
+      "expected": {
+        "text": "ABCD\n",
+        "ranges": [[0, 1], [2, 4]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "changes: adjacent 1-char replacements merge on replace char",
+      "input": "#[abcd|]#\n",
+      "keys": "s.<ret>rx",
+      "lang": "python",
+      "expected": {
+        "text": "xxxx\n",
+        "ranges": [[0, 2], [3, 4]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "changes: non-adjacent 1-char replacements stay separate",
+      "input": "#[a b c|]#\n",
+      "keys": "s\\S<ret>`",
+      "lang": "python",
+      "expected": {
+        "text": "a b c\n",
+        "ranges": [[0, 1], [2, 3], [4, 5]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "changes: backward adjacent 1-char replacements merge on lowercase",
+      "input": "#[|abcd]#\n",
+      "keys": "s.<ret><A-;>`",
+      "lang": "python",
+      "expected": {
+        "text": "abcd\n",
+        "ranges": [[0, 2], [4, 3]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "selection: empty range at EOF stays separate from preceding range after join",
+      "input": "#[a|]#\n",
+      "keys": "CJ",
+      "lang": "go",
+      "expected": {
+        "text": "a",
+        "ranges": [[0, 1], [1, 1]],
+        "primary": 1,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "selection: empty range at EOF stays separate after syntax move_parent_node_end",
+      "input": "fn f() {\n    #[a|]#();\n}\n",
+      "keys": "k%gs<A-C>w<A-e><esc>",
+      "lang": "rust",
+      "expected": {
+        "text": "fn f() {\n    a();\n}\n",
+        "ranges": [[19, 20], [20, 20]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "selection: empty range at EOF preserved across undo",
+      "input": "#[a|]#\n",
+      "keys": "CJu",
+      "lang": "go",
+      "expected": {
+        "text": "a\n",
+        "ranges": [[0, 1], [2, 2]],
+        "primary": 1,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "selection: empty range at EOF preserved across undo and redo",
+      "input": "#[a|]#\n",
+      "keys": "CJuU",
+      "lang": "go",
+      "expected": {
+        "text": "a",
+        "ranges": [[0, 1], [1, 1]],
+        "primary": 1,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "selection: cycling primary between preceding range and EOF empty range",
+      "input": "#[a|]#\n",
+      "keys": "CJ)",
+      "lang": "go",
+      "expected": {
+        "text": "a",
+        "ranges": [[0, 1], [1, 1]],
+        "primary": 0,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "selection: insert at touching preceding range and EOF empty range",
+      "input": "#[a|]#\n",
+      "keys": "CJiX<esc>",
+      "lang": "go",
+      "expected": {
+        "text": "XaX",
+        "ranges": [[2, 1], [3, 3]],
+        "primary": 1,
+        "mode": "Normal"
+      }
+    },
+    {
+      "name": "selection: delete touching preceding range and EOF empty range",
+      "input": "#[a|]#\n",
+      "keys": "CJd",
+      "lang": "go",
+      "expected": {
+        "text": "",
+        "ranges": [[0, 0]],
         "primary": 0,
         "mode": "Normal"
       }

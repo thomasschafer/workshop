@@ -58,8 +58,9 @@ function insertOffset(assoc: Assoc, s: string): number {
 }
 
 /**
- * Checks `changes` are sorted and don't overlap, as every set of changes must be, and drops
- * changes that do nothing.
+ * Checks `changes` are sorted and don't overlap, as every set of changes must be, drops changes
+ * that do nothing, and merges adjacent changes into one replacement, matching Helix's
+ * `ChangeSet::from_changes` (`helix-core/src/transaction.rs`).
  */
 export function normalizeChanges(changes: readonly Change[], length: number): Change[] {
   let last = 0;
@@ -71,7 +72,17 @@ export function normalizeChanges(changes: readonly Change[], length: number): Ch
       );
     }
     last = change.to;
-    if (change.from !== change.to || change.insert !== "") out.push(change);
+    if (change.from === change.to && change.insert === "") continue;
+    const prev = out[out.length - 1];
+    if (prev && prev.to === change.from) {
+      out[out.length - 1] = {
+        from: prev.from,
+        to: change.to,
+        insert: prev.insert + change.insert,
+      };
+    } else {
+      out.push(change);
+    }
   }
   return out;
 }
