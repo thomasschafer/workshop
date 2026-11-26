@@ -1,8 +1,8 @@
 <h1 align="center">Workshop</h1>
 
 <p align="center">
-  A learning and coding platform built for your phone, and just as good at a desk.<br>
-  Solve Advent of Code, work through coding problems, and practise anything you like from packs of your own.
+  A learning and coding platform built for your phone, that works great on desktop too.<br>
+  Solve Advent of Code, sharpen your algorithms, and practise anything you like from packs of your own.
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 ## What's inside
 
 - Advent of Code: every year's puzzles in your own language, with its language server, running on the sample before you submit.
-- Coding: problems solved a step at a time, from understanding to review, checked against hidden tests and a brute force, with a tutor that won't spoil the answer.
+- Coding: algorithm problems solved a step at a time, checked against hidden tests and a brute force, with a tutor that won't spoil the answer, plus code to read and small codebases to debug, review and refactor.
 - Practice: cards, mental maths and probability that come back just before you'd forget them, even offline.
 - Your own packs: anything you want to learn, as a folder of Markdown files, with an author that writes new items for what you find hardest.
 - A real editor: Helix's keybindings, tree-sitter highlighting and a keyboard built for code on your phone, or dictate code instead.
