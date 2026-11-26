@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::helix_theme::SyntaxThemeSettings;
 use crate::paths::Paths;
 
 /// What to use for light or dark mode.
@@ -26,6 +27,7 @@ pub enum ThemeChoice {
 pub struct ThemeSettings {
     pub light: ThemeChoice,
     pub dark: ThemeChoice,
+    pub syntax: SyntaxThemeSettings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,6 +214,19 @@ impl TerminalTheme {
             ("--syntax-number", colour(3, fg).css()),
             ("--syntax-type", colour(6, fg).css()),
             ("--syntax-operator", muted.css()),
+            ("--syntax-function", colour(4, fg).css()),
+            ("--syntax-constructor", colour(14, colour(6, fg)).css()),
+            ("--syntax-variable", fg.css()),
+            ("--syntax-parameter", colour(1, fg).mix(fg, 0.45).css()),
+            ("--syntax-member", colour(6, fg).mix(fg, 0.35).css()),
+            ("--syntax-constant", colour(9, colour(3, fg)).css()),
+            ("--syntax-punctuation", fg.mix(bg, 0.35).css()),
+            ("--syntax-namespace", colour(12, colour(4, fg)).css()),
+            ("--syntax-label", colour(13, colour(5, fg)).css()),
+            ("--syntax-special", colour(11, colour(3, fg)).css()),
+            ("--syntax-attribute", colour(13, colour(5, fg)).css()),
+            ("--syntax-hint", colour(6, fg).css()),
+            ("--syntax-info", colour(4, fg).css()),
         ])
     }
 }
@@ -449,6 +464,7 @@ mod tests {
         let settings = ThemeSettings {
             light: ThemeChoice::Default,
             dark: ThemeChoice::Named("Invented".into()),
+            ..ThemeSettings::default()
         };
         let css = stylesheet(&paths, &settings).unwrap().unwrap();
         assert!(css.starts_with("@media (prefers-color-scheme: dark)"));

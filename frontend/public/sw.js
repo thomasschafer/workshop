@@ -43,7 +43,7 @@ self.addEventListener("install", (event) => {
       // service worker keeps serving its complete, self-consistent release offline.
       await Promise.all(
         PRECACHE_ASSETS.map(async (path) => {
-          const existing = await cache.match(path);
+          const existing = await cache.match(path, { ignoreVary: true });
           if (existing) return;
           const response = await fetch(path, { cache: "reload", credentials: "same-origin" });
           if (!response.ok || response.type !== "basic") {
@@ -127,7 +127,9 @@ function bundleId(pathname) {
  */
 async function serveShell(request) {
   const cache = await caches.open(APP_CACHE);
-  const kept = (await cache.match(SHELL_KEY)) ?? (await cache.match("/"));
+  const kept =
+    (await cache.match(SHELL_KEY, { ignoreVary: true })) ??
+    (await cache.match("/", { ignoreVary: true }));
   if (kept) return kept;
   const response = await fetch(request);
   if (response.ok && response.type === "basic") {
@@ -198,7 +200,7 @@ async function networkFirstWithTimeout(request, key, timeoutMs) {
 /** Built files are content-hashed, so a cached copy is always valid. */
 async function cacheFirstAsset(request) {
   const cache = await caches.open(APP_CACHE);
-  const kept = await cache.match(request);
+  const kept = await cache.match(request, { ignoreVary: true });
   if (kept) return kept;
   const response = await fetch(request);
   if (response.ok) {
@@ -210,7 +212,7 @@ async function cacheFirstAsset(request) {
 
 async function cacheFirstPublic(request, key) {
   const cache = await caches.open(APP_CACHE);
-  const kept = await cache.match(key);
+  const kept = await cache.match(key, { ignoreVary: true });
   if (kept) return kept;
   const response = await fetch(request);
   if (response.ok && response.type === "basic") {

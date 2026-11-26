@@ -74,6 +74,8 @@ export interface Bootstrap {
   has_aoc_session: boolean;
   needs_setup: boolean;
   theme_css: string | null;
+  /** Resolved Helix syntax themes for light and dark mode, if chosen. */
+  syntax_theme?: ResolvedSyntaxThemes;
   /** Whether the solutions repo is committed and pushed after each star. */
   commit_after_star: boolean;
   /** Whether Whisper on the server is ready to hear dictation. */
@@ -182,14 +184,47 @@ export type ThemeChoice =
   | { kind: "ghostty" }
   | { kind: "named"; name: string };
 
+/** Where syntax highlighting colours come from for light or dark mode. */
+export type SyntaxThemeChoice =
+  | { kind: "default" }
+  | { kind: "helix" }
+  | { kind: "named"; name: string };
+
+export interface SyntaxThemeSettings {
+  light: SyntaxThemeChoice;
+  dark: SyntaxThemeChoice;
+}
+
+export type SyntaxModifier = "bold" | "italic" | "underlined" | "crossed_out" | "dim";
+
+export interface SyntaxScopeStyle {
+  fg?: string;
+  modifiers?: SyntaxModifier[];
+}
+
+export type HelixSyntaxScopes = Record<string, SyntaxScopeStyle>;
+
+export interface ResolvedSyntaxThemes {
+  light?: HelixSyntaxScopes;
+  dark?: HelixSyntaxScopes;
+}
+
+export interface HelixThemesInfo {
+  names: string[];
+  config: [string, string] | null;
+  error: string | null;
+}
+
 export interface ThemeSettings {
   light: ThemeChoice;
   dark: ThemeChoice;
+  syntax: SyntaxThemeSettings;
 }
 
 export interface ThemesState {
   names: string[];
   ghostty: [string, string] | null;
+  helix: HelixThemesInfo;
   settings: ThemeSettings;
 }
 
@@ -768,7 +803,8 @@ export const api = {
   setModels: (settings: ModelSettings) => request<ModelsState>("PUT", "/models", settings),
   setup: () => request<SetupState>("GET", "/setup"),
   themes: () => request<ThemesState>("GET", "/themes"),
-  setTheme: (settings: ThemeSettings) => request<{ css: string | null }>("PUT", "/theme", settings),
+  setTheme: (settings: ThemeSettings) =>
+    request<{ css: string | null; syntax_theme: ResolvedSyntaxThemes }>("PUT", "/theme", settings),
   setLanguage: (language: string) => request<null>("PUT", "/setup/language", { language }),
   setAocSession: (session: string) =>
     request<null>("POST", "/setup/aoc-session", { session }, { timeoutMs: AOC_TIMEOUT_MS }),

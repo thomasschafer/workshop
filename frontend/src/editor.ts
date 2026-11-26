@@ -78,6 +78,7 @@ import { pinchToZoom } from "./pinch";
 import type { OnDeviceMode } from "./preferences";
 import { type Problem, problemAt, problemsIn, type Severity } from "./problems";
 import { LANGUAGES, syntaxHighlighter } from "./syntax";
+import { hasTreeSitterMode, treeSitterExtension } from "./treesitter";
 import { roundCodeScale } from "./zoom";
 
 const theme = EditorView.theme({
@@ -323,6 +324,11 @@ export class CodeEditor {
     this.options = options;
     this.codeScale = options.codeScale;
     const language = LANGUAGES[options.mode];
+    const languageExtension = hasTreeSitterMode(options.mode)
+      ? treeSitterExtension(options.mode)
+      : language
+        ? language()
+        : [];
     const helixLanguage = HELIX_LANGUAGES[options.mode] ?? PLAIN_TEXT;
     const cursor = Math.min(options.cursor ?? 0, options.doc.length);
     this.view = new EditorView({
@@ -348,7 +354,7 @@ export class CodeEditor {
         changedField,
         options.readOnly ? EditorState.readOnly.of(true) : [],
         options.formatAutomatically ? formatWhenSettled(() => this.format()) : [],
-        language ? language() : [],
+        languageExtension,
         options.lsp ? [options.lsp.client.plugin(options.lsp.uri, options.lsp.languageId)] : [],
         this.inputMode.of(EditorView.contentAttributes.of({ inputmode: "none" })),
         // Keeping the cursor in view only scrolls up and down, unless the user is typing: a long

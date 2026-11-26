@@ -32,6 +32,19 @@
   --syntax-number: #b05a00;
   --syntax-type: #1f5fa8;
   --syntax-operator: #5b5b62;
+  --syntax-function: #17627a;
+  --syntax-constructor: #0e7490;
+  --syntax-variable: #1d1d1f;
+  --syntax-parameter: #8c4a27;
+  --syntax-member: #3b5998;
+  --syntax-constant: #9e4710;
+  --syntax-punctuation: #6b6b73;
+  --syntax-namespace: #6b4fa1;
+  --syntax-label: #a34d00;
+  --syntax-special: #b4436c;
+  --syntax-attribute: #7c4d96;
+  --syntax-hint: #0e7490;
+  --syntax-info: #2f62c9;
 
   /* Workshop's own keyboard, as distinct from the page as a phone's keyboard is. */
   --key-tray: #d3d4da;
@@ -74,6 +87,19 @@
     --syntax-number: #f0a26a;
     --syntax-type: #79c9ef;
     --syntax-operator: #a3a3ad;
+    --syntax-function: #7aa8ff;
+    --syntax-constructor: #6fd4c8;
+    --syntax-variable: #e4e4e7;
+    --syntax-parameter: #e5b89b;
+    --syntax-member: #a9c7e8;
+    --syntax-constant: #f29e74;
+    --syntax-punctuation: #8e8e98;
+    --syntax-namespace: #b5a3f5;
+    --syntax-label: #e8c468;
+    --syntax-special: #f08ca8;
+    --syntax-attribute: #d59ef2;
+    --syntax-hint: #6fd4c8;
+    --syntax-info: #7da3f7;
 
     /* Gboard's own dark theme, taken from a Pixel's. */
     --key-tray: #1b181f;
@@ -1922,20 +1948,50 @@ html[data-tab-turn] .content {
   padding: 0;
 }
 
-/* Highlighted code, in the editor and in Markdown, from syntaxHighlighter in syntax.ts. */
+/* Highlighted code, in the editor (tree-sitter + legacy modes) and in Markdown. */
 .syntax-keyword {
   color: var(--syntax-keyword);
 }
 
-.syntax-string {
+.syntax-keyword-directive {
+  color: var(--syntax-attribute);
+}
+
+.syntax-keyword-exception {
+  color: var(--error);
+}
+
+.syntax-keyword-debug {
+  color: var(--warn);
+}
+
+.syntax-function {
+  color: var(--syntax-function);
+}
+
+.syntax-string,
+.syntax-constant-character {
   color: var(--syntax-string);
 }
 
-.syntax-number {
+.syntax-string-special-symbol,
+.syntax-special,
+.syntax-tag {
+  color: var(--syntax-special);
+}
+
+.syntax-number,
+.syntax-constant-numeric {
   color: var(--syntax-number);
 }
 
-.syntax-comment {
+.syntax-constant,
+.syntax-constant-builtin {
+  color: var(--syntax-constant);
+}
+
+.syntax-comment,
+.syntax-comment-documentation {
   color: var(--muted);
   font-style: italic;
 }
@@ -1944,8 +2000,65 @@ html[data-tab-turn] .content {
   color: var(--syntax-type);
 }
 
+.syntax-constructor {
+  color: var(--syntax-constructor);
+}
+
+.syntax-variable {
+  color: var(--syntax-variable);
+}
+
+.syntax-variable-parameter {
+  color: var(--syntax-parameter);
+}
+
+.syntax-variable-other-member {
+  color: var(--syntax-member);
+}
+
 .syntax-operator {
   color: var(--syntax-operator);
+}
+
+.syntax-punctuation {
+  color: var(--syntax-punctuation);
+}
+
+.syntax-namespace {
+  color: var(--syntax-namespace);
+}
+
+.syntax-label {
+  color: var(--syntax-label);
+}
+
+.syntax-attribute {
+  color: var(--syntax-attribute);
+}
+
+.syntax-markup-link-url {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.syntax-hint {
+  color: var(--syntax-hint);
+  font-weight: 600;
+}
+
+.syntax-info {
+  color: var(--syntax-info);
+  font-weight: 600;
+}
+
+.syntax-warning {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.syntax-error {
+  color: var(--error);
+  font-weight: 600;
 }
 
 .markdown a {

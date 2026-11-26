@@ -8,7 +8,7 @@ use workshop_toolchain::toolchain::Toolchain;
 
 use super::error::ApiResult;
 use super::lsp::file_uri;
-use super::settings::{ModelsState, models_state, theme_css};
+use super::settings::{ModelsState, models_state, syntax_theme, theme_css};
 use super::speech::speech_state;
 use super::state::Shared;
 use crate::config::Snippet;
@@ -26,6 +26,8 @@ pub(super) struct Bootstrap {
     needs_setup: bool,
     /// Overrides Workshop's colours with the chosen terminal themes.
     theme_css: Option<String>,
+    /// Resolved Helix syntax themes for light and dark mode, when chosen.
+    syntax_theme: crate::helix_theme::ResolvedSyntaxThemes,
     commit_after_star: bool,
     /// Whether Whisper on the server is ready to hear dictation.
     server_dictation: bool,
@@ -101,6 +103,7 @@ pub(super) async fn bootstrap(State(app): State<Shared>) -> ApiResult<Bootstrap>
         models: models_state(&app),
         has_aoc_session: app.aoc.has_session(),
         theme_css: theme_css(&app),
+        syntax_theme: syntax_theme(&app),
         commit_after_star: app.settings().commit_after_star(&app.config),
         solutions_dir: workshop_common::files::display_path(&app.config.solutions_dir),
         leaderboard: app.settings().leaderboard,

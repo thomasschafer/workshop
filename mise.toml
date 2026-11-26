@@ -88,3 +88,7 @@ run = "cargo build && cd frontend && node demo/record.ts"
 [tasks.doctor]
 description = "Check your setup"
 run = "cargo run --release -- doctor"
+
+[tasks.grammars]
+description = "Build tree-sitter WASM grammars and copy Helix queries into frontend/vendor/tree-sitter"
+run = "node frontend/scripts/build-grammars.ts"

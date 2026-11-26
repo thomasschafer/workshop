@@ -14,6 +14,7 @@ mod examiner;
 mod follow_ups;
 mod goals;
 mod grader;
+mod helix_theme;
 mod language;
 mod learning;
 mod mistakes;

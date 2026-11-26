@@ -64,7 +64,7 @@ tokio = { version = "1.53.2", features = ["full"] }
 tokio-util = "0.7.20"
 toml = "1.1.8"
 tower = { version = "0.5.3", features = ["util"] }
-tower-http = { version = "0.7.1", features = ["fs", "trace"] }
+tower-http = { version = "0.7.1", features = ["compression-br", "compression-gzip", "fs", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 urlencoding = "2.1.3"

@@ -12,7 +12,7 @@ import { readCachedBootstrap, writeCachedBootstrap } from "./offline/bootstrap";
 import "@fontsource-variable/jetbrains-mono/wght.css";
 import "@fontsource-variable/jetbrains-mono/wght-italic.css";
 import "./styles.css";
-import { applyThemeCss } from "./theme";
+import { applySyntaxTheme, applyThemeCss } from "./theme";
 import { Shell } from "./tracks/shell";
 import { watchForUpdates } from "./update";
 
@@ -43,6 +43,7 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 
 function start(boot: Bootstrap): void {
   applyThemeCss(boot.theme_css);
+  applySyntaxTheme(boot.syntax_theme);
   render(<Shell boot={boot} />, root);
 }
 

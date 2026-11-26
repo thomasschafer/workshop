@@ -644,8 +644,11 @@ test("reads and solves in Haskell, with its highlighting and language server", a
     await expect(page.locator(".step.current")).toHaveText("Code");
     const editor = page.locator(".cm-content");
     await expect(editor).toContainText("lowestBalance changes = undefined");
-    // In the editor's Haskell mode.
+    // In the editor's Haskell mode (highlighted by tree-sitter once the grammar loads).
     await expect(editor.locator(".syntax-keyword", { hasText: "where" })).toBeVisible();
+    await expect(
+      editor.locator(".syntax-function", { hasText: "lowestBalance" }).first(),
+    ).toBeVisible();
     // Haskell's language server, started for Haskell's drafts, which it sees as a project of
     // their own.
     await expect

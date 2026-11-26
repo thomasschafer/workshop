@@ -39,8 +39,10 @@ use axum::extract::DefaultBodyLimit;
 use axum::http::{StatusCode, Uri, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{any, delete, get, post, put};
 use rust_embed::RustEmbed;
+use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
 
 pub use author::run_on_schedule as run_author_on_schedule;
 pub(crate) use lsp::file_uri;
@@ -245,10 +247,19 @@ pub fn router(app: Shared) -> Router {
         .route("/log", post(client::client_log))
         .route("/lsp", get(lsp::lsp))
         .route("/lsp/restart", post(lsp::restart));
+    let static_service = any(static_asset).layer(
+        CompressionLayer::new().compress_when(
+            DefaultPredicate::new()
+                .and(NotForContentType::new("font/woff2"))
+                .and(NotForContentType::new("application/font-woff2"))
+                .and(NotForContentType::new("application/gzip"))
+                .and(NotForContentType::new("application/zstd")),
+        ),
+    );
     Router::new()
         .nest("/api", api)
         .route("/on-device/{bundle}/{file}", get(on_device::serve_file))
-        .fallback(static_asset)
+        .fallback_service(static_service)
         .layer(middleware::from_fn_with_state(
             app.gate.clone(),
             workshop_auth::require_token,
@@ -355,10 +366,11 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use axum::extract::Request;
     use axum::http::{StatusCode, header};
 
+    use super::Assets;
     use super::testing::{send, test_app};
 
     #[tokio::test]
@@ -378,5 +390,63 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(send(&router, request).await.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn compresses_wasm_assets_and_skips_already_compressed_fonts() {
+        let wasm_path = Assets::iter()
+            .find(|p| p.ends_with(".wasm") && p.contains("haskell"))
+            .expect("embedded frontend should include the Haskell tree-sitter wasm asset");
+        let raw_len = Assets::get(&wasm_path).unwrap().data.len();
+
+        let (_dir, router) = test_app().await;
+
+        let gzip_req = Request::get(format!("/{wasm_path}"))
+            .header(header::COOKIE, "workshop_token=secret")
+            .header(header::ACCEPT_ENCODING, "gzip")
+            .body(Body::empty())
+            .unwrap();
+        let gzip_res = send(&router, gzip_req).await;
+        assert_eq!(gzip_res.status(), StatusCode::OK);
+        assert_eq!(
+            gzip_res.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/wasm"
+        );
+        assert_eq!(
+            gzip_res.headers().get(header::CONTENT_ENCODING).unwrap(),
+            "gzip"
+        );
+        let gzip_body = to_bytes(gzip_res.into_body(), usize::MAX).await.unwrap();
+        assert!(
+            gzip_body.len() < raw_len / 2,
+            "expected gzipped wasm ({}) to be much smaller than raw ({raw_len})",
+            gzip_body.len()
+        );
+
+        let br_req = Request::get(format!("/{wasm_path}"))
+            .header(header::COOKIE, "workshop_token=secret")
+            .header(header::ACCEPT_ENCODING, "br")
+            .body(Body::empty())
+            .unwrap();
+        let br_res = send(&router, br_req).await;
+        assert_eq!(br_res.status(), StatusCode::OK);
+        assert_eq!(
+            br_res.headers().get(header::CONTENT_ENCODING).unwrap(),
+            "br"
+        );
+
+        if let Some(woff2_path) = Assets::iter().find(|p| p.ends_with(".woff2")) {
+            let font_req = Request::get(format!("/{woff2_path}"))
+                .header(header::COOKIE, "workshop_token=secret")
+                .header(header::ACCEPT_ENCODING, "gzip, br")
+                .body(Body::empty())
+                .unwrap();
+            let font_res = send(&router, font_req).await;
+            assert_eq!(font_res.status(), StatusCode::OK);
+            assert!(
+                font_res.headers().get(header::CONTENT_ENCODING).is_none(),
+                "woff2 fonts are already compressed and should not be re-compressed"
+            );
+        }
     }
 }

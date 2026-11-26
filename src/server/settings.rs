@@ -67,25 +67,39 @@ pub(super) fn theme_css(app: &App) -> Option<String> {
     })
 }
 
+/// Resolved Helix syntax themes for light and dark mode. Falls back to defaults if a saved Helix
+/// theme has gone missing so the app still starts; Settings shows the reason.
+pub(super) fn syntax_theme(app: &App) -> crate::helix_theme::ResolvedSyntaxThemes {
+    crate::helix_theme::resolve(&app.settings().theme.syntax).unwrap_or_else(|err| {
+        tracing::warn!("using the default syntax colours: {err:#}");
+        crate::helix_theme::ResolvedSyntaxThemes::default()
+    })
+}
+
 #[derive(Serialize)]
 pub(super) struct ThemesState {
     names: Vec<String>,
     /// The light and dark themes Ghostty uses, if its config sets one.
     ghostty: Option<(String, String)>,
+    helix: crate::helix_theme::HelixThemesInfo,
     settings: crate::theme::ThemeSettings,
 }
 
 pub(super) async fn themes(State(app): State<Shared>) -> ApiResult<ThemesState> {
+    let settings = app.settings().theme;
+    let helix = crate::helix_theme::info(&settings.syntax);
     Ok(Json(ThemesState {
         names: crate::theme::available(&app.paths),
         ghostty: crate::theme::ghostty_themes(),
-        settings: app.settings().theme,
+        helix,
+        settings,
     }))
 }
 
 #[derive(Serialize)]
 pub(super) struct ThemeApplied {
     css: Option<String>,
+    syntax_theme: crate::helix_theme::ResolvedSyntaxThemes,
 }
 
 pub(super) async fn set_theme(
@@ -95,8 +109,10 @@ pub(super) async fn set_theme(
     // Checks the themes can be loaded before saving the choice.
     let css =
         crate::theme::stylesheet(&app.paths, &theme).map_err(|e| bad_request(format!("{e:#}")))?;
+    let syntax_theme =
+        crate::helix_theme::resolve(&theme.syntax).map_err(|e| bad_request(format!("{e:#}")))?;
     app.update_settings(|s| s.theme = theme)?;
-    Ok(Json(ThemeApplied { css }))
+    Ok(Json(ThemeApplied { css, syntax_theme }))
 }
 
 #[derive(Deserialize)]
