@@ -255,7 +255,7 @@ function writeUnsaved(key: string, work: string | null): void {
  * working, which is what runs the clock; when it runs out, or the learner ends it, the round
  * goes to the grader.
  */
-function RoundView({
+export function RoundView({
   opened,
   round: initial,
   serverDictation,
@@ -558,19 +558,26 @@ function RoundView({
         {notice ? <p class="muted">{notice}</p> : null}
       </section>
       {ended ? null : (
-        <span class="learn-actions">
-          <button type="button" class="pill" onClick={onDone}>
-            Pause
-          </button>
-          <button
-            type="button"
-            class="pill primary"
-            disabled={marking || !online}
-            onClick={() => void end()}
-          >
-            End and mark it
-          </button>
-        </span>
+        <>
+          {markError ? (
+            <p class="error-text" role="alert">
+              {markError}
+            </p>
+          ) : null}
+          <span class="learn-actions">
+            <button type="button" class="pill" onClick={onDone}>
+              Pause
+            </button>
+            <button
+              type="button"
+              class="pill primary"
+              disabled={marking || !online}
+              onClick={() => void end()}
+            >
+              {marking ? "Marking…" : "End and mark it"}
+            </button>
+          </span>
+        </>
       )}
     </>
   );

@@ -3,6 +3,7 @@
   --mono:
     "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --code-size: 15px;
+  --field-size: 15px;
   /* Fields that are a little smaller than the text around them. */
   --small-field-size: 13px;
   --radius: 10px;
@@ -135,15 +136,18 @@ body,
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
   color: inherit;
 }
 
 /* What's typed is never muted, even in a field labelled with muted text. */
 input,
-textarea {
+textarea,
+select {
   color: var(--fg);
+  font-size: var(--field-size);
 }
 
 button {
@@ -2471,8 +2475,6 @@ html[data-tab-turn] .content {
 
 .bench-keyboard {
   width: 100%;
-  font: inherit;
-  font-size: 15px;
   color: var(--fg);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2673,13 +2675,8 @@ html[data-tab-turn] .content {
 @supports (-webkit-touch-callout: none) {
   :root {
     --code-size: 16px;
+    --field-size: 16px;
     --small-field-size: 16px;
-  }
-
-  input,
-  textarea,
-  select {
-    font-size: 16px;
   }
 }
 

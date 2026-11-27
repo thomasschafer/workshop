@@ -87,7 +87,6 @@
 
 .coding-plan {
   min-height: 8rem;
-  font: inherit;
 }
 
 .coding-plan-text {
@@ -416,7 +415,6 @@
   width: 100%;
   box-sizing: border-box;
   min-height: 40px;
-  font: inherit;
 }
 
 .project-found button {
@@ -586,8 +584,6 @@ button.diff-row:focus-visible {
 .diff-comment-box textarea {
   width: 100%;
   box-sizing: border-box;
-  font: inherit;
-  font-size: 15px;
 }
 
 /* A review: the change, its comments, and how it was marked. */

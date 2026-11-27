@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkerCommand, WorkerReply } from "./ghcWorker";
 import { classifyGhcOutput } from "./ghcWorker";
 import {
+  buildCodingExampleCases,
   buildCodingSubmitCases,
   GhcWasmLocalRunner,
   resolveRunBackend,
@@ -171,7 +172,7 @@ describe("GhcWasmLocalRunner", () => {
     });
 
     const cases = buildCodingSubmitCases(
-      [{ examples: [{ input: "a\n", output: "a!\n" }] }],
+      [{ examples: [{ input: "a\n", output: "a!\n" }], replaces: [] }],
       [[{ input: "slow", output: "slow!\n" }]],
       [{ seed: 1, size: 4, input: "b\n", output: "b!\n" }],
       0,
@@ -194,5 +195,27 @@ describe("GhcWasmLocalRunner", () => {
       expect(outcome.graded.results[1]?.passed).toBe(true);
       expect(outcome.graded.results[2]?.run.ending.status).toBe("timed_out");
     }
+  });
+
+  it("omits replaced parts from both example and submit case lists", () => {
+    const parts = [
+      { examples: [{ input: "p0-ex\n", output: "old\n" }], replaces: [] },
+      { examples: [{ input: "p1-ex\n", output: "new\n" }], replaces: [0] },
+    ];
+    const hidden = [
+      [{ input: "p0-test\n", output: "old\n" }],
+      [{ input: "p1-test\n", output: "new\n" }],
+    ];
+
+    const exampleCases = buildCodingExampleCases(parts, 1);
+    expect(exampleCases).toEqual([
+      { ref: { kind: "example", part: 1, index: 0 }, known: { input: "p1-ex\n", output: "new\n" } },
+    ]);
+
+    const submitCases = buildCodingSubmitCases(parts, hidden, [], 1);
+    expect(submitCases).toEqual([
+      { ref: { kind: "example", part: 1, index: 0 }, known: { input: "p1-ex\n", output: "new\n" } },
+      { ref: { kind: "test", part: 1, index: 0 }, known: { input: "p1-test\n", output: "new\n" } },
+    ]);
   });
 });

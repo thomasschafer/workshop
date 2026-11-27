@@ -1,5 +1,5 @@
 import type { RefObject } from "preact";
-import { useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api, type DayMeta, isTransientNetworkError, type Problem, type Puzzle } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
@@ -35,6 +35,10 @@ interface Options {
   formatBeforeRun: () => Promise<void>;
 }
 
+function samePuzzle(a: Puzzle | null, b: Puzzle): boolean {
+  return a !== null && a.year === b.year && a.day === b.day;
+}
+
 /** Running the solution and submitting its answer, and what the Run sheet shows of them. */
 export function useRun({
   puzzleRef,
@@ -62,6 +66,21 @@ export function useRun({
     source: "server" | "local";
   } | null>(null);
 
+  /** Stops any in-flight run without contacting the server when idle. */
+  const abortRun = useCallback(() => {
+    const current = activeRun.current;
+    if (!current) return;
+    activeRun.current = null;
+    current.controller.abort();
+    if (current.source === "local") {
+      localRunner().cancel();
+    } else {
+      api.cancelRun(current.id).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => abortRun, [abortRun]);
+
   /**
    * Runs the solution. From the Run sheet it first waits for edits still being made from
    * earlier utterances, so it runs what was said; a spoken "run" is already queued after them.
@@ -84,16 +103,24 @@ export function useRun({
     activeRun.current?.controller.abort();
     const runId = newId();
     const controller = new AbortController();
+    let runSource: "server" | "local" = "server";
+    activeRun.current = { id: runId, controller, source: runSource };
+    const isCurrentRun = () => activeRun.current?.id === runId && samePuzzle(puzzleRef.current, p);
 
     // Decide server vs on-device up front from connection liveness + navigator.onLine.
     const hasLocal = await localRunner().isAvailable(languageId);
+    if (!isCurrentRun() || controller.signal.aborted) return;
     const effectivelyOnline =
       online && (typeof navigator === "undefined" || navigator.onLine !== false);
     const backend = resolveRunBackend(onDeviceMode, effectivelyOnline, hasLocal);
-    activeRun.current = { id: runId, controller, source: backend };
+    runSource = backend;
+    activeRun.current = { id: runId, controller, source: runSource };
 
     const runLocally = async () => {
-      activeRun.current = { id: runId, controller, source: "local" };
+      runSource = "local";
+      if (activeRun.current?.id === runId) {
+        activeRun.current = { id: runId, controller, source: "local" };
+      }
       // Flush locally buffered edits without failing when offline.
       void saver.current?.flush().catch(() => {});
       const code = editor.current?.text() ?? "";
@@ -102,12 +129,14 @@ export function useRun({
         stdin = chosenSample ?? "";
       } else {
         const cached = await getAocPuzzle(p.year, p.day);
+        if (!isCurrentRun() || controller.signal.aborted) return;
         if (cached?.input !== undefined) {
           stdin = cached.input;
         } else if (effectivelyOnline) {
           const fetched = await api.input(p);
-          stdin = fetched.text;
           void mergeAocPuzzle(p.year, p.day, { input: fetched.text });
+          if (!isCurrentRun() || controller.signal.aborted) return;
+          stdin = fetched.text;
         } else {
           setRun((r) => ({
             ...r,
@@ -119,6 +148,7 @@ export function useRun({
         }
       }
       const cachedHelper = await getHelpers(languageId);
+      if (!isCurrentRun() || controller.signal.aborted) return;
       const helpers = cachedHelper
         ? [
             {
@@ -134,6 +164,7 @@ export function useRun({
         helpers,
         signal: controller.signal,
       });
+      if (!isCurrentRun()) return;
       if (!controller.signal.aborted) {
         setRun((r) => ({
           ...r,
@@ -147,6 +178,7 @@ export function useRun({
 
     try {
       if (waitForEdits) await queue.idle();
+      if (!isCurrentRun() || controller.signal.aborted) return;
       if (backend === "local") {
         await runLocally();
         return;
@@ -161,11 +193,13 @@ export function useRun({
       }
 
       await formatBeforeRun();
+      if (!isCurrentRun() || controller.signal.aborted) return;
       try {
         // The run reads the code and the chosen sample from the server.
         await saver.current?.flush();
         await metaSavers.current.get(`${p.year}-${p.day}`)?.flush();
       } catch (e) {
+        if (!isCurrentRun() || controller.signal.aborted) return;
         if (isTransientNetworkError(e) && onDeviceMode === "automatic" && hasLocal) {
           await runLocally();
           return;
@@ -173,11 +207,14 @@ export function useRun({
         setRun((r) => ({ ...r, running: null, error: `Not run: ${errorMessage(e)}` }));
         return;
       }
+      if (!isCurrentRun() || controller.signal.aborted) return;
       try {
         const result = await api.run(p, input, runPart, runId, controller.signal);
+        if (!isCurrentRun()) return;
         setRun((r) => ({ ...r, running: null, last: { input, result, source: "server" } }));
       } catch (e) {
         if (
+          isCurrentRun() &&
           !controller.signal.aborted &&
           isTransientNetworkError(e) &&
           onDeviceMode === "automatic" &&
@@ -190,13 +227,13 @@ export function useRun({
       }
     } catch (e) {
       if (controller.signal.aborted) {
-        if (activeRun.current?.source === "server") {
+        if (runSource === "server") {
           // Best-effort server cancel scoped by runId so run_lock is released without killing a
           // newer run if this cancel arrives late.
           api.cancelRun(runId).catch(() => {});
         }
-        setRun((r) => ({ ...r, running: null }));
-      } else {
+        if (isCurrentRun()) setRun((r) => ({ ...r, running: null }));
+      } else if (isCurrentRun()) {
         setRun((r) => ({ ...r, running: null, error: errorMessage(e) }));
       }
     } finally {
@@ -224,17 +261,19 @@ export function useRun({
     setRun((r) => ({ ...r, submitting: true }));
     try {
       const { outcome, problem: refreshed, committed } = await api.submit(p, part, answer);
+      if (committed) notify(committed.succeeded ? "info" : "error", committed.summary);
+      if (!samePuzzle(puzzleRef.current, p)) return;
       setRun((r) => ({ ...r, submitting: false, submitted: outcome, confirmSubmit: false }));
       if (refreshed) {
         setProblem(refreshed);
         updateMeta(withSuggestions(metaRef.current, refreshed));
         void findSamples(p, refreshed);
       }
-      if (committed) notify(committed.succeeded ? "info" : "error", committed.summary);
     } catch (e) {
+      if (!samePuzzle(puzzleRef.current, p)) return;
       setRun((r) => ({ ...r, submitting: false, confirmSubmit: false, error: errorMessage(e) }));
     }
   };
 
-  return { run, setRun, doRun, cancelRun, doSubmit };
+  return { run, setRun, doRun, cancelRun, abortRun, doSubmit };
 }

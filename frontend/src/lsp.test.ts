@@ -296,6 +296,9 @@ describe("LSP documentation sanitization", () => {
     expect(rendered).toContain("&lt;img");
     expect(rendered).toContain('href="https://example.com"');
 
+    const plain = plugin.docToHTML({ kind: "plaintext", value: "a < b & c > d\n<script>" });
+    expect(plain).toBe("a &lt; b &amp; c &gt; d<br>&lt;script&gt;");
+
     // Completion tooltip DOM constructed by serverCompletionSource.
     const fakeEl = { className: "", innerHTML: "" };
     vi.stubGlobal("document", { createElement: () => fakeEl });

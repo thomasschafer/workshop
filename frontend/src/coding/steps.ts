@@ -231,7 +231,10 @@ export function sameSitting(a: Session, b: Session): boolean {
  * The parts, counting from 0, whose examples and tests apply once the learner is on `part`: it,
  * and every earlier part that no part up to it replaces, as `Coding::applying` says.
  */
-export function applying(parts: readonly OpenedPart[], part: number): number[] {
+export function applying(
+  parts: readonly { readonly replaces: readonly number[] }[],
+  part: number,
+): number[] {
   return parts
     .slice(0, part + 1)
     .map((_, earlier) => earlier)

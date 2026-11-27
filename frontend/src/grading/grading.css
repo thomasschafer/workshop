@@ -50,7 +50,6 @@
 .written {
   width: 100%;
   min-height: 10rem;
-  font: inherit;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -188,7 +187,6 @@ textarea.explain-heard {
 .design-component input {
   grid-column: 1;
   min-width: 0;
-  font: inherit;
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -208,7 +206,6 @@ textarea.explain-heard {
 }
 
 .design-deep-dive select {
-  font: inherit;
   padding: 6px 8px;
 }
 

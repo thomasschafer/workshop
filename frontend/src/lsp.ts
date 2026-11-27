@@ -3,6 +3,7 @@ import { LSPClient, LSPPlugin, type Transport } from "@codemirror/lsp-client";
 import type { Extension } from "@codemirror/state";
 import { ViewPlugin } from "@codemirror/view";
 import { errorMessage } from "./errors";
+import { escapeHtml } from "./html";
 import { EXTRA_CAPABILITIES, isRecord } from "./lspActions";
 import { serverCompletionSource } from "./lspCompletion";
 import { renderMarkdown } from "./markdown";
@@ -142,17 +143,7 @@ export function lspDocToHtml(
   const kind = typeof value === "string" ? defaultKind : value.kind;
   const text = typeof value === "string" ? value : value.value;
   if (kind === "plaintext") {
-    return text.replace(/[\n<&>"]/g, (ch) =>
-      ch === "\n"
-        ? "<br>"
-        : ch === "<"
-          ? "&lt;"
-          : ch === ">"
-            ? "&gt;"
-            : ch === '"'
-              ? "&quot;"
-              : "&amp;",
-    );
+    return escapeHtml(text).replace(/\n/g, "<br>");
   }
   return renderMarkdown(text);
 }

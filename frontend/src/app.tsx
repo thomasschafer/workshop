@@ -13,7 +13,7 @@ import {
   TimeoutError,
 } from "./api";
 import { type LocalCommand, matchCommand } from "./commands";
-import { CodeEditor, type Diagnostics, type HelixSetup, hoverText, NO_DIAGNOSTICS } from "./editor";
+import { CodeEditor, type Diagnostics, type HelixSetup, NO_DIAGNOSTICS } from "./editor";
 import { errorMessage } from "./errors";
 import { describeProblems } from "./helix/config";
 import { useCodeKeyboard } from "./hooks/useCodeKeyboard";
@@ -33,6 +33,7 @@ import { usePuzzleOffers } from "./hooks/usePuzzleOffers";
 import { useRun } from "./hooks/useRun";
 import { useSampleFinding } from "./hooks/useSampleFinding";
 import { useShortcuts } from "./hooks/useShortcuts";
+import { useTypeLookup } from "./hooks/useTypeLookup";
 import { useUiStateSaver } from "./hooks/useUiStateSaver";
 import { getAocPuzzle, getHelpers, mergeAocPuzzle, putHelpers } from "./offline/db";
 import { refreshCachedBundles } from "./onDevice/bundles";
@@ -40,7 +41,7 @@ import { findMissingModule, isUpToDate } from "./packages";
 import * as preferences from "./preferences";
 import { isPractice, PRACTICE, puzzleTitle } from "./puzzle";
 import { EMPTY_META, sampleInput, withSuggestions } from "./samples";
-import { debounced, type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
+import { type FileVersion, type SaveStatus, VersionedSaver } from "./saver";
 import { watchSwipes } from "./swipe";
 import { TABS, tabBeside } from "./tabs";
 import { turnTab } from "./tabTurn";
@@ -229,7 +230,7 @@ export function App({
   // The part being worked on: the next one to solve, or for a solved puzzle being worked through
   // again, the one the code has got to.
   const workingPart = part ?? (part2Started === true ? 2 : 1);
-  const { run, setRun, doRun, cancelRun, doSubmit } = useRun({
+  const { run, setRun, doRun, cancelRun, abortRun, doSubmit } = useRun({
     puzzleRef,
     part,
     workingPart,
@@ -335,18 +336,7 @@ export function App({
   // Leaving for the home screen, which goes by where the app was left.
   useEffect(() => () => stateSaver.flushOnExit(), [stateSaver]);
 
-  const lookUpType = useMemo(
-    () =>
-      debounced((pos: number) => {
-        const client = lsp?.client;
-        const view = editor.current?.view;
-        if (!client || !view || !fileUri.current) return;
-        hoverText(client, fileUri.current, view, pos)
-          .then(setHover)
-          .catch(() => setHover(null));
-      }, 500),
-    [],
-  );
+  const lookUpType = useTypeLookup(lsp, editor, fileUri, setHover);
 
   const loadProblem = useCallback(
     async (p: Puzzle, refresh: boolean) => {
@@ -386,6 +376,7 @@ export function App({
     setProblem(null);
     setProblemFromCache(false);
     setOpenError(null);
+    abortRun();
     setRun(initialRunState);
     setCodeConflict(null);
     setNotesConflict(null);
@@ -554,7 +545,7 @@ export function App({
       editor.current?.destroy();
       editor.current = null;
     };
-  }, [puzzle, boot, lsp, loadProblem, initMeta, updateMeta, lookUpType]);
+  }, [puzzle, boot, lsp, loadProblem, initMeta, updateMeta, lookUpType, abortRun]);
 
   // Once back online, refresh a puzzle page that was loaded from cache so part 2 appears if solved.
   useEffect(() => {

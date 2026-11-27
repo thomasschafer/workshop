@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html";
 import {
   activeSyntaxScopeSet,
   getLoadedLanguageBundle,
@@ -25,10 +26,6 @@ export function resolveSyntaxMode(marked: string): string | null {
   const normalized = marked.trim().toLowerCase();
   const mode = ALIASES[normalized] ?? normalized;
   return hasTreeSitterMode(mode) ? mode : null;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**

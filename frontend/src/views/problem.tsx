@@ -78,6 +78,8 @@ export function ProblemView({
 
   useEffect(() => {
     scrollTop.current = 0;
+    setPicked(null);
+    setEditing(null);
   }, [puzzle.year, puzzle.day]);
 
   useLayoutEffect(() => {
@@ -215,7 +217,7 @@ export function ProblemView({
         ))}
       </div>
 
-      <PuzzleInput puzzle={puzzle} />
+      <PuzzleInput key={`${puzzle.year}-${puzzle.day}`} puzzle={puzzle} />
 
       {onStartAgain === null ? (
         <button type="button" class="text-button" onClick={onRefresh} disabled={loading}>
@@ -297,31 +299,39 @@ function SampleEditor({
   );
 }
 
-function PuzzleInput({ puzzle }: { puzzle: Puzzle }) {
+export function PuzzleInput({ puzzle }: { puzzle: Puzzle }) {
   const [state, setState] = useState<
     | { kind: "hidden" }
     | { kind: "loading" }
     | { kind: "shown"; text: string; lines: number }
     | { kind: "error"; message: string }
   >({ kind: "hidden" });
+  const current = useRef(puzzle);
+  current.current = puzzle;
 
   useEffect(() => setState({ kind: "hidden" }), [puzzle.year, puzzle.day]);
 
   const show = async () => {
+    const target = puzzle;
+    const isCurrent = () =>
+      current.current.year === target.year && current.current.day === target.day;
     setState({ kind: "loading" });
     try {
-      const input = await api.input(puzzle);
-      void mergeAocPuzzle(puzzle.year, puzzle.day, { input: input.text });
+      const input = await api.input(target);
+      void mergeAocPuzzle(target.year, target.day, { input: input.text });
+      if (!isCurrent()) return;
       setState({ kind: "shown", text: input.text, lines: input.lines });
     } catch (e) {
       if (e instanceof ConnectionError || e instanceof TimeoutError) {
-        const cached = await getAocPuzzle(puzzle.year, puzzle.day);
+        const cached = await getAocPuzzle(target.year, target.day);
+        if (!isCurrent()) return;
         if (cached?.input !== undefined) {
           const lines = cached.input.length === 0 ? 0 : cached.input.trimEnd().split("\n").length;
           setState({ kind: "shown", text: cached.input, lines });
           return;
         }
       }
+      if (!isCurrent()) return;
       setState({ kind: "error", message: errorMessage(e) });
     }
   };

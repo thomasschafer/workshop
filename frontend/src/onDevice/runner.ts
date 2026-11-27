@@ -4,6 +4,7 @@
 // timeouts terminate and respawn the Worker cleanly without disturbing editor diagnostics.
 
 import type { RunResult } from "../api";
+import { applying } from "../coding/steps";
 import type { Case, CaseRef, CaseResult, Graded, OracleCase, Run } from "../coding/types";
 import { sameOutput } from "../learning/output";
 import type { OnDeviceMode } from "../preferences";
@@ -400,26 +401,14 @@ export class GhcWasmLocalRunner implements LocalRunner {
 
 /** Builds the ordered Coding submission case list: examples -> precomputed oracles -> hidden tests. */
 export function buildCodingSubmitCases(
-  parts: readonly { examples: Case[] }[],
+  parts: readonly { examples: Case[]; replaces: readonly number[] }[],
   hiddenTests: readonly Case[][],
   oracleCases: readonly OracleCase[],
   currentPart: number,
 ): { ref: CaseRef; known: Case }[] {
   const inParts = parts.length > 1;
-  const cases: { ref: CaseRef; known: Case }[] = [];
-
-  for (let p = 0; p <= currentPart && p < parts.length; p++) {
-    const part = parts[p];
-    if (!part) continue;
-    for (let i = 0; i < part.examples.length; i++) {
-      const known = part.examples[i];
-      if (!known) continue;
-      cases.push({
-        ref: inParts ? { kind: "example", part: p, index: i } : { kind: "example", index: i },
-        known,
-      });
-    }
-  }
+  const activeParts = applying(parts, currentPart);
+  const cases = buildCodingExampleCases(parts, currentPart);
 
   for (const oracle of oracleCases) {
     cases.push({
@@ -430,7 +419,7 @@ export function buildCodingSubmitCases(
     });
   }
 
-  for (let p = 0; p <= currentPart && p < hiddenTests.length; p++) {
+  for (const p of activeParts) {
     const tests = hiddenTests[p] ?? [];
     for (let i = 0; i < tests.length; i++) {
       const known = tests[i];
@@ -447,12 +436,12 @@ export function buildCodingSubmitCases(
 
 /** Builds the Coding examples case list for the current part (matching `crates/coding/src/grade.rs`). */
 export function buildCodingExampleCases(
-  parts: readonly { examples: Case[] }[],
+  parts: readonly { examples: Case[]; replaces: readonly number[] }[],
   currentPart: number,
 ): { ref: CaseRef; known: Case }[] {
   const inParts = parts.length > 1;
   const cases: { ref: CaseRef; known: Case }[] = [];
-  for (let p = 0; p <= currentPart && p < parts.length; p++) {
+  for (const p of applying(parts, currentPart)) {
     const part = parts[p];
     if (!part) continue;
     for (let i = 0; i < part.examples.length; i++) {

@@ -1184,7 +1184,9 @@ test("answers a card as usual once its follow-ups end elsewhere, after going dee
   await expect(phone.getByRole("button", { name: "Show answer" })).toBeEnabled();
 });
 
-test("runs a timed round with the examiner, carrying on after a reload and a break, until time's up", async () => {
+test("runs a timed round with the examiner, carrying on after a reload and a break, until time's up", async ({
+  browser,
+}) => {
   await phone.goto("/");
   const toggle = phone.getByRole("switch", { name: /I've got a while/ });
   await expect(toggle).not.toBeChecked();
@@ -1227,6 +1229,24 @@ test("runs a timed round with the examiner, carrying on after a reload and a bre
   expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     width,
   );
+
+  // If ending and marking fails mid-round, the error is shown beside the button rather than lost.
+  // Without the service worker, which would keep the page's requests from the test.
+  const withoutSw = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${LEARNING_PORT}`,
+    serviceWorkers: "block",
+  });
+  const endPage = await withoutSw.newPage();
+  await endPage.route(
+    "**/api/rounds/sample/two-dice-seven/end",
+    (route) => route.fulfill({ status: 500, json: { error: "Model unavailable" } }),
+    { times: 1 },
+  );
+  await endPage.goto(`/rounds/sample/two-dice-seven?token=${token()}`);
+  await endPage.getByRole("button", { name: "End and mark it" }).tap();
+  await expect(endPage.getByRole("alert")).toContainText("Model unavailable");
+  await withoutSw.close();
 
   // The working's saved as it goes, with the clock: a reload carries on where it was.
   await expect.poll(() => serverWork("two-dice-seven")).toBe("6 of the 36 pairs add up to 7");
@@ -1374,4 +1394,74 @@ test("marks an estimate right within its bounds, saying how close it must be", a
     await expect(phone.locator(".learn-verdict")).toContainText(`${verdict}: it's `);
     await phone.getByRole("button", { name: "Next" }).tap();
   }
+});
+
+test("keeps form fields at least 16px on iOS WebKit and offsets sticky round bar below the safe area", async () => {
+  await phone.goto("/");
+  const result = await phone.evaluate(() => {
+    // Playwright's desktop WebKit does not advertise iOS's -webkit-touch-callout, so when it
+    // doesn't, mirror the bundled `@supports (-webkit-touch-callout: none)` rules directly to
+    // verify the cascade as iOS Safari evaluates it.
+    let supportsCss = "";
+    let roundBarTop: string | null = null;
+    for (const sheet of document.styleSheets) {
+      for (const rule of sheet.cssRules) {
+        if (
+          rule instanceof CSSSupportsRule &&
+          rule.conditionText.includes("-webkit-touch-callout")
+        ) {
+          for (const inner of rule.cssRules) supportsCss += `${inner.cssText}\n`;
+        }
+        if (rule instanceof CSSStyleRule && rule.selectorText === ".round-bar") {
+          roundBarTop = rule.style.top;
+        }
+      }
+    }
+
+    const simulated = document.createElement("style");
+    if (!CSS.supports("-webkit-touch-callout", "none")) {
+      simulated.textContent = supportsCss;
+      document.head.appendChild(simulated);
+    }
+
+    const probe = document.createElement("div");
+    probe.style.position = "fixed";
+    probe.style.visibility = "hidden";
+    probe.innerHTML = `
+      <textarea class="written"></textarea>
+      <textarea class="coding-plan"></textarea>
+      <div class="diff"><div class="diff-comment-box"><textarea></textarea></div></div>
+      <div class="design-component"><input type="text"></div>
+      <div class="design-deep-dive"><select><option>a</option></select></div>
+      <div class="project-search"><input type="text"></div>
+      <div class="project-add"><input type="text"></div>
+      <textarea class="bench-keyboard"></textarea>
+    `;
+    document.body.appendChild(probe);
+    const selectors = [
+      ".written",
+      ".coding-plan",
+      ".diff-comment-box textarea",
+      ".design-component input",
+      ".design-deep-dive select",
+      ".project-search input",
+      ".project-add input",
+      ".bench-keyboard",
+    ];
+    const sizes: Record<string, number> = {};
+    for (const sel of selectors) {
+      const el = probe.querySelector(sel);
+      if (!el) throw new Error(`missing probe element ${sel}`);
+      sizes[sel] = Number.parseFloat(getComputedStyle(el).fontSize);
+    }
+    probe.remove();
+    simulated.remove();
+    return { hasSupportsRule: supportsCss.length > 0, sizes, roundBarTop };
+  });
+
+  expect(result.hasSupportsRule).toBe(true);
+  for (const [sel, size] of Object.entries(result.sizes)) {
+    expect(size, sel).toBeGreaterThanOrEqual(16);
+  }
+  expect(result.roundBarTop).toContain("env(safe-area-inset-top");
 });
