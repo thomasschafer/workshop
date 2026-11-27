@@ -1,20 +1,34 @@
 import { describe, expect, it } from "vitest";
+import sharedLessonCases from "../../../crates/learning/tests/lessons_plan.json";
+import type { TrackId } from "../tracks/types";
 import {
   completedLessons,
   dayStart,
+  type FlowEntry,
   flagged,
+  lastRating,
   lessonsInTrack,
   newId,
   nextInstance,
   progress,
   queue,
   retired,
+  skippedLessons,
   step,
   unmetRequires,
   weekStart,
 } from "./local";
 import { DAY_MS, review } from "./schedule";
-import type { Attempt, Deck, DeckItem, DeckLesson, RetirementChange } from "./types";
+import type {
+  Attempt,
+  Deck,
+  DeckItem,
+  DeckLesson,
+  LessonCompletion,
+  LessonSkip,
+  Rating,
+  RetirementChange,
+} from "./types";
 
 // 2026-09-21, a Monday, at 23:30 UTC.
 const LATE_MONDAY = 1_790_033_400_000;
@@ -55,6 +69,8 @@ function deck(items: DeckItem[], changes: Partial<Deck> = {}): Deck {
 function attempt(item: string, at: number, rating: Attempt["rating"] = "good"): Attempt {
   return { id: newId(), item, answered_at: at, duration_ms: 30_000, rating };
 }
+
+const entryKey = (entry: FlowEntry) => (entry.kind === "item" ? entry.item.key : entry.lesson.key);
 
 describe("dayStart and weekStart", () => {
   it("find the learner's day and week as the server does", () => {
@@ -174,7 +190,7 @@ describe("queue", () => {
     };
     expect(keys(next(spent))).toEqual(["p/b", "p/deeper"]);
     // A step of a few minutes has them, before anything due.
-    expect(step(next(both)).map((i) => i.key)).toEqual(["p/b", "p/deeper", "p/a"]);
+    expect(step(next(both)).map(entryKey)).toEqual(["p/b", "p/deeper", "p/a"]);
     // Answered since on this device, which ends their follow-ups once it's synced, it's as any
     // other card.
     const rated = [attempt("p/deeper", LATE_MONDAY - 60_000)];
@@ -227,11 +243,13 @@ describe("a track kept apart", () => {
     expect(progress(d, done, LATE_MONDAY, 0)).toEqual({
       reviewsToday: 0,
       newToday: 2,
+      lessonsToday: 0,
       minutesThisWeek: 30,
     });
     expect(progress(d, done, LATE_MONDAY, 0, drill)).toEqual({
       reviewsToday: 0,
       newToday: 2,
+      lessonsToday: 0,
       minutesThisWeek: 7,
     });
   });
@@ -262,12 +280,14 @@ describe("progress", () => {
     expect(progress(d, done, LATE_MONDAY, 0)).toEqual({
       reviewsToday: 3,
       newToday: 5,
+      lessonsToday: 0,
       minutesThisWeek: 11,
     });
     const tomorrow = LATE_MONDAY + DAY_MS;
     expect(progress(d, [], tomorrow, 0)).toEqual({
       reviewsToday: 0,
       newToday: 0,
+      lessonsToday: 0,
       minutesThisWeek: 10,
     });
     expect(progress(d, [], LATE_MONDAY + 7 * DAY_MS, 0).minutesThisWeek).toBe(0);
@@ -275,27 +295,64 @@ describe("progress", () => {
 });
 
 describe("step", () => {
-  it("takes a few minutes' worth, due items first", () => {
+  it("takes a few minutes' worth, due items first, then a lesson before new items", () => {
     const long = { ...card("p/long"), minutes: 3 };
     const chosen = step({
       followUps: [],
       due: [card("p/due")],
       waiting: 0,
+      lesson: null,
       fresh: [card("p/x"), card("p/y"), long],
       freshWaiting: 0,
     });
-    expect(chosen.map((item) => item.key)).toEqual(["p/due", "p/x", "p/y"]);
+    expect(chosen.map(entryKey)).toEqual(["p/due", "p/x", "p/y"]);
     expect(
-      step({ followUps: [], due: [], waiting: 0, fresh: [long, card("p/x")], freshWaiting: 0 }).map(
-        (i) => i.key,
-      ),
+      step({
+        followUps: [],
+        due: [],
+        waiting: 0,
+        lesson: null,
+        fresh: [long, card("p/x")],
+        freshWaiting: 0,
+      }).map(entryKey),
     ).toEqual(["p/long"]);
+
+    const intro: DeckLesson = {
+      key: "p/intro",
+      track: "review",
+      title: "Intro",
+      skills: [],
+      prompt: "Intro",
+      source: null,
+      minutes: 4,
+      requires: [],
+      sources: [{ title: "Ref", url: "https://example.com" }],
+      guesses: [],
+      segments: [{ title: "One", body: "Body", check: null }],
+      explain: "Why?",
+      explain_answer: "Because.",
+      images: {},
+    };
+    // A lesson takes one item's place between due items and new items.
+    const withLesson = step({
+      followUps: [],
+      due: [card("p/due")],
+      waiting: 0,
+      lesson: intro,
+      fresh: [card("p/x"), card("p/y")],
+      freshWaiting: 0,
+    });
+    expect(withLesson.map((e) => `${e.kind}:${entryKey(e)}`)).toEqual([
+      "item:p/due",
+      "lesson:p/intro",
+      "item:p/x",
+    ]);
   });
 
   it("skips the step just finished, then brings a forgotten item back in a later step", () => {
     const items = [card("p/a"), card("p/b"), card("p/c"), card("p/d"), card("p/e"), card("p/f")];
     const d = deck(items);
-    const first = step(queue(d, "review", [], [], [], LATE_MONDAY, 0)).map((i) => i.key);
+    const first = step(queue(d, "review", [], [], [], LATE_MONDAY, 0)).map(entryKey);
     expect(first).toEqual(["p/a", "p/b", "p/c"]);
 
     // Forgotten over ten minutes ago, p/a is due again as the first step finishes, so it
@@ -308,7 +365,7 @@ describe("step", () => {
     const later = LATE_MONDAY + 11 * 60_000;
     const secondQueue = queue(d, "review", afterFirst, [], [], later, 0);
     expect(secondQueue.due.map((i) => i.key)).toEqual(["p/a"]);
-    const second = step(secondQueue, new Set(first)).map((i) => i.key);
+    const second = step(secondQueue, new Set(first)).map(entryKey);
     expect(second).toEqual(["p/d", "p/e", "p/f"]);
 
     // Once the second step's items are done, p/a wasn't in the step just finished, so it comes
@@ -322,7 +379,7 @@ describe("step", () => {
     const third = step(
       queue(d, "review", afterSecond, [], [], later + 120_000, 0),
       new Set(second),
-    ).map((i) => i.key);
+    ).map(entryKey);
     expect(third).toEqual(["p/a"]);
 
     // Once p/a is answered right, nothing is left.
@@ -336,18 +393,16 @@ describe("step", () => {
     const a = { ...card("p/a"), minutes: 3 };
     const b = { ...card("p/b"), minutes: 3 };
     const d = deck([a, b]);
-    const first = step(queue(d, "review", [], [], [], LATE_MONDAY, 0)).map((i) => i.key);
+    const first = step(queue(d, "review", [], [], [], LATE_MONDAY, 0)).map(entryKey);
     expect(first).toEqual(["p/a"]);
     const later = LATE_MONDAY + 11 * 60_000;
     const afterA = [attempt("p/a", LATE_MONDAY, "again")];
     // Already due again by the time the learner taps Next, p/a waits behind p/b.
-    const second = step(queue(d, "review", afterA, [], [], later, 0), new Set(first)).map(
-      (i) => i.key,
-    );
+    const second = step(queue(d, "review", afterA, [], [], later, 0), new Set(first)).map(entryKey);
     expect(second).toEqual(["p/b"]);
     const afterB = [...afterA, attempt("p/b", later + 30_000, "good")];
     const third = step(queue(d, "review", afterB, [], [], later + 60_000, 0), new Set(second)).map(
-      (i) => i.key,
+      entryKey,
     );
     expect(third).toEqual(["p/a"]);
   });
@@ -459,5 +514,125 @@ describe("lessons", () => {
 
     expect(unmetRequires(d, second, {})).toEqual([{ key: "p/first", title: "First lesson" }]);
     expect(unmetRequires(d, second, merged)).toEqual([]);
+
+    const skips = skippedLessons(deck([], { lesson_skips: { "p/first": [100] } }), [
+      { id: newId(), lesson: "p/first", skipped_at: 200 },
+    ]);
+    expect(skips["p/first"]).toEqual([100, 200]);
+  });
+
+  it("tracks the latest rating across the deck and unsynced attempts", () => {
+    const d = deck([card("p/a")], {
+      schedules: { "p/a": review(null, LATE_MONDAY - DAY_MS, "again") },
+      last_ratings: { "p/a": "again" },
+    });
+    expect(lastRating(d, [], "p/a")).toBe("again");
+    expect(lastRating(d, [], "p/missing")).toBeNull();
+    expect(lastRating(d, [attempt("p/a", LATE_MONDAY, "good")], "p/a")).toBe("good");
+    expect(
+      lastRating(
+        d,
+        [attempt("p/a", LATE_MONDAY - 1000, "good"), attempt("p/a", LATE_MONDAY, "again")],
+        "p/a",
+      ),
+    ).toBe("again");
+  });
+
+  it("agrees with the server on every shared lesson unlocking and offering case", () => {
+    expect(sharedLessonCases.length).toBeGreaterThanOrEqual(10);
+    for (const c of sharedLessonCases) {
+      const keptApart = new Set(c.kept_apart as TrackId[]);
+      const trackIds = new Set<TrackId>([
+        ...(c.kept_apart as TrackId[]),
+        ...c.lessons.map((l) => l.track as TrackId),
+        ...c.items.map((i) => i.track as TrackId),
+        ...(Object.keys(c.expected) as TrackId[]),
+      ]);
+      const deckLessons: DeckLesson[] = c.lessons.map((l) => ({
+        ...lesson(l.key, l.key, l.requires),
+        track: l.track as TrackId,
+      }));
+      const deckItems: DeckItem[] = c.items.map((i) => ({
+        ...card(i.key, i.track as TrackId),
+        lesson: i.lesson,
+      }));
+      const d = deck(deckItems, {
+        limits: c.limits,
+        progress: { reviews_today: 0, new_today: 0, lessons_today: 0, minutes_this_week: 0 },
+        day_start: dayStart(c.now, c.utc_offset_minutes),
+        week_start: weekStart(c.now, c.utc_offset_minutes),
+        tracks: [...trackIds].map((id) => ({
+          id,
+          name: id,
+          kept_apart: keptApart.has(id),
+          progress: keptApart.has(id)
+            ? { reviews_today: 0, new_today: 0, lessons_today: 0, minutes_this_week: 0 }
+            : null,
+        })),
+        lessons: deckLessons,
+      });
+      const attempts: Attempt[] = c.attempts.map((a, idx) => ({
+        id: `attempt-${idx}`,
+        item: a.item,
+        answered_at: a.answered_at,
+        duration_ms: 10_000,
+        rating: a.rating as Rating,
+      }));
+      const completions: LessonCompletion[] = c.lesson_completions.map((lc, idx) => ({
+        id: `complete-${idx}`,
+        lesson: lc.lesson,
+        completed_at: lc.completed_at,
+        duration_ms: lc.duration_ms,
+      }));
+      const skips: LessonSkip[] = c.lesson_skips.map((ls, idx) => ({
+        id: `skip-${idx}`,
+        lesson: ls.lesson,
+        skipped_at: ls.skipped_at,
+      }));
+
+      if (c.expected_shared_minutes !== undefined) {
+        expect(
+          progress(d, attempts, c.now, c.utc_offset_minutes, null, completions).minutesThisWeek,
+          `${c.name}: shared minutes`,
+        ).toBe(c.expected_shared_minutes);
+      }
+      if (c.expected_apart_minutes !== undefined) {
+        for (const [track, expectedMinutes] of Object.entries(c.expected_apart_minutes)) {
+          expect(
+            progress(d, attempts, c.now, c.utc_offset_minutes, track as TrackId, completions)
+              .minutesThisWeek,
+            `${c.name}: apart minutes for ${track}`,
+          ).toBe(expectedMinutes);
+        }
+      }
+
+      for (const [track, expected] of Object.entries(c.expected)) {
+        const q = queue(
+          d,
+          track as TrackId,
+          attempts,
+          [],
+          [],
+          c.now,
+          c.utc_offset_minutes,
+          completions,
+          skips,
+        );
+        expect(
+          q.due.map((i) => i.key),
+          `${c.name} (${track}): due`,
+        ).toEqual(expected.due);
+        expect(
+          q.fresh.map((i) => i.key),
+          `${c.name} (${track}): new`,
+        ).toEqual(expected.new);
+        expect(q.fresh.length + q.freshWaiting, `${c.name} (${track}): new_count`).toBe(
+          expected.new_count,
+        );
+        expect(q.lesson?.key ?? null, `${c.name} (${track}): next_lesson`).toBe(
+          expected.next_lesson,
+        );
+      }
+    }
   });
 });

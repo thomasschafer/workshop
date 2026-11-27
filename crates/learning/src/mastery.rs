@@ -121,11 +121,13 @@ mod tests {
                 key: "p/a",
                 track: &track,
                 skills: &both,
+                lesson: None,
             },
             ItemRef {
                 key: "p/b",
                 track: &track,
                 skills: &sums,
+                lesson: None,
             },
         ];
         let seen = scheduler.review(None, now - DAY_MS, Rating::Good);
@@ -149,6 +151,7 @@ mod tests {
             key: "p/a",
             track: &track,
             skills: &sums,
+            lesson: None,
         }];
         let attempt = |id: &str, at: i64| Attempt {
             id: id.to_owned(),
@@ -195,11 +198,13 @@ mod tests {
                 key: "p/retired",
                 track: &track,
                 skills: &graphs,
+                lesson: None,
             },
             ItemRef {
                 key: "p/kept",
                 track: &track,
                 skills: &graphs,
+                lesson: None,
             },
         ];
         let solved_at = now - 100 * DAY_MS;

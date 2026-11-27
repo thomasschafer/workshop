@@ -14,8 +14,9 @@ use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use workshop_learning::{
-    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, LessonCompletion, Limits, Progress,
-    Rating, Retirement, RetirementChange, SkillMastery, Store, TrackPlan,
+    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, LessonCompletion, LessonPlanRef,
+    LessonSkip, Limits, Progress, Rating, Retirement, RetirementChange, SkillMastery, Store,
+    TrackPlan,
 };
 use workshop_pack::number::Tolerance;
 use workshop_pack::{Content, FollowUps, ImageData, Item, Lesson, Pack};
@@ -54,6 +55,10 @@ pub struct Deck {
     pub retirements: BTreeMap<String, Retirement>,
     /// Completion timestamps (ms since 1970) per lesson key, in chronological order.
     pub lesson_completions: BTreeMap<String, Vec<i64>>,
+    /// Skip ("Not now") timestamps (ms since 1970) per lesson key, in chronological order.
+    pub lesson_skips: BTreeMap<String, Vec<i64>>,
+    /// Most recent attempt's rating per short item key, for spotting consecutive lapses.
+    pub last_ratings: BTreeMap<String, Rating>,
     pub skills: Vec<DeckSkill>,
     /// The skills recent mistakes point to, whose new items come first.
     pub focus: Vec<String>,
@@ -94,6 +99,10 @@ pub struct DeckItem {
     pub prompt: String,
     pub source: Option<String>,
     pub minutes: u32,
+    /// Full `pack/lesson` key of the lesson that teaches this item, if any.
+    pub lesson: Option<String>,
+    /// The segment of that lesson covering this item, counting from 0, if specified.
+    pub segment: Option<usize>,
     #[serde(flatten)]
     pub content: DeckContent,
 }
@@ -202,6 +211,9 @@ pub struct SyncRequest {
     /// Lessons completed since the last sync.
     #[serde(default)]
     pub lesson_completions: Vec<LessonCompletion>,
+    /// Lessons skipped with "Not now" since the last sync.
+    #[serde(default)]
+    pub lesson_skips: Vec<LessonSkip>,
 }
 
 /// The learning tracks for the home screen, and the week's practice so far.
@@ -224,15 +236,15 @@ struct Apart {
 }
 
 impl Apart {
-    /// The packs' tracks kept apart, with these of their items in them. A track two packs share
-    /// is kept apart if either keeps it apart.
-    fn new(packs: &[Pack], items: &[Short<'_>]) -> Self {
+    /// The packs' tracks kept apart, with these of their items and lessons in them. A track two
+    /// packs share is kept apart if either keeps it apart.
+    fn new<'a>(packs: &[Pack], items: impl IntoIterator<Item = &'a Short<'a>>) -> Self {
         let tracks: BTreeSet<TrackId> = packs
             .iter()
             .flat_map(|pack| pack.manifest.kept_apart())
             .collect();
         let keys = items
-            .iter()
+            .into_iter()
             .filter(|short| tracks.contains(&short.item.track))
             .map(|short| (short.key.clone(), short.item.track.clone()))
             .collect();
@@ -243,6 +255,10 @@ impl Apart {
 /// An item from a pack, with the key it's known by across packs.
 struct Short<'a> {
     key: String,
+    /// Full `pack/lesson` key of the lesson teaching this item, if any.
+    lesson_key: Option<String>,
+    /// Full `pack/lesson` keys of prerequisites, for lessons.
+    requires_keys: Vec<String>,
     item: &'a Item,
 }
 
@@ -324,6 +340,7 @@ impl Learning {
         Limits {
             daily_reviews: self.config.daily_reviews,
             daily_new: self.config.daily_new,
+            daily_lessons: self.config.daily_lessons,
             weekly_minutes: self.config.weekly_minutes,
             retention: self.config.desired_retention,
         }
@@ -336,6 +353,7 @@ impl Learning {
         Ok(Progress {
             reviews_today: today.reviews,
             new_today: today.new,
+            lessons_today: today.lessons,
             minutes_this_week: (week.ms / 60_000) as u32,
         })
     }
@@ -396,11 +414,11 @@ impl Learning {
             .iter()
             .map(deck_lesson)
             .collect::<Result<Vec<_>>>()?;
-        let apart = Apart::new(&packs, &practised);
-        let (progress, mut apart_progress) = self.progress(clock, &apart)?;
         let mut all_track_items = Vec::with_capacity(practised.len() + lesson_items.len());
         all_track_items.extend(&practised);
         all_track_items.extend(&lesson_items);
+        let apart = Apart::new(&packs, all_track_items.iter().copied());
+        let (progress, mut apart_progress) = self.progress(clock, &apart)?;
         let tracks = track_names(&packs, all_track_items)
             .into_iter()
             .map(|(id, (name, icon))| DeckTrack {
@@ -420,6 +438,18 @@ impl Learning {
             .lesson_completions_by_lesson()?
             .into_iter()
             .filter(|(key, _)| lesson_keys.contains(key.as_str()))
+            .collect();
+        let lesson_skips = self
+            .store
+            .lesson_skips_by_lesson()?
+            .into_iter()
+            .filter(|(key, _)| lesson_keys.contains(key.as_str()))
+            .collect();
+        let last_ratings = self
+            .store
+            .last_ratings()?
+            .into_iter()
+            .filter(|(key, _)| keys.contains(key.as_str()))
             .collect();
         let follow_ups = self
             .follow_ups_under_way()?
@@ -444,6 +474,8 @@ impl Learning {
                 .filter(|(key, _)| keys.contains(key.as_str()))
                 .collect(),
             lesson_completions,
+            lesson_skips,
+            last_ratings,
             skills,
             focus: self.focus(&packs, clock.now)?,
             follow_ups,
@@ -459,6 +491,8 @@ impl Learning {
         self.store.record_flags(&request.flags)?;
         self.store
             .record_lesson_completions(&request.lesson_completions, clock.now)?;
+        self.store
+            .record_lesson_skips(&request.lesson_skips, clock.now)?;
         self.deck(clock)
     }
 
@@ -695,6 +729,7 @@ impl Learning {
     pub fn planned(&self, clock: Clock) -> Result<Planned> {
         let packs = self.packs()?;
         let items = practised(&packs);
+        let lesson_items = lessons(&packs);
         // Cards being followed up are carried on with first, apart from what's due and new,
         // and today's limits, as the app does.
         let follow_ups = self.follow_ups_under_way()?;
@@ -702,24 +737,30 @@ impl Learning {
             .into_iter()
             .filter(|item| !follow_ups.contains(item.key))
             .collect();
-        let apart = Apart::new(&packs, &items);
+        let lesson_refs = lesson_plan_refs(&lesson_items);
+        let apart = Apart::new(&packs, items.iter().chain(&lesson_items));
         let (progress, apart_progress) = self.progress(clock, &apart)?;
         let limits = self.limits();
         let focus = self.focus(&packs, clock.now)?;
         let retirements = self.store.retirements()?;
         let schedules = self.store.schedules()?;
         let flags = self.store.flags()?;
-        let plan = |refs: &[ItemRef<'_>], progress: Progress| {
+        let lesson_completions = self.store.lesson_completions_by_lesson()?;
+        let lesson_skips = self.store.lesson_skips_by_lesson()?;
+        let plan = |refs: &[ItemRef<'_>], lessons: &[LessonPlanRef<'_>], progress: Progress| {
             workshop_learning::plan(
                 refs,
+                lessons,
                 &schedules,
                 &flags,
                 &retirements,
+                &lesson_completions,
+                &lesson_skips,
                 progress,
                 limits,
                 &focus,
                 self.store.scheduler(),
-                clock.now,
+                clock,
             )
         };
         // Everything but the tracks kept apart shares the day's limits; each track kept apart
@@ -727,14 +768,23 @@ impl Learning {
         let (kept, shared): (Vec<ItemRef<'_>>, Vec<ItemRef<'_>>) = refs
             .iter()
             .partition(|item| apart.tracks.contains(item.track));
-        let mut plans = plan(&shared, progress);
+        let (kept_lessons, shared_lessons): (Vec<LessonPlanRef<'_>>, Vec<LessonPlanRef<'_>>) =
+            lesson_refs
+                .iter()
+                .partition(|lesson| apart.tracks.contains(lesson.track));
+        let mut plans = plan(&shared, &shared_lessons, progress);
         for (track, progress) in &apart_progress {
             let in_track: Vec<ItemRef<'_>> = kept
                 .iter()
                 .filter(|item| item.track == track)
                 .copied()
                 .collect();
-            plans.extend(plan(&in_track, *progress));
+            let track_lessons: Vec<LessonPlanRef<'_>> = kept_lessons
+                .iter()
+                .filter(|lesson| lesson.track == track)
+                .copied()
+                .collect();
+            plans.extend(plan(&in_track, &track_lessons, *progress));
         }
         let names = track_names(&packs, &items);
         let skill_names = packs
@@ -865,13 +915,24 @@ fn items_where(packs: &[Pack], keep: impl Fn(&Item) -> bool) -> Vec<Short<'_>> {
     packs
         .iter()
         .flat_map(|pack| {
-            pack.items
-                .iter()
-                .filter(|item| keep(item))
-                .map(|item| Short {
-                    key: format!("{}/{}", pack.manifest.id, item.id),
+            pack.items.iter().filter(|item| keep(item)).map(|item| {
+                let pack_id = &pack.manifest.id;
+                let lesson_key = item.lesson.as_ref().map(|l| format!("{pack_id}/{}", l.id));
+                let requires_keys = match &item.content {
+                    Content::Lesson(lesson) => lesson
+                        .requires
+                        .iter()
+                        .map(|req| format!("{pack_id}/{req}"))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                Short {
+                    key: format!("{pack_id}/{}", item.id),
+                    lesson_key,
+                    requires_keys,
                     item,
-                })
+                }
+            })
         })
         .collect()
 }
@@ -883,6 +944,18 @@ fn item_refs<'a>(shorts: &'a [Short<'a>]) -> Vec<ItemRef<'a>> {
             key: &short.key,
             track: &short.item.track,
             skills: &short.item.skills,
+            lesson: short.lesson_key.as_deref(),
+        })
+        .collect()
+}
+
+fn lesson_plan_refs<'a>(lessons: &'a [Short<'a>]) -> Vec<LessonPlanRef<'a>> {
+    lessons
+        .iter()
+        .map(|short| LessonPlanRef {
+            key: &short.key,
+            track: &short.item.track,
+            requires: &short.requires_keys,
         })
         .collect()
 }
@@ -987,6 +1060,8 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
         prompt: item.prompt.clone(),
         source: item.source.clone(),
         minutes: item.minutes,
+        lesson: short.lesson_key.clone(),
+        segment: item.lesson.as_ref().and_then(|l| l.segment),
         content,
     })
 }
@@ -1201,31 +1276,62 @@ fn followed_up_step(id: &TrackId, cards: &[&Item]) -> Option<Step<Destination>> 
     })
 }
 
-/// The step a track suggests, given its plan: due reviews, then something new, sooner if it's
-/// in a skill recent mistakes point to.
+/// The step a track suggests for its next eligible lesson, when one is offered before new items.
+pub(crate) fn lesson_step(plan: &TrackPlan, planned: &Planned) -> Option<Step<Destination>> {
+    let key = plan.next_lesson.as_ref()?;
+    let lesson = planned.item(key);
+    let title = lesson.map_or_else(|| key.clone(), Item::label);
+    let destination = Destination::Lesson { item: key.clone() };
+    if let Some(skill) = lesson.and_then(|l| planned.focus_of(l)) {
+        return Some(Step {
+            title,
+            reason: format!("Lesson · practise {skill}, after recent mistakes"),
+            priority: Priority::Focus,
+            destination,
+        });
+    }
+    let priority = if planned.week.minutes >= planned.week.target {
+        Priority::Browse
+    } else {
+        Priority::New
+    };
+    Some(Step {
+        title,
+        reason: "Lesson".to_owned(),
+        priority,
+        destination,
+    })
+}
+
+/// The step a track suggests, given its plan: due reviews, then the track's next lesson if one is
+/// offered, then something new, sooner if it's in a skill recent mistakes point to.
 fn next_step(id: &TrackId, plan: &TrackPlan, planned: &Planned) -> Option<Step<Destination>> {
     // Only the short items, practised a few at a time; the track's problems are the coding
     // module's.
     let short = |key: &&String| planned.item(key).is_some_and(|item| item.kind.is_short());
-    let plan = &TrackPlan {
+    let short_plan = TrackPlan {
         due: plan.due.iter().filter(short).cloned().collect(),
         new: plan.new.iter().filter(short).cloned().collect(),
+        next_lesson: plan.next_lesson.clone(),
         ..TrackPlan::default()
     };
     let week = planned.week;
     let destination = Destination::Practice { track: id.clone() };
-    if !plan.due.is_empty() {
+    if !short_plan.due.is_empty() {
         return Some(Step {
-            title: format!("{} due", count(plan.due.len(), "", id)),
+            title: format!("{} due", count(short_plan.due.len(), "", id)),
             reason: "Due today".to_owned(),
             priority: Priority::Due,
             destination,
         });
     }
-    if let Some(first) = plan.new.first() {
+    if let Some(step) = lesson_step(&short_plan, planned) {
+        return Some(step);
+    }
+    if let Some(first) = short_plan.new.first() {
         if let Some(skill) = planned.item(first).and_then(|item| planned.focus_of(item)) {
             return Some(Step {
-                title: count(plan.new.len(), "new ", id),
+                title: count(short_plan.new.len(), "new ", id),
                 reason: format!("Practise {skill}, after recent mistakes"),
                 priority: Priority::Focus,
                 destination,
@@ -1238,7 +1344,7 @@ fn next_step(id: &TrackId, plan: &TrackPlan, planned: &Planned) -> Option<Step<D
             Priority::New
         };
         return Some(Step {
-            title: count(plan.new.len(), "new ", id),
+            title: count(short_plan.new.len(), "new ", id),
             reason: "Something new".to_owned(),
             priority,
             destination,
@@ -1255,6 +1361,9 @@ fn summary(plan: &TrackPlan, clock: Clock, followed_up: usize) -> String {
     }
     if !plan.due.is_empty() {
         parts.push(format!("{} due", plan.due.len()));
+    }
+    if plan.next_lesson.is_some() {
+        parts.push("1 lesson".to_owned());
     }
     if plan.new_count() > 0 {
         parts.push(format!("{} new", plan.new_count()));
@@ -1296,6 +1405,7 @@ mod tests {
             sample_pack: false,
             daily_reviews: 3,
             daily_new: 10,
+            daily_lessons: 1,
             weekly_minutes: 1,
             desired_retention: 0.9,
         };
@@ -1368,6 +1478,7 @@ mod tests {
             sample_pack: false,
             daily_reviews: 1,
             daily_new: 2,
+            daily_lessons: 1,
             weekly_minutes: 1,
             desired_retention: 0.9,
         };
@@ -1451,6 +1562,7 @@ mod tests {
             sample_pack: false,
             daily_reviews: 10,
             daily_new: 10,
+            daily_lessons: 1,
             weekly_minutes: 60,
             desired_retention: 0.9,
         };
@@ -1623,10 +1735,19 @@ mod tests {
             .iter()
             .find(|track| track.id == TrackId::Review)
             .unwrap();
+        // The sample pack's Review track has a lesson waiting, so Continue offers it before new
+        // cards, and the card linked to that lesson waits until the day after it's done.
         let next = review.next.as_ref().unwrap();
         assert_eq!(next.priority, Priority::New);
-        assert_eq!(next.title, "10 new cards");
-        assert_eq!(review.summary, "10 new");
+        assert_eq!(next.title, "How a binary heap works");
+        assert_eq!(next.reason, "Lesson");
+        assert_eq!(
+            next.destination,
+            Destination::Lesson {
+                item: "sample/binary-heaps".to_owned()
+            }
+        );
+        assert_eq!(review.summary, "1 lesson · 9 new");
         assert_eq!(
             tracks.week,
             Week {
@@ -1635,7 +1756,34 @@ mod tests {
             }
         );
 
-        // Two days later, the card answered today is due again.
+        // Once the lesson is done, it counts towards the week's minutes, its card still waits
+        // until the next day, and Review offers its other new cards.
+        learning
+            .sync(
+                &SyncRequest {
+                    lesson_completions: vec![LessonCompletion {
+                        id: "lesson-done-1".to_owned(),
+                        lesson: "sample/binary-heaps".to_owned(),
+                        completed_at: NOW,
+                        duration_ms: 120_000,
+                    }],
+                    ..Default::default()
+                },
+                clock(NOW),
+            )
+            .unwrap();
+        let same_day = tracks_at(&learning, clock(NOW + 1000));
+        assert_eq!(same_day.week.minutes, 2);
+        let review = same_day
+            .tracks
+            .iter()
+            .find(|track| track.id == TrackId::Review)
+            .unwrap();
+        assert_eq!(review.summary, "9 new");
+        assert_eq!(review.next.as_ref().unwrap().title, "9 new cards");
+
+        // Two days later, the card answered today is due again, and the lesson's card has
+        // unlocked.
         let request = SyncRequest {
             attempts: vec![attempt("1", "sample/stable-sorting", NOW, Rating::Again)],
             flags: Vec::new(),
@@ -1658,8 +1806,8 @@ mod tests {
                 track: TrackId::Review
             }
         );
-        // Forty seconds of practice is less than a minute.
-        assert_eq!(later.week.minutes, 0);
+        // Two minutes from the lesson plus forty seconds from the attempt = 2 minutes.
+        assert_eq!(later.week.minutes, 2);
     }
 
     #[test]
@@ -1690,7 +1838,7 @@ mod tests {
             .iter()
             .find(|track| track.id == TrackId::Review)
             .unwrap();
-        assert_eq!(review.summary, "9 new · 1 flagged");
+        assert_eq!(review.summary, "1 lesson · 8 new · 1 flagged");
         let deck = learning
             .sync(
                 &SyncRequest {
@@ -2055,6 +2203,7 @@ mod tests {
             sample_pack: false,
             daily_reviews: 10,
             daily_new: 10,
+            daily_lessons: 1,
             weekly_minutes: 60,
             desired_retention: 0.9,
         };
@@ -2127,6 +2276,7 @@ mod tests {
                 sample_pack: false,
                 daily_reviews: 10,
                 daily_new: 10,
+                daily_lessons: 1,
                 weekly_minutes: 60,
                 desired_retention: 0.9,
             },
@@ -2175,6 +2325,7 @@ mod tests {
                 sample_pack: false,
                 daily_reviews: 10,
                 daily_new: 10,
+                daily_lessons: 1,
                 weekly_minutes: 60,
                 desired_retention: 0.9,
             },
@@ -2205,11 +2356,13 @@ mod tests {
             id: "lesson-done-1".to_owned(),
             lesson: "p/first".to_owned(),
             completed_at: NOW - 1000,
+            duration_ms: 90_000,
         };
         let c2 = LessonCompletion {
             id: "lesson-done-2".to_owned(),
             lesson: "p/first".to_owned(),
             completed_at: NOW,
+            duration_ms: 60_000,
         };
         let synced = learning
             .sync(

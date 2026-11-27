@@ -89,7 +89,9 @@ mod tests {
         );
         assert_eq!(deck["limits"]["daily_reviews"], 40);
         assert_eq!(deck["limits"]["daily_new"], 10);
+        assert_eq!(deck["limits"]["daily_lessons"], 1);
         assert_eq!(deck["progress"]["new_today"], 0);
+        assert_eq!(deck["progress"]["lessons_today"], 0);
 
         let now = crate::learning::now_ms();
         let body = serde_json::json!({
@@ -114,6 +116,7 @@ mod tests {
                 "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a22",
                 "lesson": "sample/binary-heaps",
                 "completed_at": now,
+                "duration_ms": 180000,
             }],
         });
         let done = json(send(&router, sync_request(&completion)).await).await;
@@ -121,10 +124,26 @@ mod tests {
             done["lesson_completions"]["sample/binary-heaps"],
             serde_json::json!([now])
         );
+        assert_eq!(done["progress"]["lessons_today"], 1);
+        assert_eq!(done["progress"]["minutes_this_week"], 3);
         // Sent again, it's recorded once.
         let done_again = json(send(&router, sync_request(&completion)).await).await;
         assert_eq!(
             done_again["lesson_completions"]["sample/binary-heaps"],
+            serde_json::json!([now])
+        );
+        assert_eq!(done_again["progress"]["minutes_this_week"], 3);
+
+        let skip = serde_json::json!({
+            "lesson_skips": [{
+                "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a33",
+                "lesson": "sample/binary-heaps",
+                "skipped_at": now,
+            }],
+        });
+        let skipped = json(send(&router, sync_request(&skip)).await).await;
+        assert_eq!(
+            skipped["lesson_skips"]["sample/binary-heaps"],
             serde_json::json!([now])
         );
     }

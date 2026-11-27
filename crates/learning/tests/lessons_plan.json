@@ -1,0 +1,452 @@
+[
+  {
+    "name": "undone lesson holds back its item and offers the lesson",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/heaps", "track": "review", "requires": [] }
+    ],
+    "items": [
+      { "key": "p/heap-card", "track": "review", "lesson": "p/heaps" },
+      { "key": "p/plain-card", "track": "review", "lesson": null }
+    ],
+    "attempts": [],
+    "lesson_completions": [],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": ["p/plain-card"],
+        "new_count": 1,
+        "next_lesson": "p/heaps"
+      }
+    }
+  },
+  {
+    "name": "same-day lesson completion holds item until the next day",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/heaps", "track": "review", "requires": [] }
+    ],
+    "items": [
+      { "key": "p/heap-card", "track": "review", "lesson": "p/heaps" }
+    ],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/heaps", "completed_at": 1789980000000, "duration_ms": 180000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": null
+      }
+    },
+    "expected_shared_minutes": 3
+  },
+  {
+    "name": "next-day hold follows the learner's local day (still same day at UTC+60)",
+    "now": 1790038800000,
+    "utc_offset_minutes": 60,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/heaps", "track": "review", "requires": [] }
+    ],
+    "items": [
+      { "key": "p/heap-card", "track": "review", "lesson": "p/heaps" }
+    ],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/heaps", "completed_at": 1790033400000, "duration_ms": 120000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": null
+      }
+    }
+  },
+  {
+    "name": "next-day hold unlocks once the learner's local day rolls over (UTC+0)",
+    "now": 1790038800000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/heaps", "track": "review", "requires": [] }
+    ],
+    "items": [
+      { "key": "p/heap-card", "track": "review", "lesson": "p/heaps" }
+    ],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/heaps", "completed_at": 1790033400000, "duration_ms": 120000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": ["p/heap-card"],
+        "new_count": 1,
+        "next_lesson": null
+      }
+    }
+  },
+  {
+    "name": "redoing a lesson today keeps items unlocked from its first completion",
+    "now": 1790086400000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/heaps", "track": "review", "requires": [] }
+    ],
+    "items": [
+      { "key": "p/heap-card", "track": "review", "lesson": "p/heaps" }
+    ],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/heaps", "completed_at": 1789980000000, "duration_ms": 120000 },
+      { "lesson": "p/heaps", "completed_at": 1790080000000, "duration_ms": 60000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": ["p/heap-card"],
+        "new_count": 1,
+        "next_lesson": null
+      }
+    }
+  },
+  {
+    "name": "item attempted before its lesson carries on being scheduled",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/heaps", "track": "review", "requires": [] }
+    ],
+    "items": [
+      { "key": "p/attempted", "track": "review", "lesson": "p/heaps" },
+      { "key": "p/unattempted", "track": "review", "lesson": "p/heaps" }
+    ],
+    "attempts": [
+      { "item": "p/attempted", "answered_at": 1787408000000, "rating": "good" }
+    ],
+    "lesson_completions": [],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": ["p/attempted"],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": "p/heaps"
+      }
+    }
+  },
+  {
+    "name": "requires skips lessons with unmet prerequisites and picks first ready in pack order",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 2,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/advanced", "track": "review", "requires": ["p/basics"] },
+      { "key": "p/basics", "track": "review", "requires": [] },
+      { "key": "p/other", "track": "review", "requires": [] }
+    ],
+    "items": [],
+    "attempts": [],
+    "lesson_completions": [],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": "p/basics"
+      }
+    }
+  },
+  {
+    "name": "completing prerequisite unlocks dependent lesson when daily_lessons allows",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 2,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/advanced", "track": "review", "requires": ["p/basics"] },
+      { "key": "p/basics", "track": "review", "requires": [] },
+      { "key": "p/other", "track": "review", "requires": [] }
+    ],
+    "items": [],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/basics", "completed_at": 1789980000000, "duration_ms": 120000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": "p/advanced"
+      }
+    }
+  },
+  {
+    "name": "daily_lessons limit stops offering lessons across shared tracks for the rest of the day",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/l1", "track": "review", "requires": [] },
+      { "key": "p/l2", "track": "review", "requires": [] },
+      { "key": "p/l3", "track": "probability", "requires": [] }
+    ],
+    "items": [],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/l1", "completed_at": 1789980000000, "duration_ms": 120000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": null
+      },
+      "probability": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": null
+      }
+    }
+  },
+  {
+    "name": "not now skips that lesson for the rest of the learner's day, then offers it next day",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/l1", "track": "review", "requires": [] },
+      { "key": "p/l2", "track": "review", "requires": ["p/l1"] },
+      { "key": "p/l3", "track": "probability", "requires": [] }
+    ],
+    "items": [
+      { "key": "p/c1", "track": "review", "lesson": null }
+    ],
+    "attempts": [],
+    "lesson_completions": [],
+    "lesson_skips": [
+      { "lesson": "p/l1", "skipped_at": 1789990000000 },
+      { "lesson": "p/l3", "skipped_at": 1789900000000 }
+    ],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": ["p/c1"],
+        "new_count": 1,
+        "next_lesson": null
+      },
+      "probability": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": "p/l3"
+      }
+    }
+  },
+  {
+    "name": "not now skips only the skipped lesson when another independent lesson is eligible",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": [],
+    "lessons": [
+      { "key": "p/l1", "track": "review", "requires": [] },
+      { "key": "p/l2", "track": "review", "requires": [] }
+    ],
+    "items": [],
+    "attempts": [],
+    "lesson_completions": [],
+    "lesson_skips": [
+      { "lesson": "p/l1", "skipped_at": 1789990000000 }
+    ],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": "p/l2"
+      }
+    }
+  },
+  {
+    "name": "kept-apart track has its own daily_lessons limit and separate weekly minutes",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": ["pack:drill"],
+    "lessons": [
+      { "key": "p/shared-1", "track": "review", "requires": [] },
+      { "key": "p/shared-2", "track": "review", "requires": [] },
+      { "key": "p/drill-1", "track": "pack:drill", "requires": [] }
+    ],
+    "items": [],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/shared-1", "completed_at": 1789980000000, "duration_ms": 600000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": null
+      },
+      "pack:drill": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": "p/drill-1"
+      }
+    },
+    "expected_shared_minutes": 5,
+    "expected_apart_minutes": {
+      "pack:drill": 0
+    }
+  },
+  {
+    "name": "completing a kept-apart lesson does not spend the shared daily_lessons limit or shared minutes",
+    "now": 1790000000000,
+    "utc_offset_minutes": 0,
+    "limits": {
+      "daily_reviews": 40,
+      "daily_new": 10,
+      "daily_lessons": 1,
+      "weekly_minutes": 60,
+      "retention": 0.9
+    },
+    "kept_apart": ["pack:drill"],
+    "lessons": [
+      { "key": "p/shared-1", "track": "review", "requires": [] },
+      { "key": "p/drill-1", "track": "pack:drill", "requires": [] },
+      { "key": "p/drill-2", "track": "pack:drill", "requires": [] }
+    ],
+    "items": [],
+    "attempts": [],
+    "lesson_completions": [
+      { "lesson": "p/drill-1", "completed_at": 1789980000000, "duration_ms": 240000 }
+    ],
+    "lesson_skips": [],
+    "expected": {
+      "review": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": "p/shared-1"
+      },
+      "pack:drill": {
+        "due": [],
+        "new": [],
+        "new_count": 0,
+        "next_lesson": null
+      }
+    },
+    "expected_shared_minutes": 0,
+    "expected_apart_minutes": {
+      "pack:drill": 4
+    }
+  }
+]

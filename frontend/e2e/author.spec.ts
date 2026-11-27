@@ -100,7 +100,8 @@ test("imports a question into the pack as a draft", async () => {
 
 test("practises the items the author added", async () => {
   await phone.goto("/");
-  await expect(phone.locator(".track", { hasText: "Review" })).toContainText("12 new");
+  // The sample pack's heap card waits for its lesson, so it isn't counted as new.
+  await expect(phone.locator(".track", { hasText: "Review" })).toContainText("1 lesson · 11 new");
 });
 
 test("makes up a brief for a design prompt without one, and keeps it across a reload", async () => {

@@ -1876,7 +1876,8 @@ pub fn overview(
                 Status::Retired
             } else if plan.is_some_and(|plan| plan.due.contains(&key)) {
                 Status::Due
-            } else if plan.is_some_and(|plan| plan.is_new(&key)) {
+            } else if plan.is_some_and(|plan| plan.is_new(&key) || plan.is_waiting_for_lesson(&key))
+            {
                 Status::New
             } else {
                 Status::Done
@@ -1934,7 +1935,7 @@ pub fn track(
             sessions.keys().filter(|k| items.contains_key(*k)).count(),
         ),
         Destination::Coding { item: None },
-        next_step(planned, sessions, plan, &items),
+        next_step(planned, sessions, plan, &items, true),
     ))
 }
 
@@ -1949,16 +1950,17 @@ pub fn problem_step(
     let problems: BTreeMap<String, &Item> = coding_items(planned, track)
         .filter(|(_, item)| matches!(item.kind, Kind::Coding | Kind::Codebase))
         .collect();
-    next_step(planned, sessions, plan, &problems)
+    next_step(planned, sessions, plan, &problems, false)
 }
 
 /// The step `items`, of a track with this plan, suggest: the one worked on most recently, then
-/// one that's due, then something new.
+/// one that's due, then (for the Coding track itself) the track's next lesson, then something new.
 fn next_step(
     planned: &Planned,
     sessions: &BTreeMap<String, Started>,
     plan: &TrackPlan,
     items: &BTreeMap<String, &Item>,
+    include_lesson: bool,
 ) -> Option<Step<Destination>> {
     let label = |key: &str| {
         items
@@ -1995,6 +1997,9 @@ fn next_step(
             priority: Priority::Due,
             destination: open(key),
         });
+    }
+    if include_lesson && let Some(step) = crate::learning::lesson_step(plan, planned) {
+        return Some(step);
     }
     // In a skill recent mistakes point to, if any are, and then the quickest, so a spare few
     // minutes are enough to start.
@@ -2040,6 +2045,9 @@ fn summary(plan: &TrackPlan, in_progress: usize) -> String {
     if !plan.due.is_empty() {
         parts.push(format!("{} due", plan.due.len()));
     }
+    if plan.next_lesson.is_some() {
+        parts.push("1 lesson".to_owned());
+    }
     if plan.new_count() > 0 {
         parts.push(format!("{} new", plan.new_count()));
     }
@@ -2072,6 +2080,7 @@ mod tests {
             sample_pack: false,
             daily_reviews: 40,
             daily_new: 10,
+            daily_lessons: 1,
             weekly_minutes: 90,
             desired_retention: 0.9,
         };

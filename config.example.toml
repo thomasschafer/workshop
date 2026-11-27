@@ -88,6 +88,8 @@ sample_pack = false
 daily_reviews = 40
 # The most new items Continue offers in a day, across every track; any more wait for the next.
 daily_new = 10
+# The most lessons offered in practice in a day, across every track; any more wait for the next.
+daily_lessons = 1
 # The minutes of practice to aim for each week, which the home screen counts towards.
 weekly_minutes = 90
 # How likely you should be to remember an item when it comes back, from 0.7 to 0.97. Higher means

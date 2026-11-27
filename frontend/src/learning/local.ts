@@ -13,6 +13,8 @@ import type {
   Instance,
   ItemSchedule,
   LessonCompletion,
+  LessonSkip,
+  Rating,
   Retirement,
   RetirementChange,
 } from "./types";
@@ -109,6 +111,36 @@ export function completedLessons(
   return result;
 }
 
+/** Skip ("Not now") timestamps per lesson key, merging the deck's with skips waiting to sync. */
+export function skippedLessons(deck: Deck, pending: LessonSkip[]): Record<string, number[]> {
+  const result: Record<string, number[]> = {};
+  for (const [key, times] of Object.entries(deck.lesson_skips ?? {})) {
+    result[key] = [...times];
+  }
+  for (const skip of pending) {
+    const list = result[skip.lesson] ?? [];
+    list.push(skip.skipped_at);
+    result[skip.lesson] = list;
+  }
+  for (const list of Object.values(result)) {
+    list.sort((a, b) => a - b);
+  }
+  return result;
+}
+
+/** An item's most recent rating across the deck and attempts not yet synced, or null if unseen. */
+export function lastRating(deck: Deck, attempts: Attempt[], key: string): Rating | null {
+  const local = attempts
+    .filter((a) => a.item === key)
+    .sort((a, b) => a.answered_at - b.answered_at || a.id.localeCompare(b.id));
+  const latestLocal = local.at(-1);
+  const deckLastReview = deck.schedules[key]?.last_review ?? Number.NEGATIVE_INFINITY;
+  if (latestLocal && latestLocal.answered_at >= deckLastReview) {
+    return latestLocal.rating;
+  }
+  return deck.last_ratings?.[key] ?? null;
+}
+
 /** A track's lessons, in the deck's order. */
 export function lessonsInTrack(deck: Deck, track: TrackId): DeckLesson[] {
   return (deck.lessons ?? []).filter((lesson) => lesson.track === track);
@@ -142,6 +174,8 @@ export interface Progress {
   reviewsToday: number;
   /** Items first attempted today, which count towards the daily limit of new ones. */
   newToday: number;
+  /** Distinct lessons completed today, which count towards `daily_lessons`. */
+  lessonsToday: number;
   minutesThisWeek: number;
 }
 
@@ -159,6 +193,12 @@ function limitsOfItem(deck: Deck, key: string): TrackId | null {
   return item ? limitsOf(deck, item.track) : null;
 }
 
+/** The limits a lesson counts against, by its key, as `limitsOf` says. */
+function limitsOfLesson(deck: Deck, key: string): TrackId | null {
+  const lesson = (deck.lessons ?? []).find((l) => l.key === key);
+  return lesson ? limitsOf(deck, lesson.track) : null;
+}
+
 /**
  * Today's and this week's progress: the deck's, if it was made today and this week, and what's
  * been done since. It's what counts towards the limits every track shares and the week's
@@ -170,6 +210,7 @@ export function progress(
   now: number,
   offset: number,
   track: TrackId | null = null,
+  pendingCompletions: LessonCompletion[] = [],
 ): Progress {
   const limits = track === null ? null : limitsOf(deck, track);
   const known =
@@ -178,6 +219,7 @@ export function progress(
       : (deck.tracks.find((t) => t.id === limits)?.progress ?? {
           reviews_today: 0,
           new_today: 0,
+          lessons_today: 0,
           minutes_this_week: 0,
         });
   const today = dayStart(now, offset);
@@ -199,7 +241,32 @@ export function progress(
     else if (!scheduled) started.add(attempt.item);
   }
   const newToday = (sameDay ? (known.new_today ?? 0) : 0) + started.size;
-  return { reviewsToday, newToday, minutesThisWeek: Math.floor(msThisWeek / 60_000) };
+  const lessonsDoneToday = new Set<string>();
+  for (const completion of pendingCompletions.filter(
+    (c) => limitsOfLesson(deck, c.lesson) === limits,
+  )) {
+    if (completion.completed_at >= week) {
+      msThisWeek += Math.min(completion.duration_ms ?? 0, MAX_ATTEMPT_MS);
+    }
+    if (completion.completed_at < today) continue;
+    const alreadyInDeckToday =
+      sameDay &&
+      known.lessons_today !== undefined &&
+      (deck.lesson_completions?.[completion.lesson]?.some((at) => at >= today) ?? false);
+    if (!alreadyInDeckToday) lessonsDoneToday.add(completion.lesson);
+  }
+  let lessonsToday: number;
+  if (sameDay && known.lessons_today !== undefined) {
+    lessonsToday = known.lessons_today + lessonsDoneToday.size;
+  } else {
+    for (const [key, times] of Object.entries(deck.lesson_completions ?? {})) {
+      if (limitsOfLesson(deck, key) === limits && times.some((at) => at >= today)) {
+        lessonsDoneToday.add(key);
+      }
+    }
+    lessonsToday = lessonsDoneToday.size;
+  }
+  return { reviewsToday, newToday, lessonsToday, minutesThisWeek: Math.floor(msThisWeek / 60_000) };
 }
 
 export interface Queue {
@@ -213,16 +280,25 @@ export interface Queue {
   /** Due, but waiting for tomorrow as today's limit is reached. */
   waiting: number;
   /**
-   * Never attempted, within today's limit of new items: those in the skills recent mistakes
-   * point to first, then in the deck's order.
+   * The track's next lesson to offer before new items, if one is eligible within today's
+   * `daily_lessons` limit.
+   */
+  lesson: DeckLesson | null;
+  /**
+   * Never attempted, unlocked, and within today's limit of new items: those in the skills recent
+   * mistakes point to first, then in the deck's order.
    */
   fresh: DeckItem[];
-  /** Never attempted, but waiting for tomorrow as today's limit of new items is reached. */
+  /** Never attempted and unlocked, but waiting for tomorrow as today's limit of new items is reached. */
   freshWaiting: number;
 }
 
+/** One slot in a practice flow: either a short item or a lesson card offered before new items. */
+export type FlowEntry = { kind: "item"; item: DeckItem } | { kind: "lesson"; lesson: DeckLesson };
+
 /**
- * What there is to do in a track now: cards being followed up, then due reviews, then new items.
+ * What there is to do in a track now: cards being followed up, then due reviews, then the track's
+ * next lesson (if any), then unlocked new items.
  */
 export function queue(
   deck: Deck,
@@ -232,10 +308,15 @@ export function queue(
   retirementChanges: RetirementChange[],
   now: number,
   offset: number,
+  pendingCompletions: LessonCompletion[] = [],
+  pendingSkips: LessonSkip[] = [],
 ): Queue {
   const scheduled = schedules(deck, attempts);
   const wrong = flagged(deck, changes);
   const standing = retirements(deck, retirementChanges);
+  const completed = completedLessons(deck, pendingCompletions);
+  const skipped = skippedLessons(deck, pendingSkips);
+  const today = dayStart(now, offset);
   // Cards being followed up, unless answered since, which ends their follow-ups once it's
   // synced, come first, so the learner carries on where they left off.
   const answered = new Set(attempts.map((attempt) => attempt.item));
@@ -247,7 +328,14 @@ export function queue(
     (item) => item.track === track && underWay.has(item.key) && offered(item),
   );
   const rest = (item: DeckItem) => offered(item) && !underWay.has(item.key);
-  const { reviewsToday, newToday } = progress(deck, attempts, now, offset, track);
+  const { reviewsToday, newToday, lessonsToday } = progress(
+    deck,
+    attempts,
+    now,
+    offset,
+    track,
+    pendingCompletions,
+  );
   const allowed = Math.max(0, deck.limits.daily_reviews - reviewsToday);
   // The daily limit is shared across tracks, as on the server, so it's spent on the most overdue
   // items anywhere, but in tracks kept apart, which each have a limit of their own.
@@ -262,17 +350,34 @@ export function queue(
     })
     .sort((a, b) => a.when - b.when || a.item.key.localeCompare(b.item.key));
   const within = dueEverywhere.slice(0, allowed);
+  // Unattempted items with a lesson wait until the day after that lesson was first done.
+  const unlocked = (item: DeckItem) => {
+    if (!item.lesson) return true;
+    const times = completed[item.lesson];
+    return times !== undefined && times.length > 0 && Math.min(...times) < today;
+  };
   // Also shared across tracks but those kept apart, so each offers up to what's left of it, as
   // on the server.
   const allowedNew = Math.max(0, (deck.limits.daily_new ?? Number.POSITIVE_INFINITY) - newToday);
   const fresh = deck.items
-    .filter((item) => item.track === track && rest(item) && !scheduled[item.key])
+    .filter((item) => item.track === track && rest(item) && !scheduled[item.key] && unlocked(item))
     // Sorting is stable, so otherwise they keep the deck's order.
     .sort((a, b) => Number(inFocus(deck, b)) - Number(inFocus(deck, a)));
+  const dailyLessons = deck.limits.daily_lessons ?? 1;
+  let nextLesson: DeckLesson | null = null;
+  if (lessonsToday < dailyLessons) {
+    nextLesson =
+      lessonsInTrack(deck, track).find((lesson) => {
+        if ((completed[lesson.key]?.length ?? 0) > 0) return false;
+        if (skipped[lesson.key]?.some((at) => at >= today)) return false;
+        return lesson.requires.every((req) => (completed[req]?.length ?? 0) > 0);
+      }) ?? null;
+  }
   return {
     followUps,
     due: within.filter(({ item }) => item.track === track).map(({ item }) => item),
     waiting: dueEverywhere.slice(allowed).filter(({ item }) => item.track === track).length,
+    lesson: nextLesson,
     fresh: fresh.slice(0, allowedNew),
     freshWaiting: Math.max(0, fresh.length - allowedNew),
   };
@@ -284,18 +389,26 @@ function inFocus(deck: Deck, item: DeckItem): boolean {
 }
 
 /**
- * The items for one step: cards being followed up first, then due ones, then new, until there's
- * a few minutes' worth. Items in `exclude` are left out, so the next step doesn't straight away
- * re-offer one from the step just finished.
+ * The entries for one step: cards being followed up first, then due ones, then the track's next
+ * lesson (taking one item's place), then new items, until there's a few minutes' worth. Keys in
+ * `exclude` are left out, so the next step doesn't straight away re-offer one from the step just
+ * finished.
  */
-export function step(next: Queue, exclude: ReadonlySet<string> = new Set()): DeckItem[] {
-  const chosen: DeckItem[] = [];
+export function step(next: Queue, exclude: ReadonlySet<string> = new Set()): FlowEntry[] {
+  const all: FlowEntry[] = [
+    ...next.followUps.map((item): FlowEntry => ({ kind: "item", item })),
+    ...next.due.map((item): FlowEntry => ({ kind: "item", item })),
+    ...(next.lesson ? [{ kind: "lesson" as const, lesson: next.lesson }] : []),
+    ...next.fresh.map((item): FlowEntry => ({ kind: "item", item })),
+  ];
+  const chosen: FlowEntry[] = [];
   let minutes = 0;
-  for (const item of [...next.followUps, ...next.due, ...next.fresh]) {
-    if (exclude.has(item.key)) continue;
+  for (const entry of all) {
+    const key = entry.kind === "item" ? entry.item.key : entry.lesson.key;
+    if (exclude.has(key)) continue;
     if (minutes >= STEP_MINUTES) break;
-    chosen.push(item);
-    minutes += item.minutes;
+    chosen.push(entry);
+    minutes += entry.kind === "item" ? entry.item.minutes : 1;
   }
   return chosen;
 }

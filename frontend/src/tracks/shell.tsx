@@ -5,7 +5,7 @@ import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
 import { DesignScreen } from "../grading/design";
 import { LessonScreen } from "../learning/lesson";
-import { Practice } from "../learning/practice";
+import { type OpenLessonOptions, Practice, type PracticeFlow } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
 import { writeCachedBootstrap } from "../offline/bootstrap";
 import { PackScreen } from "../pack/screen";
@@ -16,7 +16,7 @@ import { UpdateCard } from "../views/update";
 import { Home } from "./home";
 import { pathOf, type Route, routeFor, routeOf } from "./routes";
 import { watchActivity } from "./sitting";
-import type { Destination } from "./types";
+import type { Destination, TrackId } from "./types";
 
 /**
  * The screens the app moves between: the home screen, and each track's own. The address says
@@ -32,6 +32,14 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
   // Where Advent of Code opens: at a step or track chosen at home, or where it was left when
   // going back to it; null until either, when it opens as the server saved it.
   const [entry, setEntry] = useState<Destination | null>(null);
+  // Suspended practice flow per track when opening a lesson mid-flow so finishing or going back
+  // carries on without losing progress in the sitting.
+  const suspendedFlow = useRef<Partial<Record<TrackId, PracticeFlow>>>({});
+  const lessonLaunch = useRef<{
+    item: string;
+    autoStart: boolean;
+    returnToTrack: TrackId | null;
+  } | null>(null);
 
   // Doing anything in the app keeps "I've got a while" on for the sitting.
   useEffect(() => watchActivity(), []);
@@ -113,12 +121,17 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
     // An old address for a screen, such as a notification's, becomes the screen's own, keeping
     // what it asks to open for that screen to read.
     const path = pathOf(route);
-    if (location.pathname !== path) {
-      history.replaceState(history.state, "", `${path}${location.search}`);
+    const currentUrl = `${location.pathname}${location.search}`;
+    if (currentUrl !== path && (route.screen !== "advent-of-code" || location.pathname !== path)) {
+      history.replaceState(history.state, "", path);
     }
     // Dialogs close with the back button too, which leaves the screen as it is.
     const onPop = () => {
       const next = routeOf(location.pathname, location.search);
+      if (next.screen !== "lesson" && next.screen !== "practice") {
+        suspendedFlow.current = {};
+        lessonLaunch.current = null;
+      }
       setRoute((shown) => (pathOf(shown) === pathOf(next) ? shown : next));
     };
     window.addEventListener("popstate", onPop);
@@ -128,6 +141,10 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
   const go = async (destination: Destination) => {
     await rebooting.current;
     const next = routeFor(destination);
+    if (next.screen !== "lesson" && next.screen !== "practice") {
+      suspendedFlow.current = {};
+      lessonLaunch.current = null;
+    }
     history.pushState(null, "", pathOf(next));
     if (next.screen === "advent-of-code") setEntry(destination);
     setRoute(next);
@@ -159,8 +176,24 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
   }, [route.screen]);
 
   const open = (next: Route) => {
+    if (next.screen !== "lesson" && next.screen !== "practice") {
+      suspendedFlow.current = {};
+      lessonLaunch.current = null;
+    }
     history.pushState(null, "", pathOf(next));
     setRoute(next);
+  };
+  const openLesson = (item: string, options?: OpenLessonOptions) => {
+    lessonLaunch.current = {
+      item,
+      autoStart: options?.autoStart ?? false,
+      returnToTrack: options?.returnToTrack ?? null,
+    };
+    const next: Route =
+      options?.segmentIndex != null
+        ? { screen: "lesson", item, segment: options.segmentIndex }
+        : { screen: "lesson", item };
+    open(next);
   };
   const goHome = () => open({ screen: "home" });
 
@@ -198,31 +231,44 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             onOpen={(goal) => open({ screen: "goals", goal })}
           />
         );
-      case "practice":
+      case "practice": {
+        const flow = suspendedFlow.current[route.track] ?? null;
+        delete suspendedFlow.current[route.track];
         return (
           <Practice
             key={route.track}
             track={route.track}
             serverDictation={boot.server_dictation}
+            initialFlow={flow}
+            onSaveFlow={(saved) => {
+              suspendedFlow.current[route.track] = saved;
+            }}
             onHome={goHome}
             onOpenProblem={(item) => void go({ kind: "coding", item })}
-            onOpenLesson={(item) => open({ screen: "lesson", item })}
+            onOpenLesson={openLesson}
           />
         );
-      case "lesson":
+      }
+      case "lesson": {
+        const launch = lessonLaunch.current?.item === route.item ? lessonLaunch.current : null;
         return (
           <LessonScreen
-            key={route.item}
+            key={`${route.item}:${route.segment ?? "full"}`}
             itemKey={route.item}
+            segmentIndex={route.segment ?? null}
+            autoStart={launch?.autoStart ?? false}
+            returnToTrack={launch?.returnToTrack ?? null}
             serverDictation={boot.server_dictation}
             onHome={goHome}
-            onTrack={(track) =>
+            onTrack={(track) => {
+              lessonLaunch.current = null;
               void go(
                 track === "coding" ? { kind: "coding", item: null } : { kind: "practice", track },
-              )
-            }
+              );
+            }}
           />
         );
+      }
       case "coding":
         return (
           <CodingScreen
@@ -230,7 +276,9 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             item={route.item}
             onHome={goHome}
             onOpen={(item) => void go({ kind: "coding", item })}
-            onOpenLesson={(item) => open({ screen: "lesson", item })}
+            onOpenLesson={(item, options) =>
+              openLesson(item, { returnToTrack: "coding", ...options })
+            }
             onTrack={(track) => void go({ kind: "practice", track })}
           />
         );

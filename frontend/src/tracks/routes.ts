@@ -5,7 +5,8 @@ export type Route =
   | { screen: "home" }
   | { screen: "advent-of-code" }
   | { screen: "practice"; track: TrackId }
-  | { screen: "lesson"; item: string }
+  /** A lesson, or with `segment` (counting from 0), just that segment to revisit. */
+  | { screen: "lesson"; item: string; segment?: number }
   | { screen: "coding"; item: string | null }
   | { screen: "design"; item: string | null }
   | { screen: "rounds"; item: string | null }
@@ -45,6 +46,10 @@ export function routeOf(pathname: string, search: string): Route {
   if (pathname.startsWith(`${LESSONS_PATH}/`)) {
     const [pack, item, ...rest] = pathname.slice(LESSONS_PATH.length + 1).split("/");
     if (pack && item && rest.length === 0 && SLUG.test(pack) && SLUG.test(item)) {
+      const segParam = new URLSearchParams(search).get("segment");
+      if (segParam !== null && /^[1-9]\d*$/.test(segParam)) {
+        return { screen: "lesson", item: `${pack}/${item}`, segment: Number(segParam) - 1 };
+      }
       return { screen: "lesson", item: `${pack}/${item}` };
     }
   }
@@ -82,7 +87,9 @@ export function pathOf(route: Route): string {
     case "practice":
       return `${PRACTICE_PATH}${encodeURIComponent(route.track)}`;
     case "lesson":
-      return `${LESSONS_PATH}/${route.item}`;
+      return route.segment !== undefined
+        ? `${LESSONS_PATH}/${route.item}?segment=${route.segment + 1}`
+        : `${LESSONS_PATH}/${route.item}`;
     case "coding":
       return route.item === null ? CODING_PATH : `${CODING_PATH}/${route.item}`;
     case "design":
@@ -106,6 +113,8 @@ export function routeFor(destination: Destination): Route {
       return { screen: "advent-of-code" };
     case "practice":
       return { screen: "practice", track: destination.track };
+    case "lesson":
+      return { screen: "lesson", item: destination.item };
     case "coding":
       return { screen: "coding", item: destination.item };
     case "design":

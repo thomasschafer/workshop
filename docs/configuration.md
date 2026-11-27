@@ -28,6 +28,7 @@ packs = []              # pack directories; the sample pack until you list one
 sample_pack = false     # also use the sample pack alongside your own
 daily_reviews = 40      # the most reviews Continue offers in a day
 daily_new = 10          # the most new items Continue offers in a day
+daily_lessons = 1       # the most lessons offered in practice in a day
 weekly_minutes = 90     # the week's target
 desired_retention = 0.9 # how likely you should be to remember an item when it comes back
 

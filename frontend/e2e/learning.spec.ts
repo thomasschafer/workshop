@@ -168,7 +168,7 @@ test("shows the pack's tracks at home, and continues with something new", async 
   const iconBox = await phone.locator(".track .track-icon").first().boundingBox();
   const nameBox = await phone.locator(".track-name").first().boundingBox();
   expect(iconBox && nameBox && iconBox.x + iconBox.width < nameBox.x).toBe(true);
-  await expect(phone.locator(".track", { hasText: "Review" })).toContainText("10 new");
+  await expect(phone.locator(".track", { hasText: "Review" })).toContainText("1 lesson · 9 new");
   // Nothing's due yet, so Continue offers something new, in the first track with any: the
   // quickest of the Coding track's, some code to read.
   const next = phone.locator(".continue");
@@ -187,6 +187,9 @@ test("reviews cards continuously across steps, saving each, and flags one that's
   await phone.locator(".track", { hasText: "Review" }).tap();
   await expect(phone).toHaveURL(/\/practice\/review$/);
   await expect(phone.locator(".learn-count")).toHaveText(/^\d+ of \d+ minutes this week$/);
+  // The track's lesson is offered before new cards; "Not now" skips it for today and carries on.
+  await expect(phone.locator(".lesson-flow-card")).toContainText("How a binary heap works");
+  await phone.getByRole("button", { name: "Not now" }).tap();
   const firstPrompt = await phone.locator(".learn-prompt").textContent();
 
   await phone.getByRole("button", { name: "Show answer" }).tap();
@@ -226,7 +229,7 @@ test("reviews cards continuously across steps, saving each, and flags one that's
 
   // The flagged card is left out, and the rest go on.
   await goHome();
-  await expect(phone.locator(".track", { hasText: "Review" })).toContainText("7 new · 1 flagged");
+  await expect(phone.locator(".track", { hasText: "Review" })).toContainText("6 new · 1 flagged");
 });
 
 test("checks mental maths as it's typed, right or wrong", async () => {

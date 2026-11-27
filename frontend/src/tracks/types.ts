@@ -43,6 +43,8 @@ export type Destination =
   | { kind: "puzzle"; puzzle: Puzzle }
   | { kind: "puzzle_list" }
   | { kind: "practice"; track: TrackId }
+  /** A short lesson, as `pack/item`. */
+  | { kind: "lesson"; item: string }
   /** The Coding track: one of its items, as `pack/item`, or the list of them. */
   | { kind: "coding"; item: string | null }
   /** Design prompts: one of them, as `pack/item`, or the list of them. */

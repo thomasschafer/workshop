@@ -145,4 +145,68 @@ describe("homeLocal", () => {
     );
     expect(patched.continue).toBeNull();
   });
+
+  it("updates lesson summaries, weekly minutes, and drops completed or skipped Continue lessons", () => {
+    const withLessonDeck: Deck = {
+      ...DECK,
+      limits: { ...DECK.limits, daily_lessons: 1 },
+      lessons: [
+        {
+          key: "sample/heaps",
+          track: "review",
+          title: "Heaps",
+          skills: ["s"],
+          prompt: "About heaps",
+          source: null,
+          minutes: 4,
+          requires: [],
+          sources: [{ title: "Docs", url: "https://example.com" }],
+          guesses: [],
+          segments: [{ title: "One", body: "Body", check: null }],
+          explain: "Why?",
+          explain_answer: "Because.",
+          images: {},
+        },
+      ],
+    };
+    const withLessonContinue: Home = {
+      ...SNAPSHOT,
+      continue: {
+        track: "review",
+        long: false,
+        title: "Heaps",
+        reason: "Lesson",
+        priority: "new",
+        destination: { kind: "lesson", item: "sample/heaps" },
+      },
+    };
+    const completed = patchHome(
+      withLessonContinue,
+      withLessonDeck,
+      [],
+      [],
+      [],
+      NOW,
+      0,
+      [{ id: "c1", lesson: "sample/heaps", completed_at: NOW, duration_ms: 180_000 }],
+      [],
+    );
+    expect(completed.week?.minutes).toBe(8);
+    expect(completed.tracks.find((t) => t.id === "review")?.summary).toBe("1 new");
+    expect(completed.continue).toBeNull();
+
+    const skipped = patchHome(
+      withLessonContinue,
+      withLessonDeck,
+      [],
+      [],
+      [],
+      NOW,
+      0,
+      [],
+      [{ id: "s1", lesson: "sample/heaps", skipped_at: NOW }],
+    );
+    expect(skipped.tracks.find((t) => t.id === "review")?.summary).toBe("1 new");
+    expect(skipped.continue).toBeNull();
+  });
 });

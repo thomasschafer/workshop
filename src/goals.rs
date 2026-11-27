@@ -180,6 +180,7 @@ mod tests {
             sample_pack: false,
             daily_reviews: 40,
             daily_new: 10,
+            daily_lessons: 1,
             weekly_minutes: 90,
             desired_retention: 0.9,
         };
@@ -279,6 +280,7 @@ by = "2026-10-15"
             sample_pack: false,
             daily_reviews: 40,
             daily_new: 10,
+            daily_lessons: 1,
             weekly_minutes: 90,
             desired_retention: 0.9,
         };

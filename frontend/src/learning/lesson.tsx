@@ -26,7 +26,7 @@ import {
 import { completedLessons, lessonsInTrack, newId, unmetRequires } from "./local";
 import { Markdown, SyncChip, useLearning } from "./practice";
 import { learning } from "./sync";
-import type { Deck, DeckLesson, DeckLessonImage } from "./types";
+import type { Deck, DeckLesson, DeckLessonCheck, DeckLessonImage } from "./types";
 
 /**
  * Segment Markdown with embedded SVG diagrams (DOMPurify-sanitised inline so they take
@@ -101,18 +101,82 @@ export function TrackLessons({
   );
 }
 
+/** Predict-then-reveal check shown after a segment, shared by full lessons and single-segment revisits. */
+function SegmentCheck({
+  check,
+  chosen,
+  onChoose,
+}: {
+  check: DeckLessonCheck;
+  chosen: number | undefined;
+  onChoose: (choiceIndex: number) => void;
+}) {
+  const answered = chosen !== undefined;
+  return (
+    <section class="lesson-check" aria-label="Check">
+      <h3 class="tracks-heading">Check</h3>
+      <Markdown text={check.prompt} />
+      <ol class="learn-choices">
+        {check.choices.map((choice, choiceIndex) => {
+          const choiceClass = !answered
+            ? ""
+            : choiceIndex === check.answer
+              ? "right"
+              : choiceIndex === chosen
+                ? "wrong"
+                : "";
+          return (
+            <li key={choice}>
+              <button
+                type="button"
+                class={`pill learn-choice ${choiceClass}`}
+                aria-pressed={chosen === choiceIndex}
+                disabled={answered}
+                onClick={() => onChoose(choiceIndex)}
+              >
+                {choice}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {answered ? (
+        <section
+          class={`learn-answer ${chosen === check.answer ? "right" : "wrong"}`}
+          aria-label="Explanation"
+        >
+          <p class="learn-verdict">
+            {chosen === check.answer ? "Right" : `It's: ${check.choices[check.answer]}`}
+          </p>
+          <Markdown text={check.explanation} class="muted" />
+        </section>
+      ) : null}
+    </section>
+  );
+}
+
 /**
  * Teaches a lesson a step at a time: opening, unscored guesses, segments with diagrams and
  * predict-then-reveal checks, an explain-in-your-own-words step, and a recap. Progress stays on
- * the device so closing and returning carries on where the learner was.
+ * the device so closing and returning carries on where the learner was. With `segmentIndex`,
+ * shows just that segment and its check for a quick revisit, without recording a completion.
  */
 export function LessonScreen({
   itemKey,
+  segmentIndex = null,
+  autoStart = false,
+  returnToTrack = null,
   serverDictation,
   onHome,
   onTrack,
 }: {
   itemKey: string;
+  /** Counting from 0, when revisiting a single segment from "Teach me" or after two lapses. */
+  segmentIndex?: number | null;
+  /** Skip the opening card when launched via "Start" on the flow's lesson card. */
+  autoStart?: boolean;
+  /** Track to return to on finishing or going back, when opened from another track's flow. */
+  returnToTrack?: TrackId | null;
   serverDictation: boolean;
   onHome: () => void;
   onTrack: (track: TrackId) => void;
@@ -126,18 +190,15 @@ export function LessonScreen({
   }, []);
 
   const lesson = deck?.lessons?.find((l) => l.key === itemKey) ?? null;
-  const trackInfo = lesson ? deck?.tracks.find((t) => t.id === lesson.track) : undefined;
+  const backTrack = returnToTrack ?? lesson?.track ?? null;
+  const trackInfo = backTrack ? deck?.tracks.find((t) => t.id === backTrack) : undefined;
 
   const header = (
     <header class="top">
       <span class="header-start">
         <HomeButton onHome={onHome} />
-        {lesson ? (
-          <button
-            type="button"
-            class="text-button track-link"
-            onClick={() => onTrack(lesson.track)}
-          >
+        {backTrack ? (
+          <button type="button" class="text-button track-link" onClick={() => onTrack(backTrack)}>
             {trackInfo?.icon ? <TrackIcon icon={trackInfo.icon} size={16} /> : null}
             {trackInfo?.name ?? "Track"}
           </button>
@@ -181,6 +242,11 @@ export function LessonScreen({
     );
   }
 
+  const revisitSegment =
+    segmentIndex !== null && segmentIndex >= 0 && segmentIndex < lesson.segments.length
+      ? segmentIndex
+      : null;
+
   return (
     <div class="learn">
       {header}
@@ -190,34 +256,94 @@ export function LessonScreen({
         </div>
       ) : null}
       <main class="learn-content">
-        <LessonBody
-          key={lesson.key}
-          deck={deck}
-          lesson={lesson}
-          serverDictation={serverDictation}
-          onTrack={onTrack}
-        />
+        {revisitSegment !== null ? (
+          <SingleSegmentBody
+            key={`${lesson.key}:${revisitSegment}`}
+            lesson={lesson}
+            segmentIndex={revisitSegment}
+            onDone={() => onTrack(returnToTrack ?? lesson.track)}
+          />
+        ) : (
+          <LessonBody
+            key={lesson.key}
+            deck={deck}
+            lesson={lesson}
+            autoStart={autoStart}
+            serverDictation={serverDictation}
+            onTrack={() => onTrack(returnToTrack ?? lesson.track)}
+          />
+        )}
       </main>
     </div>
+  );
+}
+
+/** Revisiting a single segment (and its check, if it has one) without adding a completion. */
+function SingleSegmentBody({
+  lesson,
+  segmentIndex,
+  onDone,
+}: {
+  lesson: DeckLesson;
+  segmentIndex: number;
+  onDone: () => void;
+}) {
+  const segment = lesson.segments[segmentIndex];
+  const [chosen, setChosen] = useState<number | undefined>(undefined);
+  if (!segment) return null;
+  const canContinue = segment.check === null || chosen !== undefined;
+  return (
+    <article class="lesson-card" aria-label={segment.title}>
+      <p class="lesson-step-label muted">
+        {lesson.title} · Segment {segmentIndex + 1} of {lesson.segments.length}
+      </p>
+      <h2 class="lesson-segment-title">{segment.title}</h2>
+      <LessonMarkdown text={segment.body} images={lesson.images} />
+      {segment.check ? (
+        <SegmentCheck
+          check={segment.check}
+          chosen={chosen}
+          onChoose={(choice) => {
+            if (chosen === undefined) setChosen(choice);
+          }}
+        />
+      ) : null}
+      {canContinue ? (
+        <button type="button" class="pill primary wide" onClick={onDone}>
+          Done
+        </button>
+      ) : null}
+    </article>
   );
 }
 
 function LessonBody({
   deck,
   lesson,
+  autoStart,
   serverDictation,
   onTrack,
 }: {
   deck: Deck;
   lesson: DeckLesson;
+  autoStart: boolean;
   serverDictation: boolean;
-  onTrack: (track: TrackId) => void;
+  onTrack: () => void;
 }) {
   const state = useLearning();
   const online = useConnection();
-  const [progress, setProgress] = useState<LessonProgress>(() => loadLessonProgress(lesson));
+  const [progress, setProgress] = useState<LessonProgress>(() => {
+    const loaded = loadLessonProgress(lesson);
+    if (autoStart && loaded.stage.kind === "opening") {
+      const started = startLesson(lesson, loaded);
+      saveLessonProgress(lesson.key, started);
+      return started;
+    }
+    return loaded;
+  });
   const progressRef = useRef(progress);
   progressRef.current = progress;
+  const openedAt = useRef(Date.now());
   const [aloudMode, setAloudMode] = useState(false);
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
@@ -235,8 +361,32 @@ function LessonBody({
     }
   }, [stageKey]);
 
+  const elapsedNow = () => {
+    const now = Date.now();
+    const delta = Math.max(0, now - openedAt.current);
+    openedAt.current = now;
+    return (progressRef.current.elapsedMs ?? 0) + delta;
+  };
+
+  useEffect(() => {
+    const persistElapsed = () => {
+      const current = progressRef.current;
+      if (current.stage.kind === "recap") return;
+      const elapsedMs = elapsedNow();
+      const updated = { ...current, elapsedMs };
+      progressRef.current = updated;
+      saveLessonProgress(lesson.key, updated);
+    };
+    window.addEventListener("pagehide", persistElapsed);
+    return () => {
+      window.removeEventListener("pagehide", persistElapsed);
+      persistElapsed();
+    };
+  }, [lesson.key]);
+
   const update = (change: (current: LessonProgress) => LessonProgress) => {
-    const next = change(progressRef.current);
+    const elapsedMs = elapsedNow();
+    const next = { ...change(progressRef.current), elapsedMs };
     progressRef.current = next;
     saveLessonProgress(lesson.key, next);
     setProgress(next);
@@ -246,7 +396,9 @@ function LessonBody({
   const unmet = unmetRequires(deck, lesson, completed);
 
   const goToRecap = () => {
-    const { next, newlyCompletedId } = enterRecap(progressRef.current, newId);
+    const durationMs = elapsedNow();
+    const { next: entered, newlyCompletedId } = enterRecap(progressRef.current, newId);
+    const next = { ...entered, elapsedMs: durationMs };
     progressRef.current = next;
     saveLessonProgress(lesson.key, next);
     setProgress(next);
@@ -255,13 +407,14 @@ function LessonBody({
         id: newlyCompletedId,
         lesson: lesson.key,
         completed_at: Date.now(),
+        duration_ms: durationMs,
       });
     }
   };
 
   const finish = () => {
     clearLessonProgress(lesson.key);
-    onTrack(lesson.track);
+    onTrack();
   };
 
   const markExplanation = () => {
@@ -384,49 +537,13 @@ function LessonBody({
         <LessonMarkdown text={segment.body} images={lesson.images} />
 
         {segment.check ? (
-          <section class="lesson-check" aria-label="Check">
-            <h3 class="tracks-heading">Check</h3>
-            <Markdown text={segment.check.prompt} />
-            <ol class="learn-choices">
-              {segment.check.choices.map((choice, choiceIndex) => {
-                const choiceClass = !checkAnswered
-                  ? ""
-                  : choiceIndex === segment.check?.answer
-                    ? "right"
-                    : choiceIndex === chosenCheck
-                      ? "wrong"
-                      : "";
-                return (
-                  <li key={choice}>
-                    <button
-                      type="button"
-                      class={`pill learn-choice ${choiceClass}`}
-                      aria-pressed={chosenCheck === choiceIndex}
-                      disabled={checkAnswered}
-                      onClick={() =>
-                        update((current) => answerSegmentCheck(current, segIndex, choiceIndex))
-                      }
-                    >
-                      {choice}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-            {checkAnswered ? (
-              <section
-                class={`learn-answer ${chosenCheck === segment.check.answer ? "right" : "wrong"}`}
-                aria-label="Explanation"
-              >
-                <p class="learn-verdict">
-                  {chosenCheck === segment.check.answer
-                    ? "Right"
-                    : `It's: ${segment.check.choices[segment.check.answer]}`}
-                </p>
-                <Markdown text={segment.check.explanation} class="muted" />
-              </section>
-            ) : null}
-          </section>
+          <SegmentCheck
+            check={segment.check}
+            chosen={chosenCheck}
+            onChoose={(choiceIndex) =>
+              update((current) => answerSegmentCheck(current, segIndex, choiceIndex))
+            }
+          />
         ) : null}
 
         <div class="lesson-nav">

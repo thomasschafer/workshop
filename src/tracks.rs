@@ -20,6 +20,8 @@ pub enum Destination {
     PuzzleList,
     /// Practising a track's short items, such as review cards.
     Practice { track: TrackId },
+    /// A short lesson, as `pack/item`.
+    Lesson { item: String },
     /// The Coding track: one of its items, as `pack/item`, or the list of them.
     Coding { item: Option<String> },
     /// Design prompts, each worked through as a design session: one, as `pack/item`, or the
@@ -311,6 +313,13 @@ mod tests {
             })
             .unwrap(),
             serde_json::json!({ "kind": "practice", "track": "mental-maths" })
+        );
+        assert_eq!(
+            serde_json::to_value(Destination::Lesson {
+                item: "sample/binary-heaps".to_owned()
+            })
+            .unwrap(),
+            serde_json::json!({ "kind": "lesson", "item": "sample/binary-heaps" })
         );
         assert_eq!(
             serde_json::to_value(Destination::Coding {

@@ -42,6 +42,27 @@
   gap: 16px;
 }
 
+/* Lesson card offered inline in a track's practice flow before new items. */
+.lesson-flow-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.lesson-flow-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.lesson-flow-actions .pill {
+  min-height: 48px;
+}
+
 .lesson-head {
   display: flex;
   flex-direction: column;

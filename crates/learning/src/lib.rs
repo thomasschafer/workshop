@@ -14,9 +14,9 @@ pub mod store;
 pub use level::{SkillLevel, levels};
 pub use mastery::{SkillMastery, history, mastery};
 pub use mistakes::{Mistake, MistakeSource, NewMistake};
-pub use plan::{Clock, ItemRef, Limits, Progress, TrackPlan, due, plan};
+pub use plan::{Clock, ItemRef, LessonPlanRef, Limits, Progress, TrackPlan, due, plan};
 pub use schedule::{ItemSchedule, Rating, Scheduler};
 pub use store::{
-    Activity, Attempt, Flag, FlagChange, LessonCompletion, Retirement, RetirementChange, Store,
-    standings,
+    Activity, Attempt, Flag, FlagChange, LessonCompletion, LessonSkip, Retirement,
+    RetirementChange, Store, standings,
 };

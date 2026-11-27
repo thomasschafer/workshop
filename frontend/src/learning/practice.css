@@ -305,15 +305,18 @@
   font-weight: 600;
 }
 
-/* After a right answer to an item with a fixed answer: on, much later, or retired. */
+/* After a right answer to an item with a fixed answer, or two consecutive lapses on one with a
+   lesson: the short primary button beside a longer secondary one. */
 .learn-choice-after {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .learn-choice-after .pill {
+  flex: 1 0 auto;
   min-height: 48px;
+  padding: 10px 18px;
 }
 
 .learn-resume {

@@ -516,7 +516,7 @@ esac
             .find(|track| track["id"] == "review")
             .unwrap();
         // It's counted once, apart from what's new, and spends none of today's new items.
-        assert_eq!(review["summary"], "1 being followed up · 9 new");
+        assert_eq!(review["summary"], "1 being followed up · 1 lesson · 8 new");
         assert_eq!(review["next"]["priority"], "unfinished");
         assert_eq!(
             review["next"]["reason"],

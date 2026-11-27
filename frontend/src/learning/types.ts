@@ -39,6 +39,10 @@ interface ItemBase {
   prompt: string;
   source: string | null;
   minutes: number;
+  /** Full `pack/lesson` key of the lesson that teaches this item, if any. */
+  lesson?: string | null;
+  /** The segment of that lesson covering this item, counting from 0, if specified. */
+  segment?: number | null;
 }
 
 export type DeckItem = ItemBase &
@@ -119,6 +123,14 @@ export interface LessonCompletion {
   id: string;
   lesson: string;
   completed_at: number;
+  /** How long the lesson took, in milliseconds. */
+  duration_ms?: number;
+}
+
+export interface LessonSkip {
+  id: string;
+  lesson: string;
+  skipped_at: number;
 }
 
 export interface Limits {
@@ -126,6 +138,8 @@ export interface Limits {
   /** The most new items to start in a day. Decks saved on a device by an older Workshop don't
    * have it, and aren't limited until the next deck comes. */
   daily_new?: number;
+  /** The most lessons offered in practice in a day. Defaults to 1 when missing from older decks. */
+  daily_lessons?: number;
   weekly_minutes: number;
   retention: number;
 }
@@ -135,6 +149,8 @@ export interface DeckProgress {
   reviews_today: number;
   /** Missing from decks saved on a device by an older Workshop. */
   new_today?: number;
+  /** Distinct lessons completed today. Missing from decks saved by an older Workshop. */
+  lessons_today?: number;
   minutes_this_week: number;
 }
 
@@ -167,6 +183,10 @@ export interface Deck {
   /** Completion timestamps (ms since 1970) per lesson key. Missing from decks saved by an older
    * Workshop. */
   lesson_completions?: Record<string, number[]>;
+  /** Skip ("Not now") timestamps (ms since 1970) per lesson key. Missing from older decks. */
+  lesson_skips?: Record<string, number[]>;
+  /** Most recent attempt's rating per short item key. Missing from older decks. */
+  last_ratings?: Record<string, Rating>;
   skills: { id: string; name: string; mastery: number; items: number; attempted: number }[];
   /** The skills recent mistakes point to, whose new items come first. Decks saved on a device
    * by an older Workshop don't have it. */

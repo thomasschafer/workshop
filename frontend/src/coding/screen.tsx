@@ -3,7 +3,7 @@ import { type Bootstrap, ConnectionError, TimeoutError } from "../api";
 import { errorMessage } from "../errors";
 import { useConnection } from "../hooks/useConnection";
 import { TrackLessons } from "../learning/lesson";
-import { ItemView, SyncChip, useLearning } from "../learning/practice";
+import { ItemView, type OpenLessonOptions, SyncChip, useLearning } from "../learning/practice";
 import "../learning/practice.css";
 import { newId, retirements } from "../learning/local";
 import { RetiredList } from "../learning/retired";
@@ -39,7 +39,7 @@ export function CodingScreen({
   /** Opens an item, or the list for null. */
   onOpen: (item: string | null) => void;
   /** Opens a lesson in the Coding track, by its key. */
-  onOpenLesson: (item: string) => void;
+  onOpenLesson: (item: string, options?: OpenLessonOptions) => void;
   /** Goes to another track, such as the one a problem is in. */
   onTrack: (track: TrackId) => void;
 }) {
@@ -51,7 +51,7 @@ export function CodingScreen({
     return subscribeCachedBundles(() => setBundleTick((t) => t + 1));
   }, []);
   if (item === null)
-    return <CodingList onHome={onHome} onOpen={onOpen} onOpenLesson={onOpenLesson} />;
+    return <CodingList onHome={onHome} onOpen={onOpen} onOpenLesson={(key) => onOpenLesson(key)} />;
   // Code to read is in the deck, so it works offline; problems need the server.
   const reading = learning.deck?.items.find((i) => i.key === item && i.kind === "reading");
   if (reading) {
@@ -64,6 +64,9 @@ export function CodingScreen({
             item={reading}
             serverDictation={boot.server_dictation}
             onDone={() => onOpen(null)}
+            onOpenLesson={(lessonKey, segmentIndex) =>
+              onOpenLesson(lessonKey, { segmentIndex, returnToTrack: "coding" })
+            }
           />
         </main>
       </div>

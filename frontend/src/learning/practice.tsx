@@ -14,13 +14,27 @@ import { useMarkdown } from "../hooks/useMarkdown";
 import { HomeButton, TrackTitle } from "../progress/page";
 import type { TrackId } from "../tracks/types";
 import { describeTolerance, displayApproximate, displayNumber, grade } from "./grading";
-import { limitsOf, newId, nextInstance, progress, queue, retired, step, utcOffset } from "./local";
+import {
+  completedLessons,
+  dayStart,
+  type FlowEntry,
+  lastRating,
+  limitsOf,
+  newId,
+  nextInstance,
+  progress,
+  queue,
+  retired,
+  skippedLessons,
+  step,
+  utcOffset,
+} from "./local";
 import { sameOutput } from "./output";
 import "./practice.css";
 import { TrackLessons } from "./lesson";
 import { RetiredList } from "./retired";
 import { learning, type SyncStatus } from "./sync";
-import type { Attempt, Deck, DeckItem, Instance, Rating } from "./types";
+import type { Attempt, Deck, DeckItem, DeckLesson, Instance, Rating } from "./types";
 
 /** Re-renders whenever the device's learning changes, such as after a sync. */
 export function useLearning() {
@@ -41,8 +55,30 @@ export function Markdown({ text, class: className = "" }: { text: string; class?
   );
 }
 
-/** One result in a sitting: whether it was right, or null for a card marked by the learner. */
+/** One result in a sitting: whether it was right, or null for a card or lesson. */
 type Result = { key: string; right: boolean | null };
+
+/** One entry in a practice step: either a short item or a lesson card offered before new items. */
+export type FlowRef = { kind: "item" | "lesson"; key: string };
+
+/** Options when opening a lesson from a track's practice flow or a short item. */
+export interface OpenLessonOptions {
+  /** Counting from 0, to revisit just that segment without adding a completion. */
+  segmentIndex?: number | null;
+  /** Skip the lesson's opening card when started directly from the flow's lesson card. */
+  autoStart?: boolean;
+  /** Track to return to on finishing or going back. */
+  returnToTrack?: TrackId;
+}
+
+/** Practice flow state kept across opening a lesson so returning carries right on. */
+export interface PracticeFlow {
+  step: { entries: FlowRef[]; at: number } | null;
+  results: Result[];
+  seenLessons: string[];
+  excludeNext: string[];
+  startedLesson?: { key: string; completionsBefore: number } | null;
+}
 
 /** The week's minutes, for the target every track shares or a track kept apart from it. */
 function weekTime(deck: Deck, track: TrackId, minutes: number, detail = false): string {
@@ -54,14 +90,25 @@ function weekTime(deck: Deck, track: TrackId, minutes: number, detail = false): 
   return `${minutes} of ${deck.limits.weekly_minutes} minutes this week`;
 }
 
+function flowRefsOf(entries: FlowEntry[]): FlowRef[] {
+  return entries.map((entry) =>
+    entry.kind === "item"
+      ? { kind: "item", key: entry.item.key }
+      : { kind: "lesson", key: entry.lesson.key },
+  );
+}
+
 /**
- * Practising a track: due reviews first, flowing from one item to the next until nothing's left
- * for now. Every answer is saved on the device as it's given and synced when the server can be
- * reached, so it can be left at any moment, and works offline.
+ * Practising a track: follow-ups and due reviews first, then the track's next lesson (if any),
+ * then unlocked new items, flowing from one to the next until nothing's left for now. Every
+ * answer is saved on the device as it's given and synced when the server can be reached, so it
+ * can be left at any moment, and works offline.
  */
 export function Practice({
   track,
   serverDictation,
+  initialFlow = null,
+  onSaveFlow,
   onHome,
   onOpenProblem,
   onOpenLesson,
@@ -69,19 +116,55 @@ export function Practice({
   track: TrackId;
   /** Whether Whisper is ready on the server, for explaining answers aloud. */
   serverDictation: boolean;
+  /** Suspended flow restored when returning from a lesson opened during this sitting. */
+  initialFlow?: PracticeFlow | null;
+  /** Saves the flow before navigating to a lesson so finishing or going back carries on. */
+  onSaveFlow?: (flow: PracticeFlow) => void;
   onHome: () => void;
   /** Opens one of the track's coding problems, by its key. */
   onOpenProblem: (item: string) => void;
-  /** Opens one of the track's lessons, by its key. */
-  onOpenLesson: (item: string) => void;
+  /** Opens a lesson, optionally at a single segment or auto-started from the flow. */
+  onOpenLesson: (item: string, options?: OpenLessonOptions) => void;
 }) {
   const state = useLearning();
   const deck = state.deck;
-  // The full list of keys in the step under way and where the learner is in it; keeping the
+  // Consume any suspended flow once on mount, checking whether a started lesson was completed.
+  const [restored] = useState<{
+    step: { entries: FlowRef[]; at: number } | null;
+    results: Result[];
+    seenLessons: string[];
+    excludeNext: string[];
+    fromFlow: boolean;
+  }>(() => {
+    if (!initialFlow) {
+      return { step: null, results: [], seenLessons: [], excludeNext: [], fromFlow: false };
+    }
+    const results = [...initialFlow.results];
+    if (initialFlow.startedLesson && state.deck) {
+      const done =
+        completedLessons(state.deck, state.lessonCompletions)[initialFlow.startedLesson.key]
+          ?.length ?? 0;
+      if (done > initialFlow.startedLesson.completionsBefore) {
+        results.push({ key: initialFlow.startedLesson.key, right: null });
+      }
+    }
+    return {
+      step: initialFlow.step,
+      results,
+      seenLessons: initialFlow.seenLessons,
+      excludeNext: initialFlow.excludeNext,
+      fromFlow: true,
+    };
+  });
+
+  // The full list of entries in the step under way and where the learner is in it; keeping the
   // whole step lets the next step exclude only the one just finished, while still allowing
   // forgotten items to return in a later step of the same sitting.
-  const [currentStep, setCurrentStep] = useState<{ keys: string[]; at: number } | null>(null);
-  const [results, setResults] = useState<Result[]>([]);
+  const [currentStep, setCurrentStep] = useState<{ entries: FlowRef[]; at: number } | null>(
+    restored.step,
+  );
+  const [results, setResults] = useState<Result[]>(restored.results);
+  const seenLessonsRef = useRef<Set<string>>(new Set(restored.seenLessons));
   // The deck's ready once it's been fetched, or right away if the device has one.
   const [tried, setTried] = useState(false);
 
@@ -89,39 +172,49 @@ export function Practice({
     void state.sync().finally(() => setTried(true));
   }, []);
 
-  const pickStep = (from: Deck, exclude: ReadonlySet<string> = new Set()) =>
-    step(
-      queue(
-        from,
-        track,
-        state.attempts,
-        state.flagChanges,
-        state.retirementChanges,
-        Date.now(),
-        utcOffset(),
+  const pickStep = (from: Deck, exclude: ReadonlySet<string> = new Set()): FlowRef[] => {
+    const combinedExclude = new Set([...exclude, ...seenLessonsRef.current]);
+    return flowRefsOf(
+      step(
+        queue(
+          from,
+          track,
+          state.attempts,
+          state.flagChanges,
+          state.retirementChanges,
+          Date.now(),
+          utcOffset(),
+          state.lessonCompletions,
+          state.lessonSkips,
+        ),
+        combinedExclude,
       ),
-      exclude,
-    ).map((item) => item.key);
+    );
+  };
 
-  const startStep = () => {
+  const startStep = (exclude: ReadonlySet<string> = new Set()) => {
     const currentDeck = state.deck;
     if (!currentDeck) return;
-    setCurrentStep({ keys: pickStep(currentDeck), at: 0 });
-    setResults([]);
-    begun.current = false;
+    setCurrentStep({ entries: pickStep(currentDeck, exclude), at: 0 });
+    if (!restored.fromFlow) {
+      setResults([]);
+      begun.current = false;
+    }
   };
   // The first step starts once there's a deck, from the device or the server.
   useEffect(() => {
-    if (deck && currentStep === null) startStep();
+    if (deck && currentStep === null) {
+      startStep(new Set(restored.excludeNext));
+    }
   }, [deck !== null]);
   // Whether anything's been begun in the sitting, typed or tapped, so it isn't taken away.
-  const begun = useRef(false);
+  const begun = useRef(restored.fromFlow);
   // A step started from the device's deck, before it synced, is started again if the server
   // says a card has follow-up questions under way that it doesn't start with, such as ones
   // started on another device, unless anything in it's been begun.
   useEffect(() => {
     if (!tried || !deck || currentStep === null || results.length > 0 || begun.current) return;
-    const underWay = queue(
+    const q = queue(
       deck,
       track,
       state.attempts,
@@ -129,8 +222,16 @@ export function Practice({
       state.retirementChanges,
       Date.now(),
       utcOffset(),
-    ).followUps;
-    if (underWay.some((item, at) => currentStep.keys[at] !== item.key)) startStep();
+      state.lessonCompletions,
+      state.lessonSkips,
+    );
+    const followUpChanged = q.followUps.some(
+      (item, at) =>
+        currentStep.entries[at]?.kind !== "item" || currentStep.entries[at]?.key !== item.key,
+    );
+    const firstIsStaleLesson =
+      currentStep.entries[0]?.kind === "lesson" && currentStep.entries[0]?.key !== q.lesson?.key;
+    if (followUpChanged || firstIsStaleLesson) startStep();
   }, [tried]);
 
   const name = deck?.tracks.find((t) => t.id === track)?.name ?? "Practice";
@@ -164,36 +265,120 @@ export function Practice({
 
   if (currentStep === null) return <div class="learn">{header}</div>;
 
-  const current = currentStep.keys
+  const now = Date.now();
+  const offset = utcOffset();
+  const today = dayStart(now, offset);
+  const completed = completedLessons(deck, state.lessonCompletions);
+  const skipped = skippedLessons(deck, state.lessonSkips);
+  const resolveEntry = (ref: FlowRef): FlowEntry | undefined => {
+    if (ref.kind === "item") {
+      const item = deck.items.find((i) => i.key === ref.key);
+      return item ? { kind: "item", item } : undefined;
+    }
+    const lesson = (deck.lessons ?? []).find((l) => l.key === ref.key);
+    if (!lesson) return undefined;
+    if ((completed[lesson.key]?.length ?? 0) > 0) return undefined;
+    if (skipped[lesson.key]?.some((at) => at >= today)) return undefined;
+    return { kind: "lesson", lesson };
+  };
+
+  const current = currentStep.entries
     .slice(currentStep.at)
-    .map((key) => deck.items.find((item) => item.key === key))
-    .find((item): item is DeckItem => item !== undefined);
-  const week = progress(deck, state.attempts, Date.now(), utcOffset(), track);
+    .map(resolveEntry)
+    .find((entry): entry is FlowEntry => entry !== undefined);
+  const week = progress(deck, state.attempts, now, offset, track, state.lessonCompletions);
+
+  const computeNextAfter = (
+    ref: FlowRef,
+    nextResults: Result[],
+    extraSeenLesson?: string,
+  ): {
+    step: { entries: FlowRef[]; at: number } | null;
+    excludeNext: string[];
+    results: Result[];
+  } => {
+    if (extraSeenLesson) seenLessonsRef.current.add(extraSeenLesson);
+    const at = currentStep.entries.findIndex(
+      (e, index) => index >= currentStep.at && e.kind === ref.kind && e.key === ref.key,
+    );
+    const nextAt = at === -1 ? currentStep.entries.length : at + 1;
+    const hasMoreInStep = currentStep.entries
+      .slice(nextAt)
+      .some((e) => resolveEntry(e) !== undefined);
+    if (hasMoreInStep) {
+      return {
+        step: { entries: currentStep.entries, at: nextAt },
+        excludeNext: [],
+        results: nextResults,
+      };
+    }
+    return {
+      step: null,
+      excludeNext: currentStep.entries.map((e) => e.key),
+      results: nextResults,
+    };
+  };
+
+  const advancePast = (ref: FlowRef, result: Result | null, extraSeenLesson?: string) => {
+    const nextResults = result ? [...results, result] : results;
+    const next = computeNextAfter(ref, nextResults, extraSeenLesson);
+    setResults(next.results);
+    const currentDeck = state.deck;
+    if (next.step) {
+      setCurrentStep(next.step);
+    } else if (currentDeck) {
+      setCurrentStep({ entries: pickStep(currentDeck, new Set(next.excludeNext)), at: 0 });
+    } else {
+      setCurrentStep({ entries: [], at: 0 });
+    }
+  };
 
   const finishItem = (key: string, right: boolean | null) => {
-    const nextResults = [...results, { key, right }];
-    const currentDeck = state.deck;
-    const at = currentStep.keys.indexOf(key, currentStep.at);
-    const nextAt = at === -1 ? currentStep.keys.length : at + 1;
-    const hasMoreInStep = currentStep.keys
-      .slice(nextAt)
-      .some((k) => currentDeck?.items.some((item) => item.key === k) ?? false);
-    setResults(nextResults);
-    if (hasMoreInStep) {
-      setCurrentStep({ keys: currentStep.keys, at: nextAt });
-    } else if (currentDeck) {
-      setCurrentStep({ keys: pickStep(currentDeck, new Set(currentStep.keys)), at: 0 });
-    } else {
-      setCurrentStep({ keys: [], at: 0 });
-    }
+    advancePast({ kind: "item", key }, { key, right });
+  };
+
+  const openLessonFromItem = (
+    itemKey: string,
+    lessonKey: string,
+    segmentIndex: number | null,
+    right: boolean | null,
+  ) => {
+    const nextResults = [...results, { key: itemKey, right }];
+    const next = computeNextAfter({ kind: "item", key: itemKey }, nextResults);
+    onSaveFlow?.({
+      step: next.step,
+      results: next.results,
+      seenLessons: [...seenLessonsRef.current],
+      excludeNext: next.excludeNext,
+      startedLesson: null,
+    });
+    onOpenLesson(lessonKey, { segmentIndex, returnToTrack: track });
+  };
+
+  const startFlowLesson = (lesson: DeckLesson) => {
+    const completionsBefore = completed[lesson.key]?.length ?? 0;
+    const next = computeNextAfter({ kind: "lesson", key: lesson.key }, results, lesson.key);
+    onSaveFlow?.({
+      step: next.step,
+      results: next.results,
+      seenLessons: [...seenLessonsRef.current],
+      excludeNext: next.excludeNext,
+      startedLesson: { key: lesson.key, completionsBefore },
+    });
+    onOpenLesson(lesson.key, { autoStart: true, returnToTrack: track });
+  };
+
+  const skipFlowLesson = (lesson: DeckLesson) => {
+    state.skipLesson({ id: newId(), lesson: lesson.key, skipped_at: Date.now() });
+    advancePast({ kind: "lesson", key: lesson.key }, null, lesson.key);
   };
 
   const bringBack = (key: string) => {
     state.bringBack(key);
     const currentDeck = state.deck;
     if (!currentDeck) return;
-    const nextKeys = pickStep(currentDeck);
-    if (nextKeys.length > 0) setCurrentStep({ keys: nextKeys, at: 0 });
+    const nextEntries = pickStep(currentDeck);
+    if (nextEntries.length > 0) setCurrentStep({ entries: nextEntries, at: 0 });
   };
 
   return (
@@ -219,13 +404,25 @@ export function Practice({
               {results.length > 0 ? `${results.length} done · ` : ""}
               {weekTime(deck, track, week.minutesThisWeek)}
             </p>
-            <ItemView
-              key={`${current.key}-${results.length}`}
-              item={current}
-              followedUp={deck.follow_ups?.includes(current.key) ?? false}
-              serverDictation={serverDictation}
-              onDone={(right) => finishItem(current.key, right)}
-            />
+            {current.kind === "lesson" ? (
+              <LessonFlowCard
+                key={current.lesson.key}
+                lesson={current.lesson}
+                onStart={() => startFlowLesson(current.lesson)}
+                onSkip={() => skipFlowLesson(current.lesson)}
+              />
+            ) : (
+              <ItemView
+                key={`${current.item.key}-${results.length}`}
+                item={current.item}
+                followedUp={deck.follow_ups?.includes(current.item.key) ?? false}
+                serverDictation={serverDictation}
+                onDone={(right) => finishItem(current.item.key, right)}
+                onOpenLesson={(lessonKey, segmentIndex, right) =>
+                  openLessonFromItem(current.item.key, lessonKey, segmentIndex, right)
+                }
+              />
+            )}
           </>
         ) : (
           <>
@@ -236,12 +433,41 @@ export function Practice({
               onHome={onHome}
               onBringBack={bringBack}
             />
-            <TrackLessons deck={deck} track={track} onOpen={onOpenLesson} />
+            <TrackLessons deck={deck} track={track} onOpen={(item) => onOpenLesson(item)} />
             <TrackProblems track={track} onOpen={onOpenProblem} />
           </>
         )}
       </main>
     </div>
+  );
+}
+
+/** A short card offered in the practice flow for the track's next lesson, before new items. */
+function LessonFlowCard({
+  lesson,
+  onStart,
+  onSkip,
+}: {
+  lesson: DeckLesson;
+  onStart: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <article class="lesson-flow-card" aria-label={`Lesson: ${lesson.title}`}>
+      <div class="lesson-head">
+        <p class="lesson-meta muted">Lesson · ~{lesson.minutes} min</p>
+        <h2 class="lesson-title">{lesson.title}</h2>
+      </div>
+      <Markdown text={lesson.prompt} class="learn-prompt" />
+      <div class="lesson-flow-actions">
+        <button type="button" class="pill primary" onClick={onStart}>
+          Start
+        </button>
+        <button type="button" class="pill" onClick={onSkip}>
+          Not now
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -273,14 +499,27 @@ export function ItemView({
   followedUp = false,
   serverDictation,
   onDone,
+  onOpenLesson,
 }: {
   item: DeckItem;
   /** Whether it's a card with follow-up questions under way, to carry on with. */
   followedUp?: boolean;
   serverDictation: boolean;
   onDone: (right: boolean | null) => void;
+  /** Opens the item's lesson (or a single segment) via "Teach me" or "Revisit the lesson". */
+  onOpenLesson?: (lessonKey: string, segmentIndex: number | null, right: boolean | null) => void;
 }) {
   const shown = useRef(Date.now());
+  // Remember whether the previous attempt was wrong/Forgot before this attempt is recorded.
+  const [previousWasAgain] = useState(() => {
+    const currentDeck = learning().deck;
+    return currentDeck ? lastRating(currentDeck, learning().attempts, item.key) === "again" : false;
+  });
+  const linkedLesson = (() => {
+    if (!item.lesson || !onOpenLesson) return null;
+    const currentDeck = learning().deck;
+    return currentDeck?.lessons?.find((l) => l.key === item.lesson) ?? null;
+  })();
   const attempt = (rating: Rating, extra: { response?: string; seed?: number }): Attempt => ({
     id: newId(),
     item: item.key,
@@ -292,6 +531,22 @@ export function ItemView({
   const record = (rating: Rating, extra: { response?: string; seed?: number } = {}) => {
     learning().record(attempt(rating, extra));
   };
+  const teachMe = (right: boolean | null, extra: { seed?: number } = {}) => {
+    if (!linkedLesson || !onOpenLesson) return;
+    record("again", extra);
+    const currentDeck = learning().deck;
+    const done = currentDeck
+      ? (completedLessons(currentDeck, learning().lessonCompletions)[linkedLesson.key]?.length ??
+          0) > 0
+      : false;
+    const segmentIndex = done && item.segment != null ? item.segment : null;
+    onOpenLesson(linkedLesson.key, segmentIndex, right);
+  };
+  const revisit = (right: boolean | null) => {
+    if (!linkedLesson || !onOpenLesson) return;
+    onOpenLesson(linkedLesson.key, item.segment ?? null, right);
+  };
+  const canRevisit = linkedLesson !== null && previousWasAgain;
   // A right answer to an item with a fixed answer waits for the learner to say whether to
   // retire it. Left without saying, such as by going home or closing the app, it's "Got it".
   const choosing = useRef<Attempt | null>(null);
@@ -326,11 +581,15 @@ export function ItemView({
           item={item}
           followedUp={followedUp}
           serverDictation={serverDictation}
+          canRevisit={canRevisit}
           onRate={(rating) => {
             record(rating);
             onDone(null);
           }}
+          onLapsedAgain={() => record("again")}
           onMarked={() => onDone(null)}
+          onTeachMe={linkedLesson ? () => teachMe(null) : undefined}
+          onRevisit={canRevisit ? () => revisit(null) : undefined}
           onFlag={(note) => {
             learning().flag({
               id: newId(),
@@ -343,7 +602,14 @@ export function ItemView({
           }}
         />
       ) : item.kind === "reading" ? (
-        <ReadingView item={item} onAnswer={answerFixed} onNext={onDone} onChoose={choose} />
+        <ReadingView
+          item={item}
+          onAnswer={answerFixed}
+          onNext={onDone}
+          onChoose={choose}
+          onTeachMe={linkedLesson ? () => teachMe(false) : undefined}
+          onRevisit={canRevisit ? () => revisit(false) : undefined}
+        />
       ) : item.kind === "mental-maths" ? (
         <TypedAnswer
           prompt={nextInstance(item.instances, learning().attempts, item.key)}
@@ -357,6 +623,10 @@ export function ItemView({
             });
           }}
           onNext={onDone}
+          onTeachMe={
+            linkedLesson ? (instance) => teachMe(false, { seed: instance.seed }) : undefined
+          }
+          onRevisit={canRevisit ? () => revisit(false) : undefined}
         />
       ) : (
         <TypedAnswer
@@ -371,6 +641,8 @@ export function ItemView({
           onAnswer={(_, response, right) => answerFixed(response, right)}
           onNext={onDone}
           onChoose={choose}
+          onTeachMe={linkedLesson ? () => teachMe(false) : undefined}
+          onRevisit={canRevisit ? () => revisit(false) : undefined}
         />
       )}
       {item.source ? <p class="learn-source muted">Source: {item.source}</p> : null}
@@ -382,20 +654,31 @@ function CardView({
   item,
   followedUp,
   serverDictation,
+  canRevisit,
   onRate,
+  onLapsedAgain,
   onMarked,
+  onTeachMe,
+  onRevisit,
   onFlag,
 }: {
   item: Extract<DeckItem, { kind: "card" }>;
   /** Whether it has follow-up questions under way, to carry on with. */
   followedUp: boolean;
   serverDictation: boolean;
+  /** Whether a Forgot rating triggers "Revisit the lesson" beside Next. */
+  canRevisit: boolean;
   onRate: (rating: Rating) => void;
+  /** Records a second consecutive Forgot rating while keeping the answer screen open. */
+  onLapsedAgain: () => void;
   /** Once the grader has marked an answer in the learner's own words, which it records. */
   onMarked: () => void;
+  onTeachMe?: (() => void) | undefined;
+  onRevisit?: (() => void) | undefined;
   onFlag: (note: string) => void;
 }) {
   const [revealed, setRevealed] = useState(false);
+  const [lapsedAgain, setLapsedAgain] = useState(false);
   const [flagging, setFlagging] = useState(false);
   const [note, setNote] = useState("");
   /** Answering in the learner's own words, written or explained aloud, for the grader. */
@@ -404,6 +687,7 @@ function CardView({
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
   const [marked, setMarked] = useState<Marked | null>(null);
+  const [markedRating, setMarkedRating] = useState<Rating | null>(null);
   const online = useConnection();
   // A deck from an older Workshop doesn't say, so the server decides.
   const offersFollowUps = (item.follow_ups ?? 1) > 0;
@@ -488,6 +772,7 @@ function CardView({
       .then(
         (reply) => {
           setMarked(reply.marked);
+          setMarkedRating(reply.attempt?.rating ?? null);
           setRevealed(true);
         },
         (e: unknown) => setMarkError(errorMessage(e)),
@@ -545,10 +830,16 @@ function CardView({
             <Markdown text={item.answer} />
             {item.explanation ? <Markdown text={item.explanation} class="muted" /> : null}
           </section>
-          {marked && !flagging ? (
-            <button type="button" class="pill primary wide" onClick={onMarked}>
-              Next
-            </button>
+          {lapsedAgain && !flagging && onRevisit ? (
+            <AfterWrong onNext={onMarked} onRevisit={onRevisit} />
+          ) : marked && !flagging ? (
+            canRevisit && markedRating === "again" && onRevisit ? (
+              <AfterWrong onNext={onMarked} onRevisit={onRevisit} />
+            ) : (
+              <button type="button" class="pill primary wide" onClick={onMarked}>
+                Next
+              </button>
+            )
           ) : null}
           {flagging ? (
             <form
@@ -575,7 +866,7 @@ function CardView({
                 </button>
               </span>
             </form>
-          ) : marked ? (
+          ) : marked || lapsedAgain ? (
             <button type="button" class="learn-link" onClick={() => setFlagging(true)}>
               This is wrong
             </button>
@@ -595,7 +886,14 @@ function CardView({
                     key={rating}
                     type="button"
                     class={`pill rating ${rating}`}
-                    onClick={() => onRate(rating)}
+                    onClick={() => {
+                      if (rating === "again" && canRevisit && onRevisit) {
+                        onLapsedAgain();
+                        setLapsedAgain(true);
+                      } else {
+                        onRate(rating);
+                      }
+                    }}
                   >
                     {label}
                   </button>
@@ -616,6 +914,7 @@ function CardView({
           serverDictation={serverDictation}
           onMarked={(reply, done) => {
             setMarked(reply.marked);
+            setMarkedRating(reply.attempt?.rating ?? null);
             setFollowedUpMarked(done);
             setRevealed(true);
           }}
@@ -643,6 +942,7 @@ function CardView({
             serverDictation={serverDictation}
             onMarked={(reply) => {
               setMarked(reply.marked);
+              setMarkedRating(reply.attempt?.rating ?? null);
               setRevealed(true);
             }}
             {...(offersFollowUps ? { onDeeper: (heard: string) => goDeeper(heard, true) } : {})}
@@ -760,6 +1060,11 @@ function CardView({
             <button type="button" class="learn-link" onClick={() => setAnswering("aloud")}>
               Explain it aloud
             </button>
+            {onTeachMe ? (
+              <button type="button" class="learn-link" onClick={onTeachMe}>
+                Teach me
+              </button>
+            ) : null}
           </span>
         </>
       )}
@@ -773,12 +1078,16 @@ function ReadingView({
   onAnswer,
   onNext,
   onChoose,
+  onTeachMe,
+  onRevisit,
 }: {
   item: Extract<DeckItem, { kind: "reading" }>;
   onAnswer: (response: string | null, right: boolean) => void;
   onNext: (right: boolean) => void;
   /** After a right answer, which only goes on once the learner chooses. */
   onChoose: (choice: Choice) => void;
+  onTeachMe?: (() => void) | undefined;
+  onRevisit?: (() => void) | undefined;
 }) {
   const [response, setResponse] = useState("");
   const [right, setRight] = useState<boolean | null>(null);
@@ -852,6 +1161,13 @@ function ReadingView({
           ))}
         </ol>
       )}
+      {right === null && onTeachMe ? (
+        <span class="learn-links">
+          <button type="button" class="learn-link" onClick={onTeachMe}>
+            Teach me
+          </button>
+        </span>
+      ) : null}
       {right !== null ? (
         <section class={`learn-answer ${right ? "right" : "wrong"}`} aria-label="Answer">
           <p class="learn-verdict">
@@ -865,6 +1181,8 @@ function ReadingView({
           <Markdown text={item.explanation} class="muted" />
           {right ? (
             <ChoiceAfterRight onChoose={onChoose} />
+          ) : onRevisit ? (
+            <AfterWrong onNext={() => onNext(false)} onRevisit={onRevisit} />
           ) : (
             <NextButton onNext={onNext} right={false} />
           )}
@@ -885,6 +1203,22 @@ function NextButton({ right, onNext }: { right: boolean; onNext: (right: boolean
     <button ref={next} type="button" class="pill primary wide" onClick={() => onNext(right)}>
       Next
     </button>
+  );
+}
+
+/** After two consecutive lapses on an item with a lesson: Next (focused) beside revisiting it. */
+function AfterWrong({ onNext, onRevisit }: { onNext: () => void; onRevisit: () => void }) {
+  const next = useRef<HTMLButtonElement>(null);
+  useEffect(() => next.current?.focus(), []);
+  return (
+    <div class="learn-choice-after">
+      <button ref={next} type="button" class="pill primary" onClick={onNext}>
+        Next
+      </button>
+      <button type="button" class="pill" onClick={onRevisit}>
+        Revisit the lesson
+      </button>
+    </div>
   );
 }
 
@@ -918,6 +1252,8 @@ function TypedAnswer({
   onAnswer,
   onNext,
   onChoose,
+  onTeachMe,
+  onRevisit,
 }: {
   prompt: Instance;
   tolerance: Extract<DeckItem, { kind: "probability" }>["tolerance"];
@@ -934,6 +1270,8 @@ function TypedAnswer({
   /** For a question with a fixed answer: once it's answered right, which only goes on once the
    * learner chooses. Questions made afresh each time go straight on. */
   onChoose?: (choice: Choice) => void;
+  onTeachMe?: ((instance: Instance) => void) | undefined;
+  onRevisit?: (() => void) | undefined;
 }) {
   // The question stays the one first shown, even once answering it moves the deck on.
   const [instance] = useState(prompt);
@@ -995,6 +1333,13 @@ function TypedAnswer({
           </span>
         ) : null}
       </form>
+      {right === null && onTeachMe ? (
+        <span class="learn-links">
+          <button type="button" class="learn-link" onClick={() => onTeachMe(instance)}>
+            Teach me
+          </button>
+        </span>
+      ) : null}
       {problem ? <p class="error-text">{problem}</p> : null}
       {right !== null ? (
         <section class={`learn-answer ${right ? "right" : "wrong"}`} aria-label="Answer">
@@ -1008,6 +1353,8 @@ function TypedAnswer({
           {instance.method ? <Markdown text={instance.method} class="muted" /> : null}
           {right && onChoose ? (
             <ChoiceAfterRight onChoose={onChoose} />
+          ) : !right && onRevisit ? (
+            <AfterWrong onNext={() => onNext(false)} onRevisit={onRevisit} />
           ) : (
             <NextButton onNext={onNext} right={right} />
           )}
@@ -1040,8 +1387,10 @@ function Done({
     state.retirementChanges,
     now,
     utcOffset(),
+    state.lessonCompletions,
+    state.lessonSkips,
   );
-  const week = progress(deck, state.attempts, now, utcOffset(), track);
+  const week = progress(deck, state.attempts, now, utcOffset(), track, state.lessonCompletions);
   // A track can have only problems, listed below, and no short items to practise.
   const hasShort = deck.items.some((item) => item.track === track);
   const answered = results.filter((r) => r.right !== null);

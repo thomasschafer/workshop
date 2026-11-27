@@ -97,8 +97,20 @@ describe("routeFor", () => {
     });
   });
 
-  it("opens a lesson at its own address and falls back to home for invalid paths", () => {
+  it("opens a lesson at its own address, optionally at a segment, and falls back to home for invalid paths", () => {
     expect(routeOf("/lessons/sample/binary-heaps", "")).toEqual({
+      screen: "lesson",
+      item: "sample/binary-heaps",
+    });
+    expect(routeOf("/lessons/sample/binary-heaps", "?segment=2")).toEqual({
+      screen: "lesson",
+      item: "sample/binary-heaps",
+      segment: 1,
+    });
+    expect(pathOf({ screen: "lesson", item: "sample/binary-heaps", segment: 1 })).toBe(
+      "/lessons/sample/binary-heaps?segment=2",
+    );
+    expect(routeFor({ kind: "lesson", item: "sample/binary-heaps" })).toEqual({
       screen: "lesson",
       item: "sample/binary-heaps",
     });

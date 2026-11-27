@@ -76,7 +76,7 @@ describe("Learning", () => {
     expect(reloaded.attempts).toEqual([first]);
     await reloaded.sync();
     expect(sent).toEqual([
-      { attempts: [first], flags: [], retirements: [], lesson_completions: [] },
+      { attempts: [first], flags: [], retirements: [], lesson_completions: [], lesson_skips: [] },
     ]);
     expect(reloaded.attempts).toEqual([]);
     expect(reloaded.deck).toEqual(DECK);
@@ -127,7 +127,9 @@ describe("Learning", () => {
     // It's the server's already, so there's nothing to send.
     expect(reloaded.syncStatus.pending).toBe(0);
     await reloaded.sync();
-    expect(sent).toEqual([{ attempts: [], flags: [], retirements: [], lesson_completions: [] }]);
+    expect(sent).toEqual([
+      { attempts: [], flags: [], retirements: [], lesson_completions: [], lesson_skips: [] },
+    ]);
     expect(reloaded.attempts).toEqual([]);
   });
 
@@ -254,6 +256,7 @@ describe("Learning", () => {
         flags: [],
         retirements: offline.retirementChanges,
         lesson_completions: [],
+        lesson_skips: [],
       },
     ]);
     expect(reloaded.retirementChanges).toEqual([]);
@@ -286,7 +289,7 @@ describe("Learning", () => {
     expect(learning.syncStatus.pending).toBe(1);
     await learning.sync();
     expect(sent).toEqual([
-      { attempts: [first], flags: [], retirements: [], lesson_completions: [] },
+      { attempts: [first], flags: [], retirements: [], lesson_completions: [], lesson_skips: [] },
     ]);
   });
 
@@ -303,12 +306,20 @@ describe("Learning", () => {
       id: newId(),
       lesson: "sample/binary-heaps",
       completed_at: Date.now(),
+      duration_ms: 120_000,
+    };
+    const skip = {
+      id: newId(),
+      lesson: "sample/other-lesson",
+      skipped_at: Date.now(),
     };
     offline.completeLesson(completion);
     // Duplicate id is ignored.
     offline.completeLesson(completion);
+    offline.skipLesson(skip);
+    offline.skipLesson(skip);
     await offline.sync();
-    expect(offline.syncStatus).toMatchObject({ pending: 1, offline: true, error: null });
+    expect(offline.syncStatus).toMatchObject({ pending: 2, offline: true, error: null });
 
     const sent: unknown[] = [];
     vi.stubGlobal(
@@ -319,17 +330,26 @@ describe("Learning", () => {
           JSON.stringify({
             ...DECK,
             lesson_completions: { "sample/binary-heaps": [completion.completed_at] },
+            lesson_skips: { "sample/other-lesson": [skip.skipped_at] },
           }),
         );
       }),
     );
     const reloaded = new Learning(storage);
     expect(reloaded.lessonCompletions).toEqual([completion]);
+    expect(reloaded.lessonSkips).toEqual([skip]);
     await reloaded.sync();
     expect(sent).toEqual([
-      { attempts: [], flags: [], retirements: [], lesson_completions: [completion] },
+      {
+        attempts: [],
+        flags: [],
+        retirements: [],
+        lesson_completions: [completion],
+        lesson_skips: [skip],
+      },
     ]);
     expect(reloaded.lessonCompletions).toEqual([]);
+    expect(reloaded.lessonSkips).toEqual([]);
     expect(reloaded.syncStatus).toMatchObject({ pending: 0, offline: false });
   });
 

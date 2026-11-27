@@ -126,6 +126,8 @@ export function Home({
         state.retirementChanges,
         Date.now(),
         utcOffset(),
+        state.lessonCompletions,
+        state.lessonSkips,
       )
     : null;
 

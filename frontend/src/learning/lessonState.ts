@@ -28,6 +28,8 @@ export interface LessonProgress {
   explainRevealed: boolean;
   /** Id of the LessonCompletion recorded on reaching recap, preventing duplicates on reload. */
   completionId: string | null;
+  /** Time spent in the lesson before the current mount, in milliseconds. */
+  elapsedMs: number;
 }
 
 const STORAGE_PREFIX = "workshop:lesson:";
@@ -47,6 +49,7 @@ export function initialProgress(): LessonProgress {
     marked: null,
     explainRevealed: false,
     completionId: null,
+    elapsedMs: 0,
   };
 }
 

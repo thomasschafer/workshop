@@ -101,6 +101,21 @@ pub struct LessonCompletion {
     pub lesson: String,
     /// When the learner reached the recap, in milliseconds since 1970.
     pub completed_at: i64,
+    /// How long the lesson took, in milliseconds. Defaults to 0 for completions from older devices.
+    #[serde(default)]
+    pub duration_ms: i64,
+}
+
+/// Skipping an offered lesson with "Not now" for the rest of the learner's day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LessonSkip {
+    /// Made by the device it happened on, unique to this skip.
+    pub id: String,
+    /// The lesson, as `pack/item`.
+    pub lesson: String,
+    /// When the learner chose "Not now", in milliseconds since 1970.
+    pub skipped_at: i64,
 }
 
 /// How much was done since a moment, such as the start of the day.
@@ -111,7 +126,9 @@ pub struct Activity {
     pub reviews: u32,
     /// Items first attempted since then.
     pub new: u32,
-    /// Time spent, counting each attempt for at most `MAX_ATTEMPT_MS`.
+    /// Distinct lessons completed since then.
+    pub lessons: u32,
+    /// Time spent, counting each attempt and lesson completion for at most `MAX_ATTEMPT_MS`.
     pub ms: i64,
 }
 
@@ -121,7 +138,7 @@ pub struct Store {
 }
 
 /// The schema's version, in SQLite's `user_version`.
-const VERSION: i64 = 5;
+const VERSION: i64 = 6;
 
 const SCHEMA: &str = "
 CREATE TABLE attempts (
@@ -204,6 +221,19 @@ CREATE TABLE lesson_completions (
     received_at INTEGER NOT NULL
 );
 CREATE INDEX lesson_completions_by_lesson ON lesson_completions (lesson, completed_at, id);
+",
+    "
+-- How long each lesson took, so it counts towards the week's minutes, and lessons skipped
+-- with \"Not now\" for the rest of the learner's day.
+ALTER TABLE lesson_completions ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX lesson_completions_by_time ON lesson_completions (completed_at);
+CREATE TABLE lesson_skips (
+    id TEXT PRIMARY KEY,
+    lesson TEXT NOT NULL,
+    skipped_at INTEGER NOT NULL,
+    received_at INTEGER NOT NULL
+);
+CREATE INDEX lesson_skips_by_time ON lesson_skips (skipped_at);
 ",
 ];
 
@@ -575,7 +605,49 @@ impl Store {
                 activity.ms += ms;
             }
         }
+        let mut lessons = connection.prepare(
+            "SELECT lesson, COALESCE(SUM(MIN(duration_ms, ?2)), 0)
+             FROM lesson_completions
+             WHERE completed_at >= ?1
+             GROUP BY lesson",
+        )?;
+        let rows = lessons.query_map(params![since, MAX_ATTEMPT_MS], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (lesson, ms) = row?;
+            if counts(&lesson) {
+                activity.lessons += 1;
+                activity.ms += ms;
+            }
+        }
         Ok(activity)
+    }
+
+    /// Each attempted item's most recent rating, in attempt order (`answered_at`, then `id`).
+    pub fn last_ratings(&self) -> Result<BTreeMap<String, Rating>> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT a.item, a.rating FROM attempts a
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM attempts b
+                 WHERE b.item = a.item
+                   AND (b.answered_at > a.answered_at
+                        OR (b.answered_at = a.answered_at AND b.id > a.id))
+             )",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let rating: u32 = row.get(1)?;
+            let parsed = Rating::from_number(rating).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Integer,
+                    format!("{rating} isn't a rating").into(),
+                )
+            })?;
+            Ok((row.get::<_, String>(0)?, parsed))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// How many attempts there have been at each item.
@@ -703,13 +775,17 @@ impl Store {
                     completion.completed_at
                 );
             }
+            if completion.duration_ms < 0 {
+                bail!("lesson completion {} took less than no time", completion.id);
+            }
         }
         let mut connection = self.connection();
         let transaction = connection.transaction()?;
         for completion in completions {
             let existing: Option<LessonCompletion> = transaction
                 .query_row(
-                    "SELECT id, lesson, completed_at FROM lesson_completions WHERE id = ?",
+                    "SELECT id, lesson, completed_at, duration_ms
+                     FROM lesson_completions WHERE id = ?",
                     [&completion.id],
                     row_to_lesson_completion,
                 )
@@ -723,12 +799,13 @@ impl Store {
                 None => {}
             }
             transaction.execute(
-                "INSERT INTO lesson_completions (id, lesson, completed_at, received_at)
-                 VALUES (?, ?, ?, ?)",
+                "INSERT INTO lesson_completions (id, lesson, completed_at, duration_ms, received_at)
+                 VALUES (?, ?, ?, ?, ?)",
                 params![
                     completion.id,
                     completion.lesson,
                     completion.completed_at,
+                    completion.duration_ms,
                     now,
                 ],
             )?;
@@ -741,7 +818,7 @@ impl Store {
     pub fn lesson_completions(&self) -> Result<Vec<LessonCompletion>> {
         let connection = self.connection();
         let mut statement = connection.prepare(
-            "SELECT id, lesson, completed_at
+            "SELECT id, lesson, completed_at, duration_ms
              FROM lesson_completions ORDER BY completed_at, id",
         )?;
         let rows = statement.query_map([], row_to_lesson_completion)?;
@@ -759,6 +836,71 @@ impl Store {
         }
         Ok(by_lesson)
     }
+
+    /// Adds lesson skips ("Not now") to the log, ignoring any already there. One with the id of
+    /// one already there but different in any other way is refused, along with the rest.
+    pub fn record_lesson_skips(&self, skips: &[LessonSkip], now: i64) -> Result<()> {
+        for skip in skips {
+            validate_id(&skip.id)?;
+            if skip.lesson.is_empty() {
+                bail!("lesson skip {} isn't for any lesson", skip.id);
+            }
+            if !(EARLIEST..=now + FUTURE_SLACK_MS).contains(&skip.skipped_at) {
+                bail!(
+                    "lesson skip {} says it was made at {}, which this device's clock can't be right about",
+                    skip.id,
+                    skip.skipped_at
+                );
+            }
+        }
+        let mut connection = self.connection();
+        let transaction = connection.transaction()?;
+        for skip in skips {
+            let existing: Option<LessonSkip> = transaction
+                .query_row(
+                    "SELECT id, lesson, skipped_at FROM lesson_skips WHERE id = ?",
+                    [&skip.id],
+                    row_to_lesson_skip,
+                )
+                .optional()?;
+            match existing {
+                Some(existing) if existing == *skip => continue,
+                Some(_) => bail!(
+                    "lesson skip {} was sent before with different details",
+                    skip.id
+                ),
+                None => {}
+            }
+            transaction.execute(
+                "INSERT INTO lesson_skips (id, lesson, skipped_at, received_at)
+                 VALUES (?, ?, ?, ?)",
+                params![skip.id, skip.lesson, skip.skipped_at, now],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Every lesson skip, in the order they were made.
+    pub fn lesson_skips(&self) -> Result<Vec<LessonSkip>> {
+        let connection = self.connection();
+        let mut statement = connection
+            .prepare("SELECT id, lesson, skipped_at FROM lesson_skips ORDER BY skipped_at, id")?;
+        let rows = statement.query_map([], row_to_lesson_skip)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Skip timestamps (ms since 1970) per lesson key, in chronological order.
+    pub fn lesson_skips_by_lesson(&self) -> Result<BTreeMap<String, Vec<i64>>> {
+        let mut by_lesson: BTreeMap<String, Vec<i64>> = BTreeMap::new();
+        for skip in self.lesson_skips()? {
+            by_lesson
+                .entry(skip.lesson)
+                .or_default()
+                .push(skip.skipped_at);
+        }
+        Ok(by_lesson)
+    }
 }
 
 fn row_to_lesson_completion(row: &rusqlite::Row<'_>) -> rusqlite::Result<LessonCompletion> {
@@ -766,6 +908,15 @@ fn row_to_lesson_completion(row: &rusqlite::Row<'_>) -> rusqlite::Result<LessonC
         id: row.get(0)?,
         lesson: row.get(1)?,
         completed_at: row.get(2)?,
+        duration_ms: row.get(3)?,
+    })
+}
+
+fn row_to_lesson_skip(row: &rusqlite::Row<'_>) -> rusqlite::Result<LessonSkip> {
+    Ok(LessonSkip {
+        id: row.get(0)?,
+        lesson: row.get(1)?,
+        skipped_at: row.get(2)?,
     })
 }
 
@@ -1301,11 +1452,13 @@ mod tests {
             id: "lesson-comp-1".to_owned(),
             lesson: "sample/binary-heaps".to_owned(),
             completed_at: NOW - DAY_MS,
+            duration_ms: 120_000,
         };
         let second = LessonCompletion {
             id: "lesson-comp-2".to_owned(),
             lesson: "sample/binary-heaps".to_owned(),
             completed_at: NOW,
+            duration_ms: 60 * 60 * 1000,
         };
         store
             .record_lesson_completions(&[second.clone(), first.clone()], NOW)
@@ -1322,6 +1475,10 @@ mod tests {
             store.lesson_completions_by_lesson().unwrap(),
             BTreeMap::from([("sample/binary-heaps".to_owned(), vec![NOW - DAY_MS, NOW])])
         );
+        // Lesson duration counts towards activity, capped at MAX_ATTEMPT_MS per completion.
+        let week = store.activity(NOW - 2 * DAY_MS).unwrap();
+        assert_eq!(week.lessons, 1);
+        assert_eq!(week.ms, 120_000 + MAX_ATTEMPT_MS);
 
         // Same id with different details is refused.
         let changed = LessonCompletion {
@@ -1334,13 +1491,14 @@ mod tests {
             .to_string();
         assert!(err.contains("different details"), "{err}");
 
-        // Invalid id, empty lesson, or implausible timestamp is refused.
+        // Invalid id, empty lesson, implausible timestamp, or negative duration is refused.
         for (bad, expected) in [
             (
                 LessonCompletion {
                     id: "short".to_owned(),
                     lesson: "sample/binary-heaps".to_owned(),
                     completed_at: NOW,
+                    duration_ms: 0,
                 },
                 "isn't an id",
             ),
@@ -1349,6 +1507,7 @@ mod tests {
                     id: "lesson-comp-3".to_owned(),
                     lesson: String::new(),
                     completed_at: NOW,
+                    duration_ms: 0,
                 },
                 "any lesson",
             ),
@@ -1357,8 +1516,18 @@ mod tests {
                     id: "lesson-comp-4".to_owned(),
                     lesson: "sample/binary-heaps".to_owned(),
                     completed_at: 0,
+                    duration_ms: 0,
                 },
                 "clock",
+            ),
+            (
+                LessonCompletion {
+                    id: "lesson-comp-5".to_owned(),
+                    lesson: "sample/binary-heaps".to_owned(),
+                    completed_at: NOW,
+                    duration_ms: -1,
+                },
+                "no time",
             ),
         ] {
             let err = store
@@ -1367,5 +1536,56 @@ mod tests {
                 .to_string();
             assert!(err.contains(expected), "{err}");
         }
+    }
+
+    #[test]
+    fn records_lesson_skips_idempotently_and_tracks_last_ratings() {
+        let store = Store::in_memory().unwrap();
+        let skip = LessonSkip {
+            id: "lesson-skip-1".to_owned(),
+            lesson: "sample/binary-heaps".to_owned(),
+            skipped_at: NOW,
+        };
+        store
+            .record_lesson_skips(std::slice::from_ref(&skip), NOW)
+            .unwrap();
+        store
+            .record_lesson_skips(std::slice::from_ref(&skip), NOW)
+            .unwrap();
+        assert_eq!(store.lesson_skips().unwrap(), vec![skip.clone()]);
+        assert_eq!(
+            store.lesson_skips_by_lesson().unwrap(),
+            BTreeMap::from([("sample/binary-heaps".to_owned(), vec![NOW])])
+        );
+        let changed = LessonSkip {
+            skipped_at: NOW + 1,
+            ..skip
+        };
+        assert!(
+            store
+                .record_lesson_skips(&[changed], NOW)
+                .unwrap_err()
+                .to_string()
+                .contains("different details")
+        );
+
+        store
+            .record(
+                &[
+                    attempt("1", "sample/a", NOW - DAY_MS, Rating::Again),
+                    attempt("2", "sample/a", NOW, Rating::Good),
+                    attempt("3", "sample/b", NOW - DAY_MS, Rating::Good),
+                    attempt("4", "sample/b", NOW, Rating::Again),
+                ],
+                NOW,
+            )
+            .unwrap();
+        assert_eq!(
+            store.last_ratings().unwrap(),
+            BTreeMap::from([
+                ("sample/a".to_owned(), Rating::Good),
+                ("sample/b".to_owned(), Rating::Again),
+            ])
+        );
     }
 }

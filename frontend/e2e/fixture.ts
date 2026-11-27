@@ -326,10 +326,103 @@ name = "Study"
 [[skills]]
 id = "arrays"
 name = "Arrays"
+
+[[skills]]
+id = "hashing"
+name = "Hashing"
+
+[[tracks]]
+id = "notes"
+name = "Notes"
+summary = "Short notes kept apart"
+icon = "book"
+continue = false
+`,
+    "items/lessons/stack-frames/item.md": `+++
+kind = "lesson"
+title = "How call stacks work"
+track = "coding"
+skills = ["arrays"]
+minutes = 3
+
+[[sources]]
+title = "Call stack overview"
+url = "https://example.com/call-stacks"
++++
+How each function call gets its own frame on the stack and frees it on return.
+
+## Frames on the stack
+
+Each call pushes a frame holding its parameters, local variables and return address; returning pops that frame in O(1).
+
+## Explain
+
+Why does returning from a function free its local variables without searching memory?
+
+## Explain answer
+
+Because frames are pushed and popped in last-in, first-out order, moving the stack pointer back releases the whole frame in constant time.
+`,
+    "items/lessons/notes-lesson/item.md": `+++
+kind = "lesson"
+title = "How hash tables probe"
+track = "notes"
+skills = ["hashing"]
+minutes = 2
+
+[[sources]]
+title = "Open addressing notes"
+url = "https://example.com/probing"
+
+[[checks]]
+segment = 1
+prompt = "What happens when the home slot is already taken in linear probing?"
+choices = ["The table throws away the old key", "It checks the next slot in order", "It doubles the table immediately"]
+answer = 2
+explanation = "Linear probing steps forward slot by slot until it finds an empty slot."
++++
+How open addressing resolves collisions inside a single array.
+
+## Linear probing
+
+When a key hashes to an occupied slot, linear probing checks the next slot, wrapping around the end of the array until it finds an empty slot.
+
+## Explain
+
+Why does linear probing stay cache-friendly at low load factors?
+
+## Explain answer
+
+Checking adjacent slots keeps lookups in nearby cache lines instead of chasing pointers across memory.
+`,
+    "items/cards/notes-plain.md": `+++
+kind = "card"
+track = "notes"
+skills = ["hashing"]
++++
+What load factor range keeps open addressing fast?
+
+## Answer
+
+Below about 0.7, so probe sequences stay short.
+`,
+    "items/cards/notes-linked.md": `+++
+kind = "card"
+track = "notes"
+skills = ["hashing"]
+lesson = "notes-lesson"
+segment = 1
++++
+In linear probing, where do you look when slot h is occupied?
+
+## Answer
+
+Slot (h + 1) mod m, then (h + 2) mod m, until an empty slot is found.
 `,
     "items/lessons/arrays-intro/item.md": `+++
 kind = "lesson"
 title = "Contiguous memory in arrays"
+track = "mental-maths"
 skills = ["arrays"]
 minutes = 2
 
@@ -356,6 +449,7 @@ Because elements are stored contiguously with fixed width, the address is comput
     "items/lessons/arrays-growth/item.md": `+++
 kind = "lesson"
 title = "Resizing a dynamic array"
+track = "mental-maths"
 skills = ["arrays"]
 requires = ["arrays-intro"]
 minutes = 3
