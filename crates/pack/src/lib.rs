@@ -37,8 +37,10 @@ pub use item::{
     Content, DIFFICULTY, FollowUps, Item, Kind, MentalMaths, Param, Probability, Simulation,
     replace_section, split_front_matter,
 };
-pub use lesson::{Check, Guess, ImageData, Lesson, LessonImage, LessonRef, LessonSource, Segment};
-pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
+pub use lesson::{
+    Check, Guess, ImageData, Lesson, LessonImage, LessonRef, LessonSource, Segment, TopicRef,
+};
+pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill, Topic};
 pub use project::{Defect, Project, ProjectFile, Review, Task};
 
 /// How many questions a mental maths template must make without fault to pass its check.
@@ -1087,6 +1089,36 @@ mod tests {
                     .contains("over the limit of 300"),
             "{:?}",
             report.failures()
+        );
+    }
+
+    #[tokio::test]
+    async fn checks_the_topics_lessons_teach() {
+        let manifest =
+            format!("{MANIFEST}topics = [{{ id = \"two-dice\", name = \"Two dice\" }}]\n");
+        let with_topic = |topic: &str| {
+            lesson_file(&[], &[("One", "Text.")]).replacen(
+                "+++\n",
+                &format!("+++\ntopic = \"{topic}\"\n"),
+                1,
+            )
+        };
+        let pack = Pack::from_files(files(&[
+            ("pack.toml", &manifest),
+            ("items/taught.md", &with_topic("dice/two-dice")),
+            ("items/also-taught.md", &with_topic("dice/two-dice")),
+            ("items/untaught.md", &with_topic("dice/three-dice")),
+        ]))
+        .unwrap();
+        let report = pack.check(&NotRun).await;
+        let failures = report.failures();
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert_eq!(failures[0].path, "items/untaught.md");
+        assert!(
+            failures[0]
+                .message
+                .contains("isn't one of the topics of \"dice\""),
+            "{failures:?}"
         );
     }
 

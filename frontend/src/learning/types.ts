@@ -193,7 +193,18 @@ export interface Deck {
   lesson_skips?: Record<string, number[]>;
   /** Most recent attempt's rating per short item key. Missing from older decks. */
   last_ratings?: Record<string, Rating>;
-  skills: { id: string; name: string; mastery: number; items: number; attempted: number }[];
+  /** Each skill's recall (`mastery`) and coverage, as on the Goals page; coverage, `topics` and
+   * `covered` are missing from decks saved by an older Workshop. */
+  skills: {
+    id: string;
+    name: string;
+    mastery: number;
+    coverage?: number;
+    topics?: number;
+    covered?: number;
+    items: number;
+    attempted: number;
+  }[];
   /** The skills recent mistakes point to, whose new items come first. Decks saved on a device
    * by an older Workshop don't have it. */
   focus?: string[];

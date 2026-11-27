@@ -84,8 +84,25 @@
   gap: 12px;
 }
 
+.goal-skill-standing {
+  font-size: 14px;
+}
+
 .goal-skill-items {
   font-size: 13px;
+}
+
+/* Each measure's meter beside its name, the names in a column of their own. */
+.goal-meters {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 8px;
+}
+
+.goal-meter-label {
+  font-size: 12px;
 }
 
 /* The target, marked across the skill's meter. */
@@ -119,16 +136,60 @@
 
 .goal-trend-line {
   fill: none;
-  stroke: var(--accent);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+
+.goal-trend-coverage {
+  stroke: var(--accent);
+}
+
+.goal-trend-recall {
+  stroke: var(--ok);
+}
+
+/* A swatch of a line's colour, before its value in the caption. */
+.goal-key {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.goal-key-coverage {
+  background: var(--accent);
+}
+
+.goal-key-recall {
+  background: var(--ok);
 }
 
 .goal-trend-target {
   stroke: var(--muted);
   stroke-width: 1;
   stroke-dasharray: 4 4;
+}
+
+.goal-trend-target-coverage {
+  stroke: var(--accent);
+}
+
+.goal-trend-target-recall {
+  stroke: var(--ok);
+}
+
+/* Recall's meters in its colour in the trend; coverage's keep the meters' own accent. */
+.meter.goal-meter-recall::-webkit-meter-optimum-value,
+.meter.goal-meter-recall::-webkit-meter-suboptimum-value,
+.meter.goal-meter-recall::-webkit-meter-even-less-good-value {
+  background: var(--ok);
+}
+
+.meter.goal-meter-recall::-moz-meter-bar {
+  background: var(--ok);
 }
 
 /* Invisible, larger than the line, so hovering or tapping near a week shows its value. */

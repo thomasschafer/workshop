@@ -728,6 +728,66 @@ fn linked_hash_card(question: &str) -> String {
     )
 }
 
+#[test]
+fn tells_the_writer_the_topics_no_lesson_teaches_yet() {
+    let s = setup();
+    let now = crate::learning::now_ms();
+    let manifest = s.pack.join("pack.toml");
+    let outlined = std::fs::read_to_string(&manifest).unwrap().replacen(
+        "id = \"data-structures\"\nname = \"Data structures\"\n",
+        "id = \"data-structures\"\nname = \"Data structures\"\ntopics = [\n  { id = \"heaps\", name = \"Binary heaps\" },\n  { id = \"hash-tables\", name = \"Hash tables\" },\n  { id = \"dynamic-arrays\", name = \"Dynamic arrays\" },\n]\n",
+        1,
+    );
+    std::fs::write(&manifest, outlined).unwrap();
+    let lesson = s.pack.join("items/lessons/binary-heaps/item.md");
+    let taught = std::fs::read_to_string(&lesson).unwrap().replacen(
+        "minutes = 4\n",
+        "minutes = 4\ntopic = \"data-structures/heaps\"\n",
+        1,
+    );
+    std::fs::write(&lesson, taught).unwrap();
+    // Asking for a lesson on one of its cards makes the skill one the run targets.
+    s.learning
+        .store()
+        .record_lesson_requests(
+            &[workshop_learning::LessonRequest {
+                id: "lesson-req-hash".to_owned(),
+                item: "sample/hash-table-lookups".to_owned(),
+                requested_at: now,
+            }],
+            now,
+        )
+        .unwrap();
+    let pack = Pack::load(&s.pack).unwrap();
+    assert!(pack.problems.is_empty(), "{:?}", pack.problems);
+    let b = brief(&s.learning, &pack, &[], now).unwrap();
+    let coverage = b
+        .skill_coverage
+        .iter()
+        .find(|c| c.skill == "data-structures")
+        .unwrap();
+    assert_eq!(
+        coverage.untaught_topics,
+        [
+            ("hash-tables".to_owned(), "Hash tables".to_owned()),
+            ("dynamic-arrays".to_owned(), "Dynamic arrays".to_owned()),
+        ]
+    );
+    // No lesson of it has been done, so none of its topics is covered.
+    let skills = s
+        .learning
+        .skill_mastery(workshop_learning::Clock {
+            now,
+            utc_offset_minutes: 0,
+        })
+        .unwrap();
+    let data_structures = skills
+        .iter()
+        .find(|m| m.skill == "data-structures")
+        .unwrap();
+    assert_eq!((data_structures.topics, data_structures.covered), (3, 0));
+}
+
 #[tokio::test]
 async fn writes_lesson_links_requested_item_and_answers_and_drops_requests() {
     let s = setup();

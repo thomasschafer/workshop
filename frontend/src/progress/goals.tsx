@@ -3,7 +3,7 @@ import { errorMessage } from "../errors";
 import { getSnapshot, putSnapshot } from "../offline/db";
 import { progressApi } from "./api";
 import { Loading, Page } from "./page";
-import type { GoalProgress } from "./types";
+import type { GoalProgress, SkillProgress } from "./types";
 
 const GOALS_SNAPSHOT_KEY = "goals";
 
@@ -114,6 +114,29 @@ export function GoalsScreen({
   );
 }
 
+/** The coverage a goal asks for, which goals saved by an older Workshop didn't say. */
+const coverageTarget = (goal: GoalProgress) => goal.coverage_target ?? goal.target;
+
+/** How a skill stands, in a few words that fit a phone. */
+function standing(skill: SkillProgress): string {
+  const recall = `recall ${percent(skill.mastery)}`;
+  if (skill.coverage === undefined) return recall;
+  if ((skill.covered ?? 0) === 0) {
+    return skill.mastery > 0 ? `Nothing covered yet · ${recall}` : "Nothing covered yet";
+  }
+  return `${percent(skill.coverage)} covered · ${recall}`;
+}
+
+/** What's behind a skill's coverage, and how many of its items have been tried. */
+function counts(skill: SkillProgress): string {
+  const items = `${skill.attempted} of ${skill.items} ${skill.items === 1 ? "item" : "items"} tried`;
+  const topics = skill.topics ?? 0;
+  if (topics > 0) {
+    return `${skill.covered ?? 0} of ${topics} ${topics === 1 ? "topic" : "topics"} covered · ${items}`;
+  }
+  return items;
+}
+
 function GoalView({ goal }: { goal: GoalProgress }) {
   const name = (id: string) => goal.skills.find((s) => s.id === id)?.name ?? id;
   const due =
@@ -124,12 +147,17 @@ function GoalView({ goal }: { goal: GoalProgress }) {
         : goal.days_left === 0
           ? "It's wanted by today"
           : `${goal.days_left} ${goal.days_left === 1 ? "day" : "days"} left, to ${goal.by}`;
+  const targets =
+    coverageTarget(goal) === goal.target
+      ? `Each skill ${percent(goal.target)} covered and recalled`
+      : `Each skill ${percent(coverageTarget(goal))} covered, recall ${percent(goal.target)}`;
   return (
     <>
       <section class="goal-summary" aria-label="Summary">
         <p class="goal-headline">{percent(goal.progress)} of the way</p>
         <p class="muted">
-          Each skill to {percent(goal.target)} mastered{due ? ` · ${due}` : ""} · {goal.pack}
+          {targets}
+          {due ? ` · ${due}` : ""} · {goal.pack}
         </p>
       </section>
       <section aria-labelledby="trend-heading">
@@ -147,24 +175,30 @@ function GoalView({ goal }: { goal: GoalProgress }) {
             <li key={skill.id} class="goal-skill">
               <span class="goal-skill-name">
                 <span>{skill.name}</span>
-                <span class="muted">
-                  {percent(skill.mastery)}
-                  {skill.met ? " · there" : ""}
+                {skill.met ? <span class="muted">there</span> : null}
+              </span>
+              <span class="goal-skill-standing">{standing(skill)}</span>
+              {skill.coverage === undefined || (skill.covered ?? 0) > 0 ? (
+                <span class="goal-meters">
+                  {skill.coverage === undefined ? null : (
+                    <SkillMeter
+                      measure="coverage"
+                      label="Covered"
+                      name={`${skill.name} covered`}
+                      value={skill.coverage}
+                      target={coverageTarget(goal)}
+                    />
+                  )}
+                  <SkillMeter
+                    measure="recall"
+                    label="Recall"
+                    name={`${skill.name} recall`}
+                    value={skill.mastery}
+                    target={goal.target}
+                  />
                 </span>
-              </span>
-              <span class="goal-meter">
-                <meter
-                  class="meter"
-                  aria-label={`${skill.name} mastered`}
-                  min={0}
-                  max={1}
-                  value={skill.mastery}
-                />
-                <span class="goal-target" style={{ left: percent(goal.target) }} />
-              </span>
-              <span class="muted goal-skill-items">
-                {skill.attempted} of {skill.items} {skill.items === 1 ? "item" : "items"} tried
-              </span>
+              ) : null}
+              <span class="muted goal-skill-items">{counts(skill)}</span>
             </li>
           ))}
         </ul>
@@ -196,59 +230,135 @@ function GoalView({ goal }: { goal: GoalProgress }) {
   );
 }
 
+/** One of a skill's measures, as a meter with the goal's target marked across it. */
+function SkillMeter({
+  measure,
+  label,
+  name,
+  value,
+  target,
+}: {
+  /** Which it is, for its colour, the same as its line in the trend. */
+  measure: "coverage" | "recall";
+  label: string;
+  name: string;
+  value: number;
+  target: number;
+}) {
+  return (
+    <>
+      <span class="muted goal-meter-label" aria-hidden="true">
+        {label}
+      </span>
+      <span class="goal-meter">
+        <meter
+          class={`meter goal-meter-${measure}`}
+          aria-label={name}
+          min={0}
+          max={1}
+          value={value}
+        />
+        <span class="goal-target" style={{ left: percent(target) }} />
+      </span>
+    </>
+  );
+}
+
 const WIDTH = 320;
 const HEIGHT = 96;
 const PAD = 6;
 
-/** The goal's average mastery each week, as a line, with the target dashed across it. */
+/** The goal's average coverage and recall each week, as lines, with the targets dashed across. */
 function Trend({ goal }: { goal: GoalProgress }) {
   const points = goal.trend;
   const x = (i: number) => PAD + (i / Math.max(1, points.length - 1)) * (WIDTH - 2 * PAD);
-  const y = (mastery: number) => HEIGHT - PAD - mastery * (HEIGHT - 2 * PAD);
-  const line = points.map((p, i) => `${x(i)},${y(p.mastery)}`).join(" ");
-  const first = points[0]?.mastery ?? 0;
-  const last = points[points.length - 1]?.mastery ?? 0;
+  const y = (share: number) => HEIGHT - PAD - share * (HEIGHT - 2 * PAD);
+  const hasCoverage = points.every((p) => p.coverage !== undefined);
+  type Measure = (p: (typeof points)[number]) => number;
+  const start = (measure: Measure) => percent(points[0] ? measure(points[0]) : 0);
+  const end = (measure: Measure) => {
+    const last = points[points.length - 1];
+    return percent(last ? measure(last) : 0);
+  };
+  const from = (measure: Measure) => `${end(measure)}, from ${start(measure)}`;
+  const line = (measure: Measure) => points.map((p, i) => `${x(i)},${y(measure(p))}`).join(" ");
+  const recall: Measure = (p) => p.mastery;
+  const coverage: Measure = (p) => p.coverage ?? 0;
+  // Each target dashed in its measure's colour, or one line in neither when they're the same.
+  const targets: { share: number; measure: "coverage" | "recall" | "both" }[] =
+    hasCoverage && coverageTarget(goal) !== goal.target
+      ? [
+          { share: coverageTarget(goal), measure: "coverage" },
+          { share: goal.target, measure: "recall" },
+        ]
+      : [{ share: goal.target, measure: hasCoverage ? "both" : "recall" }];
   const week = (at: number) =>
     new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const label = hasCoverage
+    ? `Average coverage went from ${start(coverage)} to ${end(coverage)}, and recall from ${start(recall)} to ${end(recall)}, against targets of ${percent(coverageTarget(goal))} covered and ${percent(goal.target)} recall`
+    : `Average recall went from ${start(recall)} to ${end(recall)}, against a target of ${percent(goal.target)}`;
   return (
     <figure class="goal-trend">
-      <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        role="img"
-        aria-label={`Average mastery went from ${percent(first)} to ${percent(last)}, against a target of ${percent(goal.target)}`}
-      >
-        <line
-          class="goal-trend-target"
-          x1={PAD}
-          x2={WIDTH - PAD}
-          y1={y(goal.target)}
-          y2={y(goal.target)}
-        />
-        <polyline class="goal-trend-line" points={line} />
+      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={label}>
+        {targets.map((target) => (
+          <line
+            key={target.measure}
+            class={`goal-trend-target goal-trend-target-${target.measure}`}
+            x1={PAD}
+            x2={WIDTH - PAD}
+            y1={y(target.share)}
+            y2={y(target.share)}
+          />
+        ))}
+        <polyline class="goal-trend-line goal-trend-recall" points={line(recall)} />
+        {hasCoverage ? (
+          <polyline class="goal-trend-line goal-trend-coverage" points={line(coverage)} />
+        ) : null}
         {points.map((p, i) => (
           <circle
             key={p.at}
             class={i === points.length - 1 ? "goal-trend-now" : "goal-trend-point"}
             cx={x(i)}
-            cy={y(p.mastery)}
+            cy={y(hasCoverage ? coverage(p) : recall(p))}
             r={i === points.length - 1 ? 4 : 8}
           >
             <title>
-              {week(p.at)}: {percent(p.mastery)}
+              {week(p.at)}:{hasCoverage ? ` ${percent(coverage(p))} covered,` : ""} recall{" "}
+              {percent(recall(p))}
             </title>
           </circle>
         ))}
       </svg>
       <figcaption class="muted">
-        Now {percent(last)}, from {percent(first)}; the dashed line is the target.
+        {hasCoverage ? (
+          <>
+            <span class="goal-key goal-key-coverage" aria-hidden="true" />
+            Covered {from(coverage)}
+            <br />
+          </>
+        ) : null}
+        <span class="goal-key goal-key-recall" aria-hidden="true" />
+        Recall {from(recall)}
+        <br />
+        {targets.length === 1
+          ? "The dashed line is the target."
+          : "The dashed lines are their targets, in their colours."}
       </figcaption>
       <table class="visually-hidden">
-        <caption>Average mastery by week</caption>
+        <caption>Average coverage and recall by week</caption>
+        <thead>
+          <tr>
+            <th scope="col">Week</th>
+            {hasCoverage ? <th scope="col">Covered</th> : null}
+            <th scope="col">Recall</th>
+          </tr>
+        </thead>
         <tbody>
           {points.map((p) => (
             <tr key={p.at}>
               <th scope="row">{week(p.at)}</th>
-              <td>{percent(p.mastery)}</td>
+              {hasCoverage ? <td>{percent(coverage(p))}</td> : null}
+              <td>{percent(recall(p))}</td>
             </tr>
           ))}
         </tbody>

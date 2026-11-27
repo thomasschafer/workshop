@@ -50,6 +50,25 @@ pub struct Skill {
     /// such as `probability.conditional`.
     pub id: String,
     pub name: String,
+    /// An outline of what there is to learn in it, which lessons teach a topic at a time, for
+    /// working out how much of it has been covered.
+    #[serde(default)]
+    pub topics: Vec<Topic>,
+}
+
+impl Skill {
+    pub fn topic(&self, id: &str) -> Option<&Topic> {
+        self.topics.iter().find(|topic| topic.id == id)
+    }
+}
+
+/// A part of a skill a lesson can teach.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Topic {
+    /// Lowercase letters and digits, in words joined by hyphens, unique within its skill.
+    pub id: String,
+    pub name: String,
 }
 
 /// A track of the pack's own, beside the built-in ones.
@@ -66,14 +85,17 @@ pub struct PackTrack {
     pub in_continue: bool,
 }
 
-/// Something the learner is working towards: a set of skills, each to be mastered to a level.
+/// Something the learner is working towards: a set of skills, each to be covered and recalled
+/// to a level.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Goal {
     pub id: String,
     pub name: String,
     pub skills: Vec<String>,
-    /// The mastery each skill should reach, from 0 to 1.
+    /// The recall each skill should reach, from 0 to 1.
     pub mastery: f64,
+    /// The coverage each skill should reach, from 0 to 1: `mastery` unless the pack says.
+    pub coverage: f64,
     /// When it's wanted by, as the pack writes it, such as `2027-06-30`.
     pub by: Option<String>,
 }
@@ -185,6 +207,7 @@ struct RawGoal {
     name: String,
     skills: Vec<String>,
     mastery: Option<f64>,
+    coverage: Option<f64>,
     by: Option<String>,
 }
 
@@ -222,6 +245,27 @@ impl Manifest {
             }
             if !skills.insert(skill.id.as_str()) {
                 return Err(format!("the skill {:?} is listed twice", skill.id));
+            }
+            let mut topics = BTreeSet::new();
+            for topic in &skill.topics {
+                if !is_slug(&topic.id) {
+                    return Err(format!(
+                        "the skill {:?} has the topic id {:?}, which should be lowercase letters and digits, in words joined by hyphens",
+                        skill.id, topic.id
+                    ));
+                }
+                if !topics.insert(topic.id.as_str()) {
+                    return Err(format!(
+                        "the skill {:?} lists the topic {:?} twice",
+                        skill.id, topic.id
+                    ));
+                }
+                if topic.name.trim().is_empty() {
+                    return Err(format!(
+                        "the skill {:?} has the topic {:?} with no name",
+                        skill.id, topic.id
+                    ));
+                }
             }
         }
         let mut tracks = Vec::new();
@@ -291,17 +335,21 @@ impl Manifest {
                 ));
             }
             let mastery = goal.mastery.unwrap_or(DEFAULT_GOAL_MASTERY);
-            if !(mastery > 0.0 && mastery <= 1.0) {
-                return Err(format!(
-                    "the goal {:?} asks for mastery {mastery}, which should be above 0 and at most 1",
-                    goal.id
-                ));
+            let coverage = goal.coverage.unwrap_or(mastery);
+            for (field, value) in [("mastery", mastery), ("coverage", coverage)] {
+                if !(value > 0.0 && value <= 1.0) {
+                    return Err(format!(
+                        "the goal {:?} asks for {field} {value}, which should be above 0 and at most 1",
+                        goal.id
+                    ));
+                }
             }
             goals.push(Goal {
                 id: goal.id,
                 name: goal.name,
                 skills: goal.skills,
                 mastery,
+                coverage,
                 by: goal.by,
             });
         }
@@ -363,7 +411,11 @@ impl Manifest {
     }
 
     pub fn has_skill(&self, id: &str) -> bool {
-        self.skills.iter().any(|skill| skill.id == id)
+        self.skill(id).is_some()
+    }
+
+    pub fn skill(&self, id: &str) -> Option<&Skill> {
+        self.skills.iter().find(|skill| skill.id == id)
     }
 
     /// The tracks of the pack's own that are kept out of Continue.
@@ -416,6 +468,10 @@ mod tests {
         [[skills]]
         id = "graphs"
         name = "Graphs"
+        topics = [
+          { id = "search", name = "Breadth- and depth-first search" },
+          { id = "shortest-paths", name = "Shortest paths" },
+        ]
 
         [[tracks]]
         id = "estimation"
@@ -430,6 +486,13 @@ mod tests {
         id = "quick-sums"
         name = "Quick sums"
         skills = ["arithmetic.multiplication"]
+
+        [[goals]]
+        id = "graph-basics"
+        name = "Graph basics"
+        skills = ["graphs"]
+        mastery = 0.9
+        coverage = 0.6
 
         [[error_types]]
         id = "sign-error"
@@ -447,6 +510,27 @@ mod tests {
         assert!(manifest.has_skill("graphs"));
         assert!(!manifest.has_skill("geometry"));
         assert_eq!(manifest.goals[0].mastery, 0.8);
+        // Coverage is asked to the same level as recall unless the goal says.
+        assert_eq!(manifest.goals[0].coverage, 0.8);
+        assert_eq!(
+            (manifest.goals[1].mastery, manifest.goals[1].coverage),
+            (0.9, 0.6)
+        );
+        assert!(
+            manifest
+                .skill("arithmetic.multiplication")
+                .unwrap()
+                .topics
+                .is_empty()
+        );
+        let graphs = manifest.skill("graphs").unwrap();
+        let topics: Vec<&str> = graphs.topics.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(topics, ["search", "shortest-paths"]);
+        assert_eq!(
+            graphs.topic("shortest-paths").unwrap().name,
+            "Shortest paths"
+        );
+        assert!(graphs.topic("flows").is_none());
         assert_eq!(
             manifest.prompts.files().collect::<Vec<_>>(),
             [("examiner", "prompts/examiner.md")]
@@ -537,6 +621,26 @@ mod tests {
             (
                 "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"a\"]\nmastery = 1.5",
                 "at most 1",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"a\"]\ncoverage = 0",
+                "asks for coverage 0",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\ntopics = [{ id = \"Big Topic\", name = \"B\" }]",
+                "topic id \"Big Topic\"",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\ntopics = [{ id = \"t\", name = \"T\" }, { id = \"t\", name = \"U\" }]",
+                "lists the topic \"t\" twice",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\ntopics = [{ id = \"t\", name = \" \" }]",
+                "with no name",
+            ),
+            (
+                "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\ntopics = [{ id = \"t\" }]",
+                "missing field `name`",
             ),
             (
                 "id = \"x\"\nname = \"x\"\n[[skills]]\nid = \"a\"\nname = \"A\"\n[[goals]]\nid = \"g\"\nname = \"G\"\nskills = [\"a\"]\nby = \"soon\"",

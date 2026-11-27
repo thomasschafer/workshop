@@ -10,9 +10,12 @@ import {
   createAuthorHome,
   createCodebaseHome,
   createCodingHome,
+  createGoalsHome,
   createHome,
   createLearningHome,
   createLessonsHome,
+  GOALS_HOME,
+  GOALS_PORT,
   HOME,
   LEARNING_HOME,
   LEARNING_PORT,
@@ -30,6 +33,7 @@ if (process.env.WORKSHOP_E2E_HOME_READY === undefined) {
   createAuthorHome();
   createCodebaseHome();
   createLessonsHome();
+  createGoalsHome();
   process.env.WORKSHOP_E2E_HOME_READY = "1";
 }
 
@@ -74,6 +78,7 @@ export default defineConfig({
     { home: AUTHOR_HOME, port: AUTHOR_PORT },
     { home: CODEBASE_HOME, port: CODEBASE_PORT },
     { home: LESSONS_HOME, port: LESSONS_PORT },
+    { home: GOALS_HOME, port: GOALS_PORT },
   ].map(({ home, port }) => ({
     command: `${binary} serve`,
     env: {

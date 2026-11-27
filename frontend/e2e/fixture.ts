@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-const SERVERS = 6;
+const SERVERS = 7;
 const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
 const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
@@ -45,6 +45,10 @@ export const CODEBASE_HOME = `${CHECKOUT_HOME}-codebase`;
 /** A sixth, for lessons: the sample pack plus a small pack with prerequisites and a PNG diagram. */
 export const LESSONS_PORT = port(5);
 export const LESSONS_HOME = `${CHECKOUT_HOME}-lessons`;
+
+/** A seventh, for goals: a pack whose skills are outlined in topics that lessons teach. */
+export const GOALS_PORT = port(6);
+export const GOALS_HOME = `${CHECKOUT_HOME}-goals`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -640,4 +644,159 @@ packs = [${JSON.stringify(pack)}]
   git("init", "--quiet", "--initial-branch", "main");
   git("add", ".");
   git("commit", "--quiet", "-m", "Start");
+}
+
+/**
+ * A home for goals, with a pack whose operating systems skill is outlined in topics taught by
+ * lessons, a skill without topics, and one with topics nothing teaches yet.
+ */
+export function createGoalsHome(): void {
+  const outline = join(GOALS_HOME, "outline");
+  writeHome({
+    home: GOALS_HOME,
+    port: GOALS_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
+    model: "fake",
+    extra: `[learning]\npacks = [${JSON.stringify(outline)}]\nsample_pack = false\n`,
+  });
+  const files: Record<string, string> = {
+    "pack.toml": `id = "outline"
+name = "Outline"
+
+[[skills]]
+id = "systems.os"
+name = "Operating systems"
+topics = [
+  { id = "processes", name = "Processes, fork and exec" },
+  { id = "virtual-memory", name = "Virtual memory and page faults" },
+  { id = "scheduling", name = "Scheduling" },
+]
+
+[[skills]]
+id = "systems.files"
+name = "File systems"
+
+[[skills]]
+id = "systems.networks"
+name = "Networks"
+topics = [
+  { id = "routing", name = "Routing" },
+  { id = "congestion", name = "Congestion control" },
+]
+
+[[goals]]
+id = "systems-basics"
+name = "Systems basics"
+skills = ["systems.os", "systems.files", "systems.networks"]
+mastery = 0.8
+coverage = 0.6
+`,
+    "items/lessons/processes.md": `+++
+kind = "lesson"
+title = "Processes, fork and exec"
+skills = ["systems.os"]
+topic = "systems.os/processes"
+
+[[sources]]
+title = "Operating systems notes"
+url = "https://example.com/processes"
++++
+A short lesson on processes, fork and exec.
+
+## The idea
+
+A few sentences of teaching.
+
+## Explain
+
+Why does it work?
+
+## Explain answer
+
+Because of the idea above.
+`,
+    "items/lessons/virtual-memory.md": `+++
+kind = "lesson"
+title = "Virtual memory"
+skills = ["systems.os"]
+topic = "systems.os/virtual-memory"
+
+[[sources]]
+title = "Operating systems notes"
+url = "https://example.com/virtual-memory"
++++
+A short lesson on virtual memory.
+
+## The idea
+
+A few sentences of teaching.
+
+## Explain
+
+Why does it work?
+
+## Explain answer
+
+Because of the idea above.
+`,
+    "items/cards/fork.md": `+++
+kind = "card"
+skills = ["systems.os"]
+lesson = "processes"\n+++
+What does fork return in the child?
+
+## Answer
+
+An answer.
+`,
+    "items/cards/paging.md": `+++
+kind = "card"
+skills = ["systems.os"]
+lesson = "virtual-memory"\n+++
+What happens on a page fault?
+
+## Answer
+
+An answer.
+`,
+    "items/cards/inodes.md": `+++
+kind = "card"
+skills = ["systems.files"]
++++
+What does an inode hold?
+
+## Answer
+
+An answer.
+`,
+    "items/cards/journaling.md": `+++
+kind = "card"
+skills = ["systems.files"]
++++
+Why journal a file system?
+
+## Answer
+
+An answer.
+`,
+    "items/cards/routing.md": `+++
+kind = "card"
+skills = ["systems.networks"]
++++
+What does a router look up?
+
+## Answer
+
+An answer.
+`,
+  };
+  for (const [path, text] of Object.entries(files)) {
+    const file = join(outline, path);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, text);
+  }
 }

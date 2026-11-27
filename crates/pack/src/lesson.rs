@@ -32,6 +32,8 @@ const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 /// A lesson item's parsed content.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Lesson {
+    /// The topic of one of its skills it teaches, if it says.
+    pub topic: Option<TopicRef>,
     /// Ids of other lessons in the pack to do first.
     pub requires: Vec<String>,
     /// Where the lesson's facts come from, shown as further reading.
@@ -44,6 +46,37 @@ pub struct Lesson {
     pub explain: String,
     /// What a good explanation covers (`## Explain answer`).
     pub explain_answer: String,
+}
+
+/// A topic of a skill, as a lesson names it: `<skill id>/<topic id>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopicRef {
+    pub skill: String,
+    pub topic: String,
+}
+
+impl TopicRef {
+    /// Reads `<skill id>/<topic id>`, checking only its form, not that the topic exists.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let (skill, topic) = text
+            .split_once('/')
+            .filter(|(skill, topic)| !skill.is_empty() && is_slug(topic))
+            .ok_or_else(|| {
+                format!(
+                    "topic {text:?} should be a skill's id and one of its topics' ids, joined by `/`, such as \"graphs/shortest-paths\""
+                )
+            })?;
+        Ok(Self {
+            skill: skill.to_owned(),
+            topic: topic.to_owned(),
+        })
+    }
+}
+
+impl std::fmt::Display for TopicRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.skill, self.topic)
+    }
 }
 
 /// A reference a lesson's facts come from, shown as further reading.
@@ -111,6 +144,7 @@ pub struct LessonRef {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LessonFields {
+    topic: Option<String>,
     #[serde(default)]
     requires: Vec<String>,
     #[serde(default)]
@@ -153,6 +187,8 @@ impl Lesson {
         sections: Vec<(String, String)>,
         read_bytes: &dyn Fn(&str) -> Result<Vec<u8>, String>,
     ) -> Result<Self, String> {
+        let topic = fields.topic.as_deref().map(TopicRef::parse).transpose()?;
+
         // Validate `requires`.
         let mut seen_requires = BTreeSet::new();
         for req in &fields.requires {
@@ -303,6 +339,7 @@ impl Lesson {
         }
 
         Ok(Self {
+            topic,
             requires: fields.requires,
             sources,
             guesses,

@@ -15,8 +15,8 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use workshop_learning::{
     Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, LessonCompletion, LessonPlanRef,
-    LessonRequest, LessonSkip, Limits, Progress, Rating, Retirement, RetirementChange,
-    SkillMastery, Store, TrackPlan,
+    LessonRequest, LessonSkip, Limits, Log, Outline, Progress, Rating, Retirement,
+    RetirementChange, SkillMastery, Store, TrackPlan,
 };
 use workshop_pack::number::Tolerance;
 use workshop_pack::{Content, FollowUps, ImageData, Item, Lesson, Pack};
@@ -447,13 +447,7 @@ impl Learning {
             .collect::<Result<Vec<_>>>()?;
         let refs = item_refs(&shorts);
         let retirements = self.store.retirements()?;
-        let mastery = workshop_learning::mastery(
-            &refs,
-            &schedules,
-            &retirements,
-            self.store.scheduler(),
-            clock.now,
-        );
+        let mastery = self.mastery_of(&packs, &refs, clock)?;
         let skills = mastery
             .into_iter()
             .map(|mastery| {
@@ -816,17 +810,36 @@ impl Learning {
         }])
     }
 
-    /// How well each skill is known now, over the items there's practice of.
-    pub fn skill_mastery(&self, now: i64) -> Result<Vec<SkillMastery>> {
+    /// How well each skill is known and how much of it is covered, at `clock`, over `items`.
+    fn mastery_of(
+        &self,
+        packs: &[Pack],
+        items: &[ItemRef<'_>],
+        clock: Clock,
+    ) -> Result<Vec<SkillMastery>> {
+        let attempts = self.store.all_attempts()?;
+        let retirements = self.store.retirement_changes()?;
+        let lesson_completions = self.store.lesson_completions()?;
+        Ok(workshop_learning::mastery(
+            items,
+            &outline(packs),
+            Log {
+                attempts: &attempts,
+                retirements: &retirements,
+                lesson_completions: &lesson_completions,
+            },
+            self.store.scheduler(),
+            clock.now,
+            clock.utc_offset_minutes,
+        ))
+    }
+
+    /// How well each skill is known now, and how much of it is covered, over the items there's
+    /// practice of.
+    pub fn skill_mastery(&self, clock: Clock) -> Result<Vec<SkillMastery>> {
         let packs = self.packs()?;
         let items = practised(&packs);
-        Ok(workshop_learning::mastery(
-            &item_refs(&items),
-            &self.store.schedules()?,
-            &self.store.retirements()?,
-            self.store.scheduler(),
-            now,
-        ))
+        self.mastery_of(&packs, &item_refs(&items), clock)
     }
 
     /// How each of the packs' goals is going.
@@ -836,11 +849,18 @@ impl Learning {
         let recent = self
             .store
             .mistakes(clock.now - crate::mistakes::RECENT_MS)?;
+        let attempts = self.store.all_attempts()?;
+        let retirements = self.store.retirement_changes()?;
+        let lesson_completions = self.store.lesson_completions()?;
         Ok(crate::goals::progress(
             &packs,
             &item_refs(&items),
-            &self.store.all_attempts()?,
-            &self.store.retirement_changes()?,
+            &outline(&packs),
+            Log {
+                attempts: &attempts,
+                retirements: &retirements,
+                lesson_completions: &lesson_completions,
+            },
             &recent,
             self.store.scheduler(),
             clock,
@@ -1065,6 +1085,35 @@ fn items_where(packs: &[Pack], keep: impl Fn(&Item) -> bool) -> Vec<Short<'_>> {
         .collect()
 }
 
+/// Every skill's topics, and the topic each lesson teaches, across the packs. Skills with the
+/// same id in two packs are one skill, with the topics of both.
+fn outline(packs: &[Pack]) -> Outline {
+    let mut outline = Outline::default();
+    for pack in packs {
+        for skill in &pack.manifest.skills {
+            if !skill.topics.is_empty() {
+                outline
+                    .topics
+                    .entry(skill.id.clone())
+                    .or_default()
+                    .extend(skill.topics.iter().map(|topic| topic.id.clone()));
+            }
+        }
+        for item in &pack.items {
+            if let Content::Lesson(Lesson {
+                topic: Some(topic), ..
+            }) = &item.content
+            {
+                outline.lessons.insert(
+                    format!("{}/{}", pack.manifest.id, item.id),
+                    (topic.skill.clone(), topic.topic.clone()),
+                );
+            }
+        }
+    }
+    outline
+}
+
 fn item_refs<'a>(shorts: &'a [Short<'a>]) -> Vec<ItemRef<'a>> {
     shorts
         .iter()
@@ -1197,6 +1246,7 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
 fn deck_lesson(short: &Short<'_>) -> Result<DeckLesson> {
     let item = short.item;
     let Content::Lesson(Lesson {
+        topic: _,
         requires,
         sources,
         guesses,
@@ -2413,7 +2463,7 @@ mod tests {
         .unwrap();
         assert!(only_learning.deck(clock(NOW)).unwrap().items.is_empty());
         assert_eq!(only_learning.deck(clock(NOW)).unwrap().lessons.len(), 1);
-        assert!(only_learning.skill_mastery(NOW).unwrap().is_empty());
+        assert!(only_learning.skill_mastery(clock(NOW)).unwrap().is_empty());
         assert!(only_learning.planned(clock(NOW)).unwrap().names.is_empty());
     }
 

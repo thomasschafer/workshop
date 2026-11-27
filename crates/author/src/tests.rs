@@ -5,8 +5,7 @@ use std::sync::Mutex;
 
 use super::*;
 
-const MANIFEST: &str =
-    "id = \"dice\"\nname = \"Dice\"\n\n[[skills]]\nid = \"dice.sums\"\nname = \"Sums of dice\"\n";
+const MANIFEST: &str = "id = \"dice\"\nname = \"Dice\"\n\n[[skills]]\nid = \"dice.sums\"\nname = \"Sums of dice\"\ntopics = [{ id = \"two-dice\", name = \"Sums of two dice\" }, { id = \"many-dice\", name = \"Sums of many dice\" }]\n";
 
 /// A pack with one card and one draft.
 fn pack(dir: &Path) -> std::path::PathBuf {
@@ -151,7 +150,11 @@ where
         &Brief {
             lesson_requests: Vec::new(),
             skill_coverage: Vec::new(),
-            weakest: vec![("dice.sums".to_owned(), 0.2)],
+            weakest: vec![super::WeakSkill {
+                skill: "dice.sums".to_owned(),
+                coverage: 0.5,
+                recall: 0.2,
+            }],
             mistakes: vec![("concept-gap".to_owned(), 3)],
             examples: vec!["Answered 1/12; it's 1/6".to_owned()],
             answers: vec![("More cards?".to_owned(), "Yes".to_owned())],
@@ -212,7 +215,7 @@ async fn accepts_items_both_models_agree_on() {
     assert!(reviews[1].contains("Six of the 36"));
     // The writer was told what to write about, and the cap.
     let writes = fake.writes.lock().unwrap();
-    assert!(writes[0].contains("- dice.sums: 0.20"));
+    assert!(writes[0].contains("- dice.sums: covered 0.50, recall 0.20\n"));
     assert!(writes[0].contains("- concept-gap: 3"));
     assert!(writes[0].contains("Answered 1/12"));
     assert!(writes[0].contains("A: Yes"));
@@ -497,7 +500,7 @@ fn sample_svg() -> &'static str {
 
 fn sample_lesson(seg1: &str) -> String {
     format!(
-        "+++\nkind = \"lesson\"\ntitle = \"Counting dice sums\"\nskills = [\"dice.sums\"]\n\n[[sources]]\ntitle = \"Introductory probability notes\"\nurl = \"https://example.com/dice-sums\"\n\n[[guesses]]\nprompt = \"Which sum of two fair six-sided dice is most likely?\"\nchoices = [\"6\", \"7\", \"8\"]\nanswer = 2\n\n[[checks]]\nsegment = 1\nprompt = \"How many ordered pairs of two dice sum to 7?\"\nchoices = [\"5\", \"6\", \"7\"]\nanswer = 2\nexplanation = \"The pairs (1,6) through (6,1) give 6 ways.\"\n+++\nWhy two dice sum to 7 more often than any other total.\n\n## Pairs and symmetry\n\n{seg1}\n\n![Pairs summing to seven](pairs.svg)\n\n## Explain\n\nWhy does 7 have more outcomes than 2 when rolling two fair dice?\n\n## Explain answer\n\nEvery value 1..6 on the first die pairs with 7 minus it on the second, giving 6 of the 36 pairs, whereas 2 only occurs as (1, 1).\n"
+        "+++\nkind = \"lesson\"\ntitle = \"Counting dice sums\"\nskills = [\"dice.sums\"]\ntopic = \"dice.sums/two-dice\"\n\n[[sources]]\ntitle = \"Introductory probability notes\"\nurl = \"https://example.com/dice-sums\"\n\n[[guesses]]\nprompt = \"Which sum of two fair six-sided dice is most likely?\"\nchoices = [\"6\", \"7\", \"8\"]\nanswer = 2\n\n[[checks]]\nsegment = 1\nprompt = \"How many ordered pairs of two dice sum to 7?\"\nchoices = [\"5\", \"6\", \"7\"]\nanswer = 2\nexplanation = \"The pairs (1,6) through (6,1) give 6 ways.\"\n+++\nWhy two dice sum to 7 more often than any other total.\n\n## Pairs and symmetry\n\n{seg1}\n\n![Pairs summing to seven](pairs.svg)\n\n## Explain\n\nWhy does 7 have more outcomes than 2 when rolling two fair dice?\n\n## Explain answer\n\nEvery value 1..6 on the first die pairs with 7 minus it on the second, giving 6 of the 36 pairs, whereas 2 only occurs as (1, 1).\n"
     )
 }
 
@@ -559,8 +562,16 @@ async fn writes_lesson_bundle_counts_as_one_towards_cap_and_links_existing_items
             skill: "dice.sums".to_owned(),
             lessons: 0,
             unlinked_items: 1,
+            untaught_topics: vec![
+                ("two-dice".to_owned(), "Sums of two dice".to_owned()),
+                ("many-dice".to_owned(), "Sums of many dice".to_owned()),
+            ],
         }],
-        weakest: vec![("dice.sums".to_owned(), 0.2)],
+        weakest: vec![super::WeakSkill {
+            skill: "dice.sums".to_owned(),
+            coverage: 0.5,
+            recall: 0.2,
+        }],
         ..Default::default()
     };
     // max_items = 2: the lesson + 3 items counts as 1, and standalone.md counts as 1.
@@ -602,6 +613,16 @@ async fn writes_lesson_bundle_counts_as_one_towards_cap_and_links_existing_items
     assert!(writes[0].contains("How many faces has a die?"));
     assert!(writes[0].contains("A standard die is a cube."));
     assert!(writes[0].contains("- dice.sums: 0 lessons, 1 item without a lesson"));
+    // It's told the topics no lesson teaches yet, and asked to set `topic` on its lessons.
+    assert!(writes[0].contains(
+        "  Topics no lesson teaches yet: `dice.sums/two-dice` (Sums of two dice), `dice.sums/many-dice` (Sums of many dice)\n"
+    ));
+    assert!(writes[0].contains("should teach the topics no lesson teaches yet"));
+    assert!(writes[0].contains(
+        "- dice.sums: Sums of dice\n  Topics: two-dice (Sums of two dice), many-dice (Sums of many dice)\n"
+    ));
+    assert!(writes[0].contains("Give every lesson you write for a skill with topics the `topic`"));
+    assert!(writes[0].contains("- dice.sums: covered 0.50, recall 0.20\n"));
 
     // The reviewer audited the lesson (with SVG source and accompanying items) rather than solving it blind.
     let reviews = fake.reviews.lock().unwrap();

@@ -40,11 +40,18 @@ export interface MistakeLog {
 export interface SkillProgress {
   id: string;
   name: string;
-  /** From 0 to 1. */
+  /** How well its taught items are recalled, from 0 to 1. */
   mastery: number;
+  /** How much of it has been taught and then recalled, from 0 to 1. Missing from goals saved
+   * on a device by an older Workshop, as are `topics` and `covered`. */
+  coverage?: number;
+  /** How many topics its outline has, or 0 for a skill without one. */
+  topics?: number;
+  /** How many of its topics are covered, or without topics, how many items were answered right. */
+  covered?: number;
   items: number;
   attempted: number;
-  /** Whether it's reached the goal's target. */
+  /** Whether its coverage and recall have both reached the goal's targets. */
   met: boolean;
 }
 
@@ -53,15 +60,19 @@ export interface GoalProgress {
   name: string;
   /** The pack it's from, by name. */
   pack: string;
+  /** The recall each skill should reach. */
   target: number;
+  /** The coverage each skill should reach. Missing from goals saved by an older Workshop. */
+  coverage_target?: number;
   by: string | null;
   days_left: number | null;
   /** How far towards the target, from 0 to 1. */
   progress: number;
   skills: SkillProgress[];
-  /** Average mastery each week, oldest first, ending now. */
-  trend: { at: number; mastery: number }[];
-  /** The skills furthest from the target, weakest first. */
+  /** Average recall (`mastery`) and coverage each week, oldest first, ending now. Coverage is
+   * missing from goals saved by an older Workshop. */
+  trend: { at: number; mastery: number; coverage?: number }[];
+  /** The skills furthest from the targets, by the lower of coverage and recall, weakest first. */
   weakest: string[];
   mistakes: { error_type: string; count: number }[];
 }

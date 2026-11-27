@@ -12,7 +12,7 @@ pub mod schedule;
 pub mod store;
 
 pub use level::{SkillLevel, levels};
-pub use mastery::{SkillMastery, history, mastery};
+pub use mastery::{Log, Outline, SkillMastery, history, mastery};
 pub use mistakes::{Mistake, MistakeSource, NewMistake};
 pub use plan::{Clock, ItemRef, LessonPlanRef, Limits, Progress, TrackPlan, due, plan};
 pub use schedule::{ItemSchedule, Rating, Scheduler};

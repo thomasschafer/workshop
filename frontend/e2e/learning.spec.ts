@@ -306,11 +306,23 @@ test("shows progress towards each of the pack's goals", async () => {
   await expect(phone).toHaveURL(/\/goals\/quick-arithmetic$/);
   await expect(phone.getByRole("heading", { name: "Quick arithmetic" })).toBeVisible();
   await expect(phone.getByRole("region", { name: "Summary" })).toContainText(
-    "Each skill to 80% mastered",
+    "Each skill 80% covered and recalled",
   );
-  // The sums answered count towards multiplication's mastery, and the trend ends there.
-  await expect(phone.getByLabel("Multiplication mastered")).toBeVisible();
-  await expect(phone.getByRole("img", { name: /^Average mastery went from 0% to/ })).toBeVisible();
+  // The sums answered count towards addition's coverage and recall, and the trend ends there;
+  // multiplication, with nothing tried, says nothing is covered.
+  await expect(phone.getByLabel("Addition and subtraction covered")).toBeVisible();
+  await expect(phone.getByLabel("Addition and subtraction recall")).toBeVisible();
+  await expect(
+    phone
+      .locator(".goal-skill")
+      .filter({ hasText: "Multiplication" })
+      .locator(".goal-skill-standing"),
+  ).toHaveText("Nothing covered yet");
+  await expect(
+    phone.getByRole("img", {
+      name: /^Average coverage went from 0% to \d+%, and recall from 0% to/,
+    }),
+  ).toBeVisible();
   await expect(phone.getByRole("heading", { name: "Weakest" })).toBeVisible();
   await expect(phone.getByRole("heading", { name: "Recent mistakes, by kind" })).toBeVisible();
   const width = phone.viewportSize()?.width ?? 0;

@@ -99,12 +99,26 @@ pub struct LessonRequest {
     pub skills: Vec<String>,
 }
 
-/// How many lessons a targeted skill has, and how many of its short items have none.
+/// How many lessons a targeted skill has, how many of its short items have none, and which of
+/// its topics no lesson teaches yet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkillCoverage {
     pub skill: String,
     pub lessons: usize,
     pub unlinked_items: usize,
+    /// Its topics no lesson in the pack teaches, as (id, name), in the outline's order.
+    pub untaught_topics: Vec<(String, String)>,
+}
+
+/// One of the learner's weakest skills, by the lower of how much of it is covered and how well
+/// it's recalled.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WeakSkill {
+    pub skill: String,
+    /// How much of it has been taught and then recalled, from 0 to 1.
+    pub coverage: f64,
+    /// How well its taught items are recalled, from 0 to 1.
+    pub recall: f64,
 }
 
 /// What a run should write about.
@@ -114,8 +128,8 @@ pub struct Brief {
     pub lesson_requests: Vec<LessonRequest>,
     /// For each skill the run targets, how many lessons it has and how many items have none.
     pub skill_coverage: Vec<SkillCoverage>,
-    /// The skills the learner is weakest in, weakest first, with their mastery from 0 to 1.
-    pub weakest: Vec<(String, f64)>,
+    /// The skills the learner is weakest in, weakest first.
+    pub weakest: Vec<WeakSkill>,
     /// The kinds of mistake made most lately, with how often, most first.
     pub mistakes: Vec<(String, usize)>,
     /// A few recent mistakes, in words, as examples.
@@ -1319,6 +1333,22 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
     );
     for skill in &pack.manifest.skills {
         out.push_str(&format!("- {}: {}\n", skill.id, skill.name));
+        if !skill.topics.is_empty() {
+            let topics: Vec<String> = skill
+                .topics
+                .iter()
+                .map(|topic| format!("{} ({})", topic.id, topic.name))
+                .collect();
+            out.push_str(&format!("  Topics: {}\n", topics.join(", ")));
+        }
+    }
+    if pack
+        .manifest
+        .skills
+        .iter()
+        .any(|skill| !skill.topics.is_empty())
+    {
+        out.push_str("Give every lesson you write for a skill with topics the `topic` it teaches, such as `topic = \"skill.id/topic-id\"`, one topic a lesson.\n");
     }
     if !brief.lesson_requests.is_empty() {
         out.push_str("\nRequests for lessons come first. The learner tapped \"Teach me\" on these short items, which have no lesson yet. Write a lesson for them (one lesson can cover several related items) with 3 to 6 new short items, and link each requested item to it by adding `lesson` (and `segment`, counting from 1, where one segment covers it) in its front matter:\n");
@@ -1352,14 +1382,35 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
                 format!("{} items without a lesson", cov.unlinked_items)
             };
             out.push_str(&format!("- {}: {lessons}, {items}\n", cov.skill));
+            if !cov.untaught_topics.is_empty() {
+                let topics: Vec<String> = cov
+                    .untaught_topics
+                    .iter()
+                    .map(|(id, name)| format!("`{}/{id}` ({name})", cov.skill))
+                    .collect();
+                out.push_str(&format!(
+                    "  Topics no lesson teaches yet: {}\n",
+                    topics.join(", ")
+                ));
+            }
+        }
+        if brief
+            .skill_coverage
+            .iter()
+            .any(|cov| !cov.untaught_topics.is_empty())
+        {
+            out.push_str("Lessons for these skills, after any requested ones, should teach the topics no lesson teaches yet, one topic each, as a skill barely covered is as weak as one barely recalled.\n");
         }
     }
     if !brief.weakest.is_empty() {
         out.push_str(
-            "\nThe learner's weakest skills, with how well they know each, from 0 to 1:\n",
+            "\nThe learner's weakest skills, with how much of each has been taught and then recalled (covered), and how well what's been taught is recalled, each from 0 to 1:\n",
         );
-        for (skill, mastery) in &brief.weakest {
-            out.push_str(&format!("- {skill}: {mastery:.2}\n"));
+        for weak in &brief.weakest {
+            out.push_str(&format!(
+                "- {}: covered {:.2}, recall {:.2}\n",
+                weak.skill, weak.coverage, weak.recall
+            ));
         }
     }
     if !brief.too_easy.is_empty() {
@@ -1408,7 +1459,7 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
         }
     }
     out.push_str(&format!(
-        "\nWrite at most {} new items (a lesson together with its 3 to 6 new items counts as one towards this limit), addressing lesson requests first, then the weakest skills and the kinds of mistake above, and harder problems where they found them too easy. Then reply with JSON: {{\"items\": [{{\"path\": the item's file, such as items/x.md or items/x/item.md, \"from_draft\": the draft's path, if you made it from one, or null}}], \"questions\": [questions for the learner, if any]}}",
+        "\nWrite at most {} new items (a lesson together with its 3 to 6 new items counts as one towards this limit), addressing lesson requests first, then the weakest skills, the topics no lesson teaches yet and the kinds of mistake above, and harder problems where they found them too easy. Then reply with JSON: {{\"items\": [{{\"path\": the item's file, such as items/x.md or items/x/item.md, \"from_draft\": the draft's path, if you made it from one, or null}}], \"questions\": [questions for the learner, if any]}}",
         limits.max_items
     ));
     out

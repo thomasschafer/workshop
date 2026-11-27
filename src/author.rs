@@ -12,9 +12,11 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use workshop_author::{
-    Brief, LessonRequest, Limits, Linked, Models, Report, SkillCoverage, TooEasy, Written,
+    Brief, LessonRequest, Limits, Linked, Models, Report, SkillCoverage, TooEasy, WeakSkill,
+    Written,
 };
-use workshop_pack::{Item, Kind, Pack};
+use workshop_learning::{Clock, SkillMastery};
+use workshop_pack::{Content, Item, Kind, Lesson, Pack};
 use workshop_provider::{AgentConfig, CallSpec, ProviderRunner, Role};
 
 use crate::config::Config;
@@ -289,14 +291,18 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
         key.split_once('/')
             .is_some_and(|(p, _)| p == pack.manifest.id)
     };
-    let skills = learning.skill_mastery(now)?;
+    // The author runs without the learner's device, so its days are UTC's.
+    let skills = learning.skill_mastery(Clock {
+        now,
+        utc_offset_minutes: 0,
+    })?;
     let in_goals = |skill: &str| {
         pack.manifest
             .goals
             .iter()
             .any(|g| g.skills.iter().any(|s| s == skill))
     };
-    let mut weakest: Vec<(String, f64)> = pack
+    let mut weakest: Vec<WeakSkill> = pack
         .manifest
         .skills
         .iter()
@@ -304,14 +310,21 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
             let mastery = skills
                 .iter()
                 .find(|m| m.skill == skill.id)
-                .map_or(0.0, |m| m.mastery);
-            (skill.id.clone(), mastery)
+                .cloned()
+                .unwrap_or_else(|| SkillMastery::none(&skill.id));
+            WeakSkill {
+                skill: skill.id.clone(),
+                coverage: mastery.coverage,
+                recall: mastery.mastery,
+            }
         })
         .collect();
+    // As the Goals page does, by the lower of coverage and recall.
+    let lower = |weak: &WeakSkill| weak.coverage.min(weak.recall);
     weakest.sort_by(|a, b| {
-        in_goals(&b.0)
-            .cmp(&in_goals(&a.0))
-            .then(a.1.total_cmp(&b.1))
+        in_goals(&b.skill)
+            .cmp(&in_goals(&a.skill))
+            .then(lower(a).total_cmp(&lower(b)))
     });
     weakest.truncate(5);
     let recent: Vec<_> = learning
@@ -408,8 +421,8 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
             push_skill(skill);
         }
     }
-    for (skill, _) in &weakest {
-        push_skill(skill);
+    for weak in &weakest {
+        push_skill(&weak.skill);
     }
     for skill in too_easy.iter().chain(fixed_too_easy.iter()) {
         push_skill(&skill.skill);
@@ -429,10 +442,29 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
                     item.kind.is_short() && item.lesson.is_none() && item.skills.contains(&skill)
                 })
                 .count();
+            let taught: BTreeSet<&str> = pack
+                .items
+                .iter()
+                .filter_map(|item| match &item.content {
+                    Content::Lesson(Lesson {
+                        topic: Some(topic), ..
+                    }) if topic.skill == skill => Some(topic.topic.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let untaught_topics = pack
+                .manifest
+                .skill(&skill)
+                .into_iter()
+                .flat_map(|s| &s.topics)
+                .filter(|topic| !taught.contains(topic.id.as_str()))
+                .map(|topic| (topic.id.clone(), topic.name.clone()))
+                .collect();
             SkillCoverage {
                 skill,
                 lessons,
                 unlinked_items,
+                untaught_topics,
             }
         })
         .collect();

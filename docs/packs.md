@@ -44,6 +44,10 @@ track = "estimation"    # optional: the pack's own track its items are in when t
 [[skills]]
 id = "probability.conditional"   # parts separated by dots
 name = "Conditional probability"
+topics = [                       # optional: an outline, for coverage; see below
+  { id = "bayes-rule", name = "Bayes' rule" },
+  { id = "independence", name = "Independence" },
+]
 
 # Tracks of the pack's own, shown on the home screen after the built-in ones.
 [[tracks]]
@@ -53,12 +57,14 @@ summary = "Quick numbers for back-of-the-envelope sums"
 icon = "approximately"           # optional: see below
 continue = false                 # optional: keeps it out of Continue; see below
 
-# Something to work towards: a set of skills, each to reach a mastery from 0 to 1.
+# Something to work towards: a set of skills, each to be covered and recalled to a level from 0
+# to 1.
 [[goals]]
 id = "probability-foundations"
 name = "Probability foundations"
 skills = ["probability.conditional"]
-mastery = 0.8                    # the default
+mastery = 0.8                    # the recall each skill should reach; the default
+coverage = 0.6                   # optional: the coverage each skill should reach; mastery by default
 by = "2027-06-30"                # optional
 
 # Kinds of mistake for the mistake log, besides the built-in ones.
@@ -95,7 +101,16 @@ A pack's track can hold cards, mental maths, probability questions, code to read
 
 `track` at the top of `pack.toml` names one of the pack's own tracks for its items to be in when they don't say, so each item doesn't need a `track` of its own. An item's own `track` still wins, and design prompts stay in the System design track. Like the pack's other fields, it goes before its first `[[skills]]` or other table.
 
-Every item names at least one skill, and every skill it names must be listed here. Mastery of a skill comes from how well you've recalled its items lately, so goals can show progress as you go.
+Every item names at least one skill, and every skill it names must be listed here.
+
+A skill can have `topics`, an outline of what there is to learn in it, each with an `id` (lowercase letters and digits in words joined by hyphens, unique within the skill) and a `name`. A lesson names the topic it teaches with `topic` (see [Lessons](#lessons)), and more than one lesson can teach a topic.
+
+How well a skill is known is shown in two measures, so goals can show progress as you go:
+
+- Coverage is how much of it has been taught and then recalled, from 0 to 1. For a skill with topics, it's the share of its topics covered: a topic is covered once a lesson teaching it has been done and at least one item linked to that lesson has been answered right (rated Hard, Good or Easy, or marked right by the app) on a later day, in the learner's time, than the lesson was first done. A topic no lesson teaches yet isn't covered. For a skill without topics, it's the share of its items answered right at least once. A retired item counts as answered right from when it was retired.
+- Recall (mastery) is the average chance of recalling its taught items now: an item never attempted counts as not known at all, and a retired one as known for good. An item linked to a lesson that hasn't been done isn't taught yet, so it's left out rather than counted as not known, unless it's been attempted anyway.
+
+The Goals page shows both for each skill, such as "40% covered · recall 85%", and says plainly when nothing of a skill is covered yet. A goal is reached when each of its skills' coverage has reached the goal's `coverage` and its recall the goal's `mastery`. Its progress is the average, over its skills, of coverage and recall each counted up to its target; its trend shows both over the last few weeks, and its weakest skills are those not there yet, ordered by the lower of the two.
 
 Mistakes are tagged with a kind of mistake. The built-in kinds are `misread`, `arithmetic-slip`, `off-by-one`, `missed-edge-case`, `wrong-approach`, `concept-gap`, `missed-requirement`, `missed-defect` and `too-slow`; a pack's `[[error_types]]` add to them, each with an id of its own.
 
@@ -646,7 +661,7 @@ A design prompt is worked through as a design session of five stages: clarifying
 
 ### Lessons
 
-A short piece that teaches a topic in two to five minutes on a phone, before its questions. In a track's practice flow, after follow-ups and due items and before new items, Workshop offers the track's next lesson: the first in the pack's order that hasn't been done, hasn't been skipped today with "Not now", and whose `requires` have all been done, up to `daily_lessons` lessons a day (1 by default; tracks with `continue = false` have their own count of the same size). A lesson takes the place of one item in the flow as a short card with "Start" and "Not now"; finishing or going back returns to the flow, and "Not now" skips that lesson for the rest of the learner's day. Where Continue would go to a track's new items, it goes to that track's next lesson first, and the home screen's line for a track mentions a lesson waiting alongside its due and new counts. All of a track's lessons are also listed in a Lessons section on its practice screen (once there's nothing left to practise for now), each showing its title, roughly how long it takes, whether it's been done, and any lessons in `requires` not done yet. Lessons aren't scheduled for review themselves, and don't count towards mastery: their cards and other short items do.
+A short piece that teaches a topic in two to five minutes on a phone, before its questions. In a track's practice flow, after follow-ups and due items and before new items, Workshop offers the track's next lesson: the first in the pack's order that hasn't been done, hasn't been skipped today with "Not now", and whose `requires` have all been done, up to `daily_lessons` lessons a day (1 by default; tracks with `continue = false` have their own count of the same size). A lesson takes the place of one item in the flow as a short card with "Start" and "Not now"; finishing or going back returns to the flow, and "Not now" skips that lesson for the rest of the learner's day. Where Continue would go to a track's new items, it goes to that track's next lesson first, and the home screen's line for a track mentions a lesson waiting alongside its due and new counts. All of a track's lessons are also listed in a Lessons section on its practice screen (once there's nothing left to practise for now), each showing its title, roughly how long it takes, whether it's been done, and any lessons in `requires` not done yet. Lessons aren't scheduled for review themselves, and don't count towards recall: their cards and other short items do, and a lesson with a `topic` counts towards its skill's coverage once its items are recalled.
 
 A lesson is kept on the device in the deck with its images, so it works offline. Opening one walks through its title and prompt, any unscored guesses (with "Not sure" and answers held back until the end), its segments one at a time with inline diagrams and checks (with earlier segments to go back to), the `## Explain` question (typed, dictated or explained aloud, marked by the grader online against `## Explain answer` and the segments without logging mistakes or scheduling, or compared against `## Explain answer` offline or by choice), and the recap showing each guess beside the right answer and `[[sources]]` as "Read more" links. Progress is saved on the device as you go, and reaching the recap records the completion and how long it took on the device and syncs it to the server; its time counts towards the week's minutes like any other practice (capped as attempts are). A lesson can be done again and each time is recorded.
 
@@ -657,6 +672,7 @@ A lesson can be a single Markdown file, or a directory with an `item.md` when it
 kind = "lesson"
 title = "How a hash map grows"
 skills = ["data-structures"]
+topic = "data-structures/hash-maps"  # optional: the topic of one of its skills it teaches
 requires = ["hashing-basics"]     # optional: lessons in this pack to do first, by id
 minutes = 4                        # optional; defaults to 4
 
@@ -705,6 +721,7 @@ Fields in the front matter:
 - `[[guesses]]` (optional, zero to three): unscored questions asked before the first segment to focus attention on what follows, with the answers shown at the end. Each has `prompt`, `choices` (two to five) and `answer` (counting from 1).
 - `[[checks]]` (optional, at most one per segment): predict-then-reveal checks shown after a segment. Each names its `segment` (counting from 1), with `prompt`, `choices` (two to five), `answer` (counting from 1) and `explanation`, all required.
 - `requires` (optional): ids of other lessons in the same pack to do first.
+- `topic` (optional): the topic it teaches, as `<skill id>/<topic id>`, which must be one of the topics of one of its skills in `pack.toml`. Its items then count towards covering that topic.
 
 A segment can include `.svg` or `.png` images from the lesson's own directory with Markdown's `![alt](file)`. Paths must stay inside the lesson's directory (no `..` or leading `/`), and alt text is required. An SVG is shown inline and must work in both light and dark themes, so it must be valid XML without a DTD, use the SVG namespace (`xmlns="http://www.w3.org/2000/svg"`) for every element, have a `viewBox`, and mustn't contain `<script>`, `<foreignObject>`, `<a>`, animation elements (`<animate>`, `<set>`, `<animateMotion>`, `<animateTransform>`), event handler attributes (`on...`), any `href` (in any namespace, such as `xlink:href`) that isn't a local fragment (`#...`), or `@import` or non-fragment `url(...)` in `<style>` elements or `style` attributes. Use `currentColor` for text and strokes rather than fixed colours.
 
@@ -723,6 +740,7 @@ A short item with `lesson` isn't offered as new (and is left out of new-item cou
 
 - Segment length: warns when a segment is over 180 words, and refuses one over 300.
 - Images and SVG safety: refuses missing files, paths outside the lesson's directory, missing alt text, unsafe SVG elements or attributes, and SVGs without a `viewBox`. Warns, without failing, when an SVG uses a fixed colour for text or strokes instead of `currentColor`.
+- Topics: checks that every skill's topics have well-formed ids, none listed twice, and that a lesson's `topic` is one of its skills' topics.
 - Cross-item links: checks that every id in `requires` exists and is a lesson, that `requires` doesn't form a cycle, and that every short item's `lesson` and `segment` refer to an existing lesson and segment in the pack.
 
 ## Timed rounds

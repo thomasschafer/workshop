@@ -481,8 +481,25 @@ impl Item {
         let (prompt, content) = if common.kind == Kind::Lesson {
             let (prompt, sections) = split_lesson_sections(body)?;
             let fields: LessonFields = kind_fields.try_into().map_err(|err| err.to_string())?;
-            let content = Content::Lesson(Lesson::new(fields, &prompt, sections, &read_bytes)?);
-            (prompt, content)
+            let lesson = Lesson::new(fields, &prompt, sections, &read_bytes)?;
+            if let Some(topic) = &lesson.topic {
+                if !common.skills.contains(&topic.skill) {
+                    return Err(format!(
+                        "topic {:?} is a topic of {:?}, which isn't one of the lesson's skills",
+                        topic.to_string(),
+                        topic.skill
+                    ));
+                }
+                let skill = manifest.skill(&topic.skill).expect("checked above");
+                if skill.topic(&topic.topic).is_none() {
+                    return Err(format!(
+                        "topic {:?} isn't one of the topics of {:?}, in pack.toml",
+                        topic.to_string(),
+                        topic.skill
+                    ));
+                }
+            }
+            (prompt, Content::Lesson(lesson))
         } else {
             let (prompt, mut sections) = split_sections(body, common.kind)?;
             let mut section = |name: &str| sections.remove(name);
@@ -1019,6 +1036,7 @@ mod tests {
             [[skills]]
             id = "arithmetic"
             name = "Arithmetic"
+            topics = [{ id = "heaps", name = "Binary heaps" }]
             [[skills]]
             id = "dice"
             name = "Dice"
@@ -1781,6 +1799,7 @@ mod tests {
 kind = "lesson"
 title = "Binary heaps"
 skills = ["arithmetic"]
+topic = "arithmetic/heaps"
 requires = ["trees"]
 
 [[sources]]
@@ -1832,6 +1851,13 @@ Because the tree is complete with no gaps.
         let Content::Lesson(parsed) = &lesson.content else {
             panic!("not a lesson");
         };
+        assert_eq!(
+            parsed.topic,
+            Some(crate::TopicRef {
+                skill: "arithmetic".to_owned(),
+                topic: "heaps".to_owned(),
+            })
+        );
         assert_eq!(parsed.requires, ["trees"]);
         assert_eq!(parsed.sources.len(), 1);
         assert_eq!(parsed.guesses.len(), 1);
@@ -2017,6 +2043,28 @@ Because the tree is complete with no gaps.
                     base_body,
                 ),
                 "lists \"a\" twice",
+            ),
+            (
+                &*with(&format!("topic = \"heaps\"\n{base_front}"), base_body),
+                "joined by `/`",
+            ),
+            (
+                &*with(
+                    &format!("topic = \"arithmetic/Heaps\"\n{base_front}"),
+                    base_body,
+                ),
+                "joined by `/`",
+            ),
+            (
+                &*with(&format!("topic = \"dice/heaps\"\n{base_front}"), base_body),
+                "isn't one of the lesson's skills",
+            ),
+            (
+                &*with(
+                    &format!("topic = \"arithmetic/tries\"\n{base_front}"),
+                    base_body,
+                ),
+                "isn't one of the topics of \"arithmetic\"",
             ),
             (
                 &*with(
