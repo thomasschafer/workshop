@@ -473,6 +473,7 @@ export class Outbox {
             retirements: [],
             lesson_completions: [],
             lesson_skips: [],
+            lesson_requests: [],
             coding_events: batch.coding_events,
             mistake_tags: batch.mistake_tags,
           },

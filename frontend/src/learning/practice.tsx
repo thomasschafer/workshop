@@ -542,6 +542,9 @@ export function ItemView({
     const segmentIndex = done && item.segment != null ? item.segment : null;
     onOpenLesson(linkedLesson.key, segmentIndex, right);
   };
+  const requestLesson = (extra: { seed?: number } = {}) => {
+    learning().requestLesson(attempt("again", extra));
+  };
   const revisit = (right: boolean | null) => {
     if (!linkedLesson || !onOpenLesson) return;
     onOpenLesson(linkedLesson.key, item.segment ?? null, right);
@@ -589,6 +592,7 @@ export function ItemView({
           onLapsedAgain={() => record("again")}
           onMarked={() => onDone(null)}
           onTeachMe={linkedLesson ? () => teachMe(null) : undefined}
+          onRequestLesson={linkedLesson ? undefined : () => requestLesson()}
           onRevisit={canRevisit ? () => revisit(null) : undefined}
           onFlag={(note) => {
             learning().flag({
@@ -608,6 +612,7 @@ export function ItemView({
           onNext={onDone}
           onChoose={choose}
           onTeachMe={linkedLesson ? () => teachMe(false) : undefined}
+          onRequestLesson={linkedLesson ? undefined : () => requestLesson()}
           onRevisit={canRevisit ? () => revisit(false) : undefined}
         />
       ) : item.kind === "mental-maths" ? (
@@ -626,6 +631,9 @@ export function ItemView({
           onTeachMe={
             linkedLesson ? (instance) => teachMe(false, { seed: instance.seed }) : undefined
           }
+          onRequestLesson={
+            linkedLesson ? undefined : (instance) => requestLesson({ seed: instance.seed })
+          }
           onRevisit={canRevisit ? () => revisit(false) : undefined}
         />
       ) : (
@@ -642,6 +650,7 @@ export function ItemView({
           onNext={onDone}
           onChoose={choose}
           onTeachMe={linkedLesson ? () => teachMe(false) : undefined}
+          onRequestLesson={linkedLesson ? undefined : () => requestLesson()}
           onRevisit={canRevisit ? () => revisit(false) : undefined}
         />
       )}
@@ -659,6 +668,7 @@ function CardView({
   onLapsedAgain,
   onMarked,
   onTeachMe,
+  onRequestLesson,
   onRevisit,
   onFlag,
 }: {
@@ -674,11 +684,14 @@ function CardView({
   /** Once the grader has marked an answer in the learner's own words, which it records. */
   onMarked: () => void;
   onTeachMe?: (() => void) | undefined;
+  /** Records "Teach me" on a card without a lesson yet (counts as Forgot and requests a lesson). */
+  onRequestLesson?: (() => void) | undefined;
   onRevisit?: (() => void) | undefined;
   onFlag: (note: string) => void;
 }) {
   const [revealed, setRevealed] = useState(false);
   const [lapsedAgain, setLapsedAgain] = useState(false);
+  const [requestedLesson, setRequestedLesson] = useState(false);
   const [flagging, setFlagging] = useState(false);
   const [note, setNote] = useState("");
   /** Answering in the learner's own words, written or explained aloud, for the grader. */
@@ -829,10 +842,15 @@ function CardView({
           <section class="learn-answer" aria-label="Answer">
             <Markdown text={item.answer} />
             {item.explanation ? <Markdown text={item.explanation} class="muted" /> : null}
+            {requestedLesson ? (
+              <p class="muted" role="status">
+                Lesson requested for the author's next run.
+              </p>
+            ) : null}
           </section>
           {lapsedAgain && !flagging && onRevisit ? (
             <AfterWrong onNext={onMarked} onRevisit={onRevisit} />
-          ) : marked && !flagging ? (
+          ) : (marked || requestedLesson) && !flagging ? (
             canRevisit && markedRating === "again" && onRevisit ? (
               <AfterWrong onNext={onMarked} onRevisit={onRevisit} />
             ) : (
@@ -866,7 +884,7 @@ function CardView({
                 </button>
               </span>
             </form>
-          ) : marked || lapsedAgain ? (
+          ) : marked || lapsedAgain || requestedLesson ? (
             <button type="button" class="learn-link" onClick={() => setFlagging(true)}>
               This is wrong
             </button>
@@ -1060,8 +1078,20 @@ function CardView({
             <button type="button" class="learn-link" onClick={() => setAnswering("aloud")}>
               Explain it aloud
             </button>
-            {onTeachMe ? (
-              <button type="button" class="learn-link" onClick={onTeachMe}>
+            {onTeachMe || onRequestLesson ? (
+              <button
+                type="button"
+                class="learn-link"
+                onClick={() => {
+                  if (onTeachMe) {
+                    onTeachMe();
+                  } else if (onRequestLesson) {
+                    onRequestLesson();
+                    setRequestedLesson(true);
+                    setRevealed(true);
+                  }
+                }}
+              >
                 Teach me
               </button>
             ) : null}
@@ -1079,6 +1109,7 @@ function ReadingView({
   onNext,
   onChoose,
   onTeachMe,
+  onRequestLesson,
   onRevisit,
 }: {
   item: Extract<DeckItem, { kind: "reading" }>;
@@ -1087,11 +1118,13 @@ function ReadingView({
   /** After a right answer, which only goes on once the learner chooses. */
   onChoose: (choice: Choice) => void;
   onTeachMe?: (() => void) | undefined;
+  onRequestLesson?: (() => void) | undefined;
   onRevisit?: (() => void) | undefined;
 }) {
   const [response, setResponse] = useState("");
   const [right, setRight] = useState<boolean | null>(null);
   const [chosen, setChosen] = useState<number | null>(null);
+  const [requestedLesson, setRequestedLesson] = useState(false);
   const answer = (given: string | null, correct: boolean) => {
     if (right !== null) return;
     setRight(correct);
@@ -1161,9 +1194,21 @@ function ReadingView({
           ))}
         </ol>
       )}
-      {right === null && onTeachMe ? (
+      {right === null && (onTeachMe || onRequestLesson) ? (
         <span class="learn-links">
-          <button type="button" class="learn-link" onClick={onTeachMe}>
+          <button
+            type="button"
+            class="learn-link"
+            onClick={() => {
+              if (onTeachMe) {
+                onTeachMe();
+              } else if (onRequestLesson) {
+                setRight(false);
+                setRequestedLesson(true);
+                onRequestLesson();
+              }
+            }}
+          >
             Teach me
           </button>
         </span>
@@ -1179,6 +1224,11 @@ function ReadingView({
           </p>
           {!right && item.ask === "prints" ? <pre class="learn-printed">{item.output}</pre> : null}
           <Markdown text={item.explanation} class="muted" />
+          {requestedLesson ? (
+            <p class="muted" role="status">
+              Lesson requested for the author's next run.
+            </p>
+          ) : null}
           {right ? (
             <ChoiceAfterRight onChoose={onChoose} />
           ) : onRevisit ? (
@@ -1253,6 +1303,7 @@ function TypedAnswer({
   onNext,
   onChoose,
   onTeachMe,
+  onRequestLesson,
   onRevisit,
 }: {
   prompt: Instance;
@@ -1271,6 +1322,7 @@ function TypedAnswer({
    * learner chooses. Questions made afresh each time go straight on. */
   onChoose?: (choice: Choice) => void;
   onTeachMe?: ((instance: Instance) => void) | undefined;
+  onRequestLesson?: ((instance: Instance) => void) | undefined;
   onRevisit?: (() => void) | undefined;
 }) {
   // The question stays the one first shown, even once answering it moves the deck on.
@@ -1278,6 +1330,7 @@ function TypedAnswer({
   const [response, setResponse] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [right, setRight] = useState<boolean | null>(null);
+  const [requestedLesson, setRequestedLesson] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
 
@@ -1333,9 +1386,22 @@ function TypedAnswer({
           </span>
         ) : null}
       </form>
-      {right === null && onTeachMe ? (
+      {right === null && (onTeachMe || onRequestLesson) ? (
         <span class="learn-links">
-          <button type="button" class="learn-link" onClick={() => onTeachMe(instance)}>
+          <button
+            type="button"
+            class="learn-link"
+            onClick={() => {
+              if (onTeachMe) {
+                onTeachMe(instance);
+              } else if (onRequestLesson) {
+                setProblem(null);
+                setRight(false);
+                setRequestedLesson(true);
+                onRequestLesson(instance);
+              }
+            }}
+          >
             Teach me
           </button>
         </span>
@@ -1351,6 +1417,11 @@ function TypedAnswer({
                 : `The answer is ${displayNumber(instance.answer)}`}
           </p>
           {instance.method ? <Markdown text={instance.method} class="muted" /> : null}
+          {requestedLesson ? (
+            <p class="muted" role="status">
+              Lesson requested for the author's next run.
+            </p>
+          ) : null}
           {right && onChoose ? (
             <ChoiceAfterRight onChoose={onChoose} />
           ) : !right && onRevisit ? (

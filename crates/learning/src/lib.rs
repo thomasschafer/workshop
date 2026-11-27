@@ -17,6 +17,6 @@ pub use mistakes::{Mistake, MistakeSource, NewMistake};
 pub use plan::{Clock, ItemRef, LessonPlanRef, Limits, Progress, TrackPlan, due, plan};
 pub use schedule::{ItemSchedule, Rating, Scheduler};
 pub use store::{
-    Activity, Attempt, Flag, FlagChange, LessonCompletion, LessonSkip, Retirement,
+    Activity, Attempt, Flag, FlagChange, LessonCompletion, LessonRequest, LessonSkip, Retirement,
     RetirementChange, Store, standings,
 };

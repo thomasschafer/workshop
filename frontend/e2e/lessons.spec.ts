@@ -359,9 +359,9 @@ test("holds a lesson's item until the next day, offers Teach me for its segment,
   await setOffline(other, true);
 
   // Same day as completing binary-heaps: binary-heap-costs is held back, so one of the other
-  // cards is shown instead, and Teach me is not shown on an unlinked card.
+  // cards is shown instead, and an unlinked card still offers "Teach me" to request a lesson.
   await expect(page.locator(".learn-prompt")).not.toContainText("binary heap");
-  await expect(page.getByRole("button", { name: "Teach me" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Teach me" })).toBeVisible();
 
   // Move the clock into the learner's next day (25 hours forward) and re-enter Review.
   await advanceMinutes(25 * 60);
@@ -434,4 +434,48 @@ test("holds a lesson's item until the next day, offers Teach me for its segment,
   await expect(page.locator(".learn-prompt")).not.toContainText("binary heap");
 
   await other.close();
+});
+
+test("Teach me without a lesson records a request offline, shows the answer, syncs when online, and lists the request under Packs", async () => {
+  // Open Notes (kept-apart track): notes-plain has no lesson yet.
+  await phone.goto("/practice/pack%3Anotes");
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  await expect(phone.locator(".learn-prompt")).toContainText("load factor range");
+  await expect(phone.getByRole("button", { name: "Teach me" })).toBeVisible();
+
+  // Go offline and tap "Teach me": stays on the item, shows answer, notes the request, and counts
+  // as Forgot (Next button, no rating buttons).
+  await setOffline(context, true);
+  await phone.getByRole("button", { name: "Teach me" }).tap();
+  await expect(phone).toHaveURL(/\/practice\/pack%3Anotes$/);
+  await expect(phone.locator(".learn-answer")).toContainText("Below about 0.7");
+  await expect(phone.locator(".learn-answer")).toContainText("Lesson requested");
+  await expect(phone.getByRole("button", { name: "Forgot" })).toHaveCount(0);
+  await expect(phone.getByRole("button", { name: "Next" })).toBeVisible();
+  await expect(phone.locator(".learn-sync")).toContainText("Offline · 1 to sync");
+
+  const stored = await phone.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem("workshop:learning") ?? "{}") as {
+      attempts?: { item: string; rating: string }[];
+      lesson_requests?: { item: string }[];
+    };
+    return {
+      attempts: (saved.attempts ?? []).filter((a) => a.item === "study/notes-plain"),
+      requests: (saved.lesson_requests ?? []).filter((r) => r.item === "study/notes-plain"),
+    };
+  });
+  expect(stored.attempts).toHaveLength(1);
+  expect(stored.attempts[0]?.rating).toBe("again");
+  expect(stored.requests).toHaveLength(1);
+
+  await phone.getByRole("button", { name: "Next" }).tap();
+
+  // Back online: syncs the attempt and lesson request, and Packs lists the waiting request.
+  await setOffline(context, false);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+
+  await phone.goto("/pack");
+  const requests = phone.getByRole("list", { name: "Lesson requests" });
+  await expect(requests).toBeVisible();
+  await expect(requests).toContainText("load factor range");
 });

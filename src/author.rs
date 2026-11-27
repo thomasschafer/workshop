@@ -4,13 +4,16 @@
 //! on the branch it's on, and never pushed; items waiting for approval and questions for the
 //! learner are kept in Workshop's data directory.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use workshop_author::{Brief, Limits, Models, Report, TooEasy, Written};
+use workshop_author::{
+    Brief, LessonRequest, Limits, Linked, Models, Report, SkillCoverage, TooEasy, Written,
+};
 use workshop_pack::{Item, Kind, Pack};
 use workshop_provider::{AgentConfig, CallSpec, ProviderRunner, Role};
 
@@ -381,7 +384,61 @@ fn brief(learning: &Learning, pack: &Pack, questions: &[Question], now: i64) -> 
             (hardest + 1).min(*workshop_learning::level::LEVELS.end())
         },
     );
+    let lesson_requests: Vec<LessonRequest> = learning
+        .waiting_lesson_requests_in(std::slice::from_ref(pack))?
+        .into_iter()
+        .map(|req| LessonRequest {
+            path: req.path,
+            id: req.id,
+            prompt: req.prompt,
+            answer: req.answer,
+            explanation: req.explanation,
+            skills: req.skills,
+        })
+        .collect();
+    let mut targeted_skills: Vec<String> = Vec::new();
+    let mut seen_skills: BTreeSet<String> = BTreeSet::new();
+    let mut push_skill = |skill: &str| {
+        if pack.manifest.has_skill(skill) && seen_skills.insert(skill.to_owned()) {
+            targeted_skills.push(skill.to_owned());
+        }
+    };
+    for req in &lesson_requests {
+        for skill in &req.skills {
+            push_skill(skill);
+        }
+    }
+    for (skill, _) in &weakest {
+        push_skill(skill);
+    }
+    for skill in too_easy.iter().chain(fixed_too_easy.iter()) {
+        push_skill(&skill.skill);
+    }
+    let skill_coverage = targeted_skills
+        .into_iter()
+        .map(|skill| {
+            let lessons = pack
+                .items
+                .iter()
+                .filter(|item| item.kind == Kind::Lesson && item.skills.contains(&skill))
+                .count();
+            let unlinked_items = pack
+                .items
+                .iter()
+                .filter(|item| {
+                    item.kind.is_short() && item.lesson.is_none() && item.skills.contains(&skill)
+                })
+                .count();
+            SkillCoverage {
+                skill,
+                lessons,
+                unlinked_items,
+            }
+        })
+        .collect();
     Ok(Brief {
+        lesson_requests,
+        skill_coverage,
         weakest,
         mistakes,
         examples,
@@ -555,11 +612,14 @@ async fn run_locked(
         }
     })?;
 
-    let (commit, clashing) = land(&dir, &report.accepted).await?;
+    let (commit, clashing, unlinked) = land(&dir, &report.accepted, &report.linked).await?;
     for mut item in clashing {
         item.reason = Some("the pack has a file of the same name now".to_owned());
         report.accepted.retain(|a| a.path != item.path);
         report.queued.push(item);
+    }
+    if !unlinked.is_empty() {
+        report.linked.retain(|l| !unlinked.contains(&l.path));
     }
     let pack_id = loaded.manifest.id.clone();
     desk.enqueue(
@@ -579,15 +639,35 @@ async fn run_locked(
     Ok((report, commit))
 }
 
-/// Puts accepted items in the pack, removing the drafts they were made from, and commits them.
-/// Returns the commit, if there is one, and items that would overwrite a file the pack has now,
-/// which aren't put in.
-async fn land(dir: &Path, items: &[Written]) -> Result<(Option<String>, Vec<Written>)> {
+/// Puts accepted items and linked existing items in the pack, removing the drafts they were made
+/// from, and commits them. Returns the commit, if there is one, items that would overwrite a file
+/// the pack has now (which aren't put in), and any linked paths skipped because their lesson
+/// clashed or the file is gone.
+async fn land(
+    dir: &Path,
+    items: &[Written],
+    linked: &[Linked],
+) -> Result<(Option<String>, Vec<Written>, BTreeSet<String>)> {
+    // If a lesson clashes, hold back its accompanying items and links too so nothing lands broken.
+    let clashing_lessons: BTreeSet<&str> = items
+        .iter()
+        .filter(|item| {
+            item.files.get(&item.path).is_some_and(|text| {
+                workshop_author::staging::lesson_id_from_front_matter(&item.path, text.as_bytes())
+                    .is_some()
+            }) && item.files.keys().any(|path| dir.join(path).exists())
+        })
+        .map(|item| item.id.as_str())
+        .collect();
     let mut landed = Vec::new();
     let mut clashing = Vec::new();
     let mut paths = Vec::new();
     for item in items {
-        if item.files.keys().any(|path| dir.join(path).exists()) {
+        let belongs_to_clashing_lesson = item.files.get(&item.path).is_some_and(|text| {
+            workshop_author::staging::lesson_ref_from_front_matter(text.as_bytes())
+                .is_some_and(|id| clashing_lessons.contains(id.as_str()))
+        });
+        if belongs_to_clashing_lesson || item.files.keys().any(|path| dir.join(path).exists()) {
             clashing.push(item.clone());
             continue;
         }
@@ -603,14 +683,26 @@ async fn land(dir: &Path, items: &[Written]) -> Result<(Option<String>, Vec<Writ
         }
         landed.push(item);
     }
-    if landed.is_empty() {
-        return Ok((None, clashing));
+    let mut landed_links = Vec::new();
+    let mut skipped_links = BTreeSet::new();
+    for link in linked {
+        if clashing_lessons.contains(link.lesson.as_str()) || !dir.join(&link.path).is_file() {
+            skipped_links.insert(link.path.clone());
+            continue;
+        }
+        crate::pack_files::write(dir, &link.path, &link.content)?;
+        paths.push(link.path.clone());
+        landed_links.push(link);
     }
-    let commit = crate::pack_files::commit(dir, &paths, &commit_message(&landed)).await?;
-    Ok((commit, clashing))
+    if landed.is_empty() && landed_links.is_empty() {
+        return Ok((None, clashing, skipped_links));
+    }
+    let commit =
+        crate::pack_files::commit(dir, &paths, &commit_message(&landed, &landed_links)).await?;
+    Ok((commit, clashing, skipped_links))
 }
 
-fn commit_message(items: &[&Written]) -> String {
+fn commit_message(items: &[&Written], linked: &[&Linked]) -> String {
     let title = match items {
         [one] => format!("Add an item from the author: {}", one.label),
         _ => format!("Add {} items from the author", items.len()),
@@ -619,13 +711,28 @@ fn commit_message(items: &[&Written]) -> String {
     for item in items {
         body.push_str(&format!("\n- {}: {}", item.path, item.label));
     }
+    if !linked.is_empty() {
+        body.push_str("\n\nLinked to new lessons:");
+        for link in linked {
+            match link.segment {
+                Some(seg) => body.push_str(&format!(
+                    "\n- {}: {} (lesson {}, segment {seg})",
+                    link.path, link.label, link.lesson
+                )),
+                None => body.push_str(&format!(
+                    "\n- {}: {} (lesson {})",
+                    link.path, link.label, link.lesson
+                )),
+            }
+        }
+    }
     format!(
         "{title}\n\nWritten by one model and reviewed blind by another, and each passes its check.\n{body}"
     )
 }
 
-/// Approves an item waiting in the queue: puts it in the pack, if it still passes its check,
-/// and commits it. Returns the commit, if the pack is a git repo.
+/// Approves an item (or lesson bundle) waiting in the queue: puts it in the pack, if it still
+/// passes its check, and commits it. Returns the commit, if the pack is a git repo.
 pub async fn approve(
     config: &Config,
     paths: &Paths,
@@ -644,7 +751,8 @@ pub async fn approve(
 /// Restores the pack working tree if approving a queued item fails before the commit lands.
 struct ApproveRollback {
     written: Vec<PathBuf>,
-    removed_draft: Option<(PathBuf, Vec<u8>)>,
+    restored: Vec<(PathBuf, Vec<u8>)>,
+    removed_drafts: Vec<(PathBuf, Vec<u8>)>,
     armed: bool,
 }
 
@@ -652,7 +760,8 @@ impl ApproveRollback {
     fn new() -> Self {
         Self {
             written: Vec::new(),
-            removed_draft: None,
+            restored: Vec::new(),
+            removed_drafts: Vec::new(),
             armed: true,
         }
     }
@@ -672,13 +781,21 @@ impl Drop for ApproveRollback {
                 tracing::warn!("removing {} after approval failed: {err}", path.display());
             }
         }
-        if let Some((path, bytes)) = &self.removed_draft
-            && let Err(err) = workshop_common::files::write_atomic(path, bytes)
-        {
-            tracing::warn!(
-                "restoring {} after approval failed: {err:#}",
-                path.display()
-            );
+        for (path, bytes) in &self.restored {
+            if let Err(err) = workshop_common::files::write_atomic(path, bytes) {
+                tracing::warn!(
+                    "restoring {} after approval failed: {err:#}",
+                    path.display()
+                );
+            }
+        }
+        for (path, bytes) in &self.removed_drafts {
+            if let Err(err) = workshop_common::files::write_atomic(path, bytes) {
+                tracing::warn!(
+                    "restoring {} after approval failed: {err:#}",
+                    path.display()
+                );
+            }
         }
     }
 }
@@ -686,18 +803,39 @@ impl Drop for ApproveRollback {
 async fn approve_queued(config: &Config, paths: &Paths, queued: &Queued) -> Result<Option<String>> {
     let dir = crate::pack_files::pack_dir(&config.learning, &queued.pack)?;
     let item = &queued.item;
-    if item.files.keys().any(|path| dir.join(path).exists()) {
-        bail!("the pack has a file where this item would go, so it wasn't added");
+    let all_items: Vec<&Written> = std::iter::once(item).chain(item.items.iter()).collect();
+    for entry in &all_items {
+        if entry.files.keys().any(|path| dir.join(path).exists()) {
+            bail!("the pack has a file where this item would go, so it wasn't added");
+        }
     }
     let mut rollback = ApproveRollback::new();
-    for (path, text) in &item.files {
-        crate::pack_files::write(&dir, path, text)?;
-        rollback.written.push(dir.join(path));
+    let mut all_written_files: BTreeSet<String> = BTreeSet::new();
+    for entry in &all_items {
+        for (path, text) in &entry.files {
+            crate::pack_files::write(&dir, path, text)?;
+            rollback.written.push(dir.join(path));
+            all_written_files.insert(path.clone());
+        }
+    }
+    let mut applied_links: Vec<&Linked> = Vec::new();
+    for link in &item.linked {
+        let target = dir.join(&link.path);
+        if target.is_file() {
+            let before =
+                std::fs::read(&target).with_context(|| format!("reading {}", target.display()))?;
+            crate::pack_files::write(&dir, &link.path, &link.content)?;
+            rollback.restored.push((target, before));
+            applied_links.push(link);
+        }
     }
     let pack = Pack::load(&dir)?;
-    // Only this item: the rest of the pack is kept for cross-item checks, without rebuilding its
-    // existing coding problems.
-    let only = std::collections::BTreeSet::from([item.path.as_str()]);
+    // Only these items (and applied links): the rest of the pack is kept for cross-item checks,
+    // without rebuilding its existing coding problems.
+    let mut only: BTreeSet<&str> = all_items.iter().map(|i| i.path.as_str()).collect();
+    for link in &applied_links {
+        only.insert(link.path.as_str());
+    }
     let runtime = crate::coding::runtime(config, paths).await?;
     let report = pack
         .check_only(
@@ -711,47 +849,71 @@ async fn approve_queued(config: &Config, paths: &Paths, queued: &Queued) -> Resu
     let problem = report
         .problems
         .iter()
-        .find(|p| item.files.contains_key(&p.path))
+        .find(|p| {
+            all_written_files.contains(&p.path) || applied_links.iter().any(|l| l.path == p.path)
+        })
         .map(|p| p.message.clone())
         .or_else(|| {
-            match report
-                .items
-                .iter()
-                .find(|c| c.path == item.path)
-                .map(|c| &c.verdict)
-            {
-                Some(workshop_pack::Verdict::Passed(_)) => None,
-                Some(workshop_pack::Verdict::Failed(why)) => Some(why.clone()),
-                Some(workshop_pack::Verdict::Skipped(why)) => {
-                    Some(format!("it couldn't be checked here, as {why}"))
+            for check_path in &only {
+                match report
+                    .items
+                    .iter()
+                    .find(|c| c.path == *check_path)
+                    .map(|c| &c.verdict)
+                {
+                    Some(workshop_pack::Verdict::Passed(_)) => {}
+                    Some(workshop_pack::Verdict::Failed(why)) => return Some(why.clone()),
+                    Some(workshop_pack::Verdict::Skipped(why)) => {
+                        return Some(format!("it couldn't be checked here, as {why}"));
+                    }
+                    None => {
+                        return Some(
+                            report.problems.first().map_or_else(
+                                || "it can't be read".to_owned(),
+                                |p| p.message.clone(),
+                            ),
+                        );
+                    }
                 }
-                None => Some(
-                    report
-                        .problems
-                        .first()
-                        .map_or_else(|| "it can't be read".to_owned(), |p| p.message.clone()),
-                ),
             }
+            None
         });
     if let Some(problem) = problem {
         bail!("it doesn't pass its check now, so it wasn't added: {problem}");
     }
-    let mut paths: Vec<String> = item.files.keys().cloned().collect();
-    if let Some(draft) = &item.from_draft {
-        let draft_path = dir.join(draft);
-        if draft_path.is_file() {
-            let bytes = std::fs::read(&draft_path)
-                .with_context(|| format!("reading {}", draft_path.display()))?;
-            std::fs::remove_file(&draft_path)
-                .with_context(|| format!("removing {}", draft_path.display()))?;
-            rollback.removed_draft = Some((draft_path, bytes));
-            paths.push(draft.clone());
+    let mut paths: Vec<String> = all_written_files.into_iter().collect();
+    for link in &applied_links {
+        paths.push(link.path.clone());
+    }
+    for entry in &all_items {
+        if let Some(draft) = &entry.from_draft {
+            let draft_path = dir.join(draft);
+            if draft_path.is_file() {
+                let bytes = std::fs::read(&draft_path)
+                    .with_context(|| format!("reading {}", draft_path.display()))?;
+                std::fs::remove_file(&draft_path)
+                    .with_context(|| format!("removing {}", draft_path.display()))?;
+                rollback.removed_drafts.push((draft_path, bytes));
+                paths.push(draft.clone());
+            }
         }
     }
-    let message = format!(
+    let mut message = format!(
         "Add an item from the author, approved: {}\n\nThe reviewer didn't agree with it; it was approved in the app.",
         item.label
     );
+    if !item.items.is_empty() {
+        message.push_str("\n\nWith items:");
+        for child in &item.items {
+            message.push_str(&format!("\n- {}: {}", child.path, child.label));
+        }
+    }
+    if !applied_links.is_empty() {
+        message.push_str("\n\nLinked to new lessons:");
+        for link in &applied_links {
+            message.push_str(&format!("\n- {}: {}", link.path, link.label));
+        }
+    }
     match crate::pack_files::commit(&dir, &paths, &message).await {
         Ok(hash) => {
             rollback.disarm();
@@ -796,13 +958,32 @@ pub fn summary(last: &LastRun) -> String {
         }
     };
     line(&mut out, "Added", &report.accepted);
+    if !report.linked.is_empty() {
+        out.push_str("Linked:\n");
+        for link in &report.linked {
+            match link.segment {
+                Some(seg) => out.push_str(&format!(
+                    "  {} ({}) → {} (segment {seg})\n",
+                    link.path, link.label, link.lesson
+                )),
+                None => out.push_str(&format!(
+                    "  {} ({}) → {}\n",
+                    link.path, link.label, link.lesson
+                )),
+            }
+        }
+    }
     line(
         &mut out,
         "Waiting for your approval in the app",
         &report.queued,
     );
     line(&mut out, "Left out", &report.dropped);
-    if report.accepted.is_empty() && report.queued.is_empty() && report.dropped.is_empty() {
+    if report.accepted.is_empty()
+        && report.linked.is_empty()
+        && report.queued.is_empty()
+        && report.dropped.is_empty()
+    {
         out.push_str("No items were written.\n");
     }
     if let Some(commit) = &last.commit {

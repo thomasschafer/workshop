@@ -18,6 +18,7 @@ import type {
   Deck,
   FlagChange,
   LessonCompletion,
+  LessonRequest,
   LessonSkip,
   RetirementChange,
 } from "./types";
@@ -39,6 +40,8 @@ interface Saved {
   lesson_completions?: LessonCompletion[];
   /** Lesson skips ("Not now") waiting to reach the server. Missing from older saved state. */
   lesson_skips?: LessonSkip[];
+  /** Lesson requests ("Teach me" without a lesson) waiting to reach the server. */
+  lesson_requests?: LessonRequest[];
   /**
    * Recorded by the server itself since the deck came, as when the grader marks an answer, so
    * not to send. Missing from what an older Workshop saved on the device.
@@ -98,12 +101,14 @@ export class Learning {
   private pending(): number {
     const attempts = new Set(this.saved.attempts.map((a) => a.id));
     const changes = this.retirementChanges.filter((change) => !attempts.has(change.id));
+    const requests = this.lessonRequests.filter((request) => !attempts.has(request.id));
     return (
       this.saved.attempts.length +
       this.saved.flags.length +
       changes.length +
       this.lessonCompletions.length +
-      this.lessonSkips.length
+      this.lessonSkips.length +
+      requests.length
     );
   }
 
@@ -134,6 +139,10 @@ export class Learning {
 
   get lessonSkips(): LessonSkip[] {
     return this.saved.lesson_skips ?? [];
+  }
+
+  get lessonRequests(): LessonRequest[] {
+    return this.saved.lesson_requests ?? [];
   }
 
   get syncStatus(): SyncStatus {
@@ -240,6 +249,28 @@ export class Learning {
   }
 
   /**
+   * Saves a "Teach me" attempt (rated again) together with a request for a lesson on the item,
+   * sharing the attempt's id so the two count as one pending item, then sends both.
+   */
+  requestLesson(attempt: Attempt): void {
+    if (attempt.rating !== "again") {
+      throw new Error(`requesting a lesson for ${attempt.item} needs an attempt rated again`);
+    }
+    const request: LessonRequest = {
+      id: attempt.id,
+      item: attempt.item,
+      requested_at: attempt.answered_at,
+    };
+    this.saved = {
+      ...this.saved,
+      attempts: [...this.saved.attempts, attempt],
+      lesson_requests: [...this.lessonRequests, request],
+    };
+    this.save();
+    void this.sync();
+  }
+
+  /**
    * Sends what's waiting and takes the deck the server sends back. Resolves once that's done or
    * has failed: failures are kept in the status, and tried again later.
    */
@@ -269,6 +300,7 @@ export class Learning {
     const retirements = this.retirementChanges;
     const lessonCompletions = this.lessonCompletions;
     const lessonSkips = this.lessonSkips;
+    const lessonRequests = this.lessonRequests;
     // The server had these before this began, so the deck it sends back has them.
     const recorded = this.recorded;
     const pendingOutbox =
@@ -288,6 +320,7 @@ export class Learning {
             retirements,
             lesson_completions: lessonCompletions,
             lesson_skips: lessonSkips,
+            lesson_requests: lessonRequests,
             coding_events: outboxBatch.coding_events,
             mistake_tags: outboxBatch.mistake_tags,
           },
@@ -304,6 +337,7 @@ export class Learning {
           retirements,
           lesson_completions: lessonCompletions,
           lesson_skips: lessonSkips,
+          lesson_requests: lessonRequests,
         });
       }
       // Anything done while this was on its way is still to send.
@@ -312,6 +346,7 @@ export class Learning {
       const sentRetirements = new Set(retirements.map((r) => r.id));
       const sentCompletions = new Set(lessonCompletions.map((c) => c.id));
       const sentSkips = new Set(lessonSkips.map((s) => s.id));
+      const sentRequests = new Set(lessonRequests.map((r) => r.id));
       const inDeck = new Set(recorded.map((a) => a.id));
       this.saved = {
         deck,
@@ -320,6 +355,7 @@ export class Learning {
         retirements: this.retirementChanges.filter((r) => !sentRetirements.has(r.id)),
         lesson_completions: this.lessonCompletions.filter((c) => !sentCompletions.has(c.id)),
         lesson_skips: this.lessonSkips.filter((s) => !sentSkips.has(s.id)),
+        lesson_requests: this.lessonRequests.filter((r) => !sentRequests.has(r.id)),
         recorded: this.recorded.filter((a) => !inDeck.has(a.id)),
       };
       this.retryMs = RETRY_MS;

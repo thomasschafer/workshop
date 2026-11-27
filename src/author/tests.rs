@@ -627,6 +627,8 @@ async fn approve_rejects_unparsed_item_and_cleans_up_written_files() {
             from_draft: None,
             transcript: Vec::new(),
             reason: Some("needs review".to_owned()),
+            items: Vec::new(),
+            linked: Vec::new(),
         },
     };
     s.desk.enqueue(vec![queued]).unwrap();
@@ -690,6 +692,8 @@ async fn approve_restores_draft_and_cleans_up_files_when_commit_fails() {
             from_draft: Some(draft_rel.to_owned()),
             transcript: Vec::new(),
             reason: Some("needs review".to_owned()),
+            items: Vec::new(),
+            linked: Vec::new(),
         },
     };
     s.desk.enqueue(vec![queued]).unwrap();
@@ -708,4 +712,280 @@ async fn approve_restores_draft_and_cleans_up_files_when_commit_fails() {
         "draft file must be restored when commit fails"
     );
     assert_eq!(s.desk.queue().unwrap().len(), 1);
+}
+
+fn sample_lesson_md() -> &'static str {
+    "+++\nkind = \"lesson\"\ntitle = \"How hash tables handle collisions\"\nskills = [\"data-structures\", \"algorithms.complexity\"]\n\n[[sources]]\ntitle = \"Python's dict implementation notes\"\nurl = \"https://github.com/python/cpython/blob/main/Objects/dictnotes.txt\"\n\n[[checks]]\nsegment = 1\nprompt = \"What happens to lookup cost when all keys hash to one bucket?\"\nchoices = [\"Still O(1)\", \"Degrades to O(n)\", \"Triggers an error\"]\nanswer = 2\nexplanation = \"All keys share one chain, so lookup scans up to n entries.\"\n+++\nWhy hash table lookups stay fast on average and when collisions make them linear.\n\n## Buckets and load factor\n\nA hash table maps each key to a bucket index and resizes as load factor grows, keeping buckets short.\n\n![Hash buckets](buckets.svg)\n\n## Explain\n\nWhy does resizing keep average hash table lookup O(1)?\n\n## Explain answer\n\nResizing bounds the load factor so the expected number of keys per bucket stays constant.\n"
+}
+
+fn sample_lesson_svg() -> &'static str {
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 60\"><rect x=\"10\" y=\"10\" width=\"180\" height=\"40\" fill=\"none\" stroke=\"currentColor\"/><text x=\"100\" y=\"35\" text-anchor=\"middle\" fill=\"currentColor\">Buckets</text></svg>\n"
+}
+
+fn linked_hash_card(question: &str) -> String {
+    format!(
+        "+++\nkind = \"card\"\nskills = [\"data-structures\"]\nlesson = \"hash-collisions\"\nsegment = 1\n+++\n{question}\n\n## Answer\n\nBecause collisions are bounded by load factor.\n"
+    )
+}
+
+#[tokio::test]
+async fn writes_lesson_links_requested_item_and_answers_and_drops_requests() {
+    let s = setup();
+    let now = crate::learning::now_ms();
+    // Record a lesson request for an existing unlinked card in the sample pack.
+    s.learning
+        .store()
+        .record_lesson_requests(
+            &[workshop_learning::LessonRequest {
+                id: "lesson-req-hash".to_owned(),
+                item: "sample/hash-table-lookups".to_owned(),
+                requested_at: now,
+            }],
+            now,
+        )
+        .unwrap();
+    let pack = Pack::load(&s.pack).unwrap();
+    let b = brief(&s.learning, &pack, &[], now).unwrap();
+    assert_eq!(b.lesson_requests.len(), 1);
+    assert_eq!(b.lesson_requests[0].id, "hash-table-lookups");
+    assert!(b.lesson_requests[0].prompt.contains("hash table"));
+    assert!(b.lesson_requests[0].answer.contains("bucket"));
+    assert!(b.lesson_requests[0].explanation.is_some());
+    assert!(
+        b.skill_coverage
+            .iter()
+            .any(|c| c.skill == "data-structures" && c.lessons == 1)
+    );
+
+    // Writer writes a lesson + 3 new items and links items/cards/hash-table-lookups.md to it.
+    let claude = s.root.join("claude");
+    write(
+        &claude.join("write-0/items/lessons/hash-collisions/item.md"),
+        sample_lesson_md(),
+    );
+    write(
+        &claude.join("write-0/items/lessons/hash-collisions/buckets.svg"),
+        sample_lesson_svg(),
+    );
+    for i in 1..=3 {
+        write(
+            &claude.join(format!("write-0/items/author/hc-{i}.md")),
+            &linked_hash_card(&format!("Hash collision question {i}?")),
+        );
+    }
+    let original_card =
+        std::fs::read_to_string(s.pack.join("items/cards/hash-table-lookups.md")).unwrap();
+    let linked_card = original_card.replacen(
+        "skills = [\"data-structures\", \"algorithms.complexity\"]\n",
+        "skills = [\"data-structures\", \"algorithms.complexity\"]\nlesson = \"hash-collisions\"\nsegment = 1\n",
+        1,
+    );
+    write(
+        &claude.join("write-0/items/cards/hash-table-lookups.md"),
+        &linked_card,
+    );
+    write(
+        &claude.join("reply-0"),
+        &claude_result("{\"items\": [], \"questions\": []}"),
+    );
+    let codex = s.root.join("codex");
+    write(
+        &codex.join("solved"),
+        &codex_message("{\"answer\": \"O(1)\", \"working\": \"bounded load factor\"}"),
+    );
+    write(
+        &codex.join("reply"),
+        &codex_message("{\"agree\": true, \"ambiguous\": false, \"objection\": \"\"}"),
+    );
+
+    let notifier = Arc::new(workshop_push::Notifier::load(&s.paths.data_dir).unwrap());
+    let last = run(&s.config, &s.paths, &s.learning, &s.desk, notifier, None)
+        .await
+        .unwrap();
+    assert_eq!(last.error, None, "{last:#?}");
+    let report = last.report.as_ref().unwrap();
+    assert_eq!(report.accepted.len(), 4, "{report:#?}");
+    assert_eq!(report.linked.len(), 1, "{report:#?}");
+    assert_eq!(report.linked[0].path, "items/cards/hash-table-lookups.md");
+    assert!(last.commit.is_some());
+
+    // The writer saw the lesson request in its prompt.
+    let writer_prompt = std::fs::read_to_string(claude.join("prompt-0")).unwrap();
+    assert!(writer_prompt.contains("Requests for lessons come first"));
+    assert!(writer_prompt.contains("items/cards/hash-table-lookups.md"));
+
+    // Summary and commit message both list the linked item.
+    let text = summary(&last);
+    assert!(text.contains("Linked:"), "{text}");
+    assert!(text.contains("items/cards/hash-table-lookups.md"), "{text}");
+    let full_commit = crate::workspace::git(&s.pack, &["log", "-1", "--format=%B"])
+        .await
+        .unwrap();
+    assert!(
+        full_commit.contains("Linked to new lessons:"),
+        "{full_commit}"
+    );
+    assert!(
+        full_commit.contains("items/cards/hash-table-lookups.md"),
+        "{full_commit}"
+    );
+    // The pack now has the lesson, its 3 items, and the linked card, with a clean git tree.
+    let reloaded = Pack::load(&s.pack).unwrap();
+    assert!(reloaded.item("hash-collisions").is_some());
+    assert_eq!(
+        reloaded
+            .item("hash-table-lookups")
+            .unwrap()
+            .lesson
+            .as_ref()
+            .unwrap()
+            .id,
+        "hash-collisions"
+    );
+    let status = crate::workspace::git(&s.pack, &["status", "--porcelain"])
+        .await
+        .unwrap();
+    assert_eq!(status.trim(), "");
+
+    // Once linked, the request is answered and no longer waiting.
+    assert!(
+        s.learning
+            .waiting_lesson_requests_in(std::slice::from_ref(&reloaded))
+            .unwrap()
+            .is_empty()
+    );
+
+    // A request for an item that's removed from the pack is dropped.
+    s.learning
+        .store()
+        .record_lesson_requests(
+            &[workshop_learning::LessonRequest {
+                id: "lesson-req-gone".to_owned(),
+                item: "sample/stable-sorting".to_owned(),
+                requested_at: now + 1,
+            }],
+            now + 1,
+        )
+        .unwrap();
+    assert_eq!(s.learning.waiting_lesson_requests().unwrap().len(), 1);
+    std::fs::remove_file(s.pack.join("items/cards/stable-sorting.md")).unwrap();
+    assert!(s.learning.waiting_lesson_requests().unwrap().is_empty());
+    assert!(s.learning.store().lesson_requests().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn approving_a_queued_lesson_adds_its_items_and_links() {
+    let s = setup();
+    let claude = s.root.join("claude");
+    write(
+        &claude.join("write-0/items/lessons/hash-collisions/item.md"),
+        sample_lesson_md(),
+    );
+    write(
+        &claude.join("write-0/items/lessons/hash-collisions/buckets.svg"),
+        sample_lesson_svg(),
+    );
+    for i in 1..=3 {
+        write(
+            &claude.join(format!("write-0/items/author/hc-{i}.md")),
+            &linked_hash_card(&format!("Hash collision question {i}?")),
+        );
+    }
+    let original_card =
+        std::fs::read_to_string(s.pack.join("items/cards/hash-table-lookups.md")).unwrap();
+    let linked_card = original_card.replacen(
+        "skills = [\"data-structures\", \"algorithms.complexity\"]\n",
+        "skills = [\"data-structures\", \"algorithms.complexity\"]\nlesson = \"hash-collisions\"\nsegment = 1\n",
+        1,
+    );
+    write(
+        &claude.join("write-0/items/cards/hash-table-lookups.md"),
+        &linked_card,
+    );
+    write(
+        &claude.join("reply-0"),
+        &claude_result("{\"items\": [], \"questions\": []}"),
+    );
+    write(
+        &claude.join("reply"),
+        &claude_result("{\"position\": \"stands\", \"reply\": \"The source is accurate.\"}"),
+    );
+    // Reviewer objects to the lesson (by matching its path in the audit prompt) and agrees with its items.
+    let codex = s.root.join("codex");
+    write(
+        &codex.join("solved"),
+        &codex_message("{\"answer\": \"O(1)\", \"working\": \"bounded load factor\"}"),
+    );
+    write(
+        &codex.join("reply"),
+        &codex_message("{\"agree\": true, \"ambiguous\": false, \"objection\": \"\"}"),
+    );
+    // Override the fake codex script so it objects to "Audit this lesson" prompts.
+    let codex_script = codex.join("cli.sh");
+    let script = std::fs::read_to_string(&codex_script).unwrap();
+    let updated = script.replace(
+        "\"Solve this\") cat \"$home/solved\" ;;",
+        "\"Solve this\") cat \"$home/solved\" ;;\n  \"Audit this\") cat \"$home/objects\" ;;",
+    );
+    std::fs::write(&codex_script, updated).unwrap();
+    write(
+        &codex.join("objects"),
+        &codex_message(
+            "{\"agree\": false, \"ambiguous\": false, \"objection\": \"Check load factor threshold.\"}",
+        ),
+    );
+
+    let notifier = Arc::new(workshop_push::Notifier::load(&s.paths.data_dir).unwrap());
+    let last = run(&s.config, &s.paths, &s.learning, &s.desk, notifier, None)
+        .await
+        .unwrap();
+    assert_eq!(last.error, None, "{last:#?}");
+    let report = last.report.as_ref().unwrap();
+    assert!(report.accepted.is_empty(), "{report:#?}");
+    assert!(report.linked.is_empty(), "{report:#?}");
+    assert_eq!(report.queued.len(), 1, "{report:#?}");
+    assert_eq!(report.queued[0].items.len(), 3);
+    assert_eq!(report.queued[0].linked.len(), 1);
+    // Nothing was written to the pack yet.
+    assert!(
+        !s.pack
+            .join("items/lessons/hash-collisions/item.md")
+            .exists()
+    );
+    assert!(!s.pack.join("items/author/hc-1.md").exists());
+    assert_eq!(
+        std::fs::read_to_string(s.pack.join("items/cards/hash-table-lookups.md")).unwrap(),
+        original_card
+    );
+
+    // Approving the queued lesson adds the lesson, its 3 items, and the link in one commit.
+    let queue = s.desk.queue().unwrap();
+    let commit = approve(&s.config, &s.paths, &s.desk, &queue[0].id)
+        .await
+        .unwrap();
+    assert!(commit.is_some());
+    assert!(s.desk.queue().unwrap().is_empty());
+    assert!(
+        s.pack
+            .join("items/lessons/hash-collisions/item.md")
+            .is_file()
+    );
+    for i in 1..=3 {
+        assert!(s.pack.join(format!("items/author/hc-{i}.md")).is_file());
+    }
+    let reloaded = Pack::load(&s.pack).unwrap();
+    assert_eq!(
+        reloaded
+            .item("hash-table-lookups")
+            .unwrap()
+            .lesson
+            .as_ref()
+            .unwrap()
+            .id,
+        "hash-collisions"
+    );
+    let status = crate::workspace::git(&s.pack, &["status", "--porcelain"])
+        .await
+        .unwrap();
+    assert_eq!(status.trim(), "");
 }

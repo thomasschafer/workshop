@@ -24,6 +24,15 @@ struct Schedule {
 }
 
 #[derive(Serialize)]
+struct WaitingRequest {
+    /// `pack/item`.
+    item: String,
+    label: String,
+    skills: Vec<String>,
+    requested_at: i64,
+}
+
+#[derive(Serialize)]
 pub(super) struct AuthorStatus {
     running: bool,
     /// When it runs by itself, if it's scheduled to.
@@ -41,6 +50,8 @@ pub(super) struct AuthorStatus {
     queue: Vec<Queued>,
     /// Questions it's asked that haven't yet gone to a run with their answer.
     questions: Vec<Question>,
+    /// Short items the learner tapped "Teach me" on when they had no lesson yet.
+    lesson_requests: Vec<WaitingRequest>,
 }
 
 async fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
@@ -58,6 +69,17 @@ async fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
         after: author.after.map(|after| after.to_string()),
         next_at,
     });
+    let lesson_requests = app
+        .learning
+        .waiting_lesson_requests()?
+        .into_iter()
+        .map(|req| WaitingRequest {
+            item: req.item,
+            label: req.label,
+            skills: req.skills,
+            requested_at: req.requested_at,
+        })
+        .collect();
     Ok(AuthorStatus {
         running,
         schedule,
@@ -77,6 +99,7 @@ async fn status(app: &Shared) -> Result<AuthorStatus, ApiError> {
             .into_iter()
             .filter(|q| !q.told)
             .collect(),
+        lesson_requests,
     })
 }
 

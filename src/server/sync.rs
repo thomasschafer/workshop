@@ -27,6 +27,7 @@ pub(super) struct UnifiedSyncRequest {
     pub(super) retirements: Vec<workshop_learning::RetirementChange>,
     pub(super) lesson_completions: Vec<workshop_learning::LessonCompletion>,
     pub(super) lesson_skips: Vec<workshop_learning::LessonSkip>,
+    pub(super) lesson_requests: Vec<workshop_learning::LessonRequest>,
     pub(super) coding_events: Vec<CodingEvent>,
     pub(super) mistake_tags: Vec<MistakeTagChange>,
 }
@@ -87,6 +88,7 @@ pub(super) async fn sync(
             retirements: request.retirements,
             lesson_completions: request.lesson_completions,
             lesson_skips: request.lesson_skips,
+            lesson_requests: request.lesson_requests,
         },
         clock,
     )?;

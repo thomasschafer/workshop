@@ -35,7 +35,7 @@ pub use drafts::Draft;
 pub use error_types::ErrorType;
 pub use item::{
     Content, DIFFICULTY, FollowUps, Item, Kind, MentalMaths, Param, Probability, Simulation,
-    replace_section,
+    replace_section, split_front_matter,
 };
 pub use lesson::{Check, Guess, ImageData, Lesson, LessonImage, LessonRef, LessonSource, Segment};
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};

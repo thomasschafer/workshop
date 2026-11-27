@@ -24,6 +24,15 @@ export interface Turn {
   text: string;
 }
 
+export interface Linked {
+  path: string;
+  id: string;
+  label: string;
+  lesson: string;
+  segment: number | null;
+  content: string;
+}
+
 export interface Written {
   path: string;
   id: string;
@@ -34,14 +43,27 @@ export interface Written {
   from_draft: string | null;
   transcript: Turn[];
   reason: string | null;
+  /** For a queued lesson, its accompanying items held with it until it's approved. */
+  items?: Written[];
+  /** For a queued lesson, existing items to link to it when it's approved. */
+  linked?: Linked[];
 }
 
 export interface Report {
   accepted: Written[];
+  /** Existing items linked to accepted lessons written in this run. */
+  linked?: Linked[];
   queued: Written[];
   dropped: Written[];
   questions: string[];
   put_back: string[];
+}
+
+export interface WaitingLessonRequest {
+  item: string;
+  label: string;
+  skills: string[];
+  requested_at: number;
 }
 
 export interface AuthorStatus {
@@ -73,4 +95,5 @@ export interface AuthorStatus {
   } | null;
   queue: { id: string; pack: string; at: number; item: Written }[];
   questions: { id: string; text: string; asked_at: number; answer: string | null }[];
+  lesson_requests?: WaitingLessonRequest[];
 }

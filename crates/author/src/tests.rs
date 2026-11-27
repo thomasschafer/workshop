@@ -149,6 +149,8 @@ where
         fake,
         &NoPrograms,
         &Brief {
+            lesson_requests: Vec::new(),
+            skill_coverage: Vec::new(),
             weakest: vec![("dice.sums".to_owned(), 0.2)],
             mistakes: vec![("concept-gap".to_owned(), 3)],
             examples: vec!["Answered 1/12; it's 1/6".to_owned()],
@@ -484,4 +486,326 @@ fn reads_the_json_at_the_end_of_a_reply() {
         A { a: 1 }
     );
     assert!(json_in::<A>("nothing").is_err());
+}
+
+fn sample_svg() -> &'static str {
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 60\">\
+     <rect x=\"10\" y=\"10\" width=\"180\" height=\"40\" fill=\"none\" stroke=\"currentColor\"/>\
+     <text x=\"100\" y=\"35\" text-anchor=\"middle\" fill=\"currentColor\">Sum 7</text>\
+     </svg>\n"
+}
+
+fn sample_lesson(seg1: &str) -> String {
+    format!(
+        "+++\nkind = \"lesson\"\ntitle = \"Counting dice sums\"\nskills = [\"dice.sums\"]\n\n[[sources]]\ntitle = \"Introductory probability notes\"\nurl = \"https://example.com/dice-sums\"\n\n[[guesses]]\nprompt = \"Which sum of two fair six-sided dice is most likely?\"\nchoices = [\"6\", \"7\", \"8\"]\nanswer = 2\n\n[[checks]]\nsegment = 1\nprompt = \"How many ordered pairs of two dice sum to 7?\"\nchoices = [\"5\", \"6\", \"7\"]\nanswer = 2\nexplanation = \"The pairs (1,6) through (6,1) give 6 ways.\"\n+++\nWhy two dice sum to 7 more often than any other total.\n\n## Pairs and symmetry\n\n{seg1}\n\n![Pairs summing to seven](pairs.svg)\n\n## Explain\n\nWhy does 7 have more outcomes than 2 when rolling two fair dice?\n\n## Explain answer\n\nEvery value 1..6 on the first die pairs with 7 minus it on the second, giving 6 of the 36 pairs, whereas 2 only occurs as (1, 1).\n"
+    )
+}
+
+fn linked_card(lesson: &str, segment: usize, question: &str, answer: &str) -> String {
+    format!(
+        "+++\nkind = \"card\"\nskills = [\"dice.sums\"]\nlesson = \"{lesson}\"\nsegment = {segment}\n+++\n{question}\n\n## Answer\n\n{answer}\n"
+    )
+}
+
+fn write_lesson_bundle(copy: &Path, count: usize, seg1: &str) {
+    let dir = copy.join("items/lessons/dice-sums");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("item.md"), sample_lesson(seg1)).unwrap();
+    std::fs::write(dir.join("pairs.svg"), sample_svg()).unwrap();
+    for i in 1..=count {
+        std::fs::write(
+            copy.join(format!("items/lcard{i}.md")),
+            linked_card("dice-sums", 1, &format!("Lesson card {i}?"), "Six."),
+        )
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn writes_lesson_bundle_counts_as_one_towards_cap_and_links_existing_items() {
+    let dir = tempfile::tempdir().unwrap();
+    let pack_dir = pack(dir.path());
+    let fake = Fake::new(
+        |copy: &Path, _: &str, _| {
+            write_lesson_bundle(copy, 3, "Each of 36 ordered pairs is equally likely.");
+            std::fs::write(
+                copy.join("items/standalone.md"),
+                card("What is the smallest sum of two dice?", "2."),
+            )
+            .unwrap();
+            // Link the existing card items/faces.md to the new lesson.
+            let linked_existing = "+++\nkind = \"card\"\nskills = [\"dice.sums\"]\nlesson = \"dice-sums\"\nsegment = 1\n+++\nHow many faces has a die?\n\n## Answer\n\nSix.\n";
+            std::fs::write(copy.join("items/faces.md"), linked_existing).unwrap();
+            "{\"items\": []}".to_owned()
+        },
+        |prompt: &str, _| {
+            if prompt.starts_with("Solve this") {
+                solved("6")
+            } else {
+                agrees()
+            }
+        },
+    );
+    let brief = Brief {
+        lesson_requests: vec![super::LessonRequest {
+            path: "items/faces.md".to_owned(),
+            id: "faces".to_owned(),
+            prompt: "How many faces has a die?".to_owned(),
+            answer: "Six.".to_owned(),
+            explanation: Some("A standard die is a cube.".to_owned()),
+            skills: vec!["dice.sums".to_owned()],
+        }],
+        skill_coverage: vec![super::SkillCoverage {
+            skill: "dice.sums".to_owned(),
+            lessons: 0,
+            unlinked_items: 1,
+        }],
+        weakest: vec![("dice.sums".to_owned(), 0.2)],
+        ..Default::default()
+    };
+    // max_items = 2: the lesson + 3 items counts as 1, and standalone.md counts as 1.
+    let limits = Limits {
+        max_items: 2,
+        ..LIMITS
+    };
+    let report = super::run(
+        &pack_dir,
+        &dir.path().join("work"),
+        &fake,
+        &NoPrograms,
+        &brief,
+        limits,
+        &|_| {},
+    )
+    .await
+    .unwrap();
+    assert!(
+        report.queued.is_empty() && report.dropped.is_empty() && report.put_back.is_empty(),
+        "{report:#?}"
+    );
+    // Lesson + 3 bundled items + 1 standalone item = 5 accepted, all under max_items = 2.
+    assert_eq!(report.accepted.len(), 5, "{report:#?}");
+    assert_eq!(report.linked.len(), 1);
+    assert_eq!(report.linked[0].path, "items/faces.md");
+    assert_eq!(report.linked[0].lesson, "dice-sums");
+    assert_eq!(report.linked[0].segment, Some(1));
+
+    // The writer prompt puts lesson requests first and includes skill coverage.
+    let writes = fake.writes.lock().unwrap();
+    let req_at = writes[0]
+        .find("Requests for lessons come first")
+        .expect("requests section");
+    let weak_at = writes[0]
+        .find("The learner's weakest skills")
+        .expect("weakest section");
+    assert!(req_at < weak_at, "requests must come before weakest skills");
+    assert!(writes[0].contains("How many faces has a die?"));
+    assert!(writes[0].contains("A standard die is a cube."));
+    assert!(writes[0].contains("- dice.sums: 0 lessons, 1 item without a lesson"));
+
+    // The reviewer audited the lesson (with SVG source and accompanying items) rather than solving it blind.
+    let reviews = fake.reviews.lock().unwrap();
+    let audit = reviews
+        .iter()
+        .find(|p| p.starts_with("Audit this lesson"))
+        .expect("lesson audit prompt");
+    assert!(audit.contains("pairs.svg"));
+    assert!(audit.contains("currentColor"));
+    assert!(audit.contains("Lesson card 1?"));
+}
+
+#[tokio::test]
+async fn lesson_failing_check_drops_its_items_and_puts_back_its_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let too_long = "word ".repeat(310);
+    let fake = Fake::new(
+        move |copy: &Path, _: &str, n| {
+            if n == 0 {
+                write_lesson_bundle(copy, 3, &too_long);
+                let linked_existing = "+++\nkind = \"card\"\nskills = [\"dice.sums\"]\nlesson = \"dice-sums\"\nsegment = 1\n+++\nHow many faces has a die?\n\n## Answer\n\nSix.\n";
+                std::fs::write(copy.join("items/faces.md"), linked_existing).unwrap();
+            }
+            "{\"items\": []}".to_owned()
+        },
+        reviewer("6", vec![agrees()]),
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    assert!(report.accepted.is_empty(), "{report:#?}");
+    assert!(report.linked.is_empty(), "{report:#?}");
+    assert!(report.queued.is_empty(), "{report:#?}");
+    // The lesson and all 3 of its items were dropped.
+    assert_eq!(report.dropped.len(), 4, "{report:#?}");
+    assert!(report.put_back.contains(&"items/faces.md".to_owned()));
+    // Link on existing item was restored in the copy.
+    let copy_faces = std::fs::read_to_string(dir.path().join("work/pack/items/faces.md")).unwrap();
+    assert!(!copy_faces.contains("lesson ="));
+}
+
+#[tokio::test]
+async fn failing_item_leaves_lesson_unless_fewer_than_three_remain() {
+    // 4 items, 1 fails its check -> 3 remain -> lesson and 3 items accepted.
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(
+        |copy: &Path, _: &str, n| {
+            if n == 0 {
+                write_lesson_bundle(copy, 3, "Short explanation.");
+                // 4th item is a probability item with wrong answer so its simulation fails.
+                let bad_prob = "+++\nkind = \"probability\"\nskills = [\"dice.sums\"]\nlesson = \"dice-sums\"\nsegment = 1\nanswer = \"1/2\"\n\n[simulation]\ntrials = 20000\ntolerance = 0.02\n+++\nTwo dice match?\n\n## Solution\n\n1/6.\n\n## Simulation\n\n```rhai\nrand_int(1, 6) == rand_int(1, 6)\n```\n";
+                std::fs::write(copy.join("items/lbad.md"), bad_prob).unwrap();
+            }
+            "{\"items\": []}".to_owned()
+        },
+        |prompt: &str, _| {
+            if prompt.starts_with("Solve this") {
+                solved("6")
+            } else {
+                agrees()
+            }
+        },
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    assert_eq!(report.accepted.len(), 4, "{report:#?}");
+    assert_eq!(report.dropped.len(), 1, "{report:#?}");
+    assert_eq!(report.dropped[0].path, "items/lbad.md");
+
+    // 3 items, 1 fails its check -> only 2 remain -> lesson and all 3 items dropped, links put back.
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(
+        |copy: &Path, _: &str, n| {
+            if n == 0 {
+                write_lesson_bundle(copy, 2, "Short explanation.");
+                let bad_prob = "+++\nkind = \"probability\"\nskills = [\"dice.sums\"]\nlesson = \"dice-sums\"\nsegment = 1\nanswer = \"1/2\"\n\n[simulation]\ntrials = 20000\ntolerance = 0.02\n+++\nTwo dice match?\n\n## Solution\n\n1/6.\n\n## Simulation\n\n```rhai\nrand_int(1, 6) == rand_int(1, 6)\n```\n";
+                std::fs::write(copy.join("items/lbad.md"), bad_prob).unwrap();
+                let linked_existing = "+++\nkind = \"card\"\nskills = [\"dice.sums\"]\nlesson = \"dice-sums\"\nsegment = 1\n+++\nHow many faces has a die?\n\n## Answer\n\nSix.\n";
+                std::fs::write(copy.join("items/faces.md"), linked_existing).unwrap();
+            }
+            "{\"items\": []}".to_owned()
+        },
+        |prompt: &str, _| {
+            if prompt.starts_with("Solve this") {
+                solved("6")
+            } else {
+                agrees()
+            }
+        },
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    assert!(report.accepted.is_empty(), "{report:#?}");
+    assert!(report.linked.is_empty(), "{report:#?}");
+    assert_eq!(report.dropped.len(), 4, "{report:#?}");
+    assert!(report.put_back.contains(&"items/faces.md".to_owned()));
+}
+
+#[tokio::test]
+async fn lesson_audit_objection_leads_to_revision_and_acceptance() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(
+        |copy: &Path, prompt: &str, n| {
+            if n == 0 {
+                write_lesson_bundle(copy, 3, "Every die always has six faces.");
+                return "{\"items\": []}".to_owned();
+            }
+            assert!(
+                prompt.contains("standard six-sided"),
+                "expected audit objection in prompt: {prompt}"
+            );
+            std::fs::write(
+                copy.join("items/lessons/dice-sums/item.md"),
+                sample_lesson("A standard six-sided die has faces 1 through 6."),
+            )
+            .unwrap();
+            "{\"position\": \"revised\", \"reply\": \"Qualified that this is for standard six-sided dice.\"}".to_owned()
+        },
+        |prompt: &str, _| {
+            if prompt.starts_with("Audit this lesson") {
+                if prompt.contains("<author>") {
+                    agrees()
+                } else {
+                    objects("Say standard six-sided dice rather than every die.")
+                }
+            } else if prompt.starts_with("Solve this") {
+                solved("6")
+            } else {
+                agrees()
+            }
+        },
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    assert_eq!(report.accepted.len(), 4, "{report:#?}");
+    let lesson = report
+        .accepted
+        .iter()
+        .find(|w| w.path == "items/lessons/dice-sums/item.md")
+        .unwrap();
+    assert!(
+        lesson.files["items/lessons/dice-sums/item.md"]
+            .contains("standard six-sided die has faces 1 through 6")
+    );
+    let who: Vec<&str> = lesson.transcript.iter().map(|t| t.who.as_str()).collect();
+    assert_eq!(who, ["reviewer", "writer", "reviewer"]);
+}
+
+#[tokio::test]
+async fn lesson_waiting_for_approval_holds_its_items_and_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(
+        |copy: &Path, _: &str, n| {
+            if n == 0 {
+                write_lesson_bundle(copy, 3, "Short explanation.");
+                let linked_existing = "+++\nkind = \"card\"\nskills = [\"dice.sums\"]\nlesson = \"dice-sums\"\nsegment = 1\n+++\nHow many faces has a die?\n\n## Answer\n\nSix.\n";
+                std::fs::write(copy.join("items/faces.md"), linked_existing).unwrap();
+                return "{\"items\": []}".to_owned();
+            }
+            "{\"position\": \"stands\", \"reply\": \"The claim is standard.\"}".to_owned()
+        },
+        |prompt: &str, _| {
+            if prompt.starts_with("Audit this lesson") {
+                objects("Needs a primary source for that claim.")
+            } else if prompt.starts_with("Solve this") {
+                solved("6")
+            } else {
+                agrees()
+            }
+        },
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    assert!(report.accepted.is_empty(), "{report:#?}");
+    assert!(report.linked.is_empty(), "{report:#?}");
+    assert_eq!(report.queued.len(), 1, "{report:#?}");
+    let queued = &report.queued[0];
+    assert_eq!(queued.path, "items/lessons/dice-sums/item.md");
+    assert_eq!(queued.items.len(), 3);
+    assert_eq!(queued.linked.len(), 1);
+    assert_eq!(queued.linked[0].path, "items/faces.md");
+    // In the copy, the existing item was put back so it isn't left with a dangling link.
+    let copy_faces = std::fs::read_to_string(dir.path().join("work/pack/items/faces.md")).unwrap();
+    assert!(!copy_faces.contains("lesson ="));
+}
+
+#[tokio::test]
+async fn linking_existing_items_puts_back_other_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(
+        |copy: &Path, _: &str, _| {
+            write_lesson_bundle(copy, 3, "Short explanation.");
+            // Modify both the front matter link AND the body of items/faces.md -> must be put back.
+            let tampered = "+++\nkind = \"card\"\nskills = [\"dice.sums\"]\nlesson = \"dice-sums\"\nsegment = 1\n+++\nHow many faces has a die?\n\n## Answer\n\nSeven.\n";
+            std::fs::write(copy.join("items/faces.md"), tampered).unwrap();
+            "{\"items\": []}".to_owned()
+        },
+        |prompt: &str, _| {
+            if prompt.starts_with("Solve this") {
+                solved("6")
+            } else {
+                agrees()
+            }
+        },
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    assert_eq!(report.accepted.len(), 4, "{report:#?}");
+    assert!(report.linked.is_empty(), "{report:#?}");
+    assert_eq!(report.put_back, ["items/faces.md"]);
+    let copy_faces = std::fs::read_to_string(dir.path().join("work/pack/items/faces.md")).unwrap();
+    assert!(copy_faces.contains("Six."));
+    assert!(!copy_faces.contains("lesson ="));
 }

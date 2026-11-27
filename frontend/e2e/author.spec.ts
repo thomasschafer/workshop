@@ -104,6 +104,46 @@ test("practises the items the author added", async () => {
   await expect(phone.locator(".track", { hasText: "Review" })).toContainText("1 lesson · 11 new");
 });
 
+test("answers a Teach me lesson request by writing a lesson, revising on audit, and linking the item", async () => {
+  // Open Review, skip its existing lesson, and tap "Teach me" on an unlinked card to request a lesson.
+  await phone.locator(".track", { hasText: "Review" }).tap();
+  await expect(phone).toHaveURL(/\/practice\/review$/);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+  const flowCard = phone.locator(".lesson-flow-card");
+  await expect(flowCard).toBeVisible();
+  await flowCard.getByRole("button", { name: "Not now" }).tap();
+  await expect(phone.getByRole("button", { name: "Teach me" })).toBeVisible();
+  await phone.getByRole("button", { name: "Teach me" }).tap();
+  await expect(phone.locator(".learn-answer")).toContainText("Lesson requested");
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+
+  // Packs lists the request under the author; Top up writes a lesson (revised after reviewer audit)
+  // with 3 new items and links the requested card to it.
+  await phone.goto("/pack");
+  const requests = phone.getByRole("list", { name: "Lesson requests" });
+  await expect(requests).toBeVisible();
+
+  const author = phone.getByRole("region", { name: "Author" });
+  await author.getByRole("button", { name: "Top up" }).tap();
+  const last = phone.getByRole("region", { name: "Last run" });
+  await expect(last).toContainText("4 items added, 1 item linked in commit", { timeout: 30_000 });
+  await expect(phone.getByRole("list", { name: "Lesson requests" })).toHaveCount(0);
+  // The lesson file was revised on the reviewer's audit objection and committed cleanly.
+  const lessonFile = readFileSync(
+    join(pack, "items", "lessons", "sorting-stability", "item.md"),
+    "utf8",
+  );
+  expect(lessonFile).toContain("Merge sort and Timsort are stable");
+  // The deck now has the new lesson and the requested card links to it.
+  const deck = (await (await phone.request.get("/api/learning/deck?utc_offset=0")).json()) as {
+    lessons: { key: string }[];
+    items: { key: string; lesson?: string | null }[];
+  };
+  expect(deck.lessons.some((l) => l.key === "sample/sorting-stability")).toBe(true);
+  expect(deck.items.filter((i) => i.lesson === "sample/sorting-stability").length).toBe(4);
+  expect(execFileSync("git", ["status", "--porcelain"], { cwd: pack, encoding: "utf8" })).toBe("");
+});
+
 test("makes up a brief for a design prompt without one, and keeps it across a reload", async () => {
   const key = `sample/${UNBRIEFED_DESIGN}`;
   await phone.goto(`/design/${key}`);

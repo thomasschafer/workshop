@@ -15,8 +15,8 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use workshop_learning::{
     Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, LessonCompletion, LessonPlanRef,
-    LessonSkip, Limits, Progress, Rating, Retirement, RetirementChange, SkillMastery, Store,
-    TrackPlan,
+    LessonRequest, LessonSkip, Limits, Progress, Rating, Retirement, RetirementChange,
+    SkillMastery, Store, TrackPlan,
 };
 use workshop_pack::number::Tolerance;
 use workshop_pack::{Content, FollowUps, ImageData, Item, Lesson, Pack};
@@ -214,6 +214,25 @@ pub struct SyncRequest {
     /// Lessons skipped with "Not now" since the last sync.
     #[serde(default)]
     pub lesson_skips: Vec<LessonSkip>,
+    /// Lesson requests made by choosing "Teach me" on short items without a lesson.
+    #[serde(default)]
+    pub lesson_requests: Vec<LessonRequest>,
+}
+
+/// A short item the learner chose "Teach me" on when it had no lesson yet, still waiting for one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WaitingLessonRequest {
+    /// `pack/item`.
+    pub item: String,
+    pub pack: String,
+    pub path: String,
+    pub id: String,
+    pub label: String,
+    pub skills: Vec<String>,
+    pub prompt: String,
+    pub answer: String,
+    pub explanation: Option<String>,
+    pub requested_at: i64,
 }
 
 /// The learning tracks for the home screen, and the week's practice so far.
@@ -260,6 +279,48 @@ struct Short<'a> {
     /// Full `pack/lesson` keys of prerequisites, for lessons.
     requires_keys: Vec<String>,
     item: &'a Item,
+}
+
+/// Answer and explanation text for a short item, as shown to the author when a learner asks for
+/// a lesson on it.
+fn item_answer_and_explanation(item: &Item) -> (String, Option<String>) {
+    match &item.content {
+        Content::Card {
+            answer,
+            explanation,
+            ..
+        } => (answer.clone(), explanation.clone()),
+        Content::MentalMaths(template) => {
+            let answer = workshop_pack::mental::Generator::new(template, &item.prompt)
+                .and_then(|g| g.instance(0))
+                .map_or_else(
+                    |_| template.answer.clone(),
+                    |instance| {
+                        format!(
+                            "{} (formula: {})",
+                            workshop_pack::number::display(instance.answer),
+                            template.answer
+                        )
+                    },
+                );
+            (answer, template.method.clone())
+        }
+        Content::Probability(probability) => (
+            probability.answer_text.clone(),
+            Some(probability.solution.clone()),
+        ),
+        Content::Reading(reading) => {
+            let answer = match &reading.question {
+                workshop_pack::Question::Prints { output } => output.clone(),
+                workshop_pack::Question::Choice { choices, answer } => choices
+                    .get(*answer)
+                    .cloned()
+                    .unwrap_or_else(|| format!("choice {}", answer + 1)),
+            };
+            (answer, Some(reading.explanation.clone()))
+        }
+        _ => (String::new(), None),
+    }
 }
 
 pub fn now_ms() -> i64 {
@@ -493,7 +554,74 @@ impl Learning {
             .record_lesson_completions(&request.lesson_completions, clock.now)?;
         self.store
             .record_lesson_skips(&request.lesson_skips, clock.now)?;
+        self.store
+            .record_lesson_requests(&request.lesson_requests, clock.now)?;
         self.deck(clock)
+    }
+
+    /// Waiting lesson requests across all loaded packs, dropping any for items that now name a
+    /// lesson or are gone from their pack.
+    pub fn waiting_lesson_requests(&self) -> Result<Vec<WaitingLessonRequest>> {
+        let packs = self.packs()?;
+        self.waiting_lesson_requests_in(&packs)
+    }
+
+    /// Waiting lesson requests for items in `packs`, dropping any for items in those packs that
+    /// now name a lesson or are gone from their pack.
+    pub fn waiting_lesson_requests_in(&self, packs: &[Pack]) -> Result<Vec<WaitingLessonRequest>> {
+        let requests = self.store.lesson_requests()?;
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+        let packs_by_id: BTreeMap<&str, &Pack> = packs
+            .iter()
+            .map(|pack| (pack.manifest.id.as_str(), pack))
+            .collect();
+        let mut to_drop: BTreeSet<String> = BTreeSet::new();
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let mut waiting = Vec::new();
+        for req in requests {
+            let Some((pack_id, item_id)) = req.item.split_once('/') else {
+                to_drop.insert(req.item);
+                continue;
+            };
+            let Some(pack) = packs_by_id.get(pack_id) else {
+                continue;
+            };
+            let Some(item) = pack.item(item_id) else {
+                // Only drop when the pack doesn't have an unreadable file that may be this item.
+                if !pack.problems.iter().any(|p| p.path.contains(item_id)) {
+                    to_drop.insert(req.item);
+                }
+                continue;
+            };
+            if item.lesson.is_some() || !item.kind.is_short() {
+                to_drop.insert(req.item);
+                continue;
+            }
+            if !seen.insert(req.item.clone()) {
+                continue;
+            }
+            let (answer, explanation) = item_answer_and_explanation(item);
+            let pack = pack_id.to_owned();
+            waiting.push(WaitingLessonRequest {
+                item: req.item,
+                pack,
+                path: item.path.clone(),
+                id: item.id.clone(),
+                label: item.label(),
+                skills: item.skills.clone(),
+                prompt: item.prompt.clone(),
+                answer,
+                explanation,
+                requested_at: req.requested_at,
+            });
+        }
+        if !to_drop.is_empty() {
+            let drop_list: Vec<String> = to_drop.into_iter().collect();
+            self.store.drop_lesson_requests(&drop_list)?;
+        }
+        Ok(waiting)
     }
 
     /// The retirement changes a device sent that change where an item stands, in the order

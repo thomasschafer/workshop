@@ -118,6 +118,19 @@ pub struct LessonSkip {
     pub skipped_at: i64,
 }
 
+/// Requesting a lesson for a short item that doesn't have one yet, recorded when the learner
+/// chooses "Teach me" on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LessonRequest {
+    /// Made by the device it happened on, unique to this request.
+    pub id: String,
+    /// The short item, as `pack/item`.
+    pub item: String,
+    /// When the learner chose "Teach me", in milliseconds since 1970.
+    pub requested_at: i64,
+}
+
 /// How much was done since a moment, such as the start of the day.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Activity {
@@ -138,7 +151,7 @@ pub struct Store {
 }
 
 /// The schema's version, in SQLite's `user_version`.
-const VERSION: i64 = 6;
+const VERSION: i64 = 7;
 
 const SCHEMA: &str = "
 CREATE TABLE attempts (
@@ -234,6 +247,16 @@ CREATE TABLE lesson_skips (
     received_at INTEGER NOT NULL
 );
 CREATE INDEX lesson_skips_by_time ON lesson_skips (skipped_at);
+",
+    "
+-- Requests for lessons, recorded when the learner chooses \"Teach me\" on a short item without one.
+CREATE TABLE lesson_requests (
+    id TEXT PRIMARY KEY,
+    item TEXT NOT NULL,
+    requested_at INTEGER NOT NULL,
+    received_at INTEGER NOT NULL
+);
+CREATE INDEX lesson_requests_by_item ON lesson_requests (item, requested_at, id);
 ",
 ];
 
@@ -901,6 +924,84 @@ impl Store {
         }
         Ok(by_lesson)
     }
+
+    /// Adds lesson requests to the log, ignoring any already there. One with the id of one
+    /// already there but different in any other way is refused, along with the rest.
+    pub fn record_lesson_requests(&self, requests: &[LessonRequest], now: i64) -> Result<()> {
+        for request in requests {
+            validate_id(&request.id)?;
+            if request.item.is_empty() {
+                bail!("lesson request {} isn't for any item", request.id);
+            }
+            if !(EARLIEST..=now + FUTURE_SLACK_MS).contains(&request.requested_at) {
+                bail!(
+                    "lesson request {} says it was made at {}, which this device's clock can't be right about",
+                    request.id,
+                    request.requested_at
+                );
+            }
+        }
+        let mut connection = self.connection();
+        let transaction = connection.transaction()?;
+        for request in requests {
+            let existing: Option<LessonRequest> = transaction
+                .query_row(
+                    "SELECT id, item, requested_at FROM lesson_requests WHERE id = ?",
+                    [&request.id],
+                    row_to_lesson_request,
+                )
+                .optional()?;
+            match existing {
+                Some(existing) if existing == *request => continue,
+                Some(_) => bail!(
+                    "lesson request {} was sent before with different details",
+                    request.id
+                ),
+                None => {}
+            }
+            transaction.execute(
+                "INSERT INTO lesson_requests (id, item, requested_at, received_at)
+                 VALUES (?, ?, ?, ?)",
+                params![request.id, request.item, request.requested_at, now],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Every lesson request, in the order they were made.
+    pub fn lesson_requests(&self) -> Result<Vec<LessonRequest>> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT id, item, requested_at FROM lesson_requests ORDER BY requested_at, id",
+        )?;
+        let rows = statement.query_map([], row_to_lesson_request)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Drops every lesson request for the given item keys, such as when an item now has a lesson
+    /// or has been removed from its pack.
+    pub fn drop_lesson_requests(&self, items: &[String]) -> Result<usize> {
+        if items.is_empty() {
+            return Ok(0);
+        }
+        let mut connection = self.connection();
+        let transaction = connection.transaction()?;
+        let mut removed = 0;
+        for item in items {
+            removed += transaction.execute("DELETE FROM lesson_requests WHERE item = ?", [item])?;
+        }
+        transaction.commit()?;
+        Ok(removed)
+    }
+}
+
+fn row_to_lesson_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<LessonRequest> {
+    Ok(LessonRequest {
+        id: row.get(0)?,
+        item: row.get(1)?,
+        requested_at: row.get(2)?,
+    })
 }
 
 fn row_to_lesson_completion(row: &rusqlite::Row<'_>) -> rusqlite::Result<LessonCompletion> {
@@ -1587,5 +1688,40 @@ mod tests {
                 ("sample/b".to_owned(), Rating::Again),
             ])
         );
+    }
+
+    #[test]
+    fn records_and_drops_lesson_requests_idempotently() {
+        let store = Store::in_memory().unwrap();
+        let req = LessonRequest {
+            id: "lesson-req-1".to_owned(),
+            item: "sample/binary-heap-costs".to_owned(),
+            requested_at: NOW,
+        };
+        store
+            .record_lesson_requests(std::slice::from_ref(&req), NOW)
+            .unwrap();
+        store
+            .record_lesson_requests(std::slice::from_ref(&req), NOW)
+            .unwrap();
+        assert_eq!(store.lesson_requests().unwrap(), vec![req.clone()]);
+        let changed = LessonRequest {
+            requested_at: NOW + 1,
+            ..req
+        };
+        assert!(
+            store
+                .record_lesson_requests(&[changed], NOW)
+                .unwrap_err()
+                .to_string()
+                .contains("different details")
+        );
+        assert_eq!(
+            store
+                .drop_lesson_requests(&["sample/binary-heap-costs".to_owned()])
+                .unwrap(),
+            1
+        );
+        assert!(store.lesson_requests().unwrap().is_empty());
     }
 }

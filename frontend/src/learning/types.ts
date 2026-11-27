@@ -133,6 +133,12 @@ export interface LessonSkip {
   skipped_at: number;
 }
 
+export interface LessonRequest {
+  id: string;
+  item: string;
+  requested_at: number;
+}
+
 export interface Limits {
   daily_reviews: number;
   /** The most new items to start in a day. Decks saved on a device by an older Workshop don't

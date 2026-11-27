@@ -1,30 +1,38 @@
-//! The author: writes new items for a pack, for the skills the learner is weakest in and the
-//! mistakes they make most, and has each one checked before it's accepted.
+//! The author: writes new items and lessons for a pack, for requested lessons, the skills the
+//! learner is weakest in, and the mistakes they make most, and has each one checked before it's
+//! accepted.
 //!
 //! A run goes:
 //!
 //! 1. The pack is copied, leaving out anything hidden such as `.git`, and the writer, a strong
-//!    model with tools confined to the copy, writes new items there. It's the only role with
-//!    tools, and never has the pack itself in reach. Anything it changes besides adding items,
-//!    and deleting drafts it made items from, is put back.
-//! 2. Items beyond the run's cap are dropped. Every item must pass its mechanical check, as
-//!    `workshop pack check` runs it; the writer gets a few rounds to fix those that fail, and
-//!    those that still do are dropped.
+//!    model with tools confined to the copy, writes new items and lessons there. It's the only
+//!    role with tools, and never has the pack itself in reach. Anything it changes besides adding
+//!    items, linking existing short items to a lesson written in the same run (changing only
+//!    `lesson` and `segment` in front matter), and deleting drafts it made items from, is put back.
+//! 2. Each lesson and its accompanying new short items (3 to 6) form a bundle that counts as one
+//!    towards `max_items`. Items beyond the run's cap are dropped. Every item must pass its
+//!    mechanical check, as `workshop pack check` runs it; the writer gets a few rounds to fix
+//!    those that fail, and those that still do are dropped. If a lesson fails, its items are
+//!    dropped and links to it are put back; if fewer than 3 of its items remain, the lesson is
+//!    dropped too.
 //! 3. The reviewer, best a model from another provider, in calls of its own with no tools,
-//!    solves each item blind, then compares its answer with the item's and says whether the
-//!    item is right and unambiguous. Where it can
-//!    be told mechanically, such as a probability's answer, its answer is compared too.
+//!    solves each practice item blind, then compares its answer with the item's and says whether
+//!    the item is right and unambiguous. Where it can be told mechanically, such as a
+//!    probability's answer, its answer is compared too. For a lesson, the reviewer audits the
+//!    lesson and its accompanying items: factual claims, guesses and checks, explain answer,
+//!    sources, and SVG diagrams read as source.
 //! 4. If they disagree, the writer answers the objection, revising the item or saying why it
 //!    stands, and the reviewer looks again, for a few rounds. Items they agree on are accepted;
-//!    the rest wait in an approval queue for the learner.
+//!    the rest wait in an approval queue for the learner. A lesson waiting for approval holds
+//!    its items and links until it's approved.
 //!
 //! The writer can ask the learner questions, which go out as they're asked, so the learner can
-//! answer later; the run carries on without waiting. What's accepted is returned for the caller
-//! to put in the pack, and what's queued for it to keep.
+//! answer later; the run carries on without waiting. What's accepted (and linked) is returned for
+//! the caller to put in the pack, and what's queued for it to keep.
 
 pub mod staging;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::Path;
 
@@ -33,6 +41,12 @@ use serde::{Deserialize, Serialize};
 use workshop_pack::{Content, Item, Pack, Programs, Verdict};
 
 use crate::staging::Files;
+
+/// The fewest new short items a lesson bundle must have to be accepted.
+pub const MIN_LESSON_ITEMS: usize = 3;
+
+/// The most new short items a lesson bundle may carry.
+pub const MAX_LESSON_ITEMS: usize = 6;
 
 /// The pack format, as the writer is told it.
 const FORMAT: &str = include_str!("../../../docs/packs.md");
@@ -65,7 +79,7 @@ pub trait Models: Sync {
 /// How much a run may do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
-    /// The most new items a run writes.
+    /// The most new items (or lesson bundles) a run writes.
     pub max_items: usize,
     /// Rounds the writer gets to fix items whose checks fail.
     pub fix_rounds: usize,
@@ -73,9 +87,33 @@ pub struct Limits {
     pub discussion_rounds: usize,
 }
 
+/// A short item the learner chose "Teach me" on when it had no lesson yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LessonRequest {
+    /// The item's file in the pack, such as `items/cards/heaps.md`, so the writer can link it.
+    pub path: String,
+    pub id: String,
+    pub prompt: String,
+    pub answer: String,
+    pub explanation: Option<String>,
+    pub skills: Vec<String>,
+}
+
+/// How many lessons a targeted skill has, and how many of its short items have none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillCoverage {
+    pub skill: String,
+    pub lessons: usize,
+    pub unlinked_items: usize,
+}
+
 /// What a run should write about.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Brief {
+    /// Short items the learner asked for a lesson on with "Teach me", which come first.
+    pub lesson_requests: Vec<LessonRequest>,
+    /// For each skill the run targets, how many lessons it has and how many items have none.
+    pub skill_coverage: Vec<SkillCoverage>,
     /// The skills the learner is weakest in, weakest first, with their mastery from 0 to 1.
     pub weakest: Vec<(String, f64)>,
     /// The kinds of mistake made most lately, with how often, most first.
@@ -105,6 +143,22 @@ pub struct TooEasy {
     pub retired: Vec<(String, Option<u8>)>,
 }
 
+/// An existing short item whose front matter was updated to link it to a lesson written in the
+/// same run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Linked {
+    /// The item's file, relative to the pack.
+    pub path: String,
+    pub id: String,
+    pub label: String,
+    /// The lesson it was linked to, by id.
+    pub lesson: String,
+    /// The segment of that lesson, counting from 1, if given.
+    pub segment: Option<usize>,
+    /// The updated file contents, with only `lesson` (and `segment`) changed in front matter.
+    pub content: String,
+}
+
 /// An item from a run, and what happened to it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Written {
@@ -121,6 +175,12 @@ pub struct Written {
     pub transcript: Vec<Turn>,
     /// Why it's queued or was dropped, if it was.
     pub reason: Option<String>,
+    /// For a queued lesson, its accompanying items held with it until it's approved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<Written>,
+    /// For a queued lesson, existing items to link to it when it's approved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked: Vec<Linked>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,6 +195,9 @@ pub struct Turn {
 pub struct Report {
     /// Checked and agreed on, ready to go in the pack.
     pub accepted: Vec<Written>,
+    /// Existing short items linked to accepted lessons written in this run.
+    #[serde(default)]
+    pub linked: Vec<Linked>,
     /// Checked, and the writer and reviewer couldn't agree, so waiting for the learner.
     pub queued: Vec<Written>,
     /// Left out, with why: over the cap, or failing its check.
@@ -174,6 +237,26 @@ struct Judgement {
     ambiguous: bool,
     #[serde(default)]
     objection: String,
+}
+
+/// Either a standalone new item, or a lesson bundled with its new short items.
+enum Unit {
+    Standalone(Written),
+    Lesson(Bundle),
+}
+
+struct Bundle {
+    lesson: Written,
+    items: Vec<Written>,
+}
+
+impl Unit {
+    fn sort_key(&self) -> &str {
+        match self {
+            Self::Standalone(item) => &item.path,
+            Self::Lesson(bundle) => &bundle.lesson.path,
+        }
+    }
 }
 
 /// The JSON object at the end of a model's reply.
@@ -225,80 +308,363 @@ pub async fn run<M: Models>(
         .filter_map(|i| i.from_draft.clone().map(|d| (i.path.clone(), d)))
         .collect();
 
-    let changes = staging::police(&original, &copy)?;
+    let now_after_write = staging::read(&copy)?;
+    let initial_lessons = staging::new_lesson_ids(&original, &now_after_write);
+    let changes = staging::police_with_links(&original, Some(&pack), &copy, &initial_lessons)?;
     report.put_back.extend(changes.put_back);
-    let mut candidates = new_items(&original, &copy)?;
-    // Over the cap, the last by path are dropped.
-    while candidates.len() > limits.max_items {
-        let mut over = candidates.pop().expect("more than the cap");
-        remove_item(&copy, &over)?;
-        over.reason = Some(format!(
-            "over the run's limit of {} items",
-            limits.max_items
-        ));
-        report.dropped.push(over);
+    let mut drafts_removed = changes.drafts_removed;
+
+    let candidates = new_items(&original, &copy)?;
+    let mut units = group_into_units(&copy, candidates)?;
+
+    // Cap each lesson bundle at MAX_LESSON_ITEMS new items.
+    for unit in &mut units {
+        if let Unit::Lesson(bundle) = unit {
+            bundle.items.sort_by(|a, b| a.path.cmp(&b.path));
+            while bundle.items.len() > MAX_LESSON_ITEMS {
+                let mut over = bundle.items.pop().expect("more than MAX_LESSON_ITEMS");
+                remove_item(&copy, &over)?;
+                over.reason = Some(format!(
+                    "over the limit of {MAX_LESSON_ITEMS} items for a lesson"
+                ));
+                report.dropped.push(over);
+            }
+        }
     }
 
-    // Every item must pass its check; the writer can fix those that don't, a few times.
-    let mut failing = failures(&copy, &candidates, programs).await?;
+    // Over the cap, the last units by path are dropped. A lesson and its items count as one.
+    while units.len() > limits.max_items {
+        let over = units.pop().expect("more than the cap");
+        let reason = format!("over the run's limit of {} items", limits.max_items);
+        match over {
+            Unit::Standalone(mut item) => {
+                remove_item(&copy, &item)?;
+                item.reason = Some(reason);
+                report.dropped.push(item);
+            }
+            Unit::Lesson(mut bundle) => {
+                remove_item(&copy, &bundle.lesson)?;
+                bundle.lesson.reason = Some(reason.clone());
+                let lesson_id = bundle.lesson.id.clone();
+                report.dropped.push(bundle.lesson);
+                for mut child in bundle.items {
+                    remove_item(&copy, &child)?;
+                    child.reason = Some(reason.clone());
+                    report.dropped.push(child);
+                }
+                restore_links_for(
+                    &original,
+                    &pack,
+                    &copy,
+                    &lesson_id,
+                    Some(&mut report.put_back),
+                )?;
+            }
+        }
+    }
+
+    let mut active_lessons = unit_lesson_ids(&units);
+
+    // Every item (and every linked existing item) must pass its check; the writer can fix those
+    // that don't, a few times.
+    let mut failing =
+        check_units_and_links(&copy, &original, &pack, &units, &active_lessons, programs).await?;
     for _ in 0..limits.fix_rounds {
         if failing.is_empty() {
             break;
         }
         models.write(&copy, &fix_prompt(&failing)).await?;
-        let changes = staging::police(&original, &copy)?;
+        let changes = staging::police_with_links(&original, Some(&pack), &copy, &active_lessons)?;
         report.put_back.extend(changes.put_back);
+        drafts_removed.extend(changes.drafts_removed);
         // Only the items there already: a new one now would skip the cap.
-        let known: Vec<String> = candidates
-            .iter()
-            .flat_map(|c| c.files.keys().cloned())
-            .collect();
+        let flat = flatten_units(&units);
+        let known: Vec<String> = flat.iter().flat_map(|c| c.files.keys().cloned()).collect();
         for added in changes.added.iter().filter(|p| !known.contains(p)) {
-            if !candidates.iter().any(|c| owns(c, added)) {
+            if !flat.iter().any(|c| owns(c, added)) {
                 staging::remove(&copy, added)?;
                 report.put_back.push(added.clone());
             }
         }
-        candidates = refresh(&copy, candidates)?;
-        failing = failures(&copy, &candidates, programs).await?;
-    }
-    let (passing, failed): (Vec<Written>, Vec<Written>) = candidates
-        .into_iter()
-        .partition(|c| !failing.contains_key(&c.path));
-    for mut item in failed {
-        remove_item(&copy, &item)?;
-        item.reason = Some(format!("its check didn't pass: {}", failing[&item.path]));
-        report.dropped.push(item);
+        units = refresh_units(&copy, units)?;
+        active_lessons = unit_lesson_ids(&units);
+        failing = check_units_and_links(&copy, &original, &pack, &units, &active_lessons, programs)
+            .await?;
     }
 
-    // A second model solves each one blind, then reviews it, and they discuss what it objects to.
-    for mut item in passing {
+    // Any existing item link that still fails its check (such as an out-of-range segment) is put back.
+    for link in current_links(&original, &pack, &copy, &active_lessons)? {
+        if failing.contains_key(&link.path) {
+            staging::write(&copy, &link.path, &original[&link.path])?;
+            report.put_back.push(link.path);
+        }
+    }
+
+    // Partition passing vs failing units, enforcing bundle rules.
+    let mut passing_units = Vec::new();
+    for unit in units {
+        match unit {
+            Unit::Standalone(mut item) => {
+                if let Some(why) = failing.get(&item.path) {
+                    remove_item(&copy, &item)?;
+                    item.reason = Some(format!("its check didn't pass: {why}"));
+                    report.dropped.push(item);
+                } else {
+                    passing_units.push(Unit::Standalone(item));
+                }
+            }
+            Unit::Lesson(mut bundle) => {
+                if let Some(why) = failing.get(&bundle.lesson.path) {
+                    let lesson_id = bundle.lesson.id.clone();
+                    remove_item(&copy, &bundle.lesson)?;
+                    bundle.lesson.reason = Some(format!("its check didn't pass: {why}"));
+                    report.dropped.push(bundle.lesson);
+                    for mut child in bundle.items {
+                        remove_item(&copy, &child)?;
+                        child.reason = Some(match failing.get(&child.path) {
+                            Some(child_why) => format!("its check didn't pass: {child_why}"),
+                            None => format!("its lesson {lesson_id} didn't pass its check"),
+                        });
+                        report.dropped.push(child);
+                    }
+                    restore_links_for(
+                        &original,
+                        &pack,
+                        &copy,
+                        &lesson_id,
+                        Some(&mut report.put_back),
+                    )?;
+                    continue;
+                }
+                let (passing_items, failed_items): (Vec<Written>, Vec<Written>) = bundle
+                    .items
+                    .into_iter()
+                    .partition(|c| !failing.contains_key(&c.path));
+                for mut child in failed_items {
+                    remove_item(&copy, &child)?;
+                    child.reason = Some(format!("its check didn't pass: {}", failing[&child.path]));
+                    report.dropped.push(child);
+                }
+                if passing_items.len() < MIN_LESSON_ITEMS {
+                    let lesson_id = bundle.lesson.id.clone();
+                    remove_item(&copy, &bundle.lesson)?;
+                    bundle.lesson.reason = Some(format!(
+                        "fewer than {MIN_LESSON_ITEMS} of its items passed their checks ({} left)",
+                        passing_items.len()
+                    ));
+                    report.dropped.push(bundle.lesson);
+                    for mut child in passing_items {
+                        remove_item(&copy, &child)?;
+                        child.reason = Some(format!(
+                            "its lesson {lesson_id} was left out, as fewer than {MIN_LESSON_ITEMS} of its items remained"
+                        ));
+                        report.dropped.push(child);
+                    }
+                    restore_links_for(
+                        &original,
+                        &pack,
+                        &copy,
+                        &lesson_id,
+                        Some(&mut report.put_back),
+                    )?;
+                } else {
+                    bundle.items = passing_items;
+                    passing_units.push(Unit::Lesson(bundle));
+                }
+            }
+        }
+    }
+
+    let mut review_lessons = unit_lesson_ids(&passing_units);
+    let attach_draft = |item: &mut Written| {
         // A writer whose tools can't delete files leaves the draft in place, so a draft that's
         // still in the pack counts too. Only a draft in the original pack can be named, as it's
         // removed from the pack itself once the item is accepted.
         item.from_draft = from_drafts.get(&item.path).cloned().filter(|draft| {
-            changes.drafts_removed.contains(draft)
+            drafts_removed.contains(draft)
                 || (staging::is_draft(draft) && original.contains_key(draft))
         });
-        match review(
-            &copy,
-            &original,
-            &mut item,
-            models,
-            programs,
-            limits,
-            &mut report,
-        )
-        .await?
-        {
-            Outcome::Agreed => report.accepted.push(item),
-            Outcome::Disagreed(reason) => {
-                item.reason = Some(reason);
-                report.queued.push(item);
+    };
+
+    // Review each standalone item blind, and for each lesson bundle, audit the lesson and review
+    // its items blind.
+    for unit in passing_units {
+        match unit {
+            Unit::Standalone(mut item) => {
+                attach_draft(&mut item);
+                match review_item(
+                    &copy,
+                    &original,
+                    &pack,
+                    &review_lessons,
+                    &mut item,
+                    models,
+                    programs,
+                    limits,
+                    &mut report,
+                )
+                .await?
+                {
+                    Outcome::Agreed => report.accepted.push(item),
+                    Outcome::Disagreed(reason) => {
+                        remove_item(&copy, &item)?;
+                        item.reason = Some(reason);
+                        report.queued.push(item);
+                    }
+                    Outcome::Broken(reason) => {
+                        remove_item(&copy, &item)?;
+                        item.reason = Some(reason);
+                        report.dropped.push(item);
+                    }
+                }
             }
-            Outcome::Broken(reason) => {
-                item.reason = Some(reason);
-                report.dropped.push(item);
+            Unit::Lesson(mut bundle) => {
+                attach_draft(&mut bundle.lesson);
+                for child in &mut bundle.items {
+                    attach_draft(child);
+                }
+                let lesson_outcome = audit_lesson(
+                    &copy,
+                    &original,
+                    &pack,
+                    &review_lessons,
+                    &mut bundle,
+                    models,
+                    programs,
+                    limits,
+                    &mut report,
+                )
+                .await?;
+                let lesson_id = bundle.lesson.id.clone();
+                if let Outcome::Broken(reason) = lesson_outcome {
+                    remove_item(&copy, &bundle.lesson)?;
+                    for mut child in bundle.items {
+                        remove_item(&copy, &child)?;
+                        child.reason =
+                            Some(format!("its lesson {lesson_id} was left out: {reason}"));
+                        report.dropped.push(child);
+                    }
+                    restore_links_for(
+                        &original,
+                        &pack,
+                        &copy,
+                        &lesson_id,
+                        Some(&mut report.put_back),
+                    )?;
+                    review_lessons.remove(&lesson_id);
+                    bundle.lesson.reason = Some(reason);
+                    report.dropped.push(bundle.lesson);
+                    continue;
+                }
+
+                // Re-check linked existing items in case revising the lesson changed its segments.
+                let bundle_links = valid_links_for(
+                    &copy,
+                    &original,
+                    &pack,
+                    &lesson_id,
+                    programs,
+                    &mut report.put_back,
+                )
+                .await?;
+
+                // Review each of the lesson's items blind, as items are reviewed now.
+                let mut agreed_items = Vec::new();
+                let mut disagreed_items = Vec::new();
+                for mut child in bundle.items {
+                    match review_item(
+                        &copy,
+                        &original,
+                        &pack,
+                        &review_lessons,
+                        &mut child,
+                        models,
+                        programs,
+                        limits,
+                        &mut report,
+                    )
+                    .await?
+                    {
+                        Outcome::Agreed => agreed_items.push(child),
+                        Outcome::Disagreed(reason) => {
+                            child.reason = Some(reason);
+                            disagreed_items.push(child);
+                        }
+                        Outcome::Broken(reason) => {
+                            remove_item(&copy, &child)?;
+                            child.reason = Some(reason);
+                            report.dropped.push(child);
+                        }
+                    }
+                }
+
+                if agreed_items.len() + disagreed_items.len() < MIN_LESSON_ITEMS {
+                    remove_item(&copy, &bundle.lesson)?;
+                    bundle.lesson.reason = Some(format!(
+                        "fewer than {MIN_LESSON_ITEMS} of its items remained after review"
+                    ));
+                    report.dropped.push(bundle.lesson);
+                    for mut child in agreed_items.into_iter().chain(disagreed_items) {
+                        remove_item(&copy, &child)?;
+                        child.reason = Some(format!(
+                            "its lesson {lesson_id} was left out, as fewer than {MIN_LESSON_ITEMS} of its items remained"
+                        ));
+                        report.dropped.push(child);
+                    }
+                    restore_links_for(
+                        &original,
+                        &pack,
+                        &copy,
+                        &lesson_id,
+                        Some(&mut report.put_back),
+                    )?;
+                    review_lessons.remove(&lesson_id);
+                    continue;
+                }
+
+                match lesson_outcome {
+                    Outcome::Agreed if agreed_items.len() >= MIN_LESSON_ITEMS => {
+                        report.accepted.push(bundle.lesson);
+                        report.accepted.extend(agreed_items);
+                        report.linked.extend(bundle_links);
+                        for child in disagreed_items {
+                            remove_item(&copy, &child)?;
+                            report.queued.push(child);
+                        }
+                    }
+                    Outcome::Agreed => {
+                        // Fewer than MIN_LESSON_ITEMS items were agreed on without the disputed
+                        // ones, so hold the lesson and its items together for approval.
+                        remove_item(&copy, &bundle.lesson)?;
+                        for child in agreed_items.iter().chain(disagreed_items.iter()) {
+                            remove_item(&copy, child)?;
+                        }
+                        restore_links_for(&original, &pack, &copy, &lesson_id, None)?;
+                        review_lessons.remove(&lesson_id);
+                        bundle.lesson.reason = Some(format!(
+                            "fewer than {MIN_LESSON_ITEMS} of its items were agreed on without items the reviewer objects to"
+                        ));
+                        bundle.lesson.items =
+                            agreed_items.into_iter().chain(disagreed_items).collect();
+                        bundle.lesson.linked = bundle_links;
+                        report.queued.push(bundle.lesson);
+                    }
+                    Outcome::Disagreed(reason) => {
+                        // Lesson waiting for approval holds its items and links.
+                        remove_item(&copy, &bundle.lesson)?;
+                        for child in agreed_items.iter().chain(disagreed_items.iter()) {
+                            remove_item(&copy, child)?;
+                        }
+                        restore_links_for(&original, &pack, &copy, &lesson_id, None)?;
+                        review_lessons.remove(&lesson_id);
+                        bundle.lesson.reason = Some(reason);
+                        bundle.lesson.items =
+                            agreed_items.into_iter().chain(disagreed_items).collect();
+                        bundle.lesson.linked = bundle_links;
+                        report.queued.push(bundle.lesson);
+                    }
+                    Outcome::Broken(_) => unreachable!("handled above"),
+                }
             }
         }
     }
@@ -311,11 +677,225 @@ enum Outcome {
     Broken(String),
 }
 
-/// Has the reviewer solve an item blind and review it, and the writer and reviewer discuss what
-/// it objects to.
-async fn review<M: Models>(
+/// Groups new candidate items into standalone items and lesson bundles (each new lesson paired
+/// with any new items whose front matter names that lesson).
+fn group_into_units(copy: &Path, candidates: Vec<Written>) -> Result<Vec<Unit>> {
+    let now = staging::read(copy)?;
+    let mut lessons: Vec<Written> = Vec::new();
+    let mut others: Vec<Written> = Vec::new();
+    for item in candidates {
+        let is_lesson = now
+            .get(&item.path)
+            .and_then(|bytes| staging::lesson_id_from_front_matter(&item.path, bytes))
+            .is_some();
+        if is_lesson {
+            lessons.push(item);
+        } else {
+            others.push(item);
+        }
+    }
+    let mut bundles: Vec<Bundle> = lessons
+        .into_iter()
+        .map(|lesson| Bundle {
+            lesson,
+            items: Vec::new(),
+        })
+        .collect();
+    let mut units: Vec<Unit> = Vec::new();
+    for item in others {
+        let target = now
+            .get(&item.path)
+            .and_then(|bytes| staging::lesson_ref_from_front_matter(bytes));
+        if let Some(target_id) = target
+            && let Some(bundle) = bundles.iter_mut().find(|b| b.lesson.id == target_id)
+        {
+            bundle.items.push(item);
+        } else {
+            units.push(Unit::Standalone(item));
+        }
+    }
+    for bundle in bundles {
+        units.push(Unit::Lesson(bundle));
+    }
+    units.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    Ok(units)
+}
+
+fn unit_lesson_ids(units: &[Unit]) -> BTreeSet<String> {
+    units
+        .iter()
+        .filter_map(|u| match u {
+            Unit::Lesson(bundle) => Some(bundle.lesson.id.clone()),
+            Unit::Standalone(_) => None,
+        })
+        .collect()
+}
+
+fn flatten_units(units: &[Unit]) -> Vec<&Written> {
+    let mut out = Vec::new();
+    for unit in units {
+        match unit {
+            Unit::Standalone(item) => out.push(item),
+            Unit::Lesson(bundle) => {
+                out.push(&bundle.lesson);
+                out.extend(bundle.items.iter());
+            }
+        }
+    }
+    out
+}
+
+fn refresh_units(copy: &Path, units: Vec<Unit>) -> Result<Vec<Unit>> {
+    let now = staging::read(copy)?;
+    let pack = Pack::from_files(now.clone())?;
+    let refresh_one = |item: Written| -> Option<Written> {
+        if !now.contains_key(&item.path) {
+            return None;
+        }
+        Some(match pack.items.iter().find(|i| i.path == item.path) {
+            Some(loaded) => Written {
+                transcript: item.transcript,
+                from_draft: item.from_draft,
+                items: item.items,
+                linked: item.linked,
+                ..written(loaded, &now)
+            },
+            None => Written {
+                files: files_of(&item.path, &now),
+                ..item
+            },
+        })
+    };
+    let mut refreshed = Vec::with_capacity(units.len());
+    for unit in units {
+        match unit {
+            Unit::Standalone(item) => {
+                if let Some(item) = refresh_one(item) {
+                    refreshed.push(Unit::Standalone(item));
+                }
+            }
+            Unit::Lesson(bundle) => {
+                if let Some(lesson) = refresh_one(bundle.lesson) {
+                    let items = bundle.items.into_iter().filter_map(refresh_one).collect();
+                    refreshed.push(Unit::Lesson(Bundle { lesson, items }));
+                }
+            }
+        }
+    }
+    Ok(refreshed)
+}
+
+/// Current valid links from existing short items in `copy` to lessons in `allowed_lessons`.
+fn current_links(
+    original: &Files,
+    original_pack: &Pack,
+    copy: &Path,
+    allowed_lessons: &BTreeSet<String>,
+) -> Result<Vec<Linked>> {
+    let now = staging::read(copy)?;
+    let mut links = Vec::new();
+    for item in &original_pack.items {
+        if !item.kind.is_short() {
+            continue;
+        }
+        let Some(before) = original.get(&item.path) else {
+            continue;
+        };
+        let Some(after) = now.get(&item.path) else {
+            continue;
+        };
+        if let Some((lesson, segment, content)) =
+            staging::lesson_link_change(before, after, allowed_lessons)
+        {
+            links.push(Linked {
+                path: item.path.clone(),
+                id: item.id.clone(),
+                label: item.label(),
+                lesson,
+                segment,
+                content,
+            });
+        }
+    }
+    Ok(links)
+}
+
+/// Restores any existing items in `copy` that were linked to `lesson_id`, optionally recording
+/// their paths in `put_back`.
+fn restore_links_for(
+    original: &Files,
+    original_pack: &Pack,
+    copy: &Path,
+    lesson_id: &str,
+    mut put_back: Option<&mut Vec<String>>,
+) -> Result<()> {
+    let only = BTreeSet::from([lesson_id.to_owned()]);
+    for link in current_links(original, original_pack, copy, &only)? {
+        if let Some(before) = original.get(&link.path) {
+            staging::write(copy, &link.path, before)?;
+            if let Some(list) = put_back.as_deref_mut() {
+                list.push(link.path);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Returns the valid links to `lesson_id` in `copy` that pass `workshop pack check`, putting back
+/// any that fail (e.g. an out-of-range segment after the lesson was revised).
+async fn valid_links_for(
     copy: &Path,
     original: &Files,
+    original_pack: &Pack,
+    lesson_id: &str,
+    programs: &dyn Programs,
+    put_back: &mut Vec<String>,
+) -> Result<Vec<Linked>> {
+    let only = BTreeSet::from([lesson_id.to_owned()]);
+    let links = current_links(original, original_pack, copy, &only)?;
+    if links.is_empty() {
+        return Ok(Vec::new());
+    }
+    let link_paths: Vec<String> = links.iter().map(|l| l.path.clone()).collect();
+    let failing = failures_on_paths(copy, &[], &link_paths, programs).await?;
+    let mut valid = Vec::new();
+    for link in links {
+        if failing.contains_key(&link.path) {
+            if let Some(before) = original.get(&link.path) {
+                staging::write(copy, &link.path, before)?;
+            }
+            put_back.push(link.path);
+        } else {
+            valid.push(link);
+        }
+    }
+    Ok(valid)
+}
+
+async fn check_units_and_links(
+    copy: &Path,
+    original: &Files,
+    original_pack: &Pack,
+    units: &[Unit],
+    allowed_lessons: &BTreeSet<String>,
+    programs: &dyn Programs,
+) -> Result<BTreeMap<String, String>> {
+    let items: Vec<&Written> = flatten_units(units);
+    let link_paths: Vec<String> = current_links(original, original_pack, copy, allowed_lessons)?
+        .into_iter()
+        .map(|l| l.path)
+        .collect();
+    failures_on_paths(copy, &items, &link_paths, programs).await
+}
+
+/// Has the reviewer solve a practice item blind and review it, and the writer and reviewer
+/// discuss what it objects to.
+#[allow(clippy::too_many_arguments)]
+async fn review_item<M: Models>(
+    copy: &Path,
+    original: &Files,
+    original_pack: &Pack,
+    allowed_lessons: &BTreeSet<String>,
     item: &mut Written,
     models: &M,
     programs: &dyn Programs,
@@ -334,7 +914,8 @@ async fn review<M: Models>(
             return Ok(Outcome::Agreed);
         };
         let reply = models.write(copy, &answer_prompt(item, &objection)).await?;
-        let changes = staging::police(original, copy)?;
+        let changes =
+            staging::police_with_links(original, Some(original_pack), copy, allowed_lessons)?;
         report.put_back.extend(changes.put_back);
         let position: Position = json_in(&reply).unwrap_or(Position {
             position: "stands".to_owned(),
@@ -371,6 +952,93 @@ async fn review<M: Models>(
             limits.discussion_rounds
         )),
     })
+}
+
+/// Has the reviewer audit a lesson and its accompanying items, and the writer and reviewer discuss
+/// any objections.
+#[allow(clippy::too_many_arguments)]
+async fn audit_lesson<M: Models>(
+    copy: &Path,
+    original: &Files,
+    original_pack: &Pack,
+    allowed_lessons: &BTreeSet<String>,
+    bundle: &mut Bundle,
+    models: &M,
+    programs: &dyn Programs,
+    limits: Limits,
+    report: &mut Report,
+) -> Result<Outcome> {
+    let mut verdict = judge_lesson(models, bundle, None).await?;
+    for _ in 0..limits.discussion_rounds {
+        let Some(objection) = verdict else {
+            return Ok(Outcome::Agreed);
+        };
+        let reply = models
+            .write(copy, &audit_answer_prompt(&bundle.lesson, &objection))
+            .await?;
+        let changes =
+            staging::police_with_links(original, Some(original_pack), copy, allowed_lessons)?;
+        report.put_back.extend(changes.put_back);
+        let position: Position = json_in(&reply).unwrap_or(Position {
+            position: "stands".to_owned(),
+            reply: reply.clone(),
+        });
+        bundle.lesson.transcript.push(Turn {
+            who: "writer".to_owned(),
+            text: position.reply.clone(),
+        });
+        let refreshed = refresh(copy, vec![bundle.lesson.clone()])?;
+        let Some(revised) = refreshed.into_iter().next() else {
+            return Ok(Outcome::Broken(
+                "the writer's revision left it unreadable".to_owned(),
+            ));
+        };
+        let lesson_changed = revised.files != bundle.lesson.files;
+        bundle.lesson.files = revised.files;
+        bundle.lesson.label = revised.label;
+        bundle.items = refresh(copy, std::mem::take(&mut bundle.items))?;
+        if lesson_changed || position.position == "revised" {
+            let mut to_check: Vec<&Written> = vec![&bundle.lesson];
+            to_check.extend(bundle.items.iter());
+            let failing = failures_on_paths(copy, &to_check, &[], programs).await?;
+            if let Some(problem) = failing.get(&bundle.lesson.path) {
+                return Ok(Outcome::Broken(format!(
+                    "its check didn't pass once revised: {problem}"
+                )));
+            }
+        }
+        verdict = judge_lesson(models, bundle, Some(&position.reply)).await?;
+    }
+    Ok(match verdict {
+        None => Outcome::Agreed,
+        Some(objection) => Outcome::Disagreed(format!(
+            "the reviewer still objects after {} rounds: {objection}",
+            limits.discussion_rounds
+        )),
+    })
+}
+
+/// Has the reviewer audit a lesson and its accompanying items, returning its objection if any.
+async fn judge_lesson<M: Models>(
+    models: &M,
+    bundle: &mut Bundle,
+    writer: Option<&str>,
+) -> Result<Option<String>> {
+    let reply = models
+        .review(&audit_prompt(&bundle.lesson, &bundle.items, writer))
+        .await?;
+    bundle.lesson.transcript.push(Turn {
+        who: "reviewer".to_owned(),
+        text: reply.clone(),
+    });
+    let verdict: Judgement = json_in(&reply)?;
+    Ok((!verdict.agree || verdict.ambiguous).then(|| {
+        if verdict.objection.trim().is_empty() {
+            "it objects to the lesson".to_owned()
+        } else {
+            verdict.objection.clone()
+        }
+    }))
 }
 
 /// Has the reviewer compare its blind answer with the item's, and returns its objection, if it
@@ -457,8 +1125,12 @@ fn new_items(original: &Files, copy: &Path) -> Result<Vec<Written>> {
             && !items.iter().any(|i| i.path == problem.path)
         {
             let files = files_of(&problem.path, &now);
+            let id = now
+                .get(&problem.path)
+                .and_then(|bytes| staging::lesson_id_from_front_matter(&problem.path, bytes))
+                .unwrap_or_else(|| problem.path.clone());
             items.push(Written {
-                id: problem.path.clone(),
+                id,
                 label: problem.path.clone(),
                 path: problem.path.clone(),
                 skills: Vec::new(),
@@ -466,6 +1138,8 @@ fn new_items(original: &Files, copy: &Path) -> Result<Vec<Written>> {
                 from_draft: None,
                 transcript: Vec::new(),
                 reason: None,
+                items: Vec::new(),
+                linked: Vec::new(),
             });
         }
     }
@@ -483,6 +1157,8 @@ fn written(item: &Item, files: &Files) -> Written {
         from_draft: None,
         transcript: Vec::new(),
         reason: None,
+        items: Vec::new(),
+        linked: Vec::new(),
     }
 }
 
@@ -516,6 +1192,8 @@ fn refresh(copy: &Path, items: Vec<Written>) -> Result<Vec<Written>> {
                 Some(loaded) => Written {
                     transcript: item.transcript,
                     from_draft: item.from_draft,
+                    items: item.items,
+                    linked: item.linked,
                     ..written(loaded, &now)
                 },
                 None => Written {
@@ -549,10 +1227,24 @@ async fn failures(
     items: &[Written],
     programs: &dyn Programs,
 ) -> Result<BTreeMap<String, String>> {
+    let refs: Vec<&Written> = items.iter().collect();
+    failures_on_paths(copy, &refs, &[], programs).await
+}
+
+/// Like [`failures`], also checking linked existing items at `extra_paths`.
+async fn failures_on_paths(
+    copy: &Path,
+    items: &[&Written],
+    extra_paths: &[String],
+    programs: &dyn Programs,
+) -> Result<BTreeMap<String, String>> {
     let pack = Pack::from_files(staging::read(copy)?)?;
     // Only these items are checked: the rest of the pack is kept for cross-item checks, without
     // rebuilding its existing coding problems.
-    let paths: std::collections::BTreeSet<&str> = items.iter().map(|i| i.path.as_str()).collect();
+    let mut paths: BTreeSet<&str> = items.iter().map(|i| i.path.as_str()).collect();
+    for path in extra_paths {
+        paths.insert(path.as_str());
+    }
     let report = pack.check_only(&paths, programs).await;
     let mut failing = BTreeMap::new();
     for item in items {
@@ -560,28 +1252,43 @@ async fn failures(
             failing.insert(item.path.clone(), problem.message.clone());
             continue;
         }
-        match report
-            .items
-            .iter()
-            .find(|c| c.path == item.path)
-            .map(|c| &c.verdict)
-        {
-            Some(Verdict::Passed(_)) => {}
-            Some(Verdict::Failed(why)) => {
-                failing.insert(item.path.clone(), why.clone());
-            }
-            Some(Verdict::Skipped(why)) => {
-                failing.insert(
-                    item.path.clone(),
-                    format!("it couldn't be checked here, as {why}"),
-                );
-            }
-            None => {
-                failing.insert(item.path.clone(), "it can't be read".to_owned());
-            }
+        record_verdict(&report, &item.path, &mut failing);
+    }
+    for path in extra_paths {
+        if let Some(problem) = report.problems.iter().find(|p| p.path == *path) {
+            failing.insert(path.clone(), problem.message.clone());
+            continue;
         }
+        record_verdict(&report, path, &mut failing);
     }
     Ok(failing)
+}
+
+fn record_verdict(
+    report: &workshop_pack::Report,
+    path: &str,
+    failing: &mut BTreeMap<String, String>,
+) {
+    match report
+        .items
+        .iter()
+        .find(|c| c.path == path)
+        .map(|c| &c.verdict)
+    {
+        Some(Verdict::Passed(_)) => {}
+        Some(Verdict::Failed(why)) => {
+            failing.insert(path.to_owned(), why.clone());
+        }
+        Some(Verdict::Skipped(why)) => {
+            failing.insert(
+                path.to_owned(),
+                format!("it couldn't be checked here, as {why}"),
+            );
+        }
+        None => {
+            failing.insert(path.to_owned(), "it can't be read".to_owned());
+        }
+    }
 }
 
 /// Each skill found too easy, with its level and the items retired, one per line.
@@ -612,6 +1319,40 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
     );
     for skill in &pack.manifest.skills {
         out.push_str(&format!("- {}: {}\n", skill.id, skill.name));
+    }
+    if !brief.lesson_requests.is_empty() {
+        out.push_str("\nRequests for lessons come first. The learner tapped \"Teach me\" on these short items, which have no lesson yet. Write a lesson for them (one lesson can cover several related items) with 3 to 6 new short items, and link each requested item to it by adding `lesson` (and `segment`, counting from 1, where one segment covers it) in its front matter:\n");
+        for req in &brief.lesson_requests {
+            out.push_str(&format!(
+                "- {} (id: {}, skills: {})\n  Prompt: {}\n  Answer: {}\n",
+                req.path,
+                req.id,
+                req.skills.join(", "),
+                req.prompt.trim(),
+                req.answer.trim(),
+            ));
+            if let Some(explanation) = &req.explanation
+                && !explanation.trim().is_empty()
+            {
+                out.push_str(&format!("  Explanation: {}\n", explanation.trim()));
+            }
+        }
+    }
+    if !brief.skill_coverage.is_empty() {
+        out.push_str("\nLesson coverage for the skills this run targets. Write a lesson where a skill's items assume knowledge no lesson teaches, and where existing items in the pack would be taught by a new lesson, link them to it by adding or changing only `lesson` and `segment` in their front matter:\n");
+        for cov in &brief.skill_coverage {
+            let lessons = if cov.lessons == 1 {
+                "1 lesson".to_owned()
+            } else {
+                format!("{} lessons", cov.lessons)
+            };
+            let items = if cov.unlinked_items == 1 {
+                "1 item without a lesson".to_owned()
+            } else {
+                format!("{} items without a lesson", cov.unlinked_items)
+            };
+            out.push_str(&format!("- {}: {lessons}, {items}\n", cov.skill));
+        }
     }
     if !brief.weakest.is_empty() {
         out.push_str(
@@ -667,7 +1408,7 @@ fn writer_prompt(pack: &Pack, brief: &Brief, limits: Limits) -> String {
         }
     }
     out.push_str(&format!(
-        "\nWrite at most {} new items, for the weakest skills and the kinds of mistake above, so the learner practises what they get wrong, and harder problems where they found them too easy. Then reply with JSON: {{\"items\": [{{\"path\": the item's file, such as items/x.md or items/x/item.md, \"from_draft\": the draft's path, if you made it from one, or null}}], \"questions\": [questions for the learner, if any]}}",
+        "\nWrite at most {} new items (a lesson together with its 3 to 6 new items counts as one towards this limit), addressing lesson requests first, then the weakest skills and the kinds of mistake above, and harder problems where they found them too easy. Then reply with JSON: {{\"items\": [{{\"path\": the item's file, such as items/x.md or items/x/item.md, \"from_draft\": the draft's path, if you made it from one, or null}}], \"questions\": [questions for the learner, if any]}}",
         limits.max_items
     ));
     out
@@ -794,6 +1535,51 @@ fn answer_prompt(item: &Written, objection: &str) -> String {
     format!(
         "Another model solved {} blind, compared its answer with the item's, and objects:\n\n<objection>\n{}\n</objection>\n\nIf it's right, revise the item's files to fix it, keeping them where they are and its check honest. If the item stands, say why. Reply with JSON: {{\"position\": \"revised\" or \"stands\", \"reply\": what you'd say to it}}",
         item.path,
+        objection.trim()
+    )
+}
+
+/// Prompt asking the reviewer to audit a lesson and its accompanying items.
+fn audit_prompt(lesson: &Written, items: &[Written], writer: Option<&str>) -> String {
+    let mut out = String::from("Audit this lesson and its accompanying items.\n\n<lesson>\n");
+    for (path, text) in &lesson.files {
+        out.push_str(&format!(
+            "<file path=\"{path}\">\n{}\n</file>\n",
+            text.trim_end()
+        ));
+    }
+    out.push_str("</lesson>\n\n<items>\n");
+    for item in items {
+        for (path, text) in &item.files {
+            out.push_str(&format!(
+                "<file path=\"{path}\">\n{}\n</file>\n",
+                text.trim_end()
+            ));
+        }
+    }
+    out.push_str("</items>\n\n");
+    match writer {
+        Some(reply) => out.push_str(&format!(
+            "You objected to the lesson, and its author replied, perhaps revising it, as it is above:\n<author>\n{}\n</author>\n\nLook again: are your objections resolved and is the lesson now accurate and clear?",
+            reply.trim()
+        )),
+        None => out.push_str(
+            "Check:\n\
+             - every factual claim, saying which you believe wrong or misleading and why; object to any claim you believe wrong, and to any you aren't sure of that's stated as certain (including behaviour that varies by version or configuration without saying so);\n\
+             - each guess's and check's answer, that it is right and the only right choice, and each check's explanation;\n\
+             - the `## Explain answer`;\n\
+             - that the sources listed in `[[sources]]` appear real and relevant, as far as you can tell without fetching them;\n\
+             - any diagram, read as SVG source, that it shows what the text says and has no overlapping text and shapes.",
+        ),
+    }
+    out.push_str(" Reply with JSON: {\"agree\": true or false, \"ambiguous\": true or false, \"objection\": what's wrong and how to fix it, or \"\"}");
+    out
+}
+
+fn audit_answer_prompt(lesson: &Written, objection: &str) -> String {
+    format!(
+        "Another model audited {} and objects:\n\n<objection>\n{}\n</objection>\n\nIf it's right, revise the lesson's files to fix it, keeping them where they are (and keeping any checks, diagrams and accompanying items consistent). If the lesson stands, say why. Reply with JSON: {{\"position\": \"revised\" or \"stands\", \"reply\": what you'd say to it}}",
+        lesson.path,
         objection.trim()
     )
 }

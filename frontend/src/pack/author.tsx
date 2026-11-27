@@ -86,10 +86,24 @@ export function Author({ onChanged }: { onChanged: () => void }) {
           ) : last.report ? (
             <p>
               Last run: {count(last.report.accepted.length, "added")}
+              {last.report.linked?.length ? `, ${count(last.report.linked.length, "linked")}` : ""}
               {last.commit ? ` in commit ${last.commit}` : ""},{" "}
               {count(last.report.queued.length, "waiting for approval")},{" "}
               {count(last.report.dropped.length, "left out")}.
             </p>
+          ) : null}
+          {last.report?.linked?.length ? (
+            <details>
+              <summary class="muted">Linked</summary>
+              <ul>
+                {last.report.linked.map((link) => (
+                  <li key={link.path}>
+                    {link.label} → {link.lesson}
+                    {link.segment ? ` (segment ${link.segment})` : ""}
+                  </li>
+                ))}
+              </ul>
+            </details>
           ) : null}
           {last.report?.dropped.length ? (
             <details>
@@ -103,6 +117,21 @@ export function Author({ onChanged }: { onChanged: () => void }) {
               </ul>
             </details>
           ) : null}
+        </section>
+      ) : null}
+      {status.lesson_requests?.length ? (
+        <section aria-labelledby="lesson-requests-heading" class="pack-section">
+          <h3 id="lesson-requests-heading" class="tracks-heading">
+            Lesson requests
+          </h3>
+          <ul class="progress-list" aria-label="Lesson requests">
+            {status.lesson_requests.map((req) => (
+              <li key={req.item} class="progress-row">
+                <span class="progress-row-title">{req.label}</span>
+                {req.skills.length > 0 ? <span class="muted">{req.skills.join(", ")}</span> : null}
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
       {status.questions.length > 0 ? (
@@ -217,10 +246,16 @@ function QueuedRow({
   busy: boolean;
   onDecide: (approve: boolean) => void;
 }) {
+  const bundled = item.items ?? [];
+  const linked = item.linked ?? [];
   return (
     <li class="progress-row">
       <span class="progress-row-title">{item.label}</span>
-      <span class="muted">{item.path}</span>
+      <span class="muted">
+        {item.path}
+        {bundled.length > 0 ? ` · with ${bundled.length} items` : ""}
+        {linked.length > 0 ? ` · links ${linked.length} existing` : ""}
+      </span>
       {item.reason ? <span>{item.reason}</span> : null}
       <details>
         <summary class="muted">The item, and what they said</summary>
@@ -228,6 +263,16 @@ function QueuedRow({
           <pre key={path} class="pack-file">
             {text}
           </pre>
+        ))}
+        {bundled.map((child) => (
+          <div key={child.path}>
+            <p class="muted">{child.path}</p>
+            {Object.entries(child.files).map(([path, text]) => (
+              <pre key={path} class="pack-file">
+                {text}
+              </pre>
+            ))}
+          </div>
         ))}
         <ol class="pack-transcript">
           {item.transcript.map((turn, index) => (

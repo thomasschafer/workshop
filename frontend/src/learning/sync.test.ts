@@ -76,7 +76,14 @@ describe("Learning", () => {
     expect(reloaded.attempts).toEqual([first]);
     await reloaded.sync();
     expect(sent).toEqual([
-      { attempts: [first], flags: [], retirements: [], lesson_completions: [], lesson_skips: [] },
+      {
+        attempts: [first],
+        flags: [],
+        retirements: [],
+        lesson_completions: [],
+        lesson_skips: [],
+        lesson_requests: [],
+      },
     ]);
     expect(reloaded.attempts).toEqual([]);
     expect(reloaded.deck).toEqual(DECK);
@@ -128,7 +135,14 @@ describe("Learning", () => {
     expect(reloaded.syncStatus.pending).toBe(0);
     await reloaded.sync();
     expect(sent).toEqual([
-      { attempts: [], flags: [], retirements: [], lesson_completions: [], lesson_skips: [] },
+      {
+        attempts: [],
+        flags: [],
+        retirements: [],
+        lesson_completions: [],
+        lesson_skips: [],
+        lesson_requests: [],
+      },
     ]);
     expect(reloaded.attempts).toEqual([]);
   });
@@ -257,6 +271,7 @@ describe("Learning", () => {
         retirements: offline.retirementChanges,
         lesson_completions: [],
         lesson_skips: [],
+        lesson_requests: [],
       },
     ]);
     expect(reloaded.retirementChanges).toEqual([]);
@@ -289,7 +304,14 @@ describe("Learning", () => {
     expect(learning.syncStatus.pending).toBe(1);
     await learning.sync();
     expect(sent).toEqual([
-      { attempts: [first], flags: [], retirements: [], lesson_completions: [], lesson_skips: [] },
+      {
+        attempts: [first],
+        flags: [],
+        retirements: [],
+        lesson_completions: [],
+        lesson_skips: [],
+        lesson_requests: [],
+      },
     ]);
   });
 
@@ -346,10 +368,55 @@ describe("Learning", () => {
         retirements: [],
         lesson_completions: [completion],
         lesson_skips: [skip],
+        lesson_requests: [],
       },
     ]);
     expect(reloaded.lessonCompletions).toEqual([]);
     expect(reloaded.lessonSkips).toEqual([]);
+    expect(reloaded.syncStatus).toMatchObject({ pending: 0, offline: false });
+  });
+
+  it("keeps lesson requests offline with their attempt until synced", async () => {
+    const storage = new MemoryStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    const offline = new Learning(storage);
+    const missed: Attempt = { ...attempt(), rating: "again" };
+    offline.requestLesson(missed);
+    await offline.sync();
+    // The request shares its attempt's id, so they count as one pending action.
+    expect(offline.syncStatus).toMatchObject({ pending: 1, offline: true, error: null });
+    expect(offline.lessonRequests).toEqual([
+      { id: missed.id, item: missed.item, requested_at: missed.answered_at },
+    ]);
+    expect(() => offline.requestLesson(attempt())).toThrow("rated again");
+
+    const sent: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify(DECK));
+      }),
+    );
+    const reloaded = new Learning(storage);
+    expect(reloaded.syncStatus.pending).toBe(1);
+    await reloaded.sync();
+    expect(sent).toEqual([
+      {
+        attempts: [missed],
+        flags: [],
+        retirements: [],
+        lesson_completions: [],
+        lesson_skips: [],
+        lesson_requests: [{ id: missed.id, item: missed.item, requested_at: missed.answered_at }],
+      },
+    ]);
+    expect(reloaded.lessonRequests).toEqual([]);
     expect(reloaded.syncStatus).toMatchObject({ pending: 0, offline: false });
   });
 

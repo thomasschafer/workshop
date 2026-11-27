@@ -496,6 +496,8 @@ mod tests {
             from_draft: None,
             transcript: Vec::new(),
             reason: None,
+            items: Vec::new(),
+            linked: Vec::new(),
         };
         let last = |report: Option<workshop_author::Report>, error: Option<&str>| LastRun {
             started_at: 0,
