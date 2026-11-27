@@ -91,11 +91,8 @@ const theme = EditorView.theme({
   },
   ".cm-scroller": {
     fontFamily: "var(--mono)",
-    // A touch heavier than regular, as terminals thicken their text, and with JetBrains Mono's
-    // ligatures off so that code reads as typed.
+    // A touch heavier than regular, as terminals thicken their text.
     fontWeight: "450",
-    fontVariantLigatures: "none",
-    fontFeatureSettings: '"calt" 0',
     lineHeight: "1.55",
     overscrollBehavior: "contain",
   },

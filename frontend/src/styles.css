@@ -130,6 +130,9 @@ body,
   color: var(--fg);
   font-family: var(--mono);
   font-size: 15px;
+  /* JetBrains Mono's ligatures off, as code can turn up in any text and should read as typed. */
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
