@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-const SERVERS = 7;
+const SERVERS = 8;
 const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
 const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
@@ -49,6 +49,10 @@ export const LESSONS_HOME = `${CHECKOUT_HOME}-lessons`;
 /** A seventh, for goals: a pack whose skills are outlined in topics that lessons teach. */
 export const GOALS_PORT = port(6);
 export const GOALS_HOME = `${CHECKOUT_HOME}-goals`;
+
+/** An eighth, for skipping lessons with "I know this", each in a track of its own. */
+export const SKIP_PORT = port(7);
+export const SKIP_HOME = `${CHECKOUT_HOME}-skip`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -796,6 +800,125 @@ An answer.
   };
   for (const [path, text] of Object.entries(files)) {
     const file = join(outline, path);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, text);
+  }
+}
+
+/** A lesson with `checks` (as segments' checks), in a track of its own kept out of Continue. */
+function skipLesson(id: string, title: string, checks: string[]): string {
+  const segments =
+    checks.length === 1 ? ["Only part"] : ["First part", "Second part", "Third part"];
+  return `+++
+kind = "lesson"
+title = "${title}"
+track = "${id}"
+skills = ["algorithms"]
+minutes = 3
+
+[[sources]]
+title = "Algorithms notes"
+url = "https://example.com/${id}"
+${checks.join("")}+++
+A short lesson on ${title.toLowerCase()}.
+
+${segments.map((segment, i) => `## ${segment}\n\nThe ${segment.toLowerCase()} of ${title.toLowerCase()}: teaching step ${i + 1}.\n`).join("\n")}
+## Explain
+
+Why does it work?
+
+## Explain answer
+
+Because the structure stays complete, which keeps its height logarithmic.
+`;
+}
+
+/** A check after `segment` (counting from 1), whose right answer is "Right ${segment}". */
+function skipCheck(segment: number): string {
+  return `
+[[checks]]
+segment = ${segment}
+prompt = "Check on part ${segment}?"
+choices = ["Wrong ${segment}", "Right ${segment}", "Also wrong ${segment}"]
+answer = 2
+explanation = "Explanation for part ${segment}."
+`;
+}
+
+/**
+ * A home for "I know this", with a pack of lessons each in a track of its own, so each test
+ * starts from its own lesson card: most with two checks, one with only one.
+ */
+export function createSkipHome(): void {
+  const skim = join(SKIP_HOME, "skim");
+  writeHome({
+    home: SKIP_HOME,
+    port: SKIP_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
+    model: "fake",
+    extra: `[learning]\ndaily_new = 10\ndaily_lessons = 10\npacks = [${JSON.stringify(skim)}]\nsample_pack = false\n`,
+  });
+  const tracks = ["passing", "missing", "explaining", "offline", "resuming", "single"];
+  const files: Record<string, string> = {
+    "pack.toml": `id = "skim"
+name = "Skim"
+
+[[skills]]
+id = "algorithms"
+name = "Algorithms"
+${tracks.map((id) => `\n[[tracks]]\nid = "${id}"\nname = "${id[0]?.toUpperCase()}${id.slice(1)}"\nsummary = "Lessons to skip"\ncontinue = false\n`).join("")}`,
+    "items/lessons/passing.md": skipLesson("passing", "Merging sorted runs", [
+      skipCheck(1),
+      skipCheck(2),
+    ]),
+    "items/lessons/missing.md": skipLesson("missing", "Searching by levels", [
+      skipCheck(1),
+      skipCheck(2),
+    ]),
+    "items/lessons/explaining.md": skipLesson("explaining", "Searching in depth", [
+      skipCheck(1),
+      skipCheck(3),
+    ]),
+    "items/lessons/offline.md": skipLesson("offline", "Queues on a ring", [
+      skipCheck(1),
+      skipCheck(2),
+    ]),
+    "items/lessons/resuming.md": skipLesson("resuming", "Prefix trees", [
+      skipCheck(1),
+      skipCheck(2),
+    ]),
+    "items/lessons/single.md": skipLesson("single", "Counting sort", [skipCheck(1)]),
+    "items/cards/passing-linked.md": `+++
+kind = "card"
+track = "passing"
+skills = ["algorithms"]
+lesson = "passing"
+segment = 1
++++
+What does merging two sorted runs of lengths m and n cost?
+
+## Answer
+
+O(m + n).
+`,
+    "items/cards/passing-plain.md": `+++
+kind = "card"
+track = "passing"
+skills = ["algorithms"]
++++
+Is merge sort stable?
+
+## Answer
+
+Yes, when ties take from the left run first.
+`,
+  };
+  for (const [path, text] of Object.entries(files)) {
+    const file = join(skim, path);
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, text);
   }

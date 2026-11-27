@@ -38,6 +38,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
   const lessonLaunch = useRef<{
     item: string;
     autoStart: boolean;
+    knowCheck: boolean;
     returnToTrack: TrackId | null;
   } | null>(null);
 
@@ -187,6 +188,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
     lessonLaunch.current = {
       item,
       autoStart: options?.autoStart ?? false,
+      knowCheck: options?.knowCheck ?? false,
       returnToTrack: options?.returnToTrack ?? null,
     };
     const next: Route =
@@ -257,6 +259,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             itemKey={route.item}
             segmentIndex={route.segment ?? null}
             autoStart={launch?.autoStart ?? false}
+            knowCheck={launch?.knowCheck ?? false}
             returnToTrack={launch?.returnToTrack ?? null}
             serverDictation={boot.server_dictation}
             onHome={goHome}

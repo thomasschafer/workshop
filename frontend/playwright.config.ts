@@ -14,6 +14,7 @@ import {
   createHome,
   createLearningHome,
   createLessonsHome,
+  createSkipHome,
   GOALS_HOME,
   GOALS_PORT,
   HOME,
@@ -22,6 +23,8 @@ import {
   LESSONS_HOME,
   LESSONS_PORT,
   PORT,
+  SKIP_HOME,
+  SKIP_PORT,
 } from "./e2e/fixture";
 
 // Playwright loads this file in each of its processes; the home must only be built once, before
@@ -34,6 +37,7 @@ if (process.env.WORKSHOP_E2E_HOME_READY === undefined) {
   createCodebaseHome();
   createLessonsHome();
   createGoalsHome();
+  createSkipHome();
   process.env.WORKSHOP_E2E_HOME_READY = "1";
 }
 
@@ -79,6 +83,7 @@ export default defineConfig({
     { home: CODEBASE_HOME, port: CODEBASE_PORT },
     { home: LESSONS_HOME, port: LESSONS_PORT },
     { home: GOALS_HOME, port: GOALS_PORT },
+    { home: SKIP_HOME, port: SKIP_PORT },
   ].map(({ home, port }) => ({
     command: `${binary} serve`,
     env: {

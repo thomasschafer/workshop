@@ -1,6 +1,13 @@
 // Pure state transitions and local persistence for a lesson in progress.
 
 import type { Marked } from "../grading/types";
+import {
+  checkedSegments,
+  clampKnowCheck,
+  type KnowCheck,
+  lessonStartAfterMiss,
+  startKnowCheck,
+} from "./knowCheck";
 import type { DeckLesson } from "./types";
 
 export type LessonStage =
@@ -30,6 +37,8 @@ export interface LessonProgress {
   completionId: string | null;
   /** Time spent in the lesson before the current mount, in milliseconds. */
   elapsedMs: number;
+  /** The "I know this" check under way instead of the lesson, if there is one. */
+  knowCheck: KnowCheck | null;
 }
 
 const STORAGE_PREFIX = "workshop:lesson:";
@@ -50,6 +59,7 @@ export function initialProgress(): LessonProgress {
     explainRevealed: false,
     completionId: null,
     elapsedMs: 0,
+    knowCheck: null,
   };
 }
 
@@ -71,7 +81,7 @@ export function clampProgress(lesson: DeckLesson, saved: LessonProgress): Lesson
       stage = { kind: "segment", index: Math.min(Math.max(0, stage.index), maxSegment) };
     }
   }
-  return { ...saved, stage, reachedSegment };
+  return { ...saved, stage, reachedSegment, knowCheck: clampKnowCheck(lesson, saved.knowCheck) };
 }
 
 export function loadLessonProgress(
@@ -180,17 +190,59 @@ export function advanceFromSegment(
   return { ...progress, stage: { kind: "explain" } };
 }
 
+/** Stamps a completion id on the progress if one hasn't been recorded yet. */
+export function stampCompletion(
+  progress: LessonProgress,
+  makeId: () => string,
+): { next: LessonProgress; newlyCompletedId: string | null } {
+  if (progress.completionId !== null) return { next: progress, newlyCompletedId: null };
+  const id = makeId();
+  return { next: { ...progress, completionId: id }, newlyCompletedId: id };
+}
+
 /** Moves to the recap stage, stamping a completion id if one hasn't been recorded yet. */
 export function enterRecap(
   progress: LessonProgress,
   makeId: () => string,
 ): { next: LessonProgress; newlyCompletedId: string | null } {
-  if (progress.completionId !== null) {
-    return { next: { ...progress, stage: { kind: "recap" } }, newlyCompletedId: null };
+  return stampCompletion({ ...progress, stage: { kind: "recap" } }, makeId);
+}
+
+/** Starts an "I know this" check, keeping any progress in the lesson itself to go back to. */
+export function beginKnowCheck(lesson: DeckLesson, progress: LessonProgress): LessonProgress {
+  return { ...progress, knowCheck: startKnowCheck(lesson) };
+}
+
+/** Changes the "I know this" check under way. */
+export function updateKnowCheck(
+  progress: LessonProgress,
+  change: (check: KnowCheck) => KnowCheck,
+): LessonProgress {
+  return progress.knowCheck ? { ...progress, knowCheck: change(progress.knowCheck) } : progress;
+}
+
+/**
+ * Leaves an "I know this" check for the lesson itself: at the first segment with a check that was
+ * missed, if there is one, or else from the start. Checks answered right count as answered there.
+ */
+export function lessonAfterKnowCheck(lesson: DeckLesson, progress: LessonProgress): LessonProgress {
+  const check = progress.knowCheck;
+  const base: LessonProgress = { ...progress, knowCheck: null };
+  if (check === null) return startLesson(lesson, base);
+  const checks = { ...progress.checks };
+  for (const segment of checkedSegments(lesson)) {
+    if (checks[segment] !== undefined) continue;
+    const answer = check.answers[segment];
+    if (answer !== undefined && answer === lesson.segments[segment]?.check?.answer) {
+      checks[segment] = answer;
+    }
   }
-  const id = makeId();
+  const missed = lessonStartAfterMiss(lesson, check);
+  if (missed === null) return startLesson(lesson, { ...base, checks });
   return {
-    next: { ...progress, stage: { kind: "recap" }, completionId: id },
-    newlyCompletedId: id,
+    ...base,
+    checks,
+    stage: { kind: "segment", index: missed },
+    reachedSegment: Math.max(progress.reachedSegment, missed),
   };
 }

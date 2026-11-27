@@ -31,6 +31,7 @@ import {
 } from "./local";
 import { sameOutput } from "./output";
 import "./practice.css";
+import { offersKnowCheck } from "./knowCheck";
 import { TrackLessons } from "./lesson";
 import { RetiredList } from "./retired";
 import { learning, type SyncStatus } from "./sync";
@@ -67,6 +68,8 @@ export interface OpenLessonOptions {
   segmentIndex?: number | null;
   /** Skip the lesson's opening card when started directly from the flow's lesson card. */
   autoStart?: boolean;
+  /** Start "I know this" instead of the lesson, from the flow's lesson card. */
+  knowCheck?: boolean;
   /** Track to return to on finishing or going back. */
   returnToTrack?: TrackId;
 }
@@ -355,7 +358,7 @@ export function Practice({
     onOpenLesson(lessonKey, { segmentIndex, returnToTrack: track });
   };
 
-  const startFlowLesson = (lesson: DeckLesson) => {
+  const startFlowLesson = (lesson: DeckLesson, knowCheck: boolean) => {
     const completionsBefore = completed[lesson.key]?.length ?? 0;
     const next = computeNextAfter({ kind: "lesson", key: lesson.key }, results, lesson.key);
     onSaveFlow?.({
@@ -365,7 +368,7 @@ export function Practice({
       excludeNext: next.excludeNext,
       startedLesson: { key: lesson.key, completionsBefore },
     });
-    onOpenLesson(lesson.key, { autoStart: true, returnToTrack: track });
+    onOpenLesson(lesson.key, { autoStart: true, knowCheck, returnToTrack: track });
   };
 
   const skipFlowLesson = (lesson: DeckLesson) => {
@@ -408,7 +411,8 @@ export function Practice({
               <LessonFlowCard
                 key={current.lesson.key}
                 lesson={current.lesson}
-                onStart={() => startFlowLesson(current.lesson)}
+                onStart={() => startFlowLesson(current.lesson, false)}
+                onKnowCheck={() => startFlowLesson(current.lesson, true)}
                 onSkip={() => skipFlowLesson(current.lesson)}
               />
             ) : (
@@ -446,10 +450,13 @@ export function Practice({
 function LessonFlowCard({
   lesson,
   onStart,
+  onKnowCheck,
   onSkip,
 }: {
   lesson: DeckLesson;
   onStart: () => void;
+  /** Checks what the learner knows instead, to skip the lesson if they pass. */
+  onKnowCheck: () => void;
   onSkip: () => void;
 }) {
   return (
@@ -463,6 +470,11 @@ function LessonFlowCard({
         <button type="button" class="pill primary" onClick={onStart}>
           Start
         </button>
+        {offersKnowCheck(lesson) ? (
+          <button type="button" class="pill" onClick={onKnowCheck}>
+            I know this
+          </button>
+        ) : null}
         <button type="button" class="pill" onClick={onSkip}>
           Not now
         </button>

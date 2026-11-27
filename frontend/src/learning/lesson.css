@@ -299,3 +299,34 @@
   color: var(--accent);
   overflow-wrap: anywhere;
 }
+
+/* "I know this": a short check of the lesson instead of the lesson itself. */
+.lesson-know-verdict.right {
+  color: var(--ok);
+}
+
+.lesson-know-verdict.wrong {
+  color: var(--warn);
+}
+
+.lesson-know-offline,
+.lesson-know-result {
+  margin: 0;
+}
+
+.lesson-know-missed,
+.lesson-know-mark {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lesson-know-missed > .tracks-heading,
+.lesson-know-mark > .tracks-heading {
+  margin: 0;
+}
+
+/* With a third choice, such as "I know this", the first spans the row above the other two. */
+.lesson-flow-actions > .pill:first-child:nth-last-child(3) {
+  grid-column: 1 / -1;
+}

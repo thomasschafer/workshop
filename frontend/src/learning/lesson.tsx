@@ -3,6 +3,7 @@ import { errorMessage } from "../errors";
 import { gradingApi } from "../grading/api";
 import { ExplainAloud } from "../grading/explain";
 import { MarkedView } from "../grading/marked";
+import type { Marked } from "../grading/types";
 import { useConnection } from "../hooks/useConnection";
 import { useMarkdown } from "../hooks/useMarkdown";
 import { HomeButton, TrackTitle } from "../progress/page";
@@ -10,23 +11,36 @@ import { TrackIcon } from "../tracks/icons";
 import type { TrackId } from "../tracks/types";
 import { DictateButton } from "../views/dictate";
 import "./lesson.css";
+import {
+  advanceKnowCheck,
+  answerKnowCheck,
+  checkedSegments,
+  type KnowCheck,
+  markKnowCheck,
+  missedSegments,
+  offersKnowCheck,
+} from "./knowCheck";
 import { isSafeHttpUrl, renderLessonHtmlInto, sameLessonImages } from "./lessonMedia";
 import {
   advanceFromSegment,
   answerGuess,
   answerSegmentCheck,
+  beginKnowCheck,
   clearLessonProgress,
   enterRecap,
   goToSegment,
   type LessonProgress,
+  lessonAfterKnowCheck,
   loadLessonProgress,
   saveLessonProgress,
+  stampCompletion,
   startLesson,
+  updateKnowCheck,
 } from "./lessonState";
 import { completedLessons, lessonsInTrack, newId, unmetRequires } from "./local";
 import { Markdown, SyncChip, useLearning } from "./practice";
 import { learning } from "./sync";
-import type { Deck, DeckLesson, DeckLessonCheck, DeckLessonImage } from "./types";
+import type { Deck, DeckLesson, DeckLessonCheck, DeckLessonImage, DeckLessonSource } from "./types";
 
 /**
  * Segment Markdown with embedded SVG diagrams (DOMPurify-sanitised inline so they take
@@ -116,24 +130,35 @@ function SegmentCheck({
   check,
   chosen,
   onChoose,
+  heading = "Check",
+  explain = true,
 }: {
   check: DeckLessonCheck;
   chosen: number | undefined;
   onChoose: (choiceIndex: number) => void;
+  heading?: string;
+  /**
+   * Whether answering shows the right answer and its explanation, or, as in "I know this", only
+   * whether the choice was right.
+   */
+  explain?: boolean;
 }) {
   const answered = chosen !== undefined;
+  const right = chosen === check.answer;
   return (
     <section class="lesson-check" aria-label="Check">
-      <h3 class="tracks-heading">Check</h3>
+      <h3 class="tracks-heading">{heading}</h3>
       <Markdown text={check.prompt} />
       <ol class="learn-choices">
         {check.choices.map((choice, choiceIndex) => {
           const choiceClass = !answered
             ? ""
-            : choiceIndex === check.answer
-              ? "right"
-              : choiceIndex === chosen
-                ? "wrong"
+            : choiceIndex === chosen
+              ? right
+                ? "right"
+                : "wrong"
+              : explain && choiceIndex === check.answer
+                ? "right"
                 : "";
           return (
             <li key={choice}>
@@ -150,17 +175,88 @@ function SegmentCheck({
           );
         })}
       </ol>
-      {answered ? (
-        <section
-          class={`learn-answer ${chosen === check.answer ? "right" : "wrong"}`}
-          aria-label="Explanation"
-        >
-          <p class="learn-verdict">
-            {chosen === check.answer ? "Right" : `It's: ${check.choices[check.answer]}`}
-          </p>
+      {answered && explain ? (
+        <section class={`learn-answer ${right ? "right" : "wrong"}`} aria-label="Explanation">
+          <p class="learn-verdict">{right ? "Right" : `It's: ${check.choices[check.answer]}`}</p>
           <Markdown text={check.explanation} class="muted" />
         </section>
+      ) : answered ? (
+        <p class={`learn-verdict lesson-know-verdict ${right ? "right" : "wrong"}`} role="status">
+          {right ? "Right" : "Not right"}
+        </p>
       ) : null}
+    </section>
+  );
+}
+
+/** Typing or dictating an explanation, for a lesson's explain step and "I know this". */
+function ExplainInput({
+  text,
+  disabled,
+  serverDictation,
+  onText,
+  onHeard,
+}: {
+  text: string;
+  disabled: boolean;
+  serverDictation: boolean;
+  onText: (text: string) => void;
+  /** What was dictated, to add to the end of the explanation. */
+  onHeard: (heard: string) => void;
+}) {
+  const [dictateNotice, setDictateNotice] = useState<string | null>(null);
+  return (
+    <>
+      <label class="learn-question muted" for="lesson-explain">
+        Your explanation
+      </label>
+      <textarea
+        id="lesson-explain"
+        class="written"
+        rows={4}
+        value={text}
+        readOnly={disabled}
+        onInput={(event) => onText(event.currentTarget.value)}
+      />
+      <DictateButton
+        serverDictation={serverDictation}
+        disabled={disabled}
+        onHeard={(heard) => {
+          setDictateNotice(null);
+          onHeard(heard);
+        }}
+        onNotice={setDictateNotice}
+      />
+      {dictateNotice ? <p class="muted">{dictateNotice}</p> : null}
+    </>
+  );
+}
+
+/** An explanation with what was dictated added to its end. */
+function withDictated(text: string, heard: string): string {
+  return text.trim() ? `${text.trimEnd()} ${heard}` : heard;
+}
+
+/** A lesson's sources, as further reading. */
+function ReadMore({ sources }: { sources: DeckLessonSource[] }) {
+  return (
+    <section class="lesson-sources" aria-labelledby="read-more-heading">
+      <h3 id="read-more-heading" class="tracks-heading">
+        Read more
+      </h3>
+      <ul class="lesson-source-list">
+        {sources.map((source) => (
+          <li key={source.url}>
+            {isSafeHttpUrl(source.url) ? (
+              <a href={source.url} target="_blank" rel="noopener noreferrer">
+                {source.title}
+              </a>
+            ) : (
+              <span>{source.title}</span>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -169,12 +265,14 @@ function SegmentCheck({
  * Teaches a lesson a step at a time: opening, unscored guesses, segments with diagrams and
  * predict-then-reveal checks, an explain-in-your-own-words step, and a recap. Progress stays on
  * the device so closing and returning carries on where the learner was. With `segmentIndex`,
- * shows just that segment and its check for a quick revisit, without recording a completion.
+ * shows just that segment and its check for a quick revisit, without recording a completion. A
+ * lesson not yet done can be skipped with "I know this", by passing a short check instead.
  */
 export function LessonScreen({
   itemKey,
   segmentIndex = null,
   autoStart = false,
+  knowCheck = false,
   returnToTrack = null,
   serverDictation,
   onHome,
@@ -185,6 +283,8 @@ export function LessonScreen({
   segmentIndex?: number | null;
   /** Skip the opening card when launched via "Start" on the flow's lesson card. */
   autoStart?: boolean;
+  /** Start straight into "I know this", when launched from the flow's lesson card. */
+  knowCheck?: boolean;
   /** Track to return to on finishing or going back, when opened from another track's flow. */
   returnToTrack?: TrackId | null;
   serverDictation: boolean;
@@ -279,6 +379,7 @@ export function LessonScreen({
             deck={deck}
             lesson={lesson}
             autoStart={autoStart}
+            knowCheck={knowCheck}
             serverDictation={serverDictation}
             onTrack={() => onTrack(returnToTrack ?? lesson.track)}
           />
@@ -331,12 +432,14 @@ function LessonBody({
   deck,
   lesson,
   autoStart,
+  knowCheck,
   serverDictation,
   onTrack,
 }: {
   deck: Deck;
   lesson: DeckLesson;
   autoStart: boolean;
+  knowCheck: boolean;
   serverDictation: boolean;
   onTrack: () => void;
 }) {
@@ -344,6 +447,11 @@ function LessonBody({
   const online = useConnection();
   const [progress, setProgress] = useState<LessonProgress>(() => {
     const loaded = loadLessonProgress(lesson);
+    if (knowCheck && loaded.knowCheck === null && offersKnowCheck(lesson)) {
+      const started = beginKnowCheck(lesson, loaded);
+      saveLessonProgress(lesson.key, started);
+      return started;
+    }
     if (autoStart && loaded.stage.kind === "opening") {
       const started = startLesson(lesson, loaded);
       saveLessonProgress(lesson.key, started);
@@ -357,10 +465,11 @@ function LessonBody({
   const [aloudMode, setAloudMode] = useState(false);
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
-  const [dictateNotice, setDictateNotice] = useState<string | null>(null);
 
-  const stageKey =
-    progress.stage.kind === "guess" || progress.stage.kind === "segment"
+  const knowStage = progress.knowCheck?.stage;
+  const stageKey = knowStage
+    ? `know:${knowStage.kind === "check" ? `check:${knowStage.index}` : knowStage.kind}`
+    : progress.stage.kind === "guess" || progress.stage.kind === "segment"
       ? `${progress.stage.kind}:${progress.stage.index}`
       : progress.stage.kind;
   const previousStageKey = useRef(stageKey);
@@ -381,7 +490,7 @@ function LessonBody({
   useEffect(() => {
     const persistElapsed = () => {
       const current = progressRef.current;
-      if (current.stage.kind === "recap") return;
+      if (current.stage.kind === "recap" || current.knowCheck?.stage.kind === "passed") return;
       const elapsedMs = elapsedNow();
       const updated = { ...current, elapsedMs };
       progressRef.current = updated;
@@ -405,9 +514,15 @@ function LessonBody({
   const completed = completedLessons(deck, state.lessonCompletions);
   const unmet = unmetRequires(deck, lesson, completed);
 
-  const goToRecap = () => {
+  /** Moves on to where the lesson counts as done, recording its completion the first time. */
+  const complete = (
+    enter: (current: LessonProgress) => {
+      next: LessonProgress;
+      newlyCompletedId: string | null;
+    },
+  ) => {
     const durationMs = elapsedNow();
-    const { next: entered, newlyCompletedId } = enterRecap(progressRef.current, newId);
+    const { next: entered, newlyCompletedId } = enter(progressRef.current);
     const next = { ...entered, elapsedMs: durationMs };
     progressRef.current = next;
     saveLessonProgress(lesson.key, next);
@@ -422,10 +537,44 @@ function LessonBody({
     }
   };
 
+  const goToRecap = () => complete((current) => enterRecap(current, newId));
+
   const finish = () => {
     clearLessonProgress(lesson.key);
     onTrack();
   };
+
+  const done = (completed[lesson.key]?.length ?? 0) > 0;
+
+  if (progress.knowCheck !== null) {
+    const check = progress.knowCheck;
+    return (
+      <KnowCheckBody
+        lesson={lesson}
+        check={check}
+        online={online}
+        serverDictation={serverDictation}
+        onChange={(change) => update((current) => updateKnowCheck(current, change))}
+        onMarked={(marked) => {
+          const current = progressRef.current.knowCheck;
+          if (current === null) return;
+          const next = markKnowCheck(lesson, current, marked);
+          if (next.stage.kind === "passed") {
+            complete((current) => stampCompletion({ ...current, knowCheck: next }, newId));
+          } else {
+            update((current) => ({ ...current, knowCheck: next }));
+          }
+        }}
+        onLesson={() => update((current) => lessonAfterKnowCheck(lesson, current))}
+        onNotNow={() => {
+          state.skipLesson({ id: newId(), lesson: lesson.key, skipped_at: Date.now() });
+          update((current) => ({ ...current, knowCheck: null }));
+          onTrack();
+        }}
+        onDone={finish}
+      />
+    );
+  }
 
   const markExplanation = () => {
     const text = progress.explainText;
@@ -461,13 +610,32 @@ function LessonBody({
           ) : null}
         </div>
         <Markdown text={lesson.prompt} class="learn-prompt" />
-        <button
-          type="button"
-          class="pill primary wide"
-          onClick={() => update((current) => startLesson(lesson, current))}
-        >
-          Start
-        </button>
+        {!done && offersKnowCheck(lesson) ? (
+          <div class="lesson-flow-actions">
+            <button
+              type="button"
+              class="pill primary"
+              onClick={() => update((current) => startLesson(lesson, current))}
+            >
+              Start
+            </button>
+            <button
+              type="button"
+              class="pill"
+              onClick={() => update((current) => beginKnowCheck(lesson, current))}
+            >
+              I know this
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            class="pill primary wide"
+            onClick={() => update((current) => startLesson(lesson, current))}
+          >
+            Start
+          </button>
+        )}
       </article>
     );
   }
@@ -643,35 +811,18 @@ function LessonBody({
               else update((current) => ({ ...current, explainRevealed: true }));
             }}
           >
-            <label class="learn-question muted" for="lesson-explain">
-              Your explanation
-            </label>
-            <textarea
-              id="lesson-explain"
-              class="written"
-              rows={4}
-              value={progress.explainText}
-              readOnly={marking}
-              onInput={(event) => {
-                const text = event.currentTarget.value;
-                update((current) => ({ ...current, explainText: text }));
-              }}
-            />
-            <DictateButton
-              serverDictation={serverDictation}
+            <ExplainInput
+              text={progress.explainText}
               disabled={marking}
-              onHeard={(heard) => {
-                setDictateNotice(null);
+              serverDictation={serverDictation}
+              onText={(text) => update((current) => ({ ...current, explainText: text }))}
+              onHeard={(heard) =>
                 update((current) => ({
                   ...current,
-                  explainText: current.explainText.trim()
-                    ? `${current.explainText.trimEnd()} ${heard}`
-                    : heard,
-                }));
-              }}
-              onNotice={setDictateNotice}
+                  explainText: withDictated(current.explainText, heard),
+                }))
+              }
             />
-            {dictateNotice ? <p class="muted">{dictateNotice}</p> : null}
             {markError ? (
               <p class="error-text" role="alert">
                 {markError}
@@ -766,24 +917,7 @@ function LessonBody({
         </section>
       ) : null}
 
-      <section class="lesson-sources" aria-labelledby="read-more-heading">
-        <h3 id="read-more-heading" class="tracks-heading">
-          Read more
-        </h3>
-        <ul class="lesson-source-list">
-          {lesson.sources.map((source) => (
-            <li key={source.url}>
-              {isSafeHttpUrl(source.url) ? (
-                <a href={source.url} target="_blank" rel="noopener noreferrer">
-                  {source.title}
-                </a>
-              ) : (
-                <span>{source.title}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
+      <ReadMore sources={lesson.sources} />
 
       {lesson.source ? <p class="learn-source muted">Source: {lesson.source}</p> : null}
 
@@ -791,5 +925,235 @@ function LessonBody({
         Done
       </button>
     </article>
+  );
+}
+
+/**
+ * "I know this": the lesson's checks one at a time, without the segments' text and with only
+ * right or wrong shown, then its explain step marked by the grader. Passing counts the lesson as
+ * done; otherwise it shows what was missed and offers the lesson.
+ */
+function KnowCheckBody({
+  lesson,
+  check,
+  online,
+  serverDictation,
+  onChange,
+  onMarked,
+  onLesson,
+  onNotNow,
+  onDone,
+}: {
+  lesson: DeckLesson;
+  check: KnowCheck;
+  online: boolean;
+  serverDictation: boolean;
+  onChange: (change: (check: KnowCheck) => KnowCheck) => void;
+  onMarked: (marked: Marked) => void;
+  /** Leaves the check for the lesson itself. */
+  onLesson: () => void;
+  onNotNow: () => void;
+  onDone: () => void;
+}) {
+  const [marking, setMarking] = useState(false);
+  const [markError, setMarkError] = useState<string | null>(null);
+  const stage = check.stage;
+  const segments = checkedSegments(lesson);
+
+  if (!online && (stage.kind === "check" || stage.kind === "explain")) {
+    return (
+      <article class="lesson-card" aria-label="I know this">
+        <p class="lesson-step-label muted">I know this · {lesson.title}</p>
+        <p class="lesson-know-offline" role="status">
+          You're offline. Skipping a lesson needs the grader to mark your explanation, which needs a
+          connection, so it can't be done offline.
+        </p>
+        <button type="button" class="pill primary wide" onClick={onLesson}>
+          Do the lesson instead
+        </button>
+        <p class="muted explain-hint">Or come back online to carry on where you were.</p>
+      </article>
+    );
+  }
+
+  if (stage.kind === "check") {
+    const segment = segments[stage.index];
+    const segmentCheck = segment === undefined ? null : lesson.segments[segment]?.check;
+    if (segment === undefined || !segmentCheck) return null;
+    const chosen = check.answers[segment];
+    return (
+      <article class="lesson-card" aria-label="I know this">
+        <p class="lesson-step-label muted">I know this · {lesson.title}</p>
+        <SegmentCheck
+          key={segment}
+          check={segmentCheck}
+          chosen={chosen}
+          heading={`Check ${stage.index + 1} of ${segments.length}`}
+          explain={false}
+          onChoose={(choice) => onChange((current) => answerKnowCheck(lesson, current, choice))}
+        />
+        {chosen !== undefined ? (
+          <button
+            type="button"
+            class="pill primary wide"
+            onClick={() => onChange((current) => advanceKnowCheck(lesson, current))}
+          >
+            Continue
+          </button>
+        ) : null}
+        <span class="learn-links">
+          <button type="button" class="learn-link" onClick={onLesson}>
+            Do the lesson instead
+          </button>
+        </span>
+      </article>
+    );
+  }
+
+  if (stage.kind === "explain") {
+    const mark = () => {
+      const text = check.explainText;
+      if (!text.trim()) return;
+      setMarking(true);
+      setMarkError(null);
+      gradingApi
+        .mark(lesson.key, newId(), "lesson", text, false)
+        .then(
+          (reply) => onMarked(reply.marked),
+          (e: unknown) => setMarkError(errorMessage(e)),
+        )
+        .finally(() => setMarking(false));
+    };
+    return (
+      <article class="lesson-card" aria-label="I know this">
+        <p class="lesson-step-label muted">I know this · Explain in your own words</p>
+        <Markdown text={lesson.explain} class="learn-prompt" />
+        <form
+          class="learn-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            mark();
+          }}
+        >
+          <ExplainInput
+            text={check.explainText}
+            disabled={marking}
+            serverDictation={serverDictation}
+            onText={(text) => onChange((current) => ({ ...current, explainText: text }))}
+            onHeard={(heard) =>
+              onChange((current) => ({
+                ...current,
+                explainText: withDictated(current.explainText, heard),
+              }))
+            }
+          />
+          {markError ? (
+            <p class="error-text" role="alert">
+              {markError}
+            </p>
+          ) : null}
+          <button
+            type="submit"
+            class="pill primary wide"
+            disabled={marking || !check.explainText.trim()}
+          >
+            {marking ? "Marking…" : "Mark my explanation"}
+          </button>
+          <span class="learn-links">
+            <button type="button" class="learn-link" disabled={marking} onClick={onLesson}>
+              Do the lesson instead
+            </button>
+          </span>
+        </form>
+      </article>
+    );
+  }
+
+  if (stage.kind === "passed") {
+    return (
+      <article class="lesson-card" aria-label="Lesson skipped">
+        <div class="lesson-head">
+          <h2 class="lesson-title">You know this</h2>
+          <p class="lesson-meta muted">{lesson.title}</p>
+        </div>
+        <p class="lesson-know-result">
+          You got every check right and explained it well, so the lesson's skipped and counts as
+          done. Questions that wait for it start tomorrow.
+        </p>
+        {check.marked ? <KnowCheckMark marked={check.marked} /> : null}
+        <section class="lesson-your-answer" aria-label="Your explanation">
+          <h3 class="tracks-heading">Your explanation</h3>
+          <p class="learn-text">{check.explainText}</p>
+        </section>
+        <section class="learn-answer" aria-label="Explain answer">
+          <h3 class="tracks-heading">Explain answer</h3>
+          <Markdown text={lesson.explain_answer} />
+        </section>
+        <ReadMore sources={lesson.sources} />
+        <button type="button" class="pill primary wide" onClick={onDone}>
+          Done
+        </button>
+      </article>
+    );
+  }
+
+  const missed = missedSegments(lesson, check);
+  return (
+    <article class="lesson-card" aria-label="Not skipped">
+      <div class="lesson-head">
+        <h2 class="lesson-title">Worth doing the lesson</h2>
+        <p class="lesson-meta muted">{lesson.title}</p>
+      </div>
+      <p class="lesson-know-result">
+        {missed.length > 0
+          ? "Not every check was right, so the lesson isn't skipped."
+          : "Every check was right, but the explanation didn't cover enough to skip the lesson."}
+      </p>
+      {missed.length > 0 ? (
+        <section class="lesson-know-missed" aria-labelledby="know-missed-heading">
+          <h3 id="know-missed-heading" class="tracks-heading">
+            {missed.length === 1 ? "A check you missed" : "Checks you missed"}
+          </h3>
+          <ol class="lesson-recap-list">
+            {missed.map((segment) => {
+              const segmentCheck = lesson.segments[segment]?.check;
+              if (!segmentCheck) return null;
+              const picked = check.answers[segment];
+              return (
+                <li key={segment} class="lesson-recap-guess">
+                  <Markdown text={segmentCheck.prompt} />
+                  <p class="lesson-recap-picked muted">
+                    Your answer: {picked === undefined ? "" : segmentCheck.choices[picked]}
+                  </p>
+                  <p class="lesson-recap-answer">
+                    Right answer: {segmentCheck.choices[segmentCheck.answer]}
+                  </p>
+                  <Markdown text={segmentCheck.explanation} class="muted" />
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ) : null}
+      {check.marked ? <KnowCheckMark marked={check.marked} /> : null}
+      <div class="lesson-flow-actions">
+        <button type="button" class="pill primary" onClick={onLesson}>
+          Start the lesson
+        </button>
+        <button type="button" class="pill" onClick={onNotNow}>
+          Not now
+        </button>
+      </div>
+    </article>
+  );
+}
+
+/** The grader's mark of an "I know this" explanation, briefly: its score and feedback. */
+function KnowCheckMark({ marked }: { marked: Marked }) {
+  return (
+    <section class="lesson-know-mark" aria-label="Your explanation, marked">
+      <h3 class="tracks-heading">Your explanation: {Math.round(marked.score * 100)}%</h3>
+      <Markdown text={marked.feedback} />
+    </section>
   );
 }
