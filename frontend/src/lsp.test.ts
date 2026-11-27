@@ -1,5 +1,8 @@
-import type { Transport } from "@codemirror/lsp-client";
-import { describe, expect, it, vi } from "vitest";
+import { CompletionContext } from "@codemirror/autocomplete";
+import { LSPPlugin, type Transport } from "@codemirror/lsp-client";
+import { EditorState, type Extension } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   adjustCapabilities,
   LanguageClient,
@@ -7,6 +10,7 @@ import {
   messageToShow,
   typedEnoughToComplete,
 } from "./lsp";
+import { serverCompletionSource } from "./lspCompletion";
 
 describe("adjustCapabilities", () => {
   it("stops the client offering pull diagnostics, and adds what Workshop does to what it offers", () => {
@@ -197,5 +201,114 @@ describe("LanguageClient", () => {
     client.connect(silentServer().transport);
     client.unavailable = "the language server, `nothing`, isn't installed";
     await expect(client.request("textDocument/hover", {})).rejects.toThrow("isn't installed");
+  });
+});
+
+interface ViewPluginSpec {
+  readonly plugin: { create(view: EditorView, arg: unknown): unknown };
+  readonly arg: unknown;
+}
+
+/** Instantiates every ViewPlugin inside a CodeMirror extension against a minimal EditorView. */
+function mountExtensionPlugins(extension: Extension, state: EditorState): EditorView {
+  const specs: ViewPluginSpec[] = [];
+  const seen = new Set<unknown>();
+  const walk = (ext: unknown): void => {
+    if (!ext || typeof ext !== "object" || seen.has(ext)) return;
+    seen.add(ext);
+    if (Array.isArray(ext)) {
+      for (const item of ext) walk(item);
+      return;
+    }
+    if ("extension" in ext) walk((ext as { extension: unknown }).extension);
+    if ("value" in ext) {
+      const val = (ext as { value: unknown }).value;
+      if (
+        val &&
+        typeof val === "object" &&
+        "plugin" in val &&
+        typeof (val as ViewPluginSpec).plugin?.create === "function"
+      ) {
+        specs.push(val as ViewPluginSpec);
+      }
+    }
+  };
+  walk(extension);
+
+  const mounted = new Map<unknown, unknown>();
+  const view = {
+    state,
+    plugin: (p: unknown) => mounted.get(p) ?? null,
+    dispatch: () => {},
+  } as unknown as EditorView;
+  for (const spec of specs) {
+    mounted.set(spec.plugin, spec.plugin.create(view, spec.arg));
+  }
+  return view;
+}
+
+describe("LSP documentation sanitization", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("escapes raw HTML and strips unsafe links in completion and hover/signature docToHTML", async () => {
+    const payload =
+      "Docs <img src=x onerror=alert(1)> <script>alert(1)</script> and [click](javascript:alert(1)) and [safe](https://example.com)";
+    let receive: (message: string) => void = () => {};
+    const transport: Transport = {
+      send: (message) => {
+        const { id, method } = JSON.parse(message) as { id?: number; method: string };
+        if (id === undefined) return;
+        const reply =
+          method === "initialize"
+            ? { result: { capabilities: { completionProvider: { triggerCharacters: ["."] } } } }
+            : {
+                result: {
+                  items: [
+                    {
+                      label: "foo",
+                      documentation: { kind: "markdown", value: payload },
+                    },
+                  ],
+                },
+              };
+        queueMicrotask(() => receive(JSON.stringify({ jsonrpc: "2.0", id, ...reply })));
+      },
+      subscribe: (handler) => {
+        receive = handler;
+      },
+      unsubscribe: () => {},
+    };
+
+    const client = new LanguageClient({ rootUri: "file:///code" });
+    client.connect(transport);
+    await client.initializing;
+
+    const state = EditorState.create({ doc: "fo" });
+    const view = mountExtensionPlugins(client.plugin("file:///code/a.py", "python"), state);
+    const plugin = LSPPlugin.get(view);
+    if (plugin === null) throw new Error("expected LSPPlugin to be mounted");
+
+    // Direct docToHTML (used by hoverTooltips and signatureHelp as well as completions).
+    const rendered = plugin.docToHTML({ kind: "markdown", value: payload });
+    expect(rendered).not.toContain("<img");
+    expect(rendered).not.toContain("<script");
+    expect(rendered).not.toContain("javascript:");
+    expect(rendered).toContain("&lt;img");
+    expect(rendered).toContain('href="https://example.com"');
+
+    // Completion tooltip DOM constructed by serverCompletionSource.
+    const fakeEl = { className: "", innerHTML: "" };
+    vi.stubGlobal("document", { createElement: () => fakeEl });
+    const context = new CompletionContext(state, 2, true, view);
+    const result = await serverCompletionSource(context);
+    const option = result?.options[0];
+    if (!option || typeof option.info !== "function") {
+      throw new Error("expected completion option with info renderer");
+    }
+    const infoNode = option.info(option) as unknown as typeof fakeEl;
+    expect(infoNode.innerHTML).not.toContain("<img");
+    expect(infoNode.innerHTML).not.toContain("<script");
+    expect(infoNode.innerHTML).not.toContain("javascript:");
+    expect(infoNode.innerHTML).toContain('href="https://example.com"');
   });
 });

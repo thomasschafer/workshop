@@ -21,7 +21,7 @@ export function useCodeKeyboard(editor: RefObject<CodeEditor | null>, reveal?: (
   }, []);
   const show = (shown: boolean) => {
     setWanted(shown);
-    reveal?.();
+    if (shown) reveal?.();
     editor.current?.setKeyboard(shown);
   };
   return { wanted, show, statusHost, placeStatus };

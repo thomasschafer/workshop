@@ -55,3 +55,25 @@ describe("undo", () => {
     expect(h.host.state.doc.toString()).toBe("x = 1\nimport sys\ny = 2\n");
   });
 });
+
+describe("clipboard registers in prompts and search", () => {
+  it("inserts the clipboard register with C-r + in a search prompt", async () => {
+    const h = harness("#[h|]#ello world\n");
+    h.host.clipboard = "world";
+    await h.keys("/<C-r>+<ret>");
+    expect(h.state()).toBe("hello #[world|]#\n");
+  });
+
+  it("repeats search with n after yanking a search pattern into the clipboard register", async () => {
+    const h = harness("#[foo|]# bar foo baz\n");
+    await h.keys('"+*n');
+    expect(h.state()).toBe("foo bar #[foo|]# baz\n");
+  });
+
+  it("handles clipboard register history and word-bounding without crashing", async () => {
+    const h = harness("#[foo|]# bar foobar foo\n");
+    await h.keys('"+<A-*>');
+    await h.keys('"+/<up><ret>');
+    expect(h.state()).toBe("foo bar #[foo|]#bar foo\n");
+  });
+});

@@ -668,10 +668,17 @@ impl Drop for ApproveRollback {
             return;
         }
         for path in &self.written {
-            let _ = std::fs::remove_file(path);
+            if let Err(err) = std::fs::remove_file(path) {
+                tracing::warn!("removing {} after approval failed: {err}", path.display());
+            }
         }
-        if let Some((path, bytes)) = &self.removed_draft {
-            let _ = workshop_common::files::write_atomic(path, bytes);
+        if let Some((path, bytes)) = &self.removed_draft
+            && let Err(err) = workshop_common::files::write_atomic(path, bytes)
+        {
+            tracing::warn!(
+                "restoring {} after approval failed: {err:#}",
+                path.display()
+            );
         }
     }
 }
@@ -750,7 +757,12 @@ async fn approve_queued(config: &Config, paths: &Paths, queued: &Queued) -> Resu
             // Unstage any paths that `git add` staged before `git commit` failed.
             let mut reset = vec!["reset", "--quiet", "HEAD", "--"];
             reset.extend(paths.iter().map(String::as_str));
-            let _ = crate::workspace::git(&dir, &reset).await;
+            if let Err(reset_err) = crate::workspace::git(&dir, &reset).await {
+                tracing::warn!(
+                    "unstaging {} after approval commit failed: {reset_err:#}",
+                    paths.join(", ")
+                );
+            }
             Err(err)
         }
     }

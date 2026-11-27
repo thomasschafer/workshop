@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { connection } from "../api";
 import {
   AUTOMATIC_SERVER_TIMEOUT_MS,
   type LanguageServerBackend,
@@ -343,6 +344,127 @@ describe("LanguageServerConnection sticky local/server switching", () => {
 
     expect(workers).toHaveLength(0);
     expect(backends).toEqual(["server"]);
+    conn.close();
+  });
+
+  it("opens only one WebSocket when visibilitychange and online fire while checking local bundle", async () => {
+    const bundle = bundleForLanguage("haskell");
+    if (!bundle) throw new Error("expected a configured haskell bundle");
+    const bucketName = bundleCacheName(bundle);
+    const files = new Map<string, Response>();
+    for (const file of bundle.files) {
+      files.set(bundleFileUrl(bundle, file.name), new Response("ok", { status: 200 }));
+    }
+    const pending: (() => void)[] = [];
+    vi.stubGlobal("caches", {
+      open: (name: string) =>
+        new Promise((resolve) => {
+          pending.push(() =>
+            resolve({
+              match: async (req: string) =>
+                name === bucketName ? files.get(req)?.clone() : undefined,
+            }),
+          );
+        }),
+      keys: async () => [bucketName],
+    });
+
+    connection.set(false);
+    const conn = new LanguageServerConnection(
+      "file:///aoc",
+      undefined,
+      () => {},
+      () => {},
+      () => {},
+      "/api/lsp",
+      {
+        languageId: "haskell",
+        mode: "automatic",
+        onBackend: () => {},
+        createWorker: () => new FakeLspWorker() as unknown as Worker,
+      },
+    );
+
+    // Trigger concurrent foreground + online events before the initial bundle check resolves.
+    fakeDoc.visibilityState = "visible";
+    fakeDoc.dispatch("visibilitychange");
+    connection.set(true);
+
+    await flushMicrotasks();
+    expect(pending.length).toBeGreaterThanOrEqual(2);
+    while (pending.length > 0) {
+      const resolve = pending.shift();
+      resolve?.();
+      await flushMicrotasks();
+    }
+
+    const openSockets = FakeWebSocket.instances.filter((ws) => !ws.closed);
+    expect(openSockets).toHaveLength(1);
+    conn.close();
+  });
+
+  it("ignores close events from a superseded WebSocket without disconnecting the active client", async () => {
+    class AsyncCloseWebSocket extends FakeWebSocket {
+      override close(): void {
+        // Real browser WebSockets deliver `close` asynchronously rather than inside close().
+        this.closed = true;
+      }
+
+      deliverClose(): void {
+        this.dispatch("close");
+      }
+    }
+    vi.stubGlobal("WebSocket", AsyncCloseWebSocket);
+
+    const statuses: LanguageServerStatus[] = [];
+    const conn = new LanguageServerConnection(
+      "file:///aoc",
+      undefined,
+      (s) => statuses.push(s),
+      () => {},
+      () => {},
+      "/api/lsp",
+      {
+        languageId: "haskell",
+        mode: "server",
+        onBackend: () => {},
+      },
+    );
+
+    await flushMicrotasks();
+    const ws1 = FakeWebSocket.instances[0] as AsyncCloseWebSocket | undefined;
+    if (!ws1) throw new Error("expected first WebSocket");
+    ws1.simulateOpen();
+    const init1 = JSON.parse(ws1.sent[0] ?? "{}") as { id: number };
+    ws1.simulateMessage({
+      jsonrpc: "2.0",
+      id: init1.id,
+      result: { capabilities: { hoverProvider: true } },
+    });
+    await flushMicrotasks();
+    expect(statuses.at(-1)).toBe("ready");
+
+    // Reconnect while ws1's close event has not yet been delivered.
+    conn.reconnectServer();
+    await flushMicrotasks();
+    const ws2 = FakeWebSocket.instances[1] as AsyncCloseWebSocket | undefined;
+    if (!ws2) throw new Error("expected second WebSocket");
+    ws2.simulateOpen();
+    const init2 = JSON.parse(ws2.sent[0] ?? "{}") as { id: number };
+    ws2.simulateMessage({
+      jsonrpc: "2.0",
+      id: init2.id,
+      result: { capabilities: { hoverProvider: true } },
+    });
+    await flushMicrotasks();
+    expect(conn.client.connected).toBe(true);
+    expect(statuses.at(-1)).toBe("ready");
+
+    // Delayed close from ws1 must not disconnect ws2 or change status.
+    ws1.deliverClose();
+    await flushMicrotasks();
+    expect(conn.client.connected).toBe(true);
+    expect(statuses.at(-1)).toBe("ready");
     conn.close();
   });
 });

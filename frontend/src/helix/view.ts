@@ -352,13 +352,7 @@ class HelixView implements PluginValue, Host {
     // On a touch screen CodeMirror leaves putting the cursor where the code is tapped to the
     // browser, which can't now that the code isn't where the keyboard types. On the tap's last
     // event, as the ones before it move the focus on.
-    this.view.contentDOM.addEventListener("click", (event) => {
-      const pos = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
-      if (pos !== null) {
-        this.view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: "select.pointer" });
-      }
-      field.focus();
-    });
+    this.view.contentDOM.addEventListener("click", this.onContentClick);
     // Chrome on Android brings up the phone's keyboard for the field when the page comes back
     // into view, despite its inputmode, so the field lets go of the focus as the page loses it.
     // Workshop's own keyboard needs no focus; one plugged in types again once the code's tapped.
@@ -366,6 +360,14 @@ class HelixView implements PluginValue, Host {
     document.addEventListener("visibilitychange", this.releaseKeyboardFocus);
     return field;
   }
+
+  private readonly onContentClick = (event: MouseEvent): void => {
+    const pos = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (pos !== null) {
+      this.view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: "select.pointer" });
+    }
+    this.keyboard?.focus();
+  };
 
   private readonly releaseKeyboardFocus = (): void => {
     if (this.keyboard?.focused) this.keyboard.el.blur();
@@ -653,6 +655,7 @@ class HelixView implements PluginValue, Host {
     this.glide.destroy();
     this.view.dom.removeEventListener("keydown", this.onKey, true);
     this.view.dom.removeEventListener("beforeinput", this.onBeforeInput, true);
+    this.view.contentDOM.removeEventListener("click", this.onContentClick);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
     this.keyboard?.el.remove();
     window.removeEventListener("blur", this.releaseKeyboardFocus);
@@ -768,6 +771,7 @@ class HelixView implements PluginValue, Host {
           }
         });
       case "format":
+        if (!editor.ensureWritable()) return;
         try {
           editor.setStatus(
             (await this.config.actions.format()) ? "Formatted" : "Nothing to format",
@@ -928,6 +932,7 @@ class HelixView implements PluginValue, Host {
    * every keyboard can type into, with its name now there to change.
    */
   private async rename(lsp: Lsp): Promise<void> {
+    if (!this.editor.ensureWritable()) return;
     if (!this.can(lsp, "renameProvider", "rename")) return;
     const cursor = helixCursor(this.view.state);
     const word = this.view.state.wordAt(cursor);
@@ -958,6 +963,7 @@ class HelixView implements PluginValue, Host {
    * edit changed nothing here, which it says in the status line.
    */
   private applyEdit(lsp: Lsp, edit: WorkspaceEdit, userEvent: string): string | null {
+    if (!this.editor.ensureWritable()) return null;
     const { edits, elsewhere: others } = editsFor(edit, lsp.uri);
     const other = others === 0 ? "" : `, but not in ${others} other file${others === 1 ? "" : "s"}`;
     if (edits.length === 0) {

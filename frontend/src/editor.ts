@@ -413,10 +413,14 @@ export class CodeEditor {
         EditorView.contentAttributes.of({ inputmode: enabled ? "text" : "none" }),
       ),
     });
+    const field = helixKeyboard(this.view);
     if (enabled) {
-      const field = helixKeyboard(this.view);
       if (field) field.focus();
       else this.view.focus();
+    } else {
+      // Changing inputmode on an already-focused field leaves iOS's keyboard open until it blurs.
+      field?.el.blur();
+      this.view.contentDOM.blur();
     }
   }
 
@@ -972,6 +976,8 @@ export class LanguageServerConnection {
   private refused: LanguageServerUnavailable | null = null;
   private givenUp = false;
   private closed = false;
+  /** Incremented for each connection attempt so superseded async checks are ignored. */
+  private attempt = 0;
   private backend: LanguageServerBackend = "server";
   private helpers: WorkerHelperFile[] = [];
   private readonly stopOnlineListener: () => void;
@@ -1040,8 +1046,9 @@ export class LanguageServerConnection {
   }
 
   private async start(): Promise<void> {
+    const attempt = ++this.attempt;
     const canUseLocal = await this.hasLocalBundle();
-    if (this.closed) return;
+    if (this.closed || this.attempt !== attempt) return;
     if (this.local?.mode === "local" && canUseLocal) {
       this.openLocal();
       return;
@@ -1069,8 +1076,18 @@ export class LanguageServerConnection {
     }
   };
 
+  private closeSocket(): void {
+    const previous = this.socket;
+    this.socket = null;
+    previous?.close();
+  }
+
   private openServer(allowLocalFailover: boolean): void {
+    clearTimeout(this.retryTimer);
+    clearTimeout(this.failoverTimer);
+    this.closeSocket();
     this.closeWorker();
+    if (this.client.connected) this.client.disconnect();
     this.setBackend("server");
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${scheme}://${location.host}${this.path}`);
@@ -1079,19 +1096,18 @@ export class LanguageServerConnection {
     let failedOver = false;
     this.onStatus(this.retryDelay === MIN_RECONNECT_MS ? "connecting" : "reconnecting");
 
-    clearTimeout(this.failoverTimer);
     if (allowLocalFailover) {
       this.failoverTimer = setTimeout(() => {
         if (this.closed || ready || this.socket !== socket) return;
         failedOver = true;
-        socket.close();
-        this.socket = null;
+        this.closeSocket();
         if (this.client.connected) this.client.disconnect();
         this.openLocal();
       }, AUTOMATIC_SERVER_TIMEOUT_MS);
     }
 
     socket.addEventListener("open", () => {
+      if (this.closed || this.socket !== socket || failedOver) return;
       // Until the server has initialised, the diagnostics on screen may be stale.
       this.client
         .connect(
@@ -1100,7 +1116,7 @@ export class LanguageServerConnection {
           }),
         )
         .initializing.then(() => {
-          if (this.socket !== socket || failedOver) return;
+          if (this.closed || this.socket !== socket || failedOver) return;
           clearTimeout(this.failoverTimer);
           ready = true;
           // Only now, as the relay accepts the connection before it starts the server.
@@ -1113,12 +1129,13 @@ export class LanguageServerConnection {
     });
     // A failed connection attempt also fires `close`, so retrying is handled there alone.
     socket.addEventListener("close", () => {
+      if (this.socket !== socket) return;
       clearTimeout(this.failoverTimer);
+      this.socket = null;
       if (failedOver) return;
       if (this.client.connected && this.backend === "server") {
         this.client.disconnect();
       }
-      if (this.socket === socket) this.socket = null;
       if (this.closed) return;
       if (this.refused !== null) {
         if (allowLocalFailover) {
@@ -1163,10 +1180,10 @@ export class LanguageServerConnection {
   }
 
   private openLocal(): void {
+    this.attempt++;
     clearTimeout(this.retryTimer);
     clearTimeout(this.failoverTimer);
-    this.socket?.close();
-    this.socket = null;
+    this.closeSocket();
     this.closeWorker();
     if (this.client.connected) this.client.disconnect();
 
@@ -1244,6 +1261,7 @@ export class LanguageServerConnection {
   /** Manual switch from sticky on-device LSP back to the server HLS (e.g. from Problems sheet). */
   reconnectServer(): void {
     if (this.closed) return;
+    const attempt = ++this.attempt;
     clearTimeout(this.retryTimer);
     clearTimeout(this.failoverTimer);
     this.givenUp = false;
@@ -1252,10 +1270,11 @@ export class LanguageServerConnection {
     this.retryDelay = MIN_RECONNECT_MS;
     this.client.unavailable = null;
     this.onUnavailable(null);
+    this.closeSocket();
     this.closeWorker();
     if (this.client.connected) this.client.disconnect();
     void this.hasLocalBundle().then((canUseLocal) => {
-      if (this.closed) return;
+      if (this.closed || this.attempt !== attempt) return;
       this.openServer(canUseLocal && this.local?.mode === "automatic");
     });
   }
@@ -1274,12 +1293,14 @@ export class LanguageServerConnection {
 
   close(): void {
     this.closed = true;
+    this.attempt++;
     clearTimeout(this.retryTimer);
     clearTimeout(this.failoverTimer);
     this.stopOnlineListener();
     document.removeEventListener("visibilitychange", this.onVisibility);
-    this.socket?.close();
+    this.closeSocket();
     this.closeWorker();
+    if (this.client.connected) this.client.disconnect();
   }
 }
 

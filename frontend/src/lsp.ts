@@ -1,9 +1,11 @@
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
-import { LSPClient, type Transport } from "@codemirror/lsp-client";
+import { LSPClient, LSPPlugin, type Transport } from "@codemirror/lsp-client";
 import type { Extension } from "@codemirror/state";
+import { ViewPlugin } from "@codemirror/view";
 import { errorMessage } from "./errors";
 import { EXTRA_CAPABILITIES, isRecord } from "./lspActions";
 import { serverCompletionSource } from "./lspCompletion";
+import { renderMarkdown } from "./markdown";
 
 interface Message {
   method?: string;
@@ -130,6 +132,32 @@ export class LanguageServerError extends Error {
 }
 
 /**
+ * Renders an LSP documentation string or `MarkupContent` as HTML safe to insert into tooltips.
+ * Markdown goes through Workshop's renderer so raw HTML is escaped and unsafe links are dropped.
+ */
+export function lspDocToHtml(
+  value: string | { readonly kind: "markdown" | "plaintext"; readonly value: string },
+  defaultKind: "markdown" | "plaintext" = "plaintext",
+): string {
+  const kind = typeof value === "string" ? defaultKind : value.kind;
+  const text = typeof value === "string" ? value : value.value;
+  if (kind === "plaintext") {
+    return text.replace(/[\n<&>"]/g, (ch) =>
+      ch === "\n"
+        ? "<br>"
+        : ch === "<"
+          ? "&lt;"
+          : ch === ">"
+            ? "&gt;"
+            : ch === '"'
+              ? "&quot;"
+              : "&amp;",
+    );
+  }
+  return renderMarkdown(text);
+}
+
+/**
  * The language client, with nothing it does left to fail unhandled, and requests that only ever
  * fail with a `LanguageServerError`.
  *
@@ -143,6 +171,20 @@ export class LanguageClient extends LSPClient {
   private sending: Transport | null = null;
   /** Why the language server can't be used, once it's been given up on. */
   unavailable: string | null = null;
+
+  override plugin(fileURI: string, languageID?: string): Extension {
+    return [
+      super.plugin(fileURI, languageID),
+      ViewPlugin.define((view) => {
+        const plugin = LSPPlugin.get(view);
+        if (plugin === null) {
+          throw new Error("LSPPlugin missing after LanguageClient.plugin");
+        }
+        plugin.docToHTML = lspDocToHtml;
+        return {};
+      }),
+    ];
+  }
 
   override connect(transport: Transport): this {
     this.sending = transport;

@@ -678,12 +678,16 @@ function searcher(cx: Context, direction: Direction): void {
   });
 }
 
-function searchNextOrPrev(cx: Context, movement: Movement, direction: Direction): void {
+async function searchNextOrPrev(
+  cx: Context,
+  movement: Movement,
+  direction: Direction,
+): Promise<void> {
   const n = count(cx);
   const editor = cx.editor;
   const register = cx.register ?? editor.registers.lastSearchRegister;
-  const query = editor.registers.first(register);
-  if (query === null) return;
+  const query = await editor.registers.first(register);
+  if (!query) return;
   const regex = buildRegex(query, editor.options.smartCase);
   if (regex instanceof Error) {
     editor.setError(`Invalid regex: ${query}`);
@@ -724,11 +728,11 @@ function searchSelectionImpl(cx: Context, detectWordBoundaries: boolean): void {
   }
 }
 
-function makeSearchWordBounded(cx: Context): void {
+async function makeSearchWordBounded(cx: Context): Promise<void> {
   const editor = cx.editor;
   const register = cx.register ?? editor.registers.lastSearchRegister;
-  const regex = editor.registers.first(register);
-  if (regex === null) return;
+  const regex = await editor.registers.first(register);
+  if (!regex) return;
   const startAnchored = regex.startsWith("\\b");
   const endAnchored = regex.endsWith("\\b");
   if (startAnchored && endAnchored) return;
@@ -839,6 +843,7 @@ function selectionIsLinewise(selection: Selection, doc: Doc): boolean {
 
 function deleteSelectionImpl(cx: Context, op: "delete" | "change", yank: boolean): void {
   const editor = cx.editor;
+  if (!editor.ensureWritable()) return;
   const doc = editor.doc;
   const selection = editor.selection;
   const onlyWholeLines = selectionIsLinewise(selection, doc);
@@ -907,13 +912,13 @@ function deleteBySelectionInsertMode(
 // ---- Insert mode ----
 
 function insertMode(cx: Context): void {
-  cx.editor.enterInsertMode();
+  if (!cx.editor.enterInsertMode()) return;
   cx.editor.setSelection(cx.editor.selection.transform((r) => new Range(r.to, r.from)));
 }
 
 function appendMode(cx: Context): void {
   const editor = cx.editor;
-  editor.enterInsertMode();
+  if (!editor.enterInsertMode()) return;
   editor.restoreCursor = true;
   const doc = editor.doc;
   // Make room at the end of the document if the last range touches it.
@@ -930,7 +935,7 @@ function appendMode(cx: Context): void {
 function insertWithIndent(cx: Context, fallback: "start" | "end"): void {
   const wasSelect = isSelect(cx);
   const editor = cx.editor;
-  editor.enterInsertMode();
+  if (!editor.enterInsertMode()) return;
   const doc = editor.doc;
   const selection = editor.selection;
   const ranges: Range[] = [];
@@ -1000,7 +1005,7 @@ function continuedLineCommentToken(
 export function open(cx: Context, where: "below" | "above", commentContinuation: boolean): void {
   const n = count(cx);
   const editor = cx.editor;
-  editor.enterInsertMode();
+  if (!editor.enterInsertMode()) return;
   const doc = editor.doc;
   const selection = editor.selection;
   const ranges: Range[] = [];
@@ -1403,6 +1408,7 @@ function insertSelectionInteractive(cx: Context, oldMode: Mode): void {
 // ---- Undo ----
 
 function undoImpl(cx: Context, redo: boolean): void {
+  if (!cx.editor.ensureWritable()) return;
   const n = count(cx);
   for (let i = 0; i < n; i++) {
     if (!(redo ? cx.editor.host.redo() : cx.editor.host.undo())) {

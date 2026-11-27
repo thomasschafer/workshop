@@ -140,12 +140,21 @@ export class TestHost implements Host {
   readonly documentName = "[scratch]";
   private readonly disposeSyntax: (() => void) | null;
 
-  constructor(text: string, selection: Selection, treeSitterMode?: string, tabSize?: number) {
+  constructor(
+    text: string,
+    selection: Selection,
+    treeSitterMode?: string,
+    tabSize?: number,
+    readOnly = false,
+  ) {
     const extensions: Extension[] = [
       helixHistory(),
       helixSelectionExtension(selection),
       EditorState.allowMultipleSelections.of(true),
     ];
+    if (readOnly) {
+      extensions.push(EditorState.readOnly.of(true));
+    }
     if (tabSize !== undefined) {
       extensions.push(EditorState.tabSize.of(tabSize));
     }
@@ -263,12 +272,13 @@ export function harness(
     language?: LanguageConfig;
     /** Language mode ID (e.g. `"haskell"`), enabling its config and tree-sitter tree if loaded. */
     lang?: string;
+    readOnly?: boolean;
   } = {},
 ): Harness {
   const { text, selection } = print(annotated);
   const language =
     options.language ?? (options.lang ? (LANGUAGES[options.lang] ?? PLAIN_TEXT) : PLAIN_TEXT);
-  const host = new TestHost(text, selection, options.lang, language.tabWidth);
+  const host = new TestHost(text, selection, options.lang, language.tabWidth, options.readOnly);
   host.language = language;
   const editor = new HelixEditor(host, options.options ?? {}, language.indent);
   host.onChanges = (changes) => editor.mapThroughChanges(changes);

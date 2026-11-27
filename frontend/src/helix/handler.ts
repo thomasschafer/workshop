@@ -42,7 +42,7 @@ export class KeyHandler {
   /** Where the cursor is in the prompt's input, if one is open. */
   promptCursor = 0;
   private promptHistoryIndex: number | null = null;
-  private promptNextChar: ((ch: string) => void) | null = null;
+  private promptNextChar: ((ch: string) => void | Promise<void>) | null = null;
   /** What was typed before completing, which completions cycle through matches of. */
   private promptCompletionStem: string | null = null;
 
@@ -178,6 +178,7 @@ export class KeyHandler {
       return;
     }
     if (key === "." && this.keymaps.pending().length === 0) {
+      if (!editor.ensureWritable()) return;
       const times = editor.count ?? 1;
       editor.count = null;
       for (let i = 0; i < times; i++) {
@@ -416,7 +417,7 @@ export class KeyHandler {
       this.promptNextChar = null;
       editor.autoinfo = null;
       const ch = keyCharWithModifiers(key);
-      if (ch !== null) handler(ch);
+      if (ch !== null) await handler(ch);
       update();
       return;
     }
@@ -507,7 +508,7 @@ export class KeyHandler {
       }
       case "ret": {
         const history = prompt.historyRegister
-          ? editor.registers.readSync(prompt.historyRegister)
+          ? await editor.registers.read(prompt.historyRegister)
           : null;
         const last = history?.[0] ?? "";
         let value = input;
@@ -529,7 +530,7 @@ export class KeyHandler {
       case "C-n":
       case "down": {
         if (!prompt.historyRegister) return;
-        const history = editor.registers.readSync(prompt.historyRegister) ?? [];
+        const history = (await editor.registers.read(prompt.historyRegister)) ?? [];
         if (history.length === 0) return;
         const back = key === "C-p" || key === "up";
         const current = this.promptHistoryIndex;
@@ -549,8 +550,8 @@ export class KeyHandler {
         return;
       case "C-r":
         editor.autoinfo = { title: "Insert register", body: editor.registers.preview() };
-        this.promptNextChar = (ch) => {
-          const value = editor.registers.first(ch) ?? "";
+        this.promptNextChar = async (ch) => {
+          const value = (await editor.registers.first(ch)) ?? "";
           const p = editor.prompt;
           if (p === null) return;
           const at = Math.min(this.promptCursor, p.input.length);

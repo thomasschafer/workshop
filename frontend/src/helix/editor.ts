@@ -190,7 +190,7 @@ export class Registers {
   }
 
   /** Reads any register but the clipboard, which can only be read asynchronously. */
-  readSync(name: string): string[] | null {
+  private readSync(name: string): string[] | null {
     switch (name) {
       case "_":
         return [];
@@ -208,8 +208,8 @@ export class Registers {
     }
   }
 
-  first(name: string): string | null {
-    return this.readSync(name)?.[0] ?? null;
+  async first(name: string): Promise<string | null> {
+    return (await this.read(name))?.[0] ?? null;
   }
 
   private async readClipboard(name: string): Promise<string[]> {
@@ -535,11 +535,23 @@ export class HelixEditor {
     });
   }
 
+  get readOnly(): boolean {
+    return this.host.state.readOnly;
+  }
+
+  /** Returns whether the buffer can be changed, setting a read-only error otherwise. */
+  ensureWritable(): boolean {
+    if (!this.readOnly) return true;
+    this.setError("This file is read-only");
+    return false;
+  }
+
   /**
    * Changes the text, then sets the selection to `selection` or, without one, maps it through
    * the changes as Helix does.
    */
   apply(changes: readonly Change[], selection?: Selection): void {
+    if (!this.ensureWritable()) return;
     const doc = this.doc;
     const normalized = normalizeChanges(changes, doc.length);
     const oldSelection = this.selection;
@@ -613,6 +625,7 @@ export class HelixEditor {
 
   setMode(mode: Mode): void {
     if (this.mode === mode) return;
+    if (mode === "insert" && !this.ensureWritable()) return;
     const wasInsert = this.mode === "insert";
     const selection = this.selection;
     this.mode = mode;
@@ -645,9 +658,11 @@ export class HelixEditor {
     };
   }
 
-  enterInsertMode(): void {
+  enterInsertMode(): boolean {
+    if (!this.ensureWritable()) return false;
     this.insertChanges = [];
     this.setMode("insert");
+    return true;
   }
 
   exitSelectMode(): void {
