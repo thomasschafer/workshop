@@ -82,19 +82,31 @@ pub async fn check(
                 Verdict::Skipped(reason) => println!("- {}: skipped, as {reason}", item.path),
                 Verdict::Failed(message) => println!("✗ {}: {message}", item.path),
             }
+            for warning in &item.warnings {
+                println!("! {}: {warning}", item.path);
+            }
         }
         for problem in &report.problems {
             println!("✗ {problem}");
         }
         let failures = report.failures().len();
         let skipped = report.skipped().len();
+        let warnings = report.warnings().len();
+        let warn_suffix = if warnings == 0 {
+            String::new()
+        } else {
+            format!(
+                ", with {warnings} {}",
+                if warnings == 1 { "warning" } else { "warnings" }
+            )
+        };
         if failures == 0 && skipped > 0 {
             println!(
-                "{} items passed, and {skipped} couldn't be checked here.\n",
+                "{} items passed, and {skipped} couldn't be checked here{warn_suffix}.\n",
                 report.items.len() - skipped
             );
         } else if failures == 0 {
-            println!("All {} items passed.\n", report.items.len());
+            println!("All {} items passed{warn_suffix}.\n", report.items.len());
         } else {
             passed = false;
             println!(

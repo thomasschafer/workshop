@@ -756,7 +756,7 @@ fn shorts(packs: &[Pack]) -> Vec<Short<'_>> {
 }
 
 /// The items there's practice of: the short ones, coding problems, work in a codebase and design
-/// prompts.
+/// prompts. Lessons aren't scheduled or counted towards mastery.
 fn practised(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| {
         item.kind.is_short()
@@ -880,7 +880,7 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
             question: reading.question.clone(),
             explanation: reading.explanation.clone(),
         },
-        Content::Coding(_) | Content::Design { .. } | Content::Review(_) => {
+        Content::Coding(_) | Content::Design { .. } | Content::Review(_) | Content::Lesson(_) => {
             unreachable!("only short items are in the deck")
         }
     };
@@ -1912,5 +1912,54 @@ mod tests {
                 || matches!(next.destination, Destination::Practice { .. }),
             "unexpected next step: {next:?}"
         );
+    }
+
+    #[test]
+    fn leaves_lessons_out_of_deck_mastery_and_rounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let deck = learning.deck(clock(NOW)).unwrap();
+        assert!(
+            deck.items
+                .iter()
+                .all(|item| item.key != "sample/binary-heaps")
+        );
+
+        let planned = learning.planned(clock(NOW)).unwrap();
+        assert!(planned.item("sample/binary-heaps").is_some());
+        for plan in planned.plans.values() {
+            assert!(!plan.due.iter().any(|k| k == "sample/binary-heaps"));
+            assert!(!plan.new.iter().any(|k| k == "sample/binary-heaps"));
+        }
+        assert!(crate::rounds::items(&planned).all(|(key, _)| key != "sample/binary-heaps"));
+
+        // A pack with only a lesson has no practised items, so no tracks and zero mastery items.
+        let lesson_only = dir.path().join("lesson-only");
+        std::fs::create_dir_all(lesson_only.join("items")).unwrap();
+        std::fs::write(
+            lesson_only.join("pack.toml"),
+            "id = \"only\"\nname = \"Only\"\n[[skills]]\nid = \"s\"\nname = \"S\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            lesson_only.join("items/intro.md"),
+            "+++\nkind = \"lesson\"\nskills = [\"s\"]\n[[sources]]\ntitle = \"Ref\"\nurl = \"https://example.com\"\n+++\nIntro.\n## One\nText.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+        )
+        .unwrap();
+        let only_learning = Learning::open(
+            &LearningConfig {
+                packs: vec![lesson_only],
+                sample_pack: false,
+                daily_reviews: 10,
+                daily_new: 10,
+                weekly_minutes: 60,
+                desired_retention: 0.9,
+            },
+            &dir.path().join("only-data"),
+        )
+        .unwrap();
+        assert!(only_learning.deck(clock(NOW)).unwrap().items.is_empty());
+        assert!(only_learning.skill_mastery(NOW).unwrap().is_empty());
+        assert!(only_learning.planned(clock(NOW)).unwrap().names.is_empty());
     }
 }

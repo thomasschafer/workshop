@@ -20,6 +20,9 @@ my-pack/
       item.md
       project/
       ...
+    lessons/binary-heaps/  a short lesson, with any diagrams in its directory
+      item.md
+      heap-array.svg
     reading/lifetimes.md
   drafts/
     three-dice.md        a question waiting to be made into an item
@@ -86,7 +89,7 @@ prompt = "prompts/examiner-steady.md"
 
 A track's `icon` is shown beside its name. It's one of the icons the built-in tracks use, `star`, `code`, `dice`, `network`, `timer`, `sigma` and `history`, or one of `layers`, `approximately`, `book`, `chart`, `flask`, `languages`, `lightbulb`, `puzzle`, `radical` and `shapes`. Without one, a pack's track has `layers`.
 
-A pack's track can hold cards, mental maths, probability questions, code to read and coding problems. Its short items are practised one after another, as in the built-in tracks, and its coding problems are listed once there's nothing left to practise for now, each worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
+A pack's track can hold cards, mental maths, probability questions, code to read, coding problems and lessons. Its short items are practised one after another, as in the built-in tracks, and its coding problems are listed once there's nothing left to practise for now, each worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
 
 `continue = false` keeps a track to itself, for something to practise only when you choose to, such as a language you're picking up on the side. Its items are only offered when you open the track: Continue never picks them, even when you've got a while, and they aren't made into timed rounds. It has daily limits of its own, the same size as `daily_reviews` and `daily_new` under `[learning]`, so practising it doesn't use up the rest's, and the rest doesn't use up its. Its time doesn't count towards the week's target either. Its items are scheduled, and their mistakes and progress towards goals recorded, as any others are. Without it, a track is in Continue, as the built-in ones are.
 
@@ -120,14 +123,16 @@ Every item can have:
 
 | Field | |
 | --- | --- |
-| `kind` | `card`, `mental-maths`, `probability`, `coding`, `codebase`, `reading` or `design`. Required. |
+| `kind` | `card`, `mental-maths`, `probability`, `coding`, `codebase`, `reading`, `design` or `lesson`. Required. |
 | `skills` | The skills it practises, from `pack.toml`. Required. |
 | `id` | Lowercase letters and digits, in words joined by hyphens. Defaults to the file's name, or the directory's for an `item.md`. Your history is kept by id, so changing it starts the item afresh. |
 | `title` | What it's called in lists, if not the start of its prompt. |
-| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults to the pack's `track`, if it has one, and otherwise by kind: work in a codebase is in the Coding track. |
+| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults to the pack's `track`, if it has one, and otherwise by kind: work in a codebase is in the Coding track, and lessons are in the Review track. |
 | `source` | Where it came from, in your own words, such as for questions imported from elsewhere. Workshop shows it but doesn't interpret it. |
-| `minutes` | Roughly how long it takes. Defaults by kind. A timed round of it lasts this long, and at least 10 minutes. |
+| `minutes` | Roughly how long it takes. Defaults by kind (4 for a lesson). A timed round of it lasts this long, and at least 10 minutes. |
 | `difficulty` | How hard it is, from 1, a warm-up, through 3, typical of its kind, to 5, among the hardest of its kind. Optional, and most useful for coding problems: the author writes new problems at the difficulty each skill has reached (see [docs/author.md](author.md)), and takes a problem without one as 3. |
+| `lesson` | Optional, for short items (`card`, `mental-maths`, `probability` and `reading`): the id of the lesson in this pack that teaches it. The app teaches a lesson before offering its items as new. |
+| `segment` | Optional, with `lesson`: the segment of that lesson that covers the item, counting from 1. |
 
 Items that can't be read are left out, and Workshop says which and why. `workshop pack check` finds them too.
 
@@ -639,6 +644,83 @@ Design a service that shortens links.
 
 A design prompt is worked through as a design session of five stages: clarifying the requirements, estimating the scale, outlining the design as a list of components and what each talks to, going into one of them, and its trade-offs and failure modes. Notes are typed or dictated at each. While clarifying the requirements and estimating the scale, the learner asks the coach questions, typed or dictated, and it answers each from the brief: only what was asked, with the figures asked for, leaving the estimating to the learner. Asked something the brief doesn't cover, it answers as the brief's writer would, and keeps the answer with the brief for the rest of the session. From the outline on, the coach asks follow-up questions about what's been written, which can be answered aloud too, holding the design to the brief. Everything's saved as it's written, so a session can be stopped at any stage and carried on later, and earlier stages gone back to. At the end, the grader marks the whole session against the rubric, and on what the learner asked: which of the brief's key requirements they found out, which they missed, and what they assumed without asking. That counts as an attempt rated from its score, and each requirement missed goes in the mistake log as a `missed-requirement`. A session takes a while, so Continue only offers one when the learner has said they've got a while.
 
+### Lessons
+
+A short piece that teaches a topic in two to five minutes on a phone, before its questions. The app teaches a lesson before offering short items linked to it with `lesson`, and can send a learner back to the lesson, or to a specific `segment`, when an item isn't known yet. Lessons aren't scheduled for review themselves: their cards and other short items are.
+
+A lesson can be a single Markdown file, or a directory with an `item.md` when it includes images. Lessons have no fixed default track of their own: a lesson goes in the pack's `track` if it has one, or its own `track`, and otherwise in the Review track, as cards do. `minutes` defaults to 4.
+
+````markdown
++++
+kind = "lesson"
+title = "How a hash map grows"
+skills = ["data-structures"]
+requires = ["hashing-basics"]     # optional: lessons in this pack to do first, by id
+minutes = 4                        # optional; defaults to 4
+
+[[sources]]
+title = "Python's dict implementation notes"
+url = "https://github.com/python/cpython/blob/main/Objects/dictnotes.txt"
+
+[[guesses]]
+prompt = "A hash map with 8 slots holds 6 items. You add a seventh. What happens?"
+choices = ["It's stored in the next free slot", "The table grows and every item is placed again", "It replaces the oldest item"]
+answer = 2
+
+[[checks]]
+segment = 2
+prompt = "Growing from 8 slots to 16, which items move?"
+choices = ["Only the newest", "All of them, as each one's slot depends on the table's size", "None"]
+answer = 2
+explanation = "An item's slot is its hash modulo the size, so a new size means new slots."
++++
+What happens inside a hash map as it fills up, and why adding stays fast.
+
+## Slots and load
+
+Text for the first segment...
+
+![The table before and after growing](grow.svg)
+
+## Growing
+
+Text for the second segment...
+
+## Explain
+
+Why is adding an item O(1) on average, even though growing copies every item?
+
+## Explain answer
+
+What a good explanation covers, for the grader and for the learner to compare with...
+````
+
+The prompt, before the first `## ` heading, says what the lesson covers in a sentence or two. Every `## ` section after it is a teaching segment, in order, except `## Explain` (required: the question asked at the end in the learner's own words) and `## Explain answer` (required: what a good explanation covers). A lesson needs at least one segment and at most six, and no two sections can share a heading.
+
+Fields in the front matter:
+
+- `[[sources]]` (required, at least one): where the lesson's facts come from, shown as further reading. Each entry has a `title` and a `url` (`http` or `https`).
+- `[[guesses]]` (optional, zero to three): unscored questions asked before the first segment to focus attention on what follows, with the answers shown at the end. Each has `prompt`, `choices` (two to five) and `answer` (counting from 1).
+- `[[checks]]` (optional, at most one per segment): predict-then-reveal checks shown after a segment. Each names its `segment` (counting from 1), with `prompt`, `choices` (two to five), `answer` (counting from 1) and `explanation`, all required.
+- `requires` (optional): ids of other lessons in the same pack to do first.
+
+A segment can include `.svg` or `.png` images from the lesson's own directory with Markdown's `![alt](file)`. Paths must stay inside the lesson's directory (no `..` or leading `/`), and alt text is required. An SVG is shown inline and must work in both light and dark themes, so it must be valid XML without a DTD, use the SVG namespace (`xmlns="http://www.w3.org/2000/svg"`) for every element, have a `viewBox`, and mustn't contain `<script>`, `<foreignObject>`, `<a>`, animation elements (`<animate>`, `<set>`, `<animateMotion>`, `<animateTransform>`), event handler attributes (`on...`), any `href` (in any namespace, such as `xlink:href`) that isn't a local fragment (`#...`), or `@import` or non-fragment `url(...)` in `<style>` elements or `style` attributes. Use `currentColor` for text and strokes rather than fixed colours.
+
+Short items (`card`, `mental-maths`, `probability` and `reading`) can link to the lesson that teaches them with `lesson` (its id in the same pack) and optionally `segment` (counting from 1):
+
+```toml
+kind = "card"
+skills = ["data-structures"]
+lesson = "binary-heaps"
+segment = 2
+```
+
+`workshop pack check` checks every lesson and link:
+
+- Segment length: warns when a segment is over 180 words, and refuses one over 300.
+- Images and SVG safety: refuses missing files, paths outside the lesson's directory, missing alt text, unsafe SVG elements or attributes, and SVGs without a `viewBox`. Warns, without failing, when an SVG uses a fixed colour for text or strokes instead of `currentColor`.
+- Cross-item links: checks that every id in `requires` exists and is a lesson, that `requires` doesn't form a cycle, and that every short item's `lesson` and `segment` refer to an existing lesson and segment in the pack.
+
 ## Timed rounds
 
 Coding problems, probability questions and design prompts can also be done as timed rounds, in the Timed rounds track: the problem against a visible clock, as in a live session, with the examiner. The learner keeps their working in one place, typed or dictated, and talks with the examiner as they go; it answers questions without giving the method away and, once they have an answer, asks follow-ups that extend or change the problem. In a round of a design prompt, it answers questions about the requirements from the prompt's brief, as a design session's coach does, with a brief made up as the round starts for a prompt without one, and the grader marks what was asked too. A round lasts the item's `minutes`, and at least 10. A coding problem in parts is done whole in a round, every part at once. When time runs out, or the learner ends it, the grader marks the working and what was said against a rubric: a design prompt's own, and for a coding problem or a probability question, one Workshop has for rounds of each, judged against the item's approach or solution. Answering the examiner's follow-ups well is a point in each. That counts as an attempt, and what the grader finds goes in the mistake log.
@@ -698,4 +780,4 @@ loop {
 workshop pack check ~/my-pack
 ```
 
-reads every item, runs each one's check, and lists what's wrong, exiting with an error if anything is. Items that can't be checked here, such as C++ without a compiler, are listed as skipped, with what to install, and don't count as wrong. Without a path, it checks the packs in your config, and the sample pack if there are none or `sample_pack` is set. CI runs it on the sample pack.
+reads every item, runs each one's check, and lists what's wrong, exiting with an error if anything is. Warnings (such as a lesson segment over 180 words or a fixed colour in an SVG) are listed without failing the check. Items that can't be checked here, such as C++ without a compiler, are listed as skipped, with what to install, and don't count as wrong. Without a path, it checks the packs in your config, and the sample pack if there are none or `sample_pack` is set. CI runs it on the sample pack.

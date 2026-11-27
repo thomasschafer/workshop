@@ -12,6 +12,7 @@ workshop-tracks.workspace = true
 anyhow.workspace = true
 futures-util.workspace = true
 rhai.workspace = true
+roxmltree.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true

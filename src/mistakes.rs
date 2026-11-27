@@ -73,6 +73,7 @@ pub fn from_attempt(item: &Item, attempt: &Attempt) -> Option<NewMistake> {
             "Missed what's wrong with the change".to_owned(),
             Some("missed-defect"),
         ),
+        Content::Lesson(_) => return None,
     };
     Some(NewMistake {
         id: format!("attempt-{}", attempt.id),

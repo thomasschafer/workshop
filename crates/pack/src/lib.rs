@@ -11,6 +11,7 @@ pub mod diff;
 pub mod drafts;
 pub mod error_types;
 mod item;
+pub mod lesson;
 mod manifest;
 pub mod mental;
 pub mod number;
@@ -18,6 +19,7 @@ pub mod output;
 pub mod project;
 pub mod script;
 pub mod simulate;
+pub mod svg;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -35,6 +37,7 @@ pub use item::{
     Content, DIFFICULTY, FollowUps, Item, Kind, MentalMaths, Param, Probability, Simulation,
     replace_section,
 };
+pub use lesson::{Check, Guess, ImageData, Lesson, LessonImage, LessonRef, LessonSource, Segment};
 pub use manifest::{Goal, Manifest, PackTrack, Prompts, Skill};
 pub use project::{Defect, Project, ProjectFile, Review, Task};
 
@@ -189,7 +192,7 @@ impl Pack {
                     None,
                 ),
             };
-            let read = |file: &str| read_item_file(&files, dir, file);
+            let read = |file: &str| read_item_bytes(&files, dir, file);
             let list = |sub: &str| list_item_dir(&files, dir, sub);
             let parsed = std::str::from_utf8(bytes)
                 .map_err(|_| "it isn't UTF-8".to_owned())
@@ -252,17 +255,33 @@ impl Pack {
     /// Runs every item's mechanical check, along with what was found reading the pack. Items
     /// with programs to build and run are checked by `programs`.
     pub async fn check(&self, programs: &dyn Programs) -> Report {
+        self.check_where(|_| true, programs).await
+    }
+
+    /// Runs mechanical checks only on items whose paths are in `paths`, keeping the rest of the
+    /// pack in place so cross-item references (such as `requires` and `lesson`) still resolve.
+    pub async fn check_only(&self, paths: &BTreeSet<&str>, programs: &dyn Programs) -> Report {
+        self.check_where(|item| paths.contains(item.path.as_str()), programs)
+            .await
+    }
+
+    async fn check_where(&self, keep: impl Fn(&Item) -> bool, programs: &dyn Programs) -> Report {
         // At once, as building programs takes a while and each build is one process.
-        let checks = self.items.iter().map(|item| async move {
-            let verdict = match check_item(item) {
-                Some(verdict) => verdict,
-                None => programs.check(item).await,
-            };
-            Checked {
-                path: item.path.clone(),
-                verdict,
-            }
-        });
+        let checks = self
+            .items
+            .iter()
+            .filter(|item| keep(item))
+            .map(|item| async move {
+                let (verdict, warnings) = match check_item(item, self) {
+                    Some(outcome) => outcome,
+                    None => (programs.check(item).await, Vec::new()),
+                };
+                Checked {
+                    path: item.path.clone(),
+                    verdict,
+                    warnings,
+                }
+            });
         let items = futures_util::future::join_all(checks).await;
         Report {
             problems: self.problems.clone(),
@@ -280,12 +299,12 @@ pub trait Programs: Sync {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Verdict> + Send + 'a>>;
 }
 
-/// The text of a file an item refers to, relative to the item's own directory.
-fn read_item_file(
+/// The raw bytes of a file an item refers to, relative to the item's own directory.
+fn read_item_bytes(
     files: &BTreeMap<String, Vec<u8>>,
     dir: Option<&str>,
     file: &str,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     let Some(dir) = dir else {
         return Err(format!(
             "it refers to {file:?}, so it needs a directory of its own, with an item.md"
@@ -299,10 +318,10 @@ fn read_item_file(
             "{file:?} should be a path inside the item's directory"
         ));
     }
-    let bytes = files.get(&format!("{dir}/{file}")).ok_or_else(|| {
-        format!("{file:?} isn't in the item's directory, where its front matter says it is")
-    })?;
-    String::from_utf8(bytes.clone()).map_err(|_| format!("{file:?} isn't UTF-8"))
+    files
+        .get(&format!("{dir}/{file}"))
+        .cloned()
+        .ok_or_else(|| format!("{file:?} isn't in the item's directory"))
 }
 
 /// The files directly in a directory of an item's own, by name. A directory inside it is a
@@ -386,6 +405,9 @@ pub struct Report {
 pub struct Checked {
     pub path: String,
     pub verdict: Verdict,
+    /// Advice from the check that doesn't stop the item passing, such as a long lesson segment or
+    /// a fixed SVG colour.
+    pub warnings: Vec<String>,
 }
 
 /// How an item's check went.
@@ -440,14 +462,119 @@ impl Report {
             })
             .collect()
     }
+
+    /// Warnings from checked items, which don't stop the pack from passing.
+    pub fn warnings(&self) -> Vec<Problem> {
+        self.items
+            .iter()
+            .flat_map(|item| {
+                item.warnings.iter().map(move |message| Problem {
+                    path: item.path.clone(),
+                    message: message.clone(),
+                })
+            })
+            .collect()
+    }
 }
 
 /// An item's check, unless it's one of programs to build and run.
-fn check_item(item: &Item) -> Option<Verdict> {
+fn check_item(item: &Item, pack: &Pack) -> Option<(Verdict, Vec<String>)> {
+    if let Err(err) = check_lesson_link(item, pack) {
+        return Some((Verdict::Failed(err), Vec::new()));
+    }
     match &item.content {
         Content::Coding(_) | Content::Reading(_) => None,
-        _ => Some(check_without_programs(item).into()),
+        Content::Lesson(lesson) => Some(check_lesson(item, lesson, pack)),
+        _ => Some((check_without_programs(item).into(), Vec::new())),
     }
+}
+
+fn check_lesson_link(item: &Item, pack: &Pack) -> Result<(), String> {
+    let Some(link) = &item.lesson else {
+        return Ok(());
+    };
+    let Some(target) = pack.item(&link.id) else {
+        return Err(format!("lesson {:?} isn't in the pack", link.id));
+    };
+    let Content::Lesson(lesson) = &target.content else {
+        return Err(format!(
+            "lesson {:?} is a {} item, not a lesson",
+            link.id,
+            item::kind_name(target.kind)
+        ));
+    };
+    if let Some(seg) = link.segment
+        && seg >= lesson.segments.len()
+    {
+        let count = lesson.segments.len();
+        return Err(format!(
+            "lesson {:?} has only {} {}, not segment {}",
+            link.id,
+            count,
+            if count == 1 { "segment" } else { "segments" },
+            seg + 1
+        ));
+    }
+    Ok(())
+}
+
+fn check_lesson(item: &Item, lesson: &Lesson, pack: &Pack) -> (Verdict, Vec<String>) {
+    let (mut errors, warnings) = lesson.check_self();
+    for req in &lesson.requires {
+        match pack.item(req) {
+            None => errors.push(format!("requires {req:?}, which isn't in the pack")),
+            Some(other) if other.kind != Kind::Lesson => errors.push(format!(
+                "requires {req:?}, which is a {} item, not a lesson",
+                item::kind_name(other.kind)
+            )),
+            Some(_) => {}
+        }
+    }
+    if let Some(cycle) = requires_cycle(pack, &item.id) {
+        errors.push(format!("requires forms a cycle: {}", cycle.join(" → ")));
+    }
+    let verdict = if errors.is_empty() {
+        Verdict::Passed(lesson.summary())
+    } else {
+        Verdict::Failed(errors.join("; "))
+    };
+    (verdict, warnings)
+}
+
+/// If `start` lies on a `requires` cycle among lessons in `pack`, returns the lesson ids along
+/// the cycle, starting and ending with `start`.
+fn requires_cycle<'a>(pack: &'a Pack, start: &'a str) -> Option<Vec<&'a str>> {
+    fn dfs<'a>(
+        pack: &'a Pack,
+        start: &'a str,
+        current: &'a str,
+        visited: &mut BTreeSet<&'a str>,
+        path: &mut Vec<&'a str>,
+    ) -> bool {
+        let Some(item) = pack.item(current) else {
+            return false;
+        };
+        let Content::Lesson(lesson) = &item.content else {
+            return false;
+        };
+        for req in &lesson.requires {
+            if req == start {
+                path.push(start);
+                return true;
+            }
+            if visited.insert(req.as_str()) {
+                path.push(req.as_str());
+                if dfs(pack, start, req.as_str(), visited, path) {
+                    return true;
+                }
+                path.pop();
+            }
+        }
+        false
+    }
+    let mut visited = BTreeSet::new();
+    let mut path = vec![start];
+    dfs(pack, start, start, &mut visited, &mut path).then_some(path)
 }
 
 fn check_without_programs(item: &Item) -> Result<String, String> {
@@ -483,6 +610,7 @@ fn check_without_programs(item: &Item) -> Result<String, String> {
         Content::Coding(_) | Content::Reading(_) => {
             unreachable!("checked by running their programs")
         }
+        Content::Lesson(_) => unreachable!("checked by check_lesson"),
         // Reading it applied the change, and found each defect where it says.
         Content::Review(review) => Ok(format!(
             "the change to {} applies, and its {} {} where {} say{}",
@@ -550,6 +678,17 @@ mod tests {
         let report = pack.check(&NotRun).await;
         let failures: Vec<String> = report.failures().iter().map(ToString::to_string).collect();
         assert!(failures.is_empty(), "{failures:#?}");
+        let warnings: Vec<String> = report.warnings().iter().map(ToString::to_string).collect();
+        assert!(warnings.is_empty(), "{warnings:#?}");
+        let lessons = pack.items.iter().filter(|i| i.kind == Kind::Lesson).count();
+        assert!(lessons >= 1, "expected at least one sample lesson");
+        assert_eq!(
+            pack.item("binary-heap-costs").unwrap().lesson,
+            Some(LessonRef {
+                id: "binary-heaps".to_owned(),
+                segment: Some(1),
+            })
+        );
         for kind in [Kind::Card, Kind::MentalMaths, Kind::Probability] {
             // Mental maths templates come in two tracks: exact sums, and estimates.
             for track in [
@@ -855,5 +994,198 @@ mod tests {
         assert_eq!(pack.items[0].path, "items/cards/one.md");
         assert!(pack.item("one").is_some());
         assert!(Pack::load(&dir.path().join("nowhere")).is_err());
+    }
+
+    fn lesson_file(requires: &[&str], segments: &[(&str, &str)]) -> String {
+        let req = if requires.is_empty() {
+            String::new()
+        } else {
+            let quoted: Vec<String> = requires.iter().map(|r| format!("{r:?}")).collect();
+            format!("requires = [{}]\n", quoted.join(", "))
+        };
+        let body: String = segments
+            .iter()
+            .map(|(title, text)| format!("## {title}\n\n{text}\n\n"))
+            .collect();
+        format!(
+            "+++\nkind = \"lesson\"\nskills = [\"dice\"]\n{req}[[sources]]\ntitle = \"Ref\"\nurl = \"https://example.com\"\n+++\nA short summary.\n\n{body}## Explain\n\nWhy?\n\n## Explain answer\n\nBecause.\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn checks_lesson_word_counts_and_svg_colour_warnings() {
+        let words = |n: usize| vec!["word"; n].join(" ");
+        let ok_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><line x1="0" y1="0" x2="10" y2="10" stroke="currentColor"/></svg>"#;
+        let fixed_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><line x1="0" y1="0" x2="10" y2="10" stroke="#000"/><text x="5" y="20" fill="black">Hi</text></svg>"##;
+
+        let ok = Pack::from_files(files(&[
+            ("pack.toml", MANIFEST),
+            (
+                "items/ok/item.md",
+                &lesson_file(
+                    &[],
+                    &[(
+                        "Right size",
+                        &format!("{}\n\n![Diagram](a.svg)", words(180)),
+                    )],
+                ),
+            ),
+            ("items/ok/a.svg", ok_svg),
+        ]))
+        .unwrap();
+        let report = ok.check(&NotRun).await;
+        assert!(report.passed(), "{:?}", report.failures());
+        assert!(report.warnings().is_empty(), "{:?}", report.warnings());
+
+        let warned = Pack::from_files(files(&[
+            ("pack.toml", MANIFEST),
+            (
+                "items/long/item.md",
+                &lesson_file(
+                    &[],
+                    &[
+                        ("Getting long", &words(181)),
+                        (
+                            "At limit",
+                            &format!("{}\n\n![Fixed](fixed.svg)", words(300)),
+                        ),
+                    ],
+                ),
+            ),
+            ("items/long/fixed.svg", fixed_svg),
+        ]))
+        .unwrap();
+        let report = warned.check(&NotRun).await;
+        assert!(report.passed(), "{:?}", report.failures());
+        let warnings: Vec<String> = report
+            .warnings()
+            .iter()
+            .map(|w| w.message.clone())
+            .collect();
+        assert_eq!(warnings.len(), 3, "{warnings:#?}");
+        assert!(warnings[0].contains("181 words"), "{warnings:#?}");
+        assert!(warnings[1].contains("300 words"), "{warnings:#?}");
+        assert!(
+            warnings[2].contains("fixed.svg") && warnings[2].contains("currentColor"),
+            "{warnings:#?}"
+        );
+
+        let too_long = Pack::from_files(files(&[
+            ("pack.toml", MANIFEST),
+            (
+                "items/huge.md",
+                &lesson_file(&[], &[("Too long", &words(301))]),
+            ),
+        ]))
+        .unwrap();
+        let report = too_long.check(&NotRun).await;
+        assert!(!report.passed());
+        assert!(
+            report.failures()[0].message.contains("301 words")
+                && report.failures()[0]
+                    .message
+                    .contains("over the limit of 300"),
+            "{:?}",
+            report.failures()
+        );
+    }
+
+    #[tokio::test]
+    async fn checks_lesson_requires_cycles_and_item_links() {
+        let card = "+++\nkind = \"card\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA\n";
+        let linked = |lesson: &str, segment: Option<usize>| {
+            let seg = segment.map_or(String::new(), |n| format!("segment = {n}\n"));
+            format!(
+                "+++\nkind = \"card\"\nskills = [\"dice\"]\nlesson = \"{lesson}\"\n{seg}+++\nQ\n## Answer\nA\n"
+            )
+        };
+
+        // Valid DAG (diamond) and valid card links pass, including through `check_only`.
+        let good = Pack::from_files(files(&[
+            ("pack.toml", MANIFEST),
+            ("items/d.md", &lesson_file(&[], &[("One", "Base.")])),
+            ("items/b.md", &lesson_file(&["d"], &[("One", "B.")])),
+            ("items/c.md", &lesson_file(&["d"], &[("One", "C.")])),
+            (
+                "items/a.md",
+                &lesson_file(&["b", "c"], &[("One", "A1."), ("Two", "A2.")]),
+            ),
+            ("items/card-ok.md", &linked("a", Some(2))),
+        ]))
+        .unwrap();
+        let report = good.check(&NotRun).await;
+        assert!(report.passed(), "{:?}", report.failures());
+        let only = BTreeSet::from(["items/card-ok.md"]);
+        let partial = good.check_only(&only, &NotRun).await;
+        assert!(partial.passed(), "{:?}", partial.failures());
+        assert_eq!(partial.items.len(), 1);
+
+        // Missing target, non-lesson target, cycles, and bad item links all fail.
+        let reading_bad = "+++\nkind = \"reading\"\nskills = [\"dice\"]\nlesson = \"missing\"\nprints = \"1\"\n+++\nWhat?\n\n```python\nprint(1)\n```\n\n## Explanation\nOne.\n";
+        let broken = Pack::from_files(files(&[
+            ("pack.toml", MANIFEST),
+            ("items/plain-card.md", card),
+            (
+                "items/self-loop.md",
+                &lesson_file(&["self-loop"], &[("One", "Self.")]),
+            ),
+            ("items/cyc-a.md", &lesson_file(&["cyc-b"], &[("One", "A.")])),
+            ("items/cyc-b.md", &lesson_file(&["cyc-c"], &[("One", "B.")])),
+            ("items/cyc-c.md", &lesson_file(&["cyc-a"], &[("One", "C.")])),
+            (
+                "items/req-missing.md",
+                &lesson_file(&["nope"], &[("One", "M.")]),
+            ),
+            (
+                "items/req-card.md",
+                &lesson_file(&["plain-card"], &[("One", "N.")]),
+            ),
+            ("items/card-missing.md", &linked("nope", None)),
+            ("items/card-not-lesson.md", &linked("plain-card", None)),
+            ("items/card-bad-seg.md", &linked("cyc-a", Some(2))),
+            ("items/reading-bad.md", reading_bad),
+        ]))
+        .unwrap();
+        let report = broken.check(&NotRun).await;
+        let by_path: BTreeMap<&str, &str> = report
+            .items
+            .iter()
+            .filter_map(|c| match &c.verdict {
+                Verdict::Failed(msg) => Some((c.path.as_str(), msg.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            by_path["items/self-loop.md"].contains("cycle: self-loop → self-loop"),
+            "{by_path:#?}"
+        );
+        assert!(
+            by_path["items/cyc-a.md"].contains("cycle: cyc-a → cyc-b → cyc-c → cyc-a"),
+            "{by_path:#?}"
+        );
+        assert!(
+            by_path["items/req-missing.md"].contains("isn't in the pack"),
+            "{by_path:#?}"
+        );
+        assert!(
+            by_path["items/req-card.md"].contains("card item, not a lesson"),
+            "{by_path:#?}"
+        );
+        assert!(
+            by_path["items/card-missing.md"].contains("isn't in the pack"),
+            "{by_path:#?}"
+        );
+        assert!(
+            by_path["items/card-not-lesson.md"].contains("card item, not a lesson"),
+            "{by_path:#?}"
+        );
+        assert!(
+            by_path["items/card-bad-seg.md"].contains("only 1 segment, not segment 2"),
+            "{by_path:#?}"
+        );
+        assert!(
+            by_path["items/reading-bad.md"].contains("isn't in the pack"),
+            "{by_path:#?}"
+        );
     }
 }

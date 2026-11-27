@@ -1,6 +1,8 @@
 +++
 kind = "card"
 skills = ["data-structures"]
+lesson = "binary-heaps"
+segment = 2
 +++
 In a binary heap of n items, what do adding an item, removing the smallest, and looking at the
 smallest each cost?

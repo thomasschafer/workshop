@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 205" fill="none" stroke="currentColor" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 7 4 L 0 7 Z" fill="currentColor" stroke="none"/>
+    </marker>
+  </defs>
+
+  <!-- Tree edges -->
+  <g stroke-width="1.5" stroke-opacity="0.55">
+    <line x1="180" y1="30" x2="115" y2="72"/>
+    <line x1="180" y1="30" x2="245" y2="72"/>
+    <line x1="245" y1="72" x2="212" y2="114"/>
+  </g>
+  <g stroke-width="2">
+    <line x1="115" y1="72" x2="82" y2="114"/>
+    <line x1="115" y1="72" x2="148" y2="114"/>
+  </g>
+
+  <!-- Tree nodes -->
+  <g stroke-width="1.6">
+    <circle cx="180" cy="30" r="15" fill="currentColor" fill-opacity="0.06"/>
+    <circle cx="115" cy="72" r="15" fill="currentColor" fill-opacity="0.18"/>
+    <circle cx="245" cy="72" r="15" fill="currentColor" fill-opacity="0.06"/>
+    <circle cx="82" cy="114" r="15" fill="currentColor" fill-opacity="0.12"/>
+    <circle cx="148" cy="114" r="15" fill="currentColor" fill-opacity="0.12"/>
+    <circle cx="212" cy="114" r="15" fill="currentColor" fill-opacity="0.06"/>
+  </g>
+
+  <!-- Node values -->
+  <g fill="currentColor" stroke="none" text-anchor="middle" font-size="13" font-weight="600">
+    <text x="180" y="35">2</text>
+    <text x="115" y="77">5</text>
+    <text x="245" y="77">4</text>
+    <text x="82" y="119">9</text>
+    <text x="148" y="119">7</text>
+    <text x="212" y="119">8</text>
+  </g>
+
+  <!-- Node indices -->
+  <g fill="currentColor" fill-opacity="0.6" stroke="none" font-size="10">
+    <text x="199" y="24">0</text>
+    <text x="90" y="66">1</text>
+    <text x="264" y="66">2</text>
+    <text x="58" y="109">3</text>
+    <text x="167" y="109">4</text>
+    <text x="231" y="109">5</text>
+  </g>
+
+  <!-- Backing array -->
+  <g stroke-width="1.5">
+    <rect x="42" y="146" width="46" height="30" fill="none"/>
+    <rect x="88" y="146" width="46" height="30" fill="currentColor" fill-opacity="0.18"/>
+    <rect x="134" y="146" width="46" height="30" fill="none"/>
+    <rect x="180" y="146" width="46" height="30" fill="currentColor" fill-opacity="0.12"/>
+    <rect x="226" y="146" width="46" height="30" fill="currentColor" fill-opacity="0.12"/>
+    <rect x="272" y="146" width="46" height="30" fill="none"/>
+  </g>
+
+  <!-- Array values -->
+  <g fill="currentColor" stroke="none" text-anchor="middle" font-size="13" font-weight="600">
+    <text x="65" y="166">2</text>
+    <text x="111" y="166">5</text>
+    <text x="157" y="166">4</text>
+    <text x="203" y="166">9</text>
+    <text x="249" y="166">7</text>
+    <text x="295" y="166">8</text>
+  </g>
+
+  <!-- Array indices -->
+  <g fill="currentColor" fill-opacity="0.65" stroke="none" text-anchor="middle" font-size="11">
+    <text x="65" y="191">0</text>
+    <text x="111" y="191">1</text>
+    <text x="157" y="191">2</text>
+    <text x="203" y="191">3</text>
+    <text x="249" y="191">4</text>
+    <text x="295" y="191">5</text>
+  </g>
+
+  <!-- Index formula arrows: 1 -> 3 and 1 -> 4 -->
+  <path d="M 111 146 C 111 134, 203 134, 203 144" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M 111 146 C 111 128, 249 128, 249 144" stroke-width="1.2" stroke-dasharray="3 2" marker-end="url(#arrow)"/>
+</svg>

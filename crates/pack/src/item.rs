@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use workshop_tracks::TrackId;
 
 use crate::code::{Coding, CodingFields, MAX_PARTS, PartText, Reading, ReadingFields};
+use crate::lesson::{Lesson, LessonFields, LessonRef};
 use crate::manifest::{Manifest, is_slug};
 use crate::number::{self, Tolerance};
 use crate::project::{self, CodebaseFields, Review};
@@ -32,13 +33,15 @@ pub enum Kind {
     /// A small project of someone else's code, with a task in it: fixing a bug, reviewing a
     /// change, or refactoring then extending it.
     Codebase,
+    /// A short piece that teaches a topic in a few minutes before its questions.
+    Lesson,
 }
 
 impl Kind {
     /// The track an item of this kind is in, unless it says otherwise.
     pub fn default_track(self) -> TrackId {
         match self {
-            Self::Card => TrackId::Review,
+            Self::Card | Self::Lesson => TrackId::Review,
             Self::MentalMaths => TrackId::MentalMaths,
             Self::Probability => TrackId::Probability,
             Self::Coding | Self::Reading | Self::Codebase => TrackId::Coding,
@@ -59,6 +62,7 @@ impl Kind {
             Self::Card | Self::MentalMaths => 1,
             Self::Reading => 2,
             Self::Probability => 3,
+            Self::Lesson => 4,
             Self::Coding | Self::Codebase => 20,
             Self::Design => 30,
         }
@@ -127,6 +131,9 @@ impl Kind {
                 ("Part 5", false),
                 ("Part 5 hints", false),
             ],
+            // Lessons have arbitrary segment headings plus `Explain` and `Explain answer`, handled
+            // by `split_lesson_sections`.
+            Self::Lesson => &[("Explain", true), ("Explain answer", true)],
         }
     }
 }
@@ -146,6 +153,8 @@ pub struct Item {
     pub minutes: u32,
     /// How hard it is, from `DIFFICULTY`'s easiest to its hardest, if the pack says.
     pub difficulty: Option<u8>,
+    /// For a short item, the lesson that teaches it, and optionally which segment of it.
+    pub lesson: Option<LessonRef>,
     /// What the learner is asked, in Markdown.
     pub prompt: String,
     pub content: Content,
@@ -176,6 +185,7 @@ pub enum Content {
         /// marked. Without one, the coach makes one up as a session starts.
         brief: Option<String>,
     },
+    Lesson(Lesson),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -288,6 +298,8 @@ const COMMON_KEYS: &[&str] = &[
     "source",
     "minutes",
     "difficulty",
+    "lesson",
+    "segment",
 ];
 
 #[derive(Deserialize)]
@@ -301,6 +313,8 @@ struct Common {
     source: Option<String>,
     minutes: Option<u32>,
     difficulty: Option<u8>,
+    lesson: Option<String>,
+    segment: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -356,22 +370,33 @@ impl Item {
         manifest: &Manifest,
         read: impl Fn(&str) -> Result<String, String>,
     ) -> Result<Self, String> {
-        Self::parse_in(path, default_id, source, manifest, read, |dir| {
-            Err(format!("{dir}/ isn't in the item's directory"))
-        })
+        Self::parse_in(
+            path,
+            default_id,
+            source,
+            manifest,
+            |file| read(file).map(String::into_bytes),
+            |dir| Err(format!("{dir}/ isn't in the item's directory")),
+        )
     }
 
-    /// Reads an item from its file, as [`Item::parse`] does, with `list` giving the files
-    /// directly in a directory of the item's, by name, for an item with a directory of files,
-    /// such as a codebase's project.
+    /// Reads an item from its file, as [`Item::parse`] does, with `read_bytes` giving the raw
+    /// bytes of a file the item refers to (including binary images such as `.png`) and `list`
+    /// giving the files directly in a directory of the item's, by name, for an item with a
+    /// directory of files, such as a codebase's project.
     pub fn parse_in(
         path: &str,
         default_id: &str,
         source: &str,
         manifest: &Manifest,
-        read: impl Fn(&str) -> Result<String, String>,
+        read_bytes: impl Fn(&str) -> Result<Vec<u8>, String>,
         list: impl Fn(&str) -> Result<Vec<String>, String>,
     ) -> Result<Self, String> {
+        let read = |file: &str| {
+            read_bytes(file).and_then(|bytes| {
+                String::from_utf8(bytes).map_err(|_| format!("{file:?} isn't UTF-8"))
+            })
+        };
         let (front, body) = split_front_matter(source)?;
         let mut table: toml::Table = toml::from_str(front).map_err(|err| err.to_string())?;
         let mut common = toml::Table::new();
@@ -417,97 +442,142 @@ impl Item {
                 DIFFICULTY.end()
             ));
         }
-
-        let (prompt, mut sections) = split_sections(body, common.kind)?;
-        let mut section = |name: &str| sections.remove(name);
-        let kind_fields = toml::Value::Table(table);
-        let content = match common.kind {
-            Kind::Card => {
-                let fields: CardFields = kind_fields.try_into().map_err(|err| err.to_string())?;
-                Content::Card {
-                    answer: section("Answer").expect("required"),
-                    explanation: section("Explanation"),
-                    follow_ups: fields
-                        .follow_ups
-                        .map_or(Ok(FollowUps::DEFAULT), FollowUps::new)?,
+        let lesson = match (common.lesson, common.segment) {
+            (None, None) => None,
+            (Some(_), _) | (None, Some(_)) if !common.kind.is_short() => {
+                return Err(
+                    "only short items (cards, mental maths, probability and code to read) can name a `lesson` or `segment`"
+                        .to_owned(),
+                );
+            }
+            (None, Some(_)) => {
+                return Err(
+                    "`segment` names a segment of a lesson, so give `lesson` too".to_owned(),
+                );
+            }
+            (Some(lesson_id), segment) => {
+                if !is_slug(&lesson_id) {
+                    return Err(format!(
+                        "lesson {lesson_id:?} should be lowercase letters and digits, in words joined by hyphens"
+                    ));
                 }
+                let segment = match segment {
+                    None => None,
+                    Some(0) => {
+                        return Err(
+                            "`segment` counts from 1, so it should be at least 1".to_owned()
+                        );
+                    }
+                    Some(n) => Some(n - 1),
+                };
+                Some(LessonRef {
+                    id: lesson_id,
+                    segment,
+                })
             }
-            Kind::MentalMaths => {
-                let fields: MentalMathsFields =
-                    kind_fields.try_into().map_err(|err| err.to_string())?;
-                Content::MentalMaths(MentalMaths::new(fields, &prompt, section("Method"))?)
-            }
-            Kind::Probability => {
-                let fields: ProbabilityFields =
-                    kind_fields.try_into().map_err(|err| err.to_string())?;
-                let simulation = section("Simulation").expect("required");
-                Content::Probability(Probability::new(
-                    fields,
-                    section("Solution").expect("required"),
-                    &simulation,
-                )?)
-            }
-            Kind::Coding => {
-                let fields: CodingFields = kind_fields.try_into().map_err(|err| err.to_string())?;
-                let approach = section("Approach").expect("required");
-                let hints = section("Hints");
-                let notes = section("Notes");
-                let later = (2..=MAX_PARTS)
-                    .map(|n| PartText {
-                        prompt: section(&format!("Part {n}")),
-                        hints: section(&format!("Part {n} hints")),
-                    })
-                    .collect();
-                Content::Coding(Coding::new(
-                    fields, &prompt, approach, hints, notes, later, &read,
-                )?)
-            }
-            Kind::Codebase => {
-                let fields: CodebaseFields =
-                    kind_fields.try_into().map_err(|err| err.to_string())?;
-                let sections = project::Sections {
-                    explanation: section("Explanation"),
-                    hints: section("Hints"),
-                    notes: section("Notes"),
-                    defects: section("Defects"),
-                    later: (2..=MAX_PARTS)
+        };
+
+        let kind_fields = toml::Value::Table(table);
+        let (prompt, content) = if common.kind == Kind::Lesson {
+            let (prompt, sections) = split_lesson_sections(body)?;
+            let fields: LessonFields = kind_fields.try_into().map_err(|err| err.to_string())?;
+            let content = Content::Lesson(Lesson::new(fields, &prompt, sections, &read_bytes)?);
+            (prompt, content)
+        } else {
+            let (prompt, mut sections) = split_sections(body, common.kind)?;
+            let mut section = |name: &str| sections.remove(name);
+            let content = match common.kind {
+                Kind::Card => {
+                    let fields: CardFields =
+                        kind_fields.try_into().map_err(|err| err.to_string())?;
+                    Content::Card {
+                        answer: section("Answer").expect("required"),
+                        explanation: section("Explanation"),
+                        follow_ups: fields
+                            .follow_ups
+                            .map_or(Ok(FollowUps::DEFAULT), FollowUps::new)?,
+                    }
+                }
+                Kind::MentalMaths => {
+                    let fields: MentalMathsFields =
+                        kind_fields.try_into().map_err(|err| err.to_string())?;
+                    Content::MentalMaths(MentalMaths::new(fields, &prompt, section("Method"))?)
+                }
+                Kind::Probability => {
+                    let fields: ProbabilityFields =
+                        kind_fields.try_into().map_err(|err| err.to_string())?;
+                    let simulation = section("Simulation").expect("required");
+                    Content::Probability(Probability::new(
+                        fields,
+                        section("Solution").expect("required"),
+                        &simulation,
+                    )?)
+                }
+                Kind::Coding => {
+                    let fields: CodingFields =
+                        kind_fields.try_into().map_err(|err| err.to_string())?;
+                    let approach = section("Approach").expect("required");
+                    let hints = section("Hints");
+                    let notes = section("Notes");
+                    let later = (2..=MAX_PARTS)
                         .map(|n| PartText {
                             prompt: section(&format!("Part {n}")),
                             hints: section(&format!("Part {n} hints")),
                         })
-                        .collect(),
-                };
-                match project::parse(fields, &prompt, sections, &read, &list)? {
-                    project::Codebase::Coding(coding) => Content::Coding(coding),
-                    project::Codebase::Review(review) => Content::Review(review),
+                        .collect();
+                    Content::Coding(Coding::new(
+                        fields, &prompt, approach, hints, notes, later, &read,
+                    )?)
                 }
-            }
-            Kind::Reading => {
-                let fields: ReadingFields =
-                    kind_fields.try_into().map_err(|err| err.to_string())?;
-                Content::Reading(Reading::new(
-                    fields,
-                    &prompt,
-                    section("Explanation").expect("required"),
-                )?)
-            }
-            Kind::Design => {
-                kind_fields
-                    .try_into::<NoFields>()
-                    .map_err(|err| err.to_string())?;
-                let rubric = crate::code::list(&section("Rubric").expect("required"));
-                if rubric.is_empty() {
-                    return Err(
-                        "the rubric should be a list, with a point on each line starting with `- `"
-                            .to_owned(),
-                    );
+                Kind::Codebase => {
+                    let fields: CodebaseFields =
+                        kind_fields.try_into().map_err(|err| err.to_string())?;
+                    let sections = project::Sections {
+                        explanation: section("Explanation"),
+                        hints: section("Hints"),
+                        notes: section("Notes"),
+                        defects: section("Defects"),
+                        later: (2..=MAX_PARTS)
+                            .map(|n| PartText {
+                                prompt: section(&format!("Part {n}")),
+                                hints: section(&format!("Part {n} hints")),
+                            })
+                            .collect(),
+                    };
+                    match project::parse(fields, &prompt, sections, &read, &list)? {
+                        project::Codebase::Coding(coding) => Content::Coding(coding),
+                        project::Codebase::Review(review) => Content::Review(review),
+                    }
                 }
-                Content::Design {
-                    rubric,
-                    notes: section("Notes"),
-                    brief: section("Brief"),
+                Kind::Reading => {
+                    let fields: ReadingFields =
+                        kind_fields.try_into().map_err(|err| err.to_string())?;
+                    Content::Reading(Reading::new(
+                        fields,
+                        &prompt,
+                        section("Explanation").expect("required"),
+                    )?)
                 }
-            }
+                Kind::Design => {
+                    kind_fields
+                        .try_into::<NoFields>()
+                        .map_err(|err| err.to_string())?;
+                    let rubric = crate::code::list(&section("Rubric").expect("required"));
+                    if rubric.is_empty() {
+                        return Err(
+                            "the rubric should be a list, with a point on each line starting with `- `"
+                                .to_owned(),
+                        );
+                    }
+                    Content::Design {
+                        rubric,
+                        notes: section("Notes"),
+                        brief: section("Brief"),
+                    }
+                }
+                Kind::Lesson => unreachable!("handled above"),
+            };
+            (prompt, content)
         };
         Ok(Self {
             id,
@@ -519,6 +589,7 @@ impl Item {
             source: common.source,
             minutes: common.minutes.unwrap_or(common.kind.default_minutes()),
             difficulty: common.difficulty,
+            lesson,
             prompt,
             content,
         })
@@ -657,7 +728,56 @@ fn split_sections(body: &str, kind: Kind) -> Result<(String, BTreeMap<String, St
     Ok((prompt, sections))
 }
 
-fn kind_name(kind: Kind) -> &'static str {
+/// The prompt, and each `## ` section of a lesson in order, allowing any segment titles without
+/// duplicates.
+fn split_lesson_sections(body: &str) -> Result<(String, Vec<(String, String)>), String> {
+    let mut prompt = String::new();
+    let mut sections: Vec<(String, String)> = Vec::new();
+    let mut in_fence: Option<char> = None;
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if let Some(ch) = in_fence {
+            if (ch == '`' && trimmed.starts_with("```"))
+                || (ch == '~' && trimmed.starts_with("~~~"))
+            {
+                in_fence = None;
+            }
+        } else if trimmed.starts_with("```") {
+            in_fence = Some('`');
+        } else if trimmed.starts_with("~~~") {
+            in_fence = Some('~');
+        }
+        if in_fence.is_none()
+            && let Some(heading) = line.strip_prefix("## ")
+        {
+            let heading = heading.trim().to_owned();
+            if heading.is_empty() {
+                return Err("a section has an empty `## ` heading".to_owned());
+            }
+            if sections.iter().any(|(name, _)| name == &heading) {
+                return Err(format!("the {heading:?} section is there twice"));
+            }
+            sections.push((heading, String::new()));
+            continue;
+        }
+        let text = match sections.last_mut() {
+            Some((_, text)) => text,
+            None => &mut prompt,
+        };
+        text.push_str(line);
+        text.push('\n');
+    }
+    let prompt = prompt.trim().to_owned();
+    if prompt.is_empty() {
+        return Err("the prompt, before the first `## ` heading, is empty".to_owned());
+    }
+    for (_, text) in &mut sections {
+        *text = text.trim().to_owned();
+    }
+    Ok((prompt, sections))
+}
+
+pub(crate) fn kind_name(kind: Kind) -> &'static str {
     match kind {
         Kind::Card => "card",
         Kind::MentalMaths => "mental maths",
@@ -666,6 +786,7 @@ fn kind_name(kind: Kind) -> &'static str {
         Kind::Reading => "reading",
         Kind::Design => "design",
         Kind::Codebase => "codebase",
+        Kind::Lesson => "lesson",
     }
 }
 
@@ -1627,5 +1748,359 @@ mod tests {
     fn finds_placeholders() {
         assert_eq!(placeholders("{a} × {b_2} = {}"), ["a", "b_2"]);
         assert_eq!(placeholders("a set {1, 2}"), Vec::<String>::new());
+    }
+
+    const GOOD_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="10" height="10" stroke="currentColor"/></svg>"#;
+    const GOOD_PNG: &[u8] = b"\x89PNG\r\n\x1a\nfake-body";
+
+    fn parse_lesson_in(source: &str) -> Result<Item, String> {
+        Item::parse_in(
+            "items/lessons/heaps/item.md",
+            "heaps",
+            source,
+            &manifest(),
+            |file| {
+                match file {
+                "diagram.svg" => Ok(GOOD_SVG.as_bytes().to_vec()),
+                "photo.png" => Ok(GOOD_PNG.to_vec()),
+                "bad.png" => Ok(b"not a png".to_vec()),
+                "evil.svg" => {
+                    Ok(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><script>alert(1)</script></svg>"#.to_vec())
+                }
+                _ => Err(format!("{file:?} isn't in the item's directory")),
+            }
+            },
+            |dir| Err(format!("{dir}/ isn't in the item's directory")),
+        )
+    }
+
+    #[test]
+    fn reads_a_lesson_and_its_linked_short_items() {
+        let lesson = parse_lesson_in(
+            r#"+++
+kind = "lesson"
+title = "Binary heaps"
+skills = ["arithmetic"]
+requires = ["trees"]
+
+[[sources]]
+title = "Heap notes"
+url = "https://example.com/heaps"
+
+[[guesses]]
+prompt = "Where is the smallest?"
+choices = ["Root", "Leaf"]
+answer = 1
+
+[[checks]]
+segment = 2
+prompt = "What does sifting cost?"
+choices = ["O(1)", "O(log n)", "O(n)"]
+answer = 2
+explanation = "It walks one root-to-leaf path."
++++
+How a binary heap keeps the smallest at the root.
+
+## Layout
+
+Stored in an array.
+
+![Heap diagram](diagram.svg)
+
+## Sifting
+
+Sifting takes log n steps.
+
+![Step trace](photo.png)
+
+## Explain
+
+Why does an array work?
+
+## Explain answer
+
+Because the tree is complete with no gaps.
+"#,
+        )
+        .unwrap();
+        assert_eq!(lesson.id, "heaps");
+        assert_eq!(lesson.kind, Kind::Lesson);
+        assert_eq!(lesson.track, TrackId::Review);
+        assert_eq!(lesson.minutes, 4);
+        assert!(!lesson.kind.is_short());
+        assert!(lesson.kind.can_be_in_pack_track());
+        let Content::Lesson(parsed) = &lesson.content else {
+            panic!("not a lesson");
+        };
+        assert_eq!(parsed.requires, ["trees"]);
+        assert_eq!(parsed.sources.len(), 1);
+        assert_eq!(parsed.guesses.len(), 1);
+        assert_eq!(parsed.guesses[0].answer, 0);
+        assert_eq!(parsed.segments.len(), 2);
+        assert_eq!(parsed.segments[0].title, "Layout");
+        assert!(parsed.segments[0].check.is_none());
+        assert_eq!(parsed.segments[0].images.len(), 1);
+        assert_eq!(parsed.segments[0].images[0].file, "diagram.svg");
+        assert_eq!(parsed.segments[1].title, "Sifting");
+        assert_eq!(parsed.segments[1].check.as_ref().unwrap().answer, 1);
+        assert_eq!(parsed.segments[1].images[0].file, "photo.png");
+        assert_eq!(parsed.explain, "Why does an array work?");
+        assert_eq!(
+            parsed.explain_answer,
+            "Because the tree is complete with no gaps."
+        );
+
+        // Lessons default to the pack's track if it has one, unless they name their own.
+        let pack_track_manifest = Manifest::parse(
+            "id = \"ex\"\nname = \"Ex\"\ntrack = \"drill\"\n[[skills]]\nid = \"a\"\nname = \"A\"\n[[tracks]]\nid = \"drill\"\nname = \"Drill\"\n",
+        )
+        .unwrap();
+        let minimal = "+++\nkind = \"lesson\"\nskills = [\"a\"]\n[[sources]]\ntitle = \"Ref\"\nurl = \"https://example.com\"\n+++\nSummary.\n## Part one\nText.\n## Explain\nWhy?\n## Explain answer\nBecause.\n";
+        let in_pack_track = Item::parse("items/l.md", "l", minimal, &pack_track_manifest, |_| {
+            Err("no files".to_owned())
+        })
+        .unwrap();
+        assert_eq!(in_pack_track.track, TrackId::Pack("drill".parse().unwrap()));
+
+        // Short items can link to a lesson and segment (1-based in TOML, 0-based in Rust).
+        let card = parse(
+            "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\nlesson = \"heaps\"\nsegment = 2\n+++\nQ\n## Answer\nA\n",
+        )
+        .unwrap();
+        assert_eq!(
+            card.lesson,
+            Some(LessonRef {
+                id: "heaps".to_owned(),
+                segment: Some(1),
+            })
+        );
+        let reading = parse(&reading("lesson = \"heaps\"\nprints = \"1\"\n")).unwrap();
+        assert_eq!(
+            reading.lesson,
+            Some(LessonRef {
+                id: "heaps".to_owned(),
+                segment: None,
+            })
+        );
+    }
+
+    #[test]
+    fn says_what_is_wrong_with_a_lesson() {
+        let base_front = "kind = \"lesson\"\nskills = [\"arithmetic\"]\n[[sources]]\ntitle = \"Ref\"\nurl = \"https://example.com\"\n";
+        let base_body = "Summary.\n\n## First\n\nBody.\n\n## Explain\n\nWhy?\n\n## Explain answer\n\nBecause.\n";
+        let with = |front: &str, body: &str| format!("+++\n{front}+++\n{body}");
+
+        let seven_segments = (1..=7)
+            .map(|n| format!("## Seg {n}\n\nText.\n\n"))
+            .collect::<String>();
+        let four_guesses = (1..=4)
+            .map(|n| {
+                format!("[[guesses]]\nprompt = \"G{n}\"\nchoices = [\"A\", \"B\"]\nanswer = 1\n")
+            })
+            .collect::<String>();
+
+        let cases: &[(&str, &str)] = &[
+            (
+                "+++\nkind = \"lesson\"\nskills = [\"arithmetic\"]\n+++\nSummary.\n## One\nText.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                "[[sources]]",
+            ),
+            (
+                "+++\nkind = \"lesson\"\nskills = [\"arithmetic\"]\n[[sources]]\ntitle = \" \"\nurl = \"https://example.com\"\n+++\nSummary.\n## One\nText.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                "title is empty",
+            ),
+            (
+                "+++\nkind = \"lesson\"\nskills = [\"arithmetic\"]\n[[sources]]\ntitle = \"Ref\"\nurl = \"ftp://example.com\"\n+++\nSummary.\n## One\nText.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                "http or https",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\nText.\n## Explain answer\nBecause.\n",
+                ),
+                "## Explain",
+            ),
+            (
+                &*with(base_front, "Summary.\n## One\nText.\n## Explain\nWhy?\n"),
+                "## Explain answer",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "at least one segment",
+            ),
+            (
+                &*with(
+                    base_front,
+                    &format!(
+                        "Summary.\n{seven_segments}## Explain\nWhy?\n## Explain answer\nBecause.\n"
+                    ),
+                ),
+                "at most 6 segments",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "is empty",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\nA.\n## One\nB.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "there twice",
+            ),
+            (
+                &*with(&format!("{base_front}{four_guesses}"), base_body),
+                "at most 3 guesses",
+            ),
+            (
+                &*with(
+                    &format!(
+                        "{base_front}[[guesses]]\nprompt = \"G\"\nchoices = [\"Only\"]\nanswer = 1\n"
+                    ),
+                    base_body,
+                ),
+                "between 2 and 5 choices",
+            ),
+            (
+                &*with(
+                    &format!(
+                        "{base_front}[[guesses]]\nprompt = \"G\"\nchoices = [\"1\",\"2\",\"3\",\"4\",\"5\",\"6\"]\nanswer = 1\n"
+                    ),
+                    base_body,
+                ),
+                "between 2 and 5 choices",
+            ),
+            (
+                &*with(
+                    &format!(
+                        "{base_front}[[guesses]]\nprompt = \"G\"\nchoices = [\"A\", \"B\"]\nanswer = 3\n"
+                    ),
+                    base_body,
+                ),
+                "from 1 to 2, not 3",
+            ),
+            (
+                &*with(
+                    &format!(
+                        "{base_front}[[checks]]\nsegment = 2\nprompt = \"C\"\nchoices = [\"A\", \"B\"]\nanswer = 1\nexplanation = \"Because.\"\n"
+                    ),
+                    base_body,
+                ),
+                "only 1 segment",
+            ),
+            (
+                &*with(
+                    &format!(
+                        "{base_front}[[checks]]\nsegment = 1\nprompt = \"C1\"\nchoices = [\"A\", \"B\"]\nanswer = 1\nexplanation = \"E1\"\n[[checks]]\nsegment = 1\nprompt = \"C2\"\nchoices = [\"A\", \"B\"]\nanswer = 1\nexplanation = \"E2\"\n"
+                    ),
+                    base_body,
+                ),
+                "more than one check",
+            ),
+            (
+                &*with(
+                    &format!(
+                        "{base_front}[[checks]]\nsegment = 1\nprompt = \"C\"\nchoices = [\"A\", \"B\"]\nanswer = 1\nexplanation = \" \"\n"
+                    ),
+                    base_body,
+                ),
+                "empty explanation",
+            ),
+            (
+                &*with(
+                    &format!("requires = [\"a\", \"a\"]\n{base_front}"),
+                    base_body,
+                ),
+                "lists \"a\" twice",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![](diagram.svg)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "needs alt text",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![Alt](../diagram.svg)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "relative path inside",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![Alt](/diagram.svg)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "relative path inside",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![Alt](https://example.com/a.svg)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "not a URL",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![Alt](photo.jpg)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                ".svg or .png",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![Alt](missing.svg)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "isn't in the item's directory",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![Alt](bad.png)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "valid PNG",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary.\n## One\n![Alt](evil.svg)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "<script>",
+            ),
+            (
+                &*with(
+                    base_front,
+                    "Summary ![Alt](diagram.svg).\n## One\nText.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+                ),
+                "images belong in segments",
+            ),
+            (
+                "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\nsegment = 1\n+++\nQ\n## Answer\nA\n",
+                "give `lesson` too",
+            ),
+            (
+                "+++\nkind = \"card\"\nskills = [\"arithmetic\"]\nlesson = \"heaps\"\nsegment = 0\n+++\nQ\n## Answer\nA\n",
+                "at least 1",
+            ),
+            (
+                "+++\nkind = \"design\"\nskills = [\"arithmetic\"]\nlesson = \"heaps\"\n+++\nDesign it.\n## Rubric\n- Works\n",
+                "only short items",
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let err = parse_lesson_in(source).unwrap_err();
+            assert!(
+                err.contains(expected),
+                "expected {expected:?} in error {err:?} for:\n{source}"
+            );
+        }
     }
 }

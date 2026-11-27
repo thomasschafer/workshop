@@ -694,15 +694,19 @@ async fn approve_queued(config: &Config, paths: &Paths, queued: &Queued) -> Resu
         crate::pack_files::write(&dir, path, text)?;
         rollback.written.push(dir.join(path));
     }
-    let mut pack = Pack::load(&dir)?;
-    // Only this item: the rest of the pack is as it was, and coding problems take a while.
-    pack.items.retain(|i| i.path == item.path);
+    let pack = Pack::load(&dir)?;
+    // Only this item: the rest of the pack is kept for cross-item checks, without rebuilding its
+    // existing coding problems.
+    let only = std::collections::BTreeSet::from([item.path.as_str()]);
     let runtime = crate::coding::runtime(config, paths).await?;
     let report = pack
-        .check(&workshop_coding::Checker {
-            runtime,
-            unconfined: workshop_coding::Unconfined::Skip,
-        })
+        .check_only(
+            &only,
+            &workshop_coding::Checker {
+                runtime,
+                unconfined: workshop_coding::Unconfined::Skip,
+            },
+        )
         .await;
     let problem = report
         .problems
