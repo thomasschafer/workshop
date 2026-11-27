@@ -183,15 +183,16 @@ test("shows the pack's tracks at home, and continues with something new", async 
   );
 });
 
-test("reviews cards a few at a time, saving each, and flags one that's wrong", async () => {
+test("reviews cards continuously across steps, saving each, and flags one that's wrong", async () => {
   await phone.locator(".track", { hasText: "Review" }).tap();
   await expect(phone).toHaveURL(/\/practice\/review$/);
-  await expect(phone.locator(".learn-count")).toHaveText("1 of 3");
+  await expect(phone.locator(".learn-count")).toHaveText(/^\d+ of \d+ minutes this week$/);
+  const firstPrompt = await phone.locator(".learn-prompt").textContent();
 
   await phone.getByRole("button", { name: "Show answer" }).tap();
   await expect(phone.getByRole("region", { name: "Answer" })).toBeVisible();
   await phone.getByRole("button", { name: "Good" }).tap();
-  await expect(phone.locator(".learn-count")).toHaveText("2 of 3");
+  await expect(phone.locator(".learn-count")).toHaveText(/^1 done · \d+ of \d+ minutes this week$/);
   // Saved as soon as it's marked, so the learner can stop at any moment.
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   expect(await scheduled()).toBe(1);
@@ -200,11 +201,22 @@ test("reviews cards a few at a time, saving each, and flags one that's wrong", a
   await phone.getByRole("button", { name: "This is wrong" }).tap();
   await phone.getByLabel("What's wrong? (optional)").fill("The example contradicts the answer");
   await phone.getByRole("button", { name: "Flag it" }).tap();
+  await expect(phone.locator(".learn-count")).toHaveText(/^2 done · \d+ of \d+ minutes this week$/);
+  const thirdPrompt = await phone.locator(".learn-prompt").textContent();
 
   await phone.getByRole("button", { name: "Show answer" }).tap();
   await phone.getByRole("button", { name: "Forgot" }).tap();
-  await expect(phone.getByRole("heading", { name: "That's a step done" })).toBeVisible();
-  await expect(phone.getByLabel(/mastered$/).first()).toBeVisible();
+  // The first step's three cards are done; the next step's cards follow straight on without a
+  // screen in between.
+  await expect(phone.locator(".learn-count")).toHaveText(/^3 done · \d+ of \d+ minutes this week$/);
+  await expect(phone.getByRole("region", { name: "Done" })).toHaveCount(0);
+  const fourthPrompt = await phone.locator(".learn-prompt").textContent();
+  expect(fourthPrompt).not.toBe(firstPrompt);
+  expect(fourthPrompt).not.toBe(thirdPrompt);
+  const width = phone.viewportSize()?.width ?? 0;
+  expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    width,
+  );
 
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   expect(await scheduled()).toBe(2);
@@ -219,7 +231,7 @@ test("reviews cards a few at a time, saving each, and flags one that's wrong", a
 
 test("checks mental maths as it's typed, right or wrong", async () => {
   await phone.locator(".track", { hasText: "Mental maths" }).tap();
-  await expect(phone.locator(".learn-count")).toHaveText("1 of 3");
+  await expect(phone.locator(".learn-count")).toHaveText(/^\d+ of \d+ minutes this week$/);
   // The track's icon is beside its name at the top, too.
   await expect(
     phone.getByRole("heading", { name: "Mental maths" }).locator('[data-icon="sigma"]'),
@@ -242,9 +254,9 @@ test("checks mental maths as it's typed, right or wrong", async () => {
   await phone.getByRole("button", { name: "I don't know" }).tap();
   await expect(phone.locator(".learn-verdict")).toContainText("The answer is");
   await phone.getByRole("button", { name: "Next" }).tap();
-  await expect(
-    phone.getByRole("heading", { name: "That's a step done: 1 of 3 right" }),
-  ).toBeVisible();
+  // Three sums fill the first step, and the next sum follows straight away.
+  await expect(phone.locator(".learn-count")).toHaveText(/^3 done · \d+ of \d+ minutes this week$/);
+  await expect(phone.getByRole("region", { name: "Done" })).toHaveCount(0);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   expect(await scheduled("mental-maths")).toBe(3);
 });
@@ -560,21 +572,25 @@ test("practises offline on a phone, keeping answers across a reload, and syncs t
   await expect(phone.getByRole("button", { name: "Got it" })).toBeFocused();
   await expect(phone.locator(".learn-sync")).toHaveText("Offline");
   await phone.getByRole("button", { name: "Too easy: retire it" }).tap();
-  // The retirement goes with the attempt that made it.
+  // The retirement goes with the attempt that made it, and practice flows straight to the next
+  // question offline.
   await expect(phone.locator(".learn-sync")).toHaveText("Offline · 1 to sync");
-  const retired = phone.getByRole("region", { name: "Retired" });
-  await expect(retired).toContainText(question.label);
+  await expect(phone.locator(".learn-count")).toHaveText(/^1 done · \d+ of \d+ minutes this week$/);
+  expect((await shown()).key).not.toBe(question.key);
 
   await phone.reload();
   await expect(phone.locator(".learn-sync")).toHaveText("Offline · 1 to sync");
+  await expect(phone.locator(".learn-count")).toHaveText(/^\d+ of \d+ minutes this week$/);
   // It's never offered again, even offline.
-  expect((await shown()).key).not.toBe(question.key);
+  const second = await shown();
+  expect(second.key).not.toBe(question.key);
   await answer("0");
   await expect(phone.locator(".learn-sync")).toHaveText("Offline · 2 to sync");
   // A wrong answer offers nothing but going on.
   await expect(phone.getByRole("button", { name: "Got it" })).toHaveCount(0);
   await phone.getByRole("button", { name: "Next" }).tap();
-  await expect(phone.getByRole("region", { name: "Retired" })).toContainText(question.label);
+  await expect(phone.locator(".learn-count")).toHaveText(/^1 done · \d+ of \d+ minutes this week$/);
+  expect((await shown()).key).not.toBe(second.key);
   expect(await scheduled("probability")).toBe(0);
 
   await setOffline(context, false);
@@ -687,17 +703,19 @@ test("counts what was done towards the week, and offers more", async () => {
   await expect(phone.locator(".track", { hasText: "Probability" })).toContainText("7 new");
 });
 
-test("sends a question answered right further off with Got it, and brings a retired one back", async () => {
+test("sends a question answered right further off with Got it, finishes the track, and brings a retired one back", async () => {
   if (!retiredProbability) throw new Error("the offline test retires a question first");
   const back = retiredProbability;
   await phone.goto("/practice/probability");
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   const question = await shown();
   await answer(question.answer);
-  // Got it is focused, so Enter is enough.
+  // Got it is focused, so Enter is enough, and practice flows straight to the next question
+  // without a screen between steps.
   await expect(phone.getByRole("button", { name: "Got it" })).toBeFocused();
   await phone.keyboard.press("Enter");
-  await expect(phone.getByRole("region", { name: "Done" })).toBeVisible();
+  await expect(phone.locator(".learn-count")).toHaveText(/^1 done · \d+ of \d+ minutes this week$/);
+  await expect(phone.getByRole("region", { name: "Done" })).toHaveCount(0);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   // Rated easy, it's further off than a card answered Good for the first time.
   const deck = await serverDeck();
@@ -708,18 +726,53 @@ test("sends a question answered right further off with Got it, and brings a reti
   const good = Math.max(...cards.map(([, schedule]) => schedule.stability));
   expect(deck.schedules[question.key]?.stability).toBeGreaterThan(good * 2);
 
-  // The one retired offline is listed after the step, to bring back.
+  // Work through the remaining six questions in the track, each its own step, without seeing
+  // the Done screen until nothing is left.
+  const seen = new Set<string>([question.key]);
+  for (let i = 1; i < 7; i++) {
+    const current = await shown();
+    expect(seen.has(current.key)).toBe(false);
+    seen.add(current.key);
+    if (i < 3) {
+      await answer(current.answer);
+      await phone.getByRole("button", { name: "Got it" }).tap();
+    } else {
+      await answer("0");
+      await phone.getByRole("button", { name: "Next" }).tap();
+    }
+    if (i < 6) {
+      await expect(phone.locator(".learn-count")).toHaveText(
+        new RegExp(`^${i + 1} done · \\d+ of \\d+ minutes this week$`),
+      );
+      await expect(phone.getByRole("region", { name: "Done" })).toHaveCount(0);
+    }
+  }
+
+  // Once nothing is left in the track for now, the Done screen appears without skill meters
+  // or an "Another step" button.
+  await expect(
+    phone.getByRole("heading", { name: "That's everything for now: 3 of 7 right" }),
+  ).toBeVisible();
+  await expect(phone.getByRole("button", { name: "Another step" })).toHaveCount(0);
+  await expect(phone.getByLabel(/mastered$/)).toHaveCount(0);
+  await expect(phone.locator(".learn-sync")).toHaveText("Saved");
+
+  // The one retired offline is listed here, to bring back; due straight away, it opens at once.
   const retired = phone.getByRole("region", { name: "Retired" });
   await expect(retired).toContainText(back.label);
   await retired.getByRole("button", { name: "Bring back" }).tap();
   await expect(retired).toHaveCount(0);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   expect((await serverDeck()).retirements[back.key]?.state).toBe("brought_back");
-  // Due straight away, it's first in the next step.
-  await phone.getByRole("button", { name: "Another step" }).tap();
   expect((await shown()).key).toBe(back.key);
   await answer("0");
   await phone.getByRole("button", { name: "Next" }).tap();
+  await expect(
+    phone.getByRole("heading", { name: "That's everything for now: 3 of 8 right" }),
+  ).toBeVisible();
+  // Opening the track again with nothing left says so.
+  await phone.reload();
+  await expect(phone.getByRole("heading", { name: "Nothing to do here for now" })).toBeVisible();
   // It all fits across a phone's screen.
   const width = phone.viewportSize()?.width ?? 0;
   expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
@@ -735,7 +788,7 @@ test("marks a card answered in the learner's own words", async () => {
   await expect(phone.getByRole("region", { name: "Marked" })).toContainText("50%");
   await expect(phone.getByRole("region", { name: "Answer" })).toBeVisible();
   await phone.getByRole("button", { name: "Next" }).tap();
-  await expect(phone.locator(".learn-count")).toHaveText("2 of 3");
+  await expect(phone.locator(".learn-count")).toHaveText(/^1 done · \d+ of \d+ minutes this week$/);
   const log = (await (await phone.request.get("/api/mistakes")).json()) as {
     mistakes: { source: string; detail: string }[];
   };
@@ -779,7 +832,7 @@ test("explains a card aloud, marked for what's right and how clearly it's put", 
   await setOffline(context, true);
   await phone.getByRole("button", { name: "Next" }).tap();
   await phone.reload();
-  await expect(phone.locator(".learn-count")).toHaveText(/^1 of/);
+  await expect(phone.locator(".learn-count")).toHaveText(/^\d+ of \d+ minutes this week$/);
   expect(await phone.locator(".learn-prompt").innerText()).not.toBe(prompt);
   await setOffline(context, false);
   // It's an attempt, and its mistakes are in the log, as a written answer's are.
@@ -1466,4 +1519,103 @@ test("keeps form fields at least 16px on iOS WebKit and offsets sticky round bar
     expect(size, sel).toBeGreaterThanOrEqual(16);
   }
   expect(result.roundBarTop).toContain("env(safe-area-inset-top");
+});
+
+test("brings a forgotten item back in a later step, never straight away as the next item", async ({
+  browser,
+}) => {
+  // Without the service worker, so the initial deck can start fresh without touching the server's
+  // state, then run offline against the app's own scheduling while advancing the clock.
+  const other = await browser.newContext({
+    ...devices["Pixel 7"],
+    baseURL: `http://127.0.0.1:${LEARNING_PORT}`,
+    serviceWorkers: "block",
+  });
+  const page = await other.newPage();
+  await page.addInitScript(() => {
+    const realNow = Date.now.bind(Date);
+    let shift = 0;
+    Date.now = () => realNow() + shift;
+    Object.assign(window, {
+      advanceMinutes: (minutes: number) => {
+        shift += minutes * 60_000;
+      },
+    });
+  });
+  const advanceMinutes = (minutes: number) =>
+    page.evaluate(
+      (m) => (window as unknown as { advanceMinutes: (n: number) => void }).advanceMinutes(m),
+      minutes,
+    );
+  await page.route("**/api/learning/sync*", async (route) => {
+    const response = await route.fetch();
+    const deck = (await response.json()) as Deck & { follow_ups?: string[] };
+    deck.schedules = {};
+    deck.flags = {};
+    deck.retirements = {};
+    deck.follow_ups = [];
+    await route.fulfill({ response, json: deck });
+  });
+
+  // Visit Home first so its snapshot is cached for offline navigation to Probability below, then
+  // open Review to fetch the fresh deck.
+  await page.goto(`/?token=${token()}`);
+  await expect(page.locator(".track", { hasText: "Review" })).toBeVisible();
+  await page.locator(".track", { hasText: "Review" }).tap();
+  await expect(page.locator(".learn-sync")).toHaveText("Saved");
+  await page.unrouteAll({ behavior: "wait" });
+  await setOffline(other, true);
+
+  // Step 1 (three cards): rate the first Forgot, advance past the 10-minute minimum interval so
+  // it is already due again by the end of step 1, then finish the step.
+  await expect(page.locator(".learn-count")).toHaveText(/^\d+ of \d+ minutes this week$/);
+  const forgotten = await cardShown(page);
+  await page.getByRole("button", { name: "Show answer" }).tap();
+  await page.getByRole("button", { name: "Forgot" }).tap();
+  await expect(page.locator(".learn-count")).toHaveText(/^1 done · /);
+  await page.getByRole("button", { name: "Show answer" }).tap();
+  await page.getByRole("button", { name: "Good" }).tap();
+  await advanceMinutes(11);
+  await page.getByRole("button", { name: "Show answer" }).tap();
+  await page.getByRole("button", { name: "Good" }).tap();
+
+  // Step 2: the forgotten card was in step 1, so it does not come straight back.
+  await expect(page.locator(".learn-count")).toHaveText(/^3 done · /);
+  const stepTwo: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const key = await cardShown(page);
+    expect(key).not.toBe(forgotten);
+    stepTwo.push(key);
+    await page.getByRole("button", { name: "Show answer" }).tap();
+    await page.getByRole("button", { name: "Good" }).tap();
+  }
+
+  // Step 3: now that another step has passed, the forgotten card comes back first.
+  await expect(page.locator(".learn-count")).toHaveText(/^6 done · /);
+  expect(await cardShown(page)).toBe(forgotten);
+  await page.getByRole("button", { name: "Show answer" }).tap();
+  await page.getByRole("button", { name: "Good" }).tap();
+  await expect(page.locator(".learn-count")).toHaveText(/^7 done · /);
+  expect(await cardShown(page)).not.toBe(forgotten);
+  expect(stepTwo).not.toContain(forgotten);
+
+  // A single-item step (probability, 3 minutes) answered wrong and already due by the time the
+  // learner taps Next must not come straight back as the very next item, then comes back after
+  // the next question.
+  await page.getByRole("banner").getByRole("button", { name: "Home" }).tap();
+  await page.locator(".track", { hasText: "Probability" }).tap();
+  await expect(page.locator(".learn-count")).toHaveText(/^\d+ of \d+ minutes this week$/);
+  const missed = await shown(page);
+  await page.getByRole("button", { name: "I don't know" }).tap();
+  await advanceMinutes(11);
+  await page.getByRole("button", { name: "Next" }).tap();
+  await expect(page.locator(".learn-count")).toHaveText(/^1 done · /);
+  const afterMissed = await shown(page);
+  expect(afterMissed.key).not.toBe(missed.key);
+  await answer(afterMissed.answer, page);
+  await page.getByRole("button", { name: "Got it" }).tap();
+  await expect(page.locator(".learn-count")).toHaveText(/^2 done · /);
+  expect((await shown(page)).key).toBe(missed.key);
+
+  await other.close();
 });

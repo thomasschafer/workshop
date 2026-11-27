@@ -86,7 +86,7 @@ prompt = "prompts/examiner-steady.md"
 
 A track's `icon` is shown beside its name. It's one of the icons the built-in tracks use, `star`, `code`, `dice`, `network`, `timer`, `sigma` and `history`, or one of `layers`, `approximately`, `book`, `chart`, `flask`, `languages`, `lightbulb`, `puzzle`, `radical` and `shapes`. Without one, a pack's track has `layers`.
 
-A pack's track can hold cards, mental maths, probability questions, code to read and coding problems. Its short items are practised a few at a time, as in the built-in tracks, and its coding problems are listed below them, each worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
+A pack's track can hold cards, mental maths, probability questions, code to read and coding problems. Its short items are practised one after another, as in the built-in tracks, and its coding problems are listed once there's nothing left to practise for now, each worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
 
 `continue = false` keeps a track to itself, for something to practise only when you choose to, such as a language you're picking up on the side. Its items are only offered when you open the track: Continue never picks them, even when you've got a while, and they aren't made into timed rounds. It has daily limits of its own, the same size as `daily_reviews` and `daily_new` under `[learning]`, so practising it doesn't use up the rest's, and the rest doesn't use up its. Its time doesn't count towards the week's target either. Its items are scheduled, and their mistakes and progress towards goals recorded, as any others are. Without it, a track is in Continue, as the built-in ones are.
 
@@ -498,7 +498,7 @@ Work in a codebase needs the server, which keeps its files and runs it, so it is
 
 Code to read and probability questions have one fixed answer, which the app marks itself, and seen again within days such an item soon tests memory of its answer rather than the concept. So a right answer to one offers two choices: "Got it", which rates it easy, so it comes back much later than a right answer otherwise would, and "Too easy: retire it", which retires it as a coding problem rated easy is, and tells the author to write harder items for its skills that test the concept differently (see [docs/author.md](author.md)). "Got it" is chosen with Enter, and an answer left without choosing counts as "Got it". A wrong answer, or "I don't know", is forgotten, as before. Mental maths is made afresh each time, so it's never the same question twice, and cards are marked by the learner, so neither offers this.
 
-Retiring works offline, saved on the device and sent with its attempt when it syncs. Retired code to read is listed with the retired problems at the end of the Coding track, and retired probability questions, or those of a pack's own track, after a step in their track, where any can be brought back, due straight away.
+Retiring works offline, saved on the device and sent with its attempt when it syncs. Retired code to read is listed with the retired problems at the end of the Coding track, and retired probability questions, or those of a pack's own track, at the end of their track once nothing's left to practise for now, where any can be brought back, due straight away.
 
 ### Reading
 

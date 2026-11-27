@@ -62,21 +62,27 @@ test("practises its cards and code to read once it's opened, with limits of its 
   await phone.locator(".track", { hasText: "Drills" }).tap();
   await expect(phone).toHaveURL(/\/practice\/pack%3Adrills$/);
   await expect(phone.locator(".app-title")).toContainText("Drills");
-  await expect(phone.locator(".learn-count")).toHaveText("1 of 3");
+  await expect(phone.locator(".learn-count")).toHaveText(/^\d+ minutes here this week$/);
   await phone.getByRole("button", { name: "Show answer" }).tap();
   await phone.getByRole("button", { name: "Forgot" }).tap();
+  await expect(phone.locator(".learn-count")).toHaveText(/^1 done · \d+ minutes here this week$/);
   await phone.getByRole("button", { name: "Show answer" }).tap();
   await phone.getByRole("button", { name: "Good" }).tap();
+  await expect(phone.locator(".learn-count")).toHaveText(/^2 done · \d+ minutes here this week$/);
   // Code to read, highlighted as Python.
   await expect(phone.locator(".learn-prompt .syntax-keyword").first()).toHaveText("for");
   await phone.getByLabel("What it prints").fill("14");
   await phone.getByRole("button", { name: "Check" }).tap();
   await expect(phone.locator(".learn-verdict")).toHaveText("Right");
   await phone.getByRole("button", { name: "Got it" }).tap();
-  await expect(phone.getByRole("heading", { name: /That's a step done/ })).toBeVisible();
+  await expect(
+    phone.getByRole("heading", { name: "That's everything for now: 1 of 1 right" }),
+  ).toBeVisible();
   await expect(phone.locator(".learn-done")).toContainText(
     "minutes here this week, kept apart from the week's target",
   );
+  await expect(phone.getByRole("button", { name: "Another step" })).toHaveCount(0);
+  await expect(phone.getByLabel(/mastered$/)).toHaveCount(0);
   await expect(phone.locator(".learn-sync")).toHaveText("Saved");
   // Counted towards its own limits, and not the rest's.
   const after = await done();

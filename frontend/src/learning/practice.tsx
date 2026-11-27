@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, ConnectionError, connection } from "../api";
 import { codingApi } from "../coding/api";
 import { CodingItems, toDo } from "../coding/screen";
@@ -40,13 +40,23 @@ export function Markdown({ text, class: className = "" }: { text: string; class?
   );
 }
 
-/** One result in a step: whether it was right, or null for a card marked by the learner. */
+/** One result in a sitting: whether it was right, or null for a card marked by the learner. */
 type Result = { key: string; right: boolean | null };
 
+/** The week's minutes, for the target every track shares or a track kept apart from it. */
+function weekTime(deck: Deck, track: TrackId, minutes: number, detail = false): string {
+  if (limitsOf(deck, track) !== null) {
+    return detail
+      ? `${minutes} minutes here this week, kept apart from the week's target`
+      : `${minutes} minutes here this week`;
+  }
+  return `${minutes} of ${deck.limits.weekly_minutes} minutes this week`;
+}
+
 /**
- * Practising a track: a few minutes of its items at a time, due reviews first. Every answer is
- * saved on the device as it's given and synced when the server can be reached, so it can be
- * left at any moment, and works offline.
+ * Practising a track: due reviews first, flowing from one item to the next until nothing's left
+ * for now. Every answer is saved on the device as it's given and synced when the server can be
+ * reached, so it can be left at any moment, and works offline.
  */
 export function Practice({
   track,
@@ -63,7 +73,10 @@ export function Practice({
 }) {
   const state = useLearning();
   const deck = state.deck;
-  const [chosen, setChosen] = useState<string[] | null>(null);
+  // The full list of keys in the step under way and where the learner is in it; keeping the
+  // whole step lets the next step exclude only the one just finished, while still allowing
+  // forgotten items to return in a later step of the same sitting.
+  const [currentStep, setCurrentStep] = useState<{ keys: string[]; at: number } | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   // The deck's ready once it's been fetched, or right away if the device has one.
   const [tried, setTried] = useState(false);
@@ -72,32 +85,38 @@ export function Practice({
     void state.sync().finally(() => setTried(true));
   }, []);
 
+  const pickStep = (from: Deck, exclude: ReadonlySet<string> = new Set()) =>
+    step(
+      queue(
+        from,
+        track,
+        state.attempts,
+        state.flagChanges,
+        state.retirementChanges,
+        Date.now(),
+        utcOffset(),
+      ),
+      exclude,
+    ).map((item) => item.key);
+
   const startStep = () => {
-    if (!deck) return;
-    const next = queue(
-      deck,
-      track,
-      state.attempts,
-      state.flagChanges,
-      state.retirementChanges,
-      Date.now(),
-      utcOffset(),
-    );
-    setChosen(step(next).map((item) => item.key));
+    const currentDeck = state.deck;
+    if (!currentDeck) return;
+    setCurrentStep({ keys: pickStep(currentDeck), at: 0 });
     setResults([]);
     begun.current = false;
   };
   // The first step starts once there's a deck, from the device or the server.
   useEffect(() => {
-    if (deck && chosen === null) startStep();
+    if (deck && currentStep === null) startStep();
   }, [deck !== null]);
-  // Whether anything's been begun in the step, typed or tapped, so it isn't taken away.
+  // Whether anything's been begun in the sitting, typed or tapped, so it isn't taken away.
   const begun = useRef(false);
   // A step started from the device's deck, before it synced, is started again if the server
   // says a card has follow-up questions under way that it doesn't start with, such as ones
   // started on another device, unless anything in it's been begun.
   useEffect(() => {
-    if (!tried || !deck || chosen === null || results.length > 0 || begun.current) return;
+    if (!tried || !deck || currentStep === null || results.length > 0 || begun.current) return;
     const underWay = queue(
       deck,
       track,
@@ -107,7 +126,7 @@ export function Practice({
       Date.now(),
       utcOffset(),
     ).followUps;
-    if (underWay.some((item, at) => chosen[at] !== item.key)) startStep();
+    if (underWay.some((item, at) => currentStep.keys[at] !== item.key)) startStep();
   }, [tried]);
 
   const name = deck?.tracks.find((t) => t.id === track)?.name ?? "Practice";
@@ -139,10 +158,40 @@ export function Practice({
     );
   }
 
-  if (chosen === null) return <div class="learn">{header}</div>;
+  if (currentStep === null) return <div class="learn">{header}</div>;
 
-  const items = chosen.flatMap((key) => deck.items.find((item) => item.key === key) ?? []);
-  const current = items[results.length];
+  const current = currentStep.keys
+    .slice(currentStep.at)
+    .map((key) => deck.items.find((item) => item.key === key))
+    .find((item): item is DeckItem => item !== undefined);
+  const week = progress(deck, state.attempts, Date.now(), utcOffset(), track);
+
+  const finishItem = (key: string, right: boolean | null) => {
+    const nextResults = [...results, { key, right }];
+    const currentDeck = state.deck;
+    const at = currentStep.keys.indexOf(key, currentStep.at);
+    const nextAt = at === -1 ? currentStep.keys.length : at + 1;
+    const hasMoreInStep = currentStep.keys
+      .slice(nextAt)
+      .some((k) => currentDeck?.items.some((item) => item.key === k) ?? false);
+    setResults(nextResults);
+    if (hasMoreInStep) {
+      setCurrentStep({ keys: currentStep.keys, at: nextAt });
+    } else if (currentDeck) {
+      setCurrentStep({ keys: pickStep(currentDeck, new Set(currentStep.keys)), at: 0 });
+    } else {
+      setCurrentStep({ keys: [], at: 0 });
+    }
+  };
+
+  const bringBack = (key: string) => {
+    state.bringBack(key);
+    const currentDeck = state.deck;
+    if (!currentDeck) return;
+    const nextKeys = pickStep(currentDeck);
+    if (nextKeys.length > 0) setCurrentStep({ keys: nextKeys, at: 0 });
+  };
+
   return (
     <div class="learn">
       {header}
@@ -163,19 +212,26 @@ export function Practice({
         {current ? (
           <>
             <p class="learn-count muted">
-              {results.length + 1} of {items.length}
+              {results.length > 0 ? `${results.length} done · ` : ""}
+              {weekTime(deck, track, week.minutesThisWeek)}
             </p>
             <ItemView
               key={`${current.key}-${results.length}`}
               item={current}
               followedUp={deck.follow_ups?.includes(current.key) ?? false}
               serverDictation={serverDictation}
-              onDone={(right) => setResults((done) => [...done, { key: current.key, right }])}
+              onDone={(right) => finishItem(current.key, right)}
             />
           </>
         ) : (
           <>
-            <Done deck={deck} track={track} results={results} onAgain={startStep} onHome={onHome} />
+            <Done
+              deck={deck}
+              track={track}
+              results={results}
+              onHome={onHome}
+              onBringBack={bringBack}
+            />
             <TrackProblems track={track} onOpen={onOpenProblem} />
           </>
         )}
@@ -960,14 +1016,14 @@ function Done({
   deck,
   track,
   results,
-  onAgain,
   onHome,
+  onBringBack,
 }: {
   deck: Deck;
   track: TrackId;
   results: Result[];
-  onAgain: () => void;
   onHome: () => void;
+  onBringBack: (key: string) => void;
 }) {
   const state = learning();
   const now = Date.now();
@@ -980,16 +1036,10 @@ function Done({
     now,
     utcOffset(),
   );
-  const more = left.followUps.length + left.due.length + left.fresh.length;
-  const keptApart = limitsOf(deck, track) !== null;
   const week = progress(deck, state.attempts, now, utcOffset(), track);
-  // A track can have only problems, listed below, and nothing to practise a few at a time.
+  // A track can have only problems, listed below, and no short items to practise.
   const hasShort = deck.items.some((item) => item.track === track);
   const answered = results.filter((r) => r.right !== null);
-  const skills = useMemo(() => {
-    const ids = new Set(deck.items.filter((i) => i.track === track).flatMap((i) => i.skills));
-    return deck.skills.filter((skill) => ids.has(skill.id));
-  }, [deck, track]);
   return (
     <section class="learn-done" aria-label="Done">
       {results.length === 0 ? (
@@ -998,16 +1048,14 @@ function Done({
         ) : null
       ) : (
         <h2>
-          That's a step done
+          That's everything for now
           {answered.length > 0
             ? `: ${answered.filter((r) => r.right).length} of ${answered.length} right`
             : ""}
         </h2>
       )}
       <p class="muted">
-        {keptApart
-          ? `${week.minutesThisWeek} minutes here this week, kept apart from the week's target`
-          : `${week.minutesThisWeek} of ${deck.limits.weekly_minutes} minutes this week`}
+        {weekTime(deck, track, week.minutesThisWeek, true)}
         {left.waiting > 0 ? ` · ${left.waiting} more due tomorrow` : ""}
         {left.freshWaiting > 0 ? ` · ${left.freshWaiting} more new tomorrow` : ""}
       </p>
@@ -1015,37 +1063,11 @@ function Done({
         <button type="button" class="pill" onClick={onHome}>
           Home
         </button>
-        {more > 0 ? (
-          <button type="button" class="pill primary" onClick={onAgain}>
-            Another step
-          </button>
-        ) : null}
       </span>
       <RetiredList
         items={retired(deck, track, state.retirementChanges)}
-        onBringBack={(key) => state.bringBack(key)}
+        onBringBack={onBringBack}
       />
-      {skills.length > 0 ? (
-        <section aria-labelledby="skills-heading">
-          <h3 id="skills-heading" class="tracks-heading">
-            Skills
-          </h3>
-          <ul class="learn-skills">
-            {skills.map((skill) => (
-              <li key={skill.id}>
-                <span>{skill.name}</span>
-                <meter
-                  class="meter"
-                  aria-label={`${skill.name} mastered`}
-                  min={0}
-                  max={1}
-                  value={skill.mastery}
-                />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
     </section>
   );
 }

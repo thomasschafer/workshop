@@ -18,7 +18,7 @@ import type {
 /** The longest an attempt counts for towards time spent, as on the server. */
 export const MAX_ATTEMPT_MS = 5 * 60 * 1000;
 
-/** Roughly how many minutes a step takes: a few items, so it fits in a short gap. */
+/** Roughly how many minutes of items are chosen at a time before picking the next step. */
 export const STEP_MINUTES = 3;
 
 /** How far the device's time is ahead of UTC, in minutes, as the server's API takes it. */
@@ -246,12 +246,14 @@ function inFocus(deck: Deck, item: DeckItem): boolean {
 
 /**
  * The items for one step: cards being followed up first, then due ones, then new, until there's
- * a few minutes' worth.
+ * a few minutes' worth. Items in `exclude` are left out, so the next step doesn't straight away
+ * re-offer one from the step just finished.
  */
-export function step(next: Queue): DeckItem[] {
+export function step(next: Queue, exclude: ReadonlySet<string> = new Set()): DeckItem[] {
   const chosen: DeckItem[] = [];
   let minutes = 0;
   for (const item of [...next.followUps, ...next.due, ...next.fresh]) {
+    if (exclude.has(item.key)) continue;
     if (minutes >= STEP_MINUTES) break;
     chosen.push(item);
     minutes += item.minutes;

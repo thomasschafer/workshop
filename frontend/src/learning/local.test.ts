@@ -288,6 +288,66 @@ describe("step", () => {
       ),
     ).toEqual(["p/long"]);
   });
+
+  it("skips the step just finished, then brings a forgotten item back in a later step", () => {
+    const items = [card("p/a"), card("p/b"), card("p/c"), card("p/d"), card("p/e"), card("p/f")];
+    const d = deck(items);
+    const first = step(queue(d, "review", [], [], [], LATE_MONDAY, 0)).map((i) => i.key);
+    expect(first).toEqual(["p/a", "p/b", "p/c"]);
+
+    // Forgotten over ten minutes ago, p/a is due again as the first step finishes, so it
+    // must not come straight back in the next step.
+    const afterFirst = [
+      attempt("p/a", LATE_MONDAY, "again"),
+      attempt("p/b", LATE_MONDAY + 60_000, "good"),
+      attempt("p/c", LATE_MONDAY + 120_000, "good"),
+    ];
+    const later = LATE_MONDAY + 11 * 60_000;
+    const secondQueue = queue(d, "review", afterFirst, [], [], later, 0);
+    expect(secondQueue.due.map((i) => i.key)).toEqual(["p/a"]);
+    const second = step(secondQueue, new Set(first)).map((i) => i.key);
+    expect(second).toEqual(["p/d", "p/e", "p/f"]);
+
+    // Once the second step's items are done, p/a wasn't in the step just finished, so it comes
+    // back first in the third step for successive relearning.
+    const afterSecond = [
+      ...afterFirst,
+      attempt("p/d", later + 30_000, "good"),
+      attempt("p/e", later + 60_000, "good"),
+      attempt("p/f", later + 90_000, "good"),
+    ];
+    const third = step(
+      queue(d, "review", afterSecond, [], [], later + 120_000, 0),
+      new Set(second),
+    ).map((i) => i.key);
+    expect(third).toEqual(["p/a"]);
+
+    // Once p/a is answered right, nothing is left.
+    const afterThird = [...afterSecond, attempt("p/a", later + 150_000, "good")];
+    expect(
+      step(queue(d, "review", afterThird, [], [], later + 180_000, 0), new Set(third)),
+    ).toEqual([]);
+  });
+
+  it("doesn't straight away re-offer a single-item step just answered wrong", () => {
+    const a = { ...card("p/a"), minutes: 3 };
+    const b = { ...card("p/b"), minutes: 3 };
+    const d = deck([a, b]);
+    const first = step(queue(d, "review", [], [], [], LATE_MONDAY, 0)).map((i) => i.key);
+    expect(first).toEqual(["p/a"]);
+    const later = LATE_MONDAY + 11 * 60_000;
+    const afterA = [attempt("p/a", LATE_MONDAY, "again")];
+    // Already due again by the time the learner taps Next, p/a waits behind p/b.
+    const second = step(queue(d, "review", afterA, [], [], later, 0), new Set(first)).map(
+      (i) => i.key,
+    );
+    expect(second).toEqual(["p/b"]);
+    const afterB = [...afterA, attempt("p/b", later + 30_000, "good")];
+    const third = step(queue(d, "review", afterB, [], [], later + 60_000, 0), new Set(second)).map(
+      (i) => i.key,
+    );
+    expect(third).toEqual(["p/a"]);
+  });
 });
 
 describe("nextInstance", () => {
