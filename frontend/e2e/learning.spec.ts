@@ -1424,6 +1424,8 @@ test("keeps form fields at least 16px on iOS WebKit and offsets sticky round bar
       document.head.appendChild(simulated);
     }
 
+    // WebKit on macOS sizes a native menu to the system's controls, whatever the stylesheet says,
+    // which iOS doesn't do, so the select is measured without its native appearance.
     const probe = document.createElement("div");
     probe.style.position = "fixed";
     probe.style.visibility = "hidden";
@@ -1432,7 +1434,7 @@ test("keeps form fields at least 16px on iOS WebKit and offsets sticky round bar
       <textarea class="coding-plan"></textarea>
       <div class="diff"><div class="diff-comment-box"><textarea></textarea></div></div>
       <div class="design-component"><input type="text"></div>
-      <div class="design-deep-dive"><select><option>a</option></select></div>
+      <div class="design-deep-dive"><select style="appearance: none"><option>a</option></select></div>
       <div class="project-search"><input type="text"></div>
       <div class="project-add"><input type="text"></div>
       <textarea class="bench-keyboard"></textarea>
