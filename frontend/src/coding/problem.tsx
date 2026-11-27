@@ -6,6 +6,7 @@ import {
   connection,
   isTransientNetworkError,
   TimeoutError,
+  type VersionedFile,
 } from "../api";
 import type { CodeEditor } from "../editor";
 import { errorMessage } from "../errors";
@@ -51,6 +52,7 @@ import {
   updateCachedCodingDraft,
   updateCachedCodingSession,
 } from "./offline";
+import { CodingSessionVersions } from "./offlineVersion";
 import { ProjectFiles } from "./project";
 import { ChangesView, ReviewView } from "./review";
 import {
@@ -81,6 +83,7 @@ import type {
   CaseResult,
   Finished as FinishedReply,
   Graded,
+  Language,
   Opened,
   OpenedProject,
   OpenedReview,
@@ -158,8 +161,10 @@ export function ProblemView({
   );
   // A change to review opens in the same place as a problem, and is a review of its own.
   const [review, setReview] = useState<OpenedReview | null>(null);
-  const confirmedVersion = useRef<number>(0);
-  const localExpectedVersion = useRef<number>(0);
+  const versions = useRef(new CodingSessionVersions(itemKey));
+  if (versions.current.itemKey !== itemKey) {
+    versions.current = new CodingSessionVersions(itemKey);
+  }
   const staleAfterTimeout = useRef<boolean>(false);
 
   useEffect(() => {
@@ -168,12 +173,8 @@ export function ProblemView({
       if (conflict) setSessionConflict(conflict);
     });
     const unsubApplied = outbox().onSessionApplied(itemKey, (applied) => {
-      const nextVer = applied.version ?? 0;
-      if (nextVer > confirmedVersion.current) {
-        confirmedVersion.current = nextVer;
-      }
+      versions.current.confirm(applied.version ?? 0, outbox().list());
       if (!outbox().hasPendingCodingEvents(itemKey)) {
-        localExpectedVersion.current = confirmedVersion.current;
         staleAfterTimeout.current = false;
       }
       void updateCachedCodingSession(itemKey, applied);
@@ -198,8 +199,7 @@ export function ProblemView({
       new LatestSaver<Session>(
         async (next, keepalive) => {
           const queueOfflineUpdate = () => {
-            const base =
-              localExpectedVersion.current || confirmedVersion.current || (next.version ?? 1);
+            const base = versions.current.nextBaseVersion(next.version ?? 1);
             const { coalesced } = outbox().enqueueCodingEvent(
               {
                 kind: "session_updated",
@@ -211,9 +211,7 @@ export function ProblemView({
               },
               false,
             );
-            if (!coalesced) {
-              localExpectedVersion.current = base + 1;
-            }
+            versions.current.recordOfflineUpdate(base, coalesced);
           };
 
           // Single owner per item: if the outbox still has pending events for this item, flush
@@ -231,24 +229,29 @@ export function ProblemView({
           if (staleAfterTimeout.current) {
             try {
               const refreshed = await codingApi.open(itemKey);
-              confirmedVersion.current = refreshed.session.version ?? confirmedVersion.current;
-              localExpectedVersion.current = confirmedVersion.current;
+              versions.current.reset(
+                refreshed.session.version ?? versions.current.confirmed,
+                outbox().list(),
+              );
               staleAfterTimeout.current = false;
             } catch {
               // Still unreachable; fall through to normal offline queueing below.
             }
           }
           const toSend: Session =
-            confirmedVersion.current > 0 ? { ...next, version: confirmedVersion.current } : next;
+            versions.current.confirmed > 0
+              ? { ...next, version: versions.current.confirmed }
+              : next;
           try {
             const saved = await codingApi.saveSession(itemKey, toSend, keepalive);
-            const nextVer = saved.session.version ?? confirmedVersion.current;
-            confirmedVersion.current = nextVer;
-            localExpectedVersion.current = nextVer;
             staleAfterTimeout.current = false;
             // This online PUT persisted the full latest session, so any unsent queued updates for
             // this item are superseded.
             outbox().dropUnsentSessionUpdates(itemKey);
+            versions.current.reset(
+              saved.session.version ?? versions.current.confirmed,
+              outbox().list(),
+            );
             // Only what's still unsaved is forgotten: a later change waits its turn.
             if (JSON.stringify(readUnsaved(itemKey)?.session) === JSON.stringify(next)) {
               writeUnsaved(itemKey, null);
@@ -322,8 +325,7 @@ export function ProblemView({
           return;
         }
         const fresh = item;
-        confirmedVersion.current = fresh.session.version ?? 0;
-        localExpectedVersion.current = confirmedVersion.current;
+        versions.current.reset(fresh.session.version ?? 0, outbox().list());
         staleAfterTimeout.current = false;
         // What was done here while the server couldn't hear of it wins over what it has.
         const unsaved = solve ? null : readUnsaved(itemKey);
@@ -361,8 +363,7 @@ export function ProblemView({
                 false,
               );
             }
-            confirmedVersion.current = offlineOpened.session.version ?? 1;
-            localExpectedVersion.current = confirmedVersion.current;
+            versions.current.reset(offlineOpened.session.version ?? 1, outbox().list());
             const unsaved = solve ? null : readUnsaved(itemKey);
             const adopted =
               unsaved &&
@@ -395,8 +396,10 @@ export function ProblemView({
       .twist(itemKey)
       .then(
         (fresh) => {
-          confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
-          localExpectedVersion.current = confirmedVersion.current;
+          versions.current.reset(
+            fresh.session.version ?? versions.current.confirmed,
+            outbox().list(),
+          );
           void updateCachedCodingSession(itemKey, fresh.session);
           setOpened(fresh);
           sessionRef.current = fresh.session;
@@ -558,6 +561,48 @@ export function ProblemView({
     notify: setNotice,
   };
 
+  const onCodeSaved = useCallback((language: Language, code: VersionedFile) => {
+    setOpened((current) =>
+      current
+        ? {
+            ...current,
+            languages: current.languages.map((l) => (l.id === language ? { ...l, code } : l)),
+          }
+        : current,
+    );
+  }, []);
+
+  const recordLocalSubmit = useCallback(
+    async (
+      passed: boolean,
+      graded: Graded,
+      buildNext: (baseVersion: number, now: number) => Session,
+    ): Promise<Session> => {
+      await saver.flush().catch(() => {});
+      const now = Date.now();
+      const currentSession = sessionRef.current;
+      const baseVersion = versions.current.nextBaseVersion(currentSession?.version ?? 1);
+      const nextSession = buildNext(baseVersion, now);
+      versions.current.recordOfflineSubmit(baseVersion);
+      await updateCachedCodingSession(itemKey, nextSession);
+      outbox().enqueueCodingEvent({
+        kind: "submitted",
+        id: newId(),
+        item: itemKey,
+        base_version: baseVersion,
+        passed,
+        part: currentSession?.part ?? nextSession.part,
+        graded,
+        at: now,
+      });
+      sessionRef.current = nextSession;
+      setSession(nextSession);
+      writeUnsaved(itemKey, null);
+      return nextSession;
+    },
+    [itemKey, saver],
+  );
+
   const done = finished !== null || twistMarked !== null;
   const body = twistMarked ? (
     <TwistResult result={twistMarked} track={track} onHome={onHome} onList={onList} />
@@ -579,6 +624,7 @@ export function ProblemView({
       keyboard={keyboard}
       editor={editor}
       draftSaver={draftSaver}
+      onCodeSaved={onCodeSaved}
       onMarked={(result) => {
         writeUnsaved(itemKey, null);
         setTwistMarked(result);
@@ -603,12 +649,17 @@ export function ProblemView({
       zen={zen.on ? { onExit: zen.exit } : null}
       editor={editor}
       draftSaver={draftSaver}
+      onCodeSaved={onCodeSaved}
+      onLocalSubmit={recordLocalSubmit}
+      onLocalOpened={setOpened}
       onRan={(summary) => {
         lastRun.current = summary;
       }}
       onReloaded={(fresh) => {
-        confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
-        localExpectedVersion.current = confirmedVersion.current;
+        versions.current.reset(
+          fresh.session.version ?? versions.current.confirmed,
+          outbox().list(),
+        );
         const hints = Math.max(fresh.session.hints, sessionRef.current?.hints ?? 0);
         const adopted = hints > fresh.session.hints ? { ...fresh.session, hints } : fresh.session;
         void updateCachedCodingSession(itemKey, adopted);
@@ -704,7 +755,10 @@ export function ProblemView({
               type="button"
               class="text-button"
               onClick={() => {
-                confirmedVersion.current = sessionConflict.version ?? confirmedVersion.current;
+                versions.current.reset(
+                  sessionConflict.version ?? versions.current.confirmed,
+                  outbox().list(),
+                );
                 outbox().clearConflict(itemKey);
                 setSessionConflict(null);
                 if (sessionRef.current) {
@@ -1149,6 +1203,9 @@ function CodeStep({
   zen,
   editor,
   draftSaver,
+  onCodeSaved,
+  onLocalSubmit,
+  onLocalOpened,
   onRan,
   onReloaded,
   onProject,
@@ -1163,6 +1220,13 @@ function CodeStep({
   zen: { onExit: () => void } | null;
   editor: { current: CodeEditor | null };
   draftSaver: { current: VersionedSaver | null };
+  onCodeSaved: (language: Language, code: VersionedFile) => void;
+  onLocalSubmit: (
+    passed: boolean,
+    graded: Graded,
+    buildNext: (baseVersion: number, now: number) => Session,
+  ) => Promise<Session>;
+  onLocalOpened: (opened: Opened) => void;
   onRan: (summary: string) => void;
   onReloaded: (opened: Opened) => void;
   /** Changes the project as it's kept, as its files are saved or added. */
@@ -1317,41 +1381,29 @@ function CodeStep({
         const ranCount =
           graded.outcome === "ran" ? graded.results.filter((r) => r.passed).length : 0;
 
-        const now = Date.now();
-        const baseVersion = session.version ?? 1;
         const advancingPart = passed && session.part < opened.part_count - 1;
-        const nextSession: Session = advancingPart
-          ? {
-              ...session,
-              submissions: session.submissions + 1,
-              plans: [...session.plans, session.plan],
-              part: session.part + 1,
-              plan: "",
-              prediction: null,
-              step: "understand",
-              updated_at: Math.max(now, session.updated_at),
-              version: baseVersion + 1,
-            }
-          : {
-              ...session,
-              submissions: session.submissions + 1,
-              passed,
-              step: passed ? "review" : "test",
-              updated_at: Math.max(now, session.updated_at),
-              version: baseVersion + 1,
-            };
-
-        await updateCachedCodingSession(itemKey, nextSession);
-        outbox().enqueueCodingEvent({
-          kind: "submitted",
-          id: newId(),
-          item: itemKey,
-          base_version: baseVersion,
-          passed,
-          part: session.part,
-          graded,
-          at: now,
-        });
+        const nextSession = await onLocalSubmit(passed, graded, (baseVersion, now) =>
+          advancingPart
+            ? {
+                ...session,
+                submissions: session.submissions + 1,
+                plans: [...session.plans, session.plan],
+                part: session.part + 1,
+                plan: "",
+                prediction: null,
+                step: "understand",
+                updated_at: Math.max(now, session.updated_at),
+                version: baseVersion + 1,
+              }
+            : {
+                ...session,
+                submissions: session.submissions + 1,
+                passed,
+                step: passed ? "review" : "test",
+                updated_at: Math.max(now, session.updated_at),
+                version: baseVersion + 1,
+              },
+        );
 
         const cachedProblem = await getCachedCodingProblem(itemKey);
         const nextParts = cachedProblem
@@ -1377,7 +1429,7 @@ function CodeStep({
         setSubmitted(result);
         setSubmittedEngine(engine);
         onRan(result.problem ?? "Passed every test.");
-        onReloaded(nextOpened);
+        onLocalOpened(nextOpened);
         return;
       }
 
@@ -1525,7 +1577,7 @@ function CodeStep({
             <EditorPane
               key={language.id}
               itemKey={itemKey}
-              file={languageFile(itemKey, language)}
+              file={languageFile(itemKey, language, (code) => onCodeSaved(language.id, code))}
               settings={settings}
               editor={editor}
               saver={draftSaver}
@@ -2018,6 +2070,7 @@ function TwistStep({
   keyboard,
   editor,
   draftSaver,
+  onCodeSaved,
   onMarked,
   onSolve,
 }: StepProps & {
@@ -2027,6 +2080,7 @@ function TwistStep({
   keyboard: CodeKeyboardState;
   editor: { current: CodeEditor | null };
   draftSaver: { current: VersionedSaver | null };
+  onCodeSaved: (language: Language, code: VersionedFile) => void;
   onMarked: (result: TwistMarked) => void;
   onSolve: () => void;
 }) {
@@ -2111,7 +2165,7 @@ function TwistStep({
           <EditorPane
             key={language.id}
             itemKey={itemKey}
-            file={languageFile(itemKey, language)}
+            file={languageFile(itemKey, language, (code) => onCodeSaved(language.id, code))}
             settings={settings}
             editor={editor}
             saver={draftSaver}

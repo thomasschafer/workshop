@@ -12,6 +12,7 @@ workshop-common.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 rand.workspace = true
+serde_json.workspace = true
 urlencoding.workspace = true
 
 [dev-dependencies]

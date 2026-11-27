@@ -693,7 +693,14 @@ async function send(
   }
   if (!response.ok) {
     const text = await response.text();
-    const json: unknown = text ? JSON.parse(text) : null;
+    let json: unknown = null;
+    if (text) {
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
+    }
     const message =
       json && typeof json === "object" && "error" in json && typeof json.error === "string"
         ? json.error

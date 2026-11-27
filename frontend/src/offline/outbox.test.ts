@@ -299,4 +299,77 @@ describe("Outbox", () => {
     expect(tabA.issues()).toHaveLength(1);
     expect(calls).toBe(3);
   });
+
+  it("retries instead of dropping a batch when the server returns an HTML 401", async () => {
+    const storage = memoryStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<!doctype html><h1>Workshop</h1>", {
+            status: 401,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          }),
+      ),
+    );
+    const ob = new Outbox(storage);
+    ob.enqueueCodingEvent(
+      {
+        kind: "finished",
+        id: "html-401-fin",
+        item: "sample/a",
+        base_version: null,
+        rating: "good",
+        plan: null,
+        duration_ms: 0,
+        answered_at: 1000,
+      },
+      false,
+    );
+    await ob.flush();
+    expect(ob.pending).toBe(1);
+    expect(ob.issues()).toHaveLength(0);
+  });
+
+  it("flushes events queued while an earlier sync batch is still in flight", async () => {
+    const storage = memoryStorage();
+    const resolvers: (() => void)[] = [];
+    const sentBatches: { mistake_tags: { mistake_id: string }[] }[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          mistake_tags: { id: string; mistake_id: string }[];
+        };
+        sentBatches.push(body);
+        await new Promise<void>((resolve) => resolvers.push(resolve));
+        return new Response(
+          JSON.stringify({
+            deck: emptyDeck,
+            coding_results: [],
+            mistake_tag_results: body.mistake_tags.map((t) => ({ id: t.id, ok: true })),
+          }),
+        );
+      }),
+    );
+
+    const ob = new Outbox(storage);
+    ob.enqueueMistakeTag("m1", "concept-gap");
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1));
+
+    // Enqueue a second event while batch 1 is still in flight.
+    ob.enqueueMistakeTag("m2", "edge-case");
+    expect(ob.pending).toBe(2);
+
+    // Completing batch 1 must automatically drain batch 2 without waiting for a reload.
+    resolvers[0]?.();
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2));
+    resolvers[1]?.();
+    await vi.waitFor(() => expect(ob.pending).toBe(0));
+
+    expect(sentBatches).toHaveLength(2);
+    expect(sentBatches[0]?.mistake_tags.map((t) => t.mistake_id)).toEqual(["m1"]);
+    expect(sentBatches[1]?.mistake_tags.map((t) => t.mistake_id)).toEqual(["m2"]);
+  });
 });

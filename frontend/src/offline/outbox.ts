@@ -434,45 +434,46 @@ export class Outbox {
       clearTimeout(this.retry);
       this.retry = null;
     }
-    const batch = this.tryAcquireBatch();
-    if (!batch) return;
-    try {
-      const response = await request<UnifiedSyncResponse>(
-        "POST",
-        `/sync?utc_offset=${utcOffset()}`,
-        {
-          attempts: [],
-          flags: [],
-          retirements: [],
-          coding_events: batch.coding_events,
-          mistake_tags: batch.mistake_tags,
-        },
-      );
-      this.applySyncResults(batch, response);
-      if (this.pending > 0) void this.flush();
-    } catch (e) {
-      if (isRetryableError(e)) {
+    for (;;) {
+      const batch = this.tryAcquireBatch();
+      if (!batch) return;
+      try {
+        const response = await request<UnifiedSyncResponse>(
+          "POST",
+          `/sync?utc_offset=${utcOffset()}`,
+          {
+            attempts: [],
+            flags: [],
+            retirements: [],
+            coding_events: batch.coding_events,
+            mistake_tags: batch.mistake_tags,
+          },
+        );
+        this.applySyncResults(batch, response);
+      } catch (e) {
+        if (isRetryableError(e)) {
+          this.releaseBatch(batch);
+          this.retry = setTimeout(() => void this.flush(), this.retryMs);
+          this.retryMs = Math.min(MAX_RETRY_MS, this.retryMs * 2);
+          return;
+        }
+        // Permanent 4xx validation refusal: record in durable issues so it isn't lost silently,
+        // and drop only this batch so later events aren't blocked.
+        const issues = this.storage ? this.loadIssues() : [...this.savedIssues];
+        issues.push({
+          id: newId(),
+          kind: "error",
+          item: "sync",
+          message: `Offline sync batch was rejected: ${errorMessage(e)}`,
+          at: Date.now(),
+        });
+        this.savedIssues = issues.slice(-50);
+        this.saveIssues();
+        const current = this.storage ? this.loadEvents() : this.events;
+        this.events = current.filter((ev) => !batch.ids.has(ev.id));
         this.releaseBatch(batch);
-        this.retry = setTimeout(() => void this.flush(), this.retryMs);
-        this.retryMs = Math.min(MAX_RETRY_MS, this.retryMs * 2);
-        return;
+        this.saveEvents();
       }
-      // Permanent 4xx validation refusal: record in durable issues so it isn't lost silently,
-      // and drop only this batch so later events aren't blocked.
-      const issues = this.storage ? this.loadIssues() : [...this.savedIssues];
-      issues.push({
-        id: newId(),
-        kind: "error",
-        item: "sync",
-        message: `Offline sync batch was rejected: ${errorMessage(e)}`,
-        at: Date.now(),
-      });
-      this.savedIssues = issues.slice(-50);
-      this.saveIssues();
-      const current = this.storage ? this.loadEvents() : this.events;
-      this.events = current.filter((ev) => !batch.ids.has(ev.id));
-      this.releaseBatch(batch);
-      this.saveEvents();
     }
   }
 }

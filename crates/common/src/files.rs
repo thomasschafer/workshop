@@ -31,6 +31,31 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
     write_atomic_with_mode(path, contents, None)
 }
 
+/// Writes `contents` to `path` only if it does not already exist, returning whether the file was
+/// created. Uses `create_new(true)` so a concurrent save is never overwritten.
+pub fn write_if_missing(path: &Path, contents: &[u8]) -> Result<bool> {
+    use std::io::Write;
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => {
+            if let Err(err) = file.write_all(contents).and_then(|()| file.sync_all()) {
+                let _ = std::fs::remove_file(path);
+                return Err(err).with_context(|| format!("writing {}", path.display()));
+            }
+            Ok(true)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("creating {}", path.display())),
+    }
+}
+
 /// Like `write_atomic`, for files only the user may read, such as credentials. The permissions
 /// are set before anything is written, so the contents are never readable by others.
 pub fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
@@ -114,6 +139,19 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
         let entries: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().collect();
         assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn write_if_missing_creates_once_and_never_overwrites_existing_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/code.py");
+
+        assert!(write_if_missing(&path, b"starter\n").unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "starter\n");
+
+        write_atomic(&path, b"user code\n").unwrap();
+        assert!(!write_if_missing(&path, b"starter\n").unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "user code\n");
     }
 
     #[cfg(unix)]

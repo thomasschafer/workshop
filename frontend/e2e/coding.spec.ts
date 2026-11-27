@@ -904,3 +904,64 @@ test("shows only what applies once a part changes an earlier one", async () => {
   await expect(drawer.getByRole("region", { name: "Part 1's example 1" })).toHaveCount(0);
   expect(await scrollsSideways()).toBe(false);
 });
+
+test("keeps saved code when switching to Plan and back to Code", async () => {
+  await phone.goto("/coding/sample/stock");
+  await expect(phone.locator(".step.current")).toBeVisible({ timeout: 15_000 });
+  const step = await phone.locator(".step.current").textContent();
+  if (step === "Understand") {
+    await phone.getByRole("button", { name: "Skip" }).tap();
+    await expect(phone.locator(".step.current")).toHaveText("Plan");
+  }
+  if ((await phone.locator(".step.current").textContent()) === "Plan") {
+    await phone.getByRole("button", { name: "Next: code" }).tap();
+  }
+  await expect(phone.locator(".step.current")).toHaveText("Code");
+
+  const editor = phone.locator(".cm-content");
+  await expect(editor).toBeVisible();
+  await phone.getByRole("button", { name: "Type" }).tap();
+  const keyboard = phone.locator(".keyboard");
+  await expect(keyboard).toBeVisible();
+  const key = (name: string) => keyboard.getByRole("button", { name, exact: true });
+  await key("g").tap();
+  await key("g").tap();
+  await key("Shift").tap();
+  await key("O").tap();
+  for (const ch of "saved") await key(ch).tap();
+  await key("Escape").tap();
+  await expect(editor).toContainText("saved");
+  // Wait for auto-save to land on the server and clear the unsaved localStorage copy.
+  await expect
+    .poll(() =>
+      phone.evaluate(() => localStorage.getItem("workshop:unsaved:coding:sample/stock:python")),
+    )
+    .toBeNull();
+  await expect(phone.locator(".status-line")).not.toContainText("saving");
+  await keyboard.getByRole("button", { name: "Hide keyboard" }).tap();
+
+  // Switching to Plan and back to Code keeps the saved code instead of reverting to starter.
+  await phone.locator(".steps").getByRole("button", { name: "Plan" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Plan");
+  await phone.getByRole("button", { name: "Next: code" }).tap();
+  await expect(phone.locator(".step.current")).toHaveText("Code");
+  await expect(editor).toContainText("saved");
+
+  // Editing again saves cleanly without a 409 conflict banner.
+  await phone.getByRole("button", { name: "Type" }).tap();
+  await expect(keyboard).toBeVisible();
+  await key("g").tap();
+  await key("g").tap();
+  await key("Shift").tap();
+  await key("O").tap();
+  for (const ch of "more") await key(ch).tap();
+  await key("Escape").tap();
+  await expect
+    .poll(() =>
+      phone.evaluate(() => localStorage.getItem("workshop:unsaved:coding:sample/stock:python")),
+    )
+    .toBeNull();
+  await expect(phone.locator(".status-line")).not.toContainText("saving");
+  await expect(phone.locator(".banner")).toHaveCount(0);
+  await keyboard.getByRole("button", { name: "Hide keyboard" }).tap();
+});

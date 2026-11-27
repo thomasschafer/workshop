@@ -1491,10 +1491,7 @@ impl Problems {
                 .coding
                 .starter_in(language)
                 .with_context(|| format!("there's no starter in {}", language.name()))?;
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            workshop_common::files::write_atomic(&path, starter.text.as_bytes())?;
+            workshop_common::files::write_if_missing(&path, starter.text.as_bytes())?;
         }
         read_versioned(&path)
     }
@@ -1553,9 +1550,7 @@ impl Problems {
         std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         for file in project.files.iter().filter(|f| !f.is_test()) {
             let path = dir.join(&file.path);
-            if !path.exists() {
-                workshop_common::files::write_atomic(&path, file.text.as_bytes())?;
-            }
+            workshop_common::files::write_if_missing(&path, file.text.as_bytes())?;
         }
         // Tests are the item's, so they're written each time, and those of parts not reached
         // yet, such as from an earlier sitting, are taken away.

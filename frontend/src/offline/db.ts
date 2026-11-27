@@ -63,10 +63,14 @@ export interface StorageDiagnostics {
 
 let opened: Promise<IDBDatabase | null> | null = null;
 
+function isInvalidStateError(err: unknown): boolean {
+  return err instanceof Error && err.name === "InvalidStateError";
+}
+
 function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
   if (opened) return opened;
-  opened = new Promise((resolve) => {
+  const opening: Promise<IDBDatabase | null> = new Promise((resolve) => {
     try {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -92,22 +96,84 @@ function openDb(): Promise<IDBDatabase | null> {
       };
       req.onsuccess = () => {
         const db = req.result;
+        const reset = () => {
+          if (opened === opening) opened = null;
+        };
         db.onversionchange = () => {
           db.close();
-          opened = null;
+          reset();
         };
+        // WebKit closes idle connections when backgrounded on iOS; drop the handle so the next
+        // operation reopens cleanly.
+        db.onclose = reset;
         resolve(db);
       };
       req.onerror = () => {
-        opened = null;
+        if (opened === opening) opened = null;
         resolve(null);
       };
     } catch {
-      opened = null;
+      if (opened === opening) opened = null;
       resolve(null);
     }
   });
-  return opened;
+  opened = opening;
+  return opening;
+}
+
+/**
+ * Runs a single IndexedDB transaction, reopening the database once if `db.transaction` throws
+ * `InvalidStateError` (such as after iOS Safari evicts an idle connection). Other errors and
+ * transaction aborts propagate instead of failing silently or hanging.
+ */
+async function withTx<T>(
+  storeName: StoreName,
+  mode: IDBTransactionMode,
+  exec: (store: IDBObjectStore) => IDBRequest<T> | undefined,
+): Promise<T | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const db = await openDb();
+    if (!db) return null;
+    let tx: IDBTransaction;
+    try {
+      tx = db.transaction(storeName, mode);
+    } catch (err) {
+      if (attempt === 0 && isInvalidStateError(err)) {
+        opened = null;
+        continue;
+      }
+      throw err;
+    }
+    return await new Promise<T | null>((resolve, reject) => {
+      let value: T | null = null;
+      let settled = false;
+      const fail = (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      tx.oncomplete = () => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      tx.onerror = () => fail(tx.error ?? new Error("IndexedDB transaction failed."));
+      tx.onabort = () =>
+        fail(tx.error ?? new DOMException("IndexedDB transaction aborted.", "AbortError"));
+      try {
+        const req = exec(tx.objectStore(storeName));
+        if (req) {
+          req.onsuccess = () => {
+            value = req.result ?? null;
+          };
+          req.onerror = () => fail(req.error ?? tx.error ?? new Error("IndexedDB request failed."));
+        }
+      } catch (err) {
+        fail(err);
+      }
+    });
+  }
+  return null;
 }
 
 function runTx<T>(
@@ -115,20 +181,7 @@ function runTx<T>(
   mode: IDBTransactionMode,
   work: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T | null> {
-  return openDb().then((db) => {
-    if (!db) return null;
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction(storeName, mode);
-        const store = tx.objectStore(storeName);
-        const req = work(store);
-        req.onsuccess = () => resolve(req.result ?? null);
-        req.onerror = () => resolve(null);
-      } catch {
-        resolve(null);
-      }
-    });
-  });
+  return withTx(storeName, mode, work);
 }
 
 export async function getSnapshot<T>(key: string): Promise<SnapshotRecord<T> | null> {
@@ -162,24 +215,15 @@ export async function listAocPuzzles(): Promise<CachedAocPuzzle[]> {
 
 /** Deletes all cached AoC puzzle records for a given year from this device. */
 export async function deleteAocYear(year: number): Promise<void> {
-  const db = await openDb();
-  if (!db) return;
-  await new Promise<void>((resolve) => {
-    try {
-      const tx = db.transaction("aoc", "readwrite");
-      const store = tx.objectStore("aoc");
-      const req = store.getAll();
-      req.onsuccess = () => {
-        const rows = (req.result as CachedAocPuzzle[] | undefined) ?? [];
-        for (const row of rows) {
-          if (row.year === year) store.delete(row.key);
-        }
-      };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    } catch {
-      resolve();
-    }
+  await withTx<undefined>("aoc", "readwrite", (store) => {
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const rows = (req.result as CachedAocPuzzle[] | undefined) ?? [];
+      for (const row of rows) {
+        if (row.year === year) store.delete(row.key);
+      }
+    };
+    return undefined;
   });
 }
 
@@ -189,39 +233,30 @@ export async function mergeAocPuzzle(
   day: number,
   patch: Partial<Omit<CachedAocPuzzle, "key" | "year" | "day" | "updatedAt">>,
 ): Promise<void> {
-  const db = await openDb();
-  if (!db) return;
-  await new Promise<void>((resolve) => {
-    try {
-      const tx = db.transaction("aoc", "readwrite");
-      const store = tx.objectStore("aoc");
-      const key = aocKey(year, day);
-      const getReq = store.get(key);
-      getReq.onsuccess = () => {
-        const existing = (getReq.result as CachedAocPuzzle | undefined) ?? {
-          key,
-          year,
-          day,
-          updatedAt: Date.now(),
-        };
-        const next: CachedAocPuzzle = {
-          ...existing,
-          ...patch,
-          key,
-          year,
-          day,
-          updatedAt: Date.now(),
-        };
-        if (patch.problem !== undefined) {
-          next.problemParts = patch.problem.parts_html.length;
-        }
-        store.put(next);
+  await withTx<undefined>("aoc", "readwrite", (store) => {
+    const key = aocKey(year, day);
+    const getReq = store.get(key);
+    getReq.onsuccess = () => {
+      const existing = (getReq.result as CachedAocPuzzle | undefined) ?? {
+        key,
+        year,
+        day,
+        updatedAt: Date.now(),
       };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    } catch {
-      resolve();
-    }
+      const next: CachedAocPuzzle = {
+        ...existing,
+        ...patch,
+        key,
+        year,
+        day,
+        updatedAt: Date.now(),
+      };
+      if (patch.problem !== undefined) {
+        next.problemParts = patch.problem.parts_html.length;
+      }
+      store.put(next);
+    };
+    return undefined;
   });
 }
 
@@ -234,25 +269,16 @@ export async function mergeAocYear(
   year: number,
   patch: Partial<Omit<CachedAocYear, "year" | "updatedAt">>,
 ): Promise<void> {
-  const db = await openDb();
-  if (!db) return;
-  await new Promise<void>((resolve) => {
-    try {
-      const tx = db.transaction("aocYear", "readwrite");
-      const store = tx.objectStore("aocYear");
-      const getReq = store.get(year);
-      getReq.onsuccess = () => {
-        const existing = (getReq.result as CachedAocYear | undefined) ?? {
-          year,
-          updatedAt: Date.now(),
-        };
-        store.put({ ...existing, ...patch, year, updatedAt: Date.now() });
+  await withTx<undefined>("aocYear", "readwrite", (store) => {
+    const getReq = store.get(year);
+    getReq.onsuccess = () => {
+      const existing = (getReq.result as CachedAocYear | undefined) ?? {
+        year,
+        updatedAt: Date.now(),
       };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    } catch {
-      resolve();
-    }
+      store.put({ ...existing, ...patch, year, updatedAt: Date.now() });
+    };
+    return undefined;
   });
 }
 

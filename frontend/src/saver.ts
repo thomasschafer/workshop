@@ -206,11 +206,13 @@ export class VersionedSaver {
 
   close(): void {
     this.stopOnlineListener();
-    this.flushOnExit();
+    clearTimeout(this.timer);
     this.closed = true;
+    this.flushOnExit();
   }
 
   private queue(text: string): void {
+    if (this.closed) return;
     this.pending = text;
     if (isBrowserOffline()) {
       clearTimeout(this.timer);
@@ -220,6 +222,7 @@ export class VersionedSaver {
     this.onStatus("pending");
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
+      if (this.closed) return;
       if (isBrowserOffline()) {
         this.onStatus("offline");
         return;
@@ -231,7 +234,7 @@ export class VersionedSaver {
   private async attempt(text: string, keepalive: boolean): Promise<void> {
     if (this.conflicted) return;
     this.remember(text);
-    this.onStatus("saving");
+    if (!this.closed) this.onStatus("saving");
     try {
       const saved = await this.saveFile(text, this.version, keepalive);
       this.lastError = null;
@@ -242,18 +245,19 @@ export class VersionedSaver {
         this.lastError = null;
         const theirs = (err.body as { current?: FileVersion } | null)?.current;
         if (!theirs) {
-          this.enterConflict({ text: this.confirmed, version: this.version });
+          if (!this.closed) this.enterConflict({ text: this.confirmed, version: this.version });
           return;
         }
         const ours = this.sentAs(theirs.text);
         if (ours !== undefined) {
           // One of our own saves landed first, for example one sent as the page was hidden.
           this.confirm({ text: ours, version: theirs.version });
-        } else {
+        } else if (!this.closed) {
           this.enterConflict(theirs);
         }
         return;
       }
+      if (this.closed) return;
       this.lastError = err;
       this.pending ??= this.latest;
       clearTimeout(this.timer);
@@ -277,6 +281,7 @@ export class VersionedSaver {
     this.retryDelay = MIN_RETRY_MS;
     if (this.hasUnsavedChanges) {
       this.writeUnsaved();
+      if (this.closed) return;
       if (this.pending === null) this.queue(this.latest);
       this.onStatus("pending");
     } else {
@@ -291,6 +296,7 @@ export class VersionedSaver {
   }
 
   private enterConflict(theirs: FileVersion): void {
+    if (this.closed) return;
     this.conflicted = true;
     this.pending = null;
     clearTimeout(this.timer);
@@ -301,7 +307,7 @@ export class VersionedSaver {
 
   private markSaved(): void {
     this.clearUnsaved();
-    this.onStatus("saved");
+    if (!this.closed) this.onStatus("saved");
   }
 
   /** The recently sent text that the server saved as `saved`, which may add a final newline. */

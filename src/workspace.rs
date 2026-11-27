@@ -229,9 +229,7 @@ impl Workspace {
         if !self.solutions_dir.join(".git").exists() {
             git(&self.solutions_dir, &["init", "--quiet"]).await?;
             let gitignore = self.solutions_dir.join(".gitignore");
-            if !gitignore.exists() {
-                files::write_atomic(&gitignore, SOLUTIONS_GITIGNORE.as_bytes())?;
-            }
+            files::write_if_missing(&gitignore, SOLUTIONS_GITIGNORE.as_bytes())?;
         }
         Ok(())
     }
@@ -239,8 +237,7 @@ impl Workspace {
     /// Loads a solution, creating it from the language's template the first time.
     pub fn load_code(&self, profile: &LanguageProfile, puzzle: Puzzle) -> Result<VersionedFile> {
         let path = profile.solution_path(&self.solutions_dir, puzzle)?;
-        if !path.exists() {
-            files::write_atomic(&path, profile.template.as_bytes())?;
+        if files::write_if_missing(&path, profile.template.as_bytes())? {
             self.setup_solutions_project(profile)?;
         }
         read_versioned(&path)
@@ -282,7 +279,7 @@ impl Workspace {
         )?;
         let readme = self.solutions_dir.join("README.md");
         if !readme.exists() {
-            files::write_atomic(&readme, solutions_readme(profile)?.as_bytes())?;
+            files::write_if_missing(&readme, solutions_readme(profile)?.as_bytes())?;
         }
         Ok(())
     }

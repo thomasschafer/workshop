@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ApiError,
   askCoach,
   ConnectionError,
   connection,
@@ -115,5 +116,31 @@ describe("coach reply streaming and cancellation", () => {
     );
 
     await expect(followReply("r2", () => {})).rejects.toBeInstanceOf(ReplyCancelled);
+  });
+});
+
+describe("non-JSON HTTP errors", () => {
+  it("throws ApiError with the HTTP status on HTML 401 and plain-text 500 responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<!doctype html><h1>Workshop</h1>", {
+            status: 401,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          }),
+      ),
+    );
+    await expect(request("GET", "/bootstrap")).rejects.toSatisfy(
+      (err: unknown) => err instanceof ApiError && err.status === 401,
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("Bad Gateway", { status: 500 })),
+    );
+    await expect(request("POST", "/sync", {})).rejects.toSatisfy(
+      (err: unknown) => err instanceof ApiError && err.status === 500,
+    );
   });
 });

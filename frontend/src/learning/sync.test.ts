@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { outbox } from "../offline/outbox";
 import { newId } from "./local";
 import { Learning } from "./sync";
 import type { Attempt, Deck } from "./types";
@@ -296,5 +297,58 @@ describe("Learning", () => {
       offline: false,
       error: "Attempt x took less than no time",
     });
+  });
+
+  it("flushes outbox events queued while a piggybacked Learning.sync is in flight", async () => {
+    const storage = new MemoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    const resolvers: (() => void)[] = [];
+    const sentTags: string[][] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          mistake_tags?: { id: string; mistake_id: string }[];
+        };
+        const tags = body.mistake_tags ?? [];
+        sentTags.push(tags.map((t) => t.mistake_id));
+        await new Promise<void>((resolve) => resolvers.push(resolve));
+        return new Response(
+          JSON.stringify({
+            deck: DECK,
+            coding_results: [],
+            mistake_tag_results: tags.map((t) => ({ id: t.id, ok: true })),
+          }),
+        );
+      }),
+    );
+
+    const ob = outbox();
+    ob.syncFromStorage();
+    // Seed an outbox event directly in storage so Learning.sync acquires it as a piggybacked batch.
+    storage.setItem(
+      "workshop:outbox",
+      JSON.stringify([
+        { kind: "mistake_tag", id: "m1-ev", mistakeId: "m1", errorType: "edge-case", at: 1 },
+      ]),
+    );
+    ob.syncFromStorage();
+
+    const learning = new Learning(storage);
+    const syncing = learning.sync();
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1));
+
+    // Queue a second outbox event while Learning.sync holds batchInFlight.
+    ob.enqueueMistakeTag("m2", "concept-gap");
+    expect(ob.pending).toBe(2);
+
+    // Finish Learning.sync; the queued m2 event must flush automatically.
+    resolvers[0]?.();
+    await syncing;
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2));
+    resolvers[1]?.();
+    await vi.waitFor(() => expect(ob.pending).toBe(0));
+    expect(sentTags).toEqual([["m1"], ["m2"]]);
   });
 });

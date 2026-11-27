@@ -243,6 +243,8 @@ export class Learning {
         );
         pendingOutbox.applySyncResults(outboxBatch, unified);
         outboxSettled = true;
+        // Drain any outbox events that arrived while this sync held the batch lock.
+        pendingOutbox.flushIfPending();
         deck = unified.deck;
       } else {
         deck = await request<Deck>("POST", `/learning/sync?utc_offset=${utcOffset()}`, {
@@ -267,11 +269,12 @@ export class Learning {
       this.save();
       this.setStatus({ syncing: false, offline: false, error: null });
     } catch (e) {
-      if (outboxBatch && pendingOutbox && !outboxSettled) {
-        pendingOutbox.releaseBatch(outboxBatch);
-      }
       const offline = e instanceof ConnectionError;
       const slow = e instanceof TimeoutError;
+      if (outboxBatch && pendingOutbox && !outboxSettled) {
+        pendingOutbox.releaseBatch(outboxBatch);
+        if (!offline && !slow) pendingOutbox.flushIfPending();
+      }
       this.setStatus({
         syncing: false,
         offline: offline || slow,

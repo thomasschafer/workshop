@@ -41,7 +41,11 @@ export interface EditedFile {
 }
 
 /** A problem's code in one language, as an edited file. */
-export function languageFile(itemKey: string, language: OpenedLanguage): EditedFile {
+export function languageFile(
+  itemKey: string,
+  language: OpenedLanguage,
+  onSaved?: (saved: VersionedFile) => void,
+): EditedFile {
   return {
     id: language.id,
     name: language.code.path.split(/[\\/]/).pop() ?? "code",
@@ -58,11 +62,14 @@ export function languageFile(itemKey: string, language: OpenedLanguage): EditedF
     save: async (text, version, keepalive) => {
       const saved = await codingApi.saveCode(itemKey, language.id, text, version, keepalive);
       void updateCachedCodingDraft(itemKey, language.id, saved);
+      onSaved?.(saved);
       return saved;
     },
     fresh: async () => {
       const opened = await codingApi.open(itemKey);
-      return opened.languages.find((l) => l.id === language.id)?.code;
+      const code = opened.languages.find((l) => l.id === language.id)?.code;
+      if (code) onSaved?.(code);
+      return code;
     },
   };
 }

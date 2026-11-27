@@ -470,3 +470,97 @@ describe("LatestSaver", () => {
     saver.close();
   });
 });
+
+describe("VersionedSaver after close", () => {
+  it("does not emit conflict, status, or retries when an exiting save fails after close", async () => {
+    let rejectSave!: (err: unknown) => void;
+    const saveFile = vi.fn(
+      () =>
+        new Promise<FileVersion>((_resolve, reject) => {
+          rejectSave = reject;
+        }),
+    );
+    const statuses: SaveStatus[] = [];
+    const conflicts: FileVersion[] = [];
+    const saver = new VersionedSaver(
+      saveFile,
+      "closed-409",
+      "v1",
+      "original",
+      (s) => statuses.push(s),
+      (c) => conflicts.push(c),
+    );
+
+    saver.schedule("edited");
+    statuses.length = 0;
+    saver.close();
+    expect(saveFile).toHaveBeenCalledTimes(1);
+
+    // Late 409 arrives after switching to another file.
+    rejectSave(
+      new ApiError("conflict", 409, { current: { text: "from elsewhere", version: "v2" } }),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(conflicts).toEqual([]);
+    expect(statuses).toEqual([]);
+    expect(saveFile).toHaveBeenCalledTimes(1);
+    // The unsaved local copy for the closed file stays in localStorage for when it's reopened.
+    expect(localStorage.getItem("closed-409")).not.toBeNull();
+  });
+
+  it("does not leak retry timers or overwrite status when an exiting save hits a 500 after close", async () => {
+    let rejectSave!: (err: unknown) => void;
+    const saveFile = vi.fn(
+      () =>
+        new Promise<FileVersion>((_resolve, reject) => {
+          rejectSave = reject;
+        }),
+    );
+    const statuses: SaveStatus[] = [];
+    const saver = new VersionedSaver(
+      saveFile,
+      "closed-500",
+      "v1",
+      "original",
+      (s) => statuses.push(s),
+      () => {},
+    );
+
+    saver.schedule("edited");
+    statuses.length = 0;
+    saver.close();
+    expect(saveFile).toHaveBeenCalledTimes(1);
+
+    rejectSave(new Error("server down"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(statuses).toEqual([]);
+    expect(saveFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("still clears localStorage without firing UI callbacks when an exiting save succeeds after close", async () => {
+    let resolveSave!: (file: FileVersion) => void;
+    const saveFile = vi.fn(
+      () =>
+        new Promise<FileVersion>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const statuses: SaveStatus[] = [];
+    const saver = new VersionedSaver(
+      saveFile,
+      "closed-ok",
+      "v1",
+      "original",
+      (s) => statuses.push(s),
+      () => {},
+    );
+
+    saver.schedule("edited");
+    statuses.length = 0;
+    saver.close();
+    resolveSave({ text: "edited", version: "v2" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(statuses).toEqual([]);
+    expect(localStorage.getItem("closed-ok")).toBeNull();
+  });
+});

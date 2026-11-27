@@ -42,6 +42,7 @@ pub async fn require_token(
     if gate.public_paths.contains(&request.uri().path()) {
         return next.run(request).await;
     }
+    let is_api = request.uri().path() == "/api" || request.uri().path().starts_with("/api/");
     let query_token = request.uri().query().and_then(|q| {
         q.split('&')
             .filter_map(|pair| pair.split_once('='))
@@ -50,9 +51,10 @@ pub async fn require_token(
     });
     if let Some(token) = query_token {
         if !constant_time_eq(token.as_bytes(), gate.token.as_bytes()) {
-            return unauthorised(Some(
-                "That isn't Workshop's link or token. Check it was copied in full.",
-            ));
+            return unauthorised(
+                Some("That isn't Workshop's link or token. Check it was copied in full."),
+                is_api,
+            );
         }
         // Lax rather than Strict: links opened from outside the browser, such as a scanned QR
         // code, count as cross-site, and Strict cookies wouldn't be sent after the redirect.
@@ -71,7 +73,7 @@ pub async fn require_token(
     let authorised = cookie_token(request.headers())
         .is_some_and(|t| constant_time_eq(t.as_bytes(), gate.token.as_bytes()));
     if !authorised {
-        return unauthorised(None);
+        return unauthorised(None, is_api);
     }
     let is_websocket = request.headers().contains_key(header::UPGRADE);
     if (request.method() != Method::GET || is_websocket) && !same_origin(request.headers()) {
@@ -120,8 +122,20 @@ fn given_token(value: &str) -> String {
 }
 
 /// Asks for the link with the token, such as on a phone that hasn't opened it yet, or in an app
-/// added to an iPhone's home screen, which doesn't share Safari's cookies.
-fn unauthorised(problem: Option<&str>) -> Response {
+/// added to an iPhone's home screen, which doesn't share Safari's cookies. API requests receive
+/// JSON so clients can distinguish 401 from non-JSON errors.
+fn unauthorised(problem: Option<&str>, is_api: bool) -> Response {
+    if is_api {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::CONTENT_TYPE, "application/json")],
+            serde_json::json!({
+                "error": problem.unwrap_or("Sign in to Workshop again."),
+            })
+            .to_string(),
+        )
+            .into_response();
+    }
     let problem = problem
         .map(|p| format!("<p class=problem>{p}</p>"))
         .unwrap_or_default();
@@ -246,6 +260,31 @@ mod tests {
                 StatusCode::UNAUTHORIZED
             );
         }
+    }
+
+    #[tokio::test]
+    async fn returns_json_401_for_api_paths_and_html_401_for_pages() {
+        let router = test_app();
+
+        let api_res = send(
+            &router,
+            Request::get("/api/bootstrap").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(api_res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(api_res.headers()[header::CONTENT_TYPE], "application/json");
+        let body = axum::body::to_bytes(api_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["error"].as_str().is_some_and(|s| !s.is_empty()));
+
+        let page_res = send(&router, Request::get("/").body(Body::empty()).unwrap()).await;
+        assert_eq!(page_res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            page_res.headers()[header::CONTENT_TYPE],
+            "text/html; charset=utf-8"
+        );
     }
 
     #[test]
