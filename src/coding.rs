@@ -1392,7 +1392,7 @@ impl Problems {
                         seed: None,
                     },
                     &[],
-                    answered_at,
+                    crate::learning::now_ms(),
                 ) {
                     return error_outcome(format!("{err:#}"));
                 }
@@ -2748,5 +2748,36 @@ mod tests {
             .expect("newer session must remain on disk");
         assert_eq!(remaining.started_at, newer_started_at);
         assert_eq!(learning.store().attempts(&found2.key()).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn rejects_finished_event_with_future_answered_at_against_server_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let learning = learning(dir.path());
+        let packs = vec![Pack::sample()];
+        let found = find(&packs, "sample", "islands").unwrap();
+        let problems = Problems::new(dir.path());
+
+        let future = crate::learning::now_ms() + 10 * 86_400_000;
+        let outcome = problems.apply_event(
+            &packs,
+            &learning,
+            CodingEvent::Finished {
+                id: "future-fin".into(),
+                item: found.key(),
+                base_version: None,
+                started_at: None,
+                rating: Rating::Good,
+                plan: Some("future plan".into()),
+                duration_ms: 1000,
+                answered_at: future,
+            },
+        );
+        assert!(
+            matches!(outcome.status, CodingEventStatus::Error { .. }),
+            "expected error for future timestamp, got {:?}",
+            outcome.status
+        );
+        assert!(learning.store().attempts(&found.key()).unwrap().is_empty());
     }
 }

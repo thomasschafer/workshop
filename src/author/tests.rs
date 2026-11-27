@@ -605,3 +605,107 @@ fn asks_for_harder_variants_of_items_with_a_fixed_answer_retired_as_too_easy() {
         ]
     );
 }
+
+#[tokio::test]
+async fn approve_rejects_unparsed_item_and_cleans_up_written_files() {
+    let s = setup();
+    let item_path = "items/missing-from-report.md";
+    // The written file is not a valid pack item (no front matter) under a path the pack loader
+    // ignores or doesn't include in report.items for `item.path`.
+    let mut files = std::collections::BTreeMap::new();
+    files.insert("notes/stray.txt".to_owned(), "not an item\n".to_owned());
+    let queued = Queued {
+        id: "queued-unparsed".to_owned(),
+        pack: "sample".to_owned(),
+        at: 1,
+        item: workshop_author::Written {
+            path: item_path.to_owned(),
+            id: "missing-from-report".to_owned(),
+            label: "Missing from report".to_owned(),
+            skills: vec!["probability.counting".to_owned()],
+            files,
+            from_draft: None,
+            transcript: Vec::new(),
+            reason: Some("needs review".to_owned()),
+        },
+    };
+    s.desk.enqueue(vec![queued]).unwrap();
+
+    let err = approve(&s.config, &s.paths, &s.desk, "queued-unparsed")
+        .await
+        .expect_err("item missing from check report must not be approved");
+    assert!(
+        format!("{err:#}").contains("doesn't pass its check"),
+        "{err:#}"
+    );
+    assert!(
+        !s.pack.join("notes/stray.txt").exists(),
+        "written file must be cleaned up on rejection"
+    );
+    assert_eq!(s.desk.queue().unwrap().len(), 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn approve_restores_draft_and_cleans_up_files_when_commit_fails() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let s = setup();
+    let draft_rel = "drafts/counting-draft.md";
+    let draft_path = s.pack.join(draft_rel);
+    let draft_contents =
+        "+++\nskills = [\"probability.counting\"]\n+++\nHow many ways to pick 2 from 7?\n";
+    std::fs::create_dir_all(draft_path.parent().unwrap()).unwrap();
+    std::fs::write(&draft_path, draft_contents).unwrap();
+    crate::workspace::git(&s.pack, &["add", "--", draft_rel])
+        .await
+        .unwrap();
+    crate::workspace::git(&s.pack, &["commit", "--quiet", "-m", "Add draft"])
+        .await
+        .unwrap();
+
+    // Force `git commit` to fail via a failing pre-commit hook.
+    let hook = s.pack.join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    let mut perms = std::fs::metadata(&hook).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&hook, perms).unwrap();
+
+    let item_rel = "items/probability/choose-two-from-seven.md";
+    let mut files = std::collections::BTreeMap::new();
+    files.insert(
+        item_rel.to_owned(),
+        card("How many ways are there to choose 2 items from 7?"),
+    );
+    let queued = Queued {
+        id: "queued-commit-fail".to_owned(),
+        pack: "sample".to_owned(),
+        at: 2,
+        item: workshop_author::Written {
+            path: item_rel.to_owned(),
+            id: "choose-two-from-seven".to_owned(),
+            label: "Choose two from seven".to_owned(),
+            skills: vec!["probability.counting".to_owned()],
+            files,
+            from_draft: Some(draft_rel.to_owned()),
+            transcript: Vec::new(),
+            reason: Some("needs review".to_owned()),
+        },
+    };
+    s.desk.enqueue(vec![queued]).unwrap();
+
+    let err = approve(&s.config, &s.paths, &s.desk, "queued-commit-fail")
+        .await
+        .expect_err("commit failure must fail approve");
+    assert!(format!("{err:#}").contains("committing"), "{err:#}");
+    assert!(
+        !s.pack.join(item_rel).exists(),
+        "written item file must be removed when commit fails"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&draft_path).unwrap(),
+        draft_contents,
+        "draft file must be restored when commit fails"
+    );
+    assert_eq!(s.desk.queue().unwrap().len(), 1);
+}

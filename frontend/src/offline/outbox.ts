@@ -434,9 +434,35 @@ export class Outbox {
       clearTimeout(this.retry);
       this.retry = null;
     }
+    // Guards against spinning forever if storage cannot persist the cleared outbox.
+    const seenIds = new Set<string>();
     for (;;) {
       const batch = this.tryAcquireBatch();
       if (!batch) return;
+      let repeated = false;
+      for (const id of batch.ids) {
+        if (seenIds.has(id)) {
+          repeated = true;
+          break;
+        }
+      }
+      if (repeated) {
+        this.releaseBatch(batch);
+        const issues = this.storage ? this.loadIssues() : [...this.savedIssues];
+        issues.push({
+          id: newId(),
+          kind: "error",
+          item: "sync",
+          message: "Offline sync couldn't clear sent events from local storage; retrying later.",
+          at: Date.now(),
+        });
+        this.savedIssues = issues.slice(-50);
+        this.saveIssues();
+        this.retry = setTimeout(() => void this.flush(), this.retryMs);
+        this.retryMs = Math.min(MAX_RETRY_MS, this.retryMs * 2);
+        return;
+      }
+      for (const id of batch.ids) seenIds.add(id);
       try {
         const response = await request<UnifiedSyncResponse>(
           "POST",

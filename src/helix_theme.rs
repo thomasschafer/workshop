@@ -663,6 +663,9 @@ fn parse_raw_color(s: &str) -> Result<ResolvedColor> {
 }
 
 fn parse_hex_color(hex: &str) -> Result<String> {
+    if !hex.is_ascii() {
+        bail!("invalid hex colour #{hex}");
+    }
     match hex.len() {
         6 => {
             let r = u8::from_str_radix(&hex[0..2], 16)?;
@@ -851,5 +854,11 @@ comment = "#445566"
 
         // Traversal names are rejected.
         assert!(load_in(&dirs, "../secret").is_err());
+    }
+
+    #[test]
+    fn rejects_non_ascii_hex_colours_without_panicking() {
+        assert!(parse_hex_color("éa").is_err());
+        assert!(parse_hex_color("ééé").is_err());
     }
 }

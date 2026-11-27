@@ -580,10 +580,12 @@ impl Learning {
     }
 
     /// How each of the packs' goals is going.
-    pub fn goals(&self, now: i64) -> Result<Vec<crate::goals::GoalProgress>> {
+    pub fn goals(&self, clock: Clock) -> Result<Vec<crate::goals::GoalProgress>> {
         let packs = self.packs()?;
         let items = practised(&packs);
-        let recent = self.store.mistakes(now - crate::mistakes::RECENT_MS)?;
+        let recent = self
+            .store
+            .mistakes(clock.now - crate::mistakes::RECENT_MS)?;
         Ok(crate::goals::progress(
             &packs,
             &item_refs(&items),
@@ -591,7 +593,7 @@ impl Learning {
             &self.store.retirement_changes()?,
             &recent,
             self.store.scheduler(),
-            now,
+            clock,
         ))
     }
 
@@ -680,12 +682,13 @@ impl Learning {
         designs: &BTreeMap<String, workshop_sessions::design::Session>,
         problems: &BTreeMap<String, crate::coding::Started>,
     ) -> Tracks {
+        let empty = workshop_learning::TrackPlan::default();
         let tracks = planned
             .names
             .iter()
             .filter(|(id, _)| **id != TrackId::Coding)
             .map(|(id, (name, icon))| {
-                let plan = &planned.plans[id];
+                let plan = planned.plans.get(id).unwrap_or(&empty);
                 if *id == TrackId::SystemDesign {
                     return design_track(plan, planned, designs);
                 }
@@ -1855,5 +1858,59 @@ mod tests {
         let next = tracks.tracks[0].next.as_ref().unwrap();
         // The week's target is met, so something new can wait.
         assert_eq!(next.priority, Priority::Browse);
+    }
+
+    #[test]
+    fn tracks_does_not_panic_when_every_item_in_a_track_has_a_follow_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("single-pack");
+        std::fs::create_dir_all(pack.join("items")).unwrap();
+        std::fs::write(
+            pack.join("pack.toml"),
+            "id = \"solo\"\nname = \"Solo\"\n\n[[skills]]\nid = \"s\"\nname = \"S\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            pack.join("items/only.md"),
+            "+++\nkind = \"card\"\nskills = [\"s\"]\n+++\nOnly question?\n\n## Answer\n\nOnly answer.\n",
+        )
+        .unwrap();
+        let config = LearningConfig {
+            packs: vec![pack],
+            sample_pack: false,
+            daily_reviews: 10,
+            daily_new: 10,
+            weekly_minutes: 60,
+            desired_retention: 0.9,
+        };
+        let learning = Learning::open(&config, dir.path()).unwrap();
+        let exchange = crate::follow_ups::Exchange {
+            id: "ex-1".to_owned(),
+            limit: workshop_pack::FollowUps::new(2).unwrap(),
+            answer: crate::follow_ups::Said {
+                text: "my answer".to_owned(),
+                spoken: false,
+                at: NOW,
+            },
+            questions: Vec::new(),
+            attempts_before: 0,
+            started_at: NOW,
+            updated_at: NOW,
+            marked: None,
+        };
+        learning.exchanges().put("solo/only", &exchange).unwrap();
+
+        let tracks = tracks_at(&learning, clock(NOW));
+        assert_eq!(tracks.tracks.len(), 1);
+        let next = tracks.tracks[0]
+            .next
+            .as_ref()
+            .expect("track should still offer the active follow-up");
+        assert!(
+            next.reason.to_lowercase().contains("follow")
+                || next.title.to_lowercase().contains("follow")
+                || matches!(next.destination, Destination::Practice { .. }),
+            "unexpected next step: {next:?}"
+        );
     }
 }

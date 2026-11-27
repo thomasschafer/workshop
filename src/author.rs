@@ -641,27 +641,53 @@ pub async fn approve(
     result
 }
 
+/// Restores the pack working tree if approving a queued item fails before the commit lands.
+struct ApproveRollback {
+    written: Vec<PathBuf>,
+    removed_draft: Option<(PathBuf, Vec<u8>)>,
+    armed: bool,
+}
+
+impl ApproveRollback {
+    fn new() -> Self {
+        Self {
+            written: Vec::new(),
+            removed_draft: None,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ApproveRollback {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        for path in &self.written {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Some((path, bytes)) = &self.removed_draft {
+            let _ = workshop_common::files::write_atomic(path, bytes);
+        }
+    }
+}
+
 async fn approve_queued(config: &Config, paths: &Paths, queued: &Queued) -> Result<Option<String>> {
     let dir = crate::pack_files::pack_dir(&config.learning, &queued.pack)?;
     let item = &queued.item;
     if item.files.keys().any(|path| dir.join(path).exists()) {
         bail!("the pack has a file where this item would go, so it wasn't added");
     }
+    let mut rollback = ApproveRollback::new();
     for (path, text) in &item.files {
         crate::pack_files::write(&dir, path, text)?;
+        rollback.written.push(dir.join(path));
     }
-    let undo = || {
-        for path in item.files.keys() {
-            let _ = std::fs::remove_file(dir.join(path));
-        }
-    };
-    let mut pack = match Pack::load(&dir) {
-        Ok(pack) => pack,
-        Err(err) => {
-            undo();
-            return Err(err);
-        }
-    };
+    let mut pack = Pack::load(&dir)?;
     // Only this item: the rest of the pack is as it was, and coding problems take a while.
     pack.items.retain(|i| i.path == item.path);
     let runtime = crate::coding::runtime(config, paths).await?;
@@ -677,38 +703,57 @@ async fn approve_queued(config: &Config, paths: &Paths, queued: &Queued) -> Resu
         .find(|p| item.files.contains_key(&p.path))
         .map(|p| p.message.clone())
         .or_else(|| {
-            report
+            match report
                 .items
                 .iter()
                 .find(|c| c.path == item.path)
-                .and_then(|c| match &c.verdict {
-                    workshop_pack::Verdict::Passed(_) => None,
-                    workshop_pack::Verdict::Failed(why) => Some(why.clone()),
-                    workshop_pack::Verdict::Skipped(why) => {
-                        Some(format!("it couldn't be checked here, as {why}"))
-                    }
-                })
+                .map(|c| &c.verdict)
+            {
+                Some(workshop_pack::Verdict::Passed(_)) => None,
+                Some(workshop_pack::Verdict::Failed(why)) => Some(why.clone()),
+                Some(workshop_pack::Verdict::Skipped(why)) => {
+                    Some(format!("it couldn't be checked here, as {why}"))
+                }
+                None => Some(
+                    report
+                        .problems
+                        .first()
+                        .map_or_else(|| "it can't be read".to_owned(), |p| p.message.clone()),
+                ),
+            }
         });
     if let Some(problem) = problem {
-        undo();
         bail!("it doesn't pass its check now, so it wasn't added: {problem}");
     }
     let mut paths: Vec<String> = item.files.keys().cloned().collect();
-    if let Some(draft) = &item.from_draft
-        && dir.join(draft).is_file()
-    {
-        std::fs::remove_file(dir.join(draft))?;
-        paths.push(draft.clone());
+    if let Some(draft) = &item.from_draft {
+        let draft_path = dir.join(draft);
+        if draft_path.is_file() {
+            let bytes = std::fs::read(&draft_path)
+                .with_context(|| format!("reading {}", draft_path.display()))?;
+            std::fs::remove_file(&draft_path)
+                .with_context(|| format!("removing {}", draft_path.display()))?;
+            rollback.removed_draft = Some((draft_path, bytes));
+            paths.push(draft.clone());
+        }
     }
-    crate::pack_files::commit(
-        &dir,
-        &paths,
-        &format!(
-            "Add an item from the author, approved: {}\n\nThe reviewer didn't agree with it; it was approved in the app.",
-            item.label
-        ),
-    )
-    .await
+    let message = format!(
+        "Add an item from the author, approved: {}\n\nThe reviewer didn't agree with it; it was approved in the app.",
+        item.label
+    );
+    match crate::pack_files::commit(&dir, &paths, &message).await {
+        Ok(hash) => {
+            rollback.disarm();
+            Ok(hash)
+        }
+        Err(err) => {
+            // Unstage any paths that `git add` staged before `git commit` failed.
+            let mut reset = vec!["reset", "--quiet", "HEAD", "--"];
+            reset.extend(paths.iter().map(String::as_str));
+            let _ = crate::workspace::git(&dir, &reset).await;
+            Err(err)
+        }
+    }
 }
 
 /// What a run did, for the command line.

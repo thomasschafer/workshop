@@ -30,18 +30,22 @@ pub struct Clock {
 }
 
 impl Clock {
+    /// The learner's local calendar day, in days since 1 January 1970.
+    pub fn local_day(&self) -> i64 {
+        let offset = i64::from(self.utc_offset_minutes) * 60 * 1000;
+        (self.now + offset).div_euclid(DAY_MS)
+    }
+
     /// The start of the learner's day, in milliseconds since 1970.
     pub fn day_start(&self) -> i64 {
         let offset = i64::from(self.utc_offset_minutes) * 60 * 1000;
-        (self.now + offset).div_euclid(DAY_MS) * DAY_MS - offset
+        self.local_day() * DAY_MS - offset
     }
 
     /// The start of the learner's week, on Monday.
     pub fn week_start(&self) -> i64 {
-        let offset = i64::from(self.utc_offset_minutes) * 60 * 1000;
-        let day = (self.now + offset).div_euclid(DAY_MS);
         // 1 January 1970 was a Thursday, three days after a Monday.
-        let since_monday = (day + 3).rem_euclid(7);
+        let since_monday = (self.local_day() + 3).rem_euclid(7);
         self.day_start() - since_monday * DAY_MS
     }
 }

@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 use workshop_learning::schedule::DAY_MS;
-use workshop_learning::{Attempt, ItemRef, Mistake, RetirementChange, Scheduler, SkillMastery};
+use workshop_learning::{
+    Attempt, Clock, ItemRef, Mistake, RetirementChange, Scheduler, SkillMastery,
+};
 use workshop_pack::Pack;
 
 /// How many weeks back the trend goes.
@@ -52,7 +54,7 @@ pub struct Point {
     pub mastery: f64,
 }
 
-/// Every goal in the packs, with how it's going at `now`. `items` are the items there's
+/// Every goal in the packs, with how it's going at `clock`. `items` are the items there's
 /// practice of, and `attempts` and `retirements` every attempt and retirement change, in the
 /// order they were made.
 #[allow(clippy::too_many_arguments)]
@@ -63,11 +65,11 @@ pub fn progress(
     retirements: &[RetirementChange],
     mistakes: &[Mistake],
     scheduler: &Scheduler,
-    now: i64,
+    clock: Clock,
 ) -> Vec<GoalProgress> {
     let times: Vec<i64> = (0..=TREND_WEEKS)
         .rev()
-        .map(|weeks| now - weeks * 7 * DAY_MS)
+        .map(|weeks| clock.now - weeks * 7 * DAY_MS)
         .collect();
     let history = workshop_learning::history(items, attempts, retirements, scheduler, &times);
     let at = |index: usize| -> BTreeMap<&str, &SkillMastery> {
@@ -79,7 +81,7 @@ pub fn progress(
     let now_index = times.len() - 1;
     let current = at(now_index);
     let items_by_key = crate::mistakes::items_by_key(packs);
-    let today = now.div_euclid(DAY_MS);
+    let today = clock.local_day();
     packs
         .iter()
         .flat_map(|pack| pack.manifest.goals.iter().map(move |goal| (pack, goal)))
@@ -201,7 +203,12 @@ mod tests {
                 NOW,
             )
             .unwrap();
-        let goals = learning.goals(NOW).unwrap();
+        let goals = learning
+            .goals(Clock {
+                now: NOW,
+                utc_offset_minutes: 0,
+            })
+            .unwrap();
         let names: Vec<&str> = goals.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(
             names,
@@ -236,5 +243,66 @@ mod tests {
         );
         assert_eq!(arithmetic.mistakes[0].error_type, "concept-gap");
         assert_eq!(goals[1].progress, 0.0);
+    }
+
+    #[test]
+    fn days_left_uses_the_learners_local_calendar_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack_dir = dir.path().join("dated-pack");
+        std::fs::create_dir_all(pack_dir.join("items")).unwrap();
+        std::fs::write(
+            pack_dir.join("pack.toml"),
+            r#"
+id = "dated"
+name = "Dated"
+
+[[skills]]
+id = "s"
+name = "Skill"
+
+[[goals]]
+id = "exam"
+name = "Exam"
+skills = ["s"]
+mastery = 0.8
+by = "2026-10-15"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pack_dir.join("items/one.md"),
+            "+++\nkind = \"card\"\nskills = [\"s\"]\n+++\nQ?\n\n## Answer\n\nA.\n",
+        )
+        .unwrap();
+        let config = LearningConfig {
+            packs: vec![pack_dir],
+            sample_pack: false,
+            daily_reviews: 40,
+            daily_new: 10,
+            weekly_minutes: 90,
+            desired_retention: 0.9,
+        };
+        let learning = Learning::open(&config, dir.path()).unwrap();
+
+        // 2026-10-14T23:30:00Z is already 2026-10-15 at UTC+02:00.
+        let oct_15_utc_ms = 20_741 * DAY_MS;
+        let late_oct_14_utc = oct_15_utc_ms - 30 * 60 * 1000;
+        let ahead = learning
+            .goals(Clock {
+                now: late_oct_14_utc,
+                utc_offset_minutes: 120,
+            })
+            .unwrap();
+        assert_eq!(ahead[0].days_left, Some(0));
+
+        // 2026-10-15T00:30:00Z is still 2026-10-14 at UTC-05:00.
+        let early_oct_15_utc = oct_15_utc_ms + 30 * 60 * 1000;
+        let behind = learning
+            .goals(Clock {
+                now: early_oct_15_utc,
+                utc_offset_minutes: -300,
+            })
+            .unwrap();
+        assert_eq!(behind[0].days_left, Some(1));
     }
 }

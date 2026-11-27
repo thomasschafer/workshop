@@ -578,7 +578,8 @@ export function ProblemView({
       graded: Graded,
       buildNext: (baseVersion: number, now: number) => Session,
     ): Promise<Session> => {
-      await saver.flush().catch(() => {});
+      // Offline/timeout saves are queued into the outbox by saver itself; let real save errors surface.
+      await saver.flush();
       const now = Date.now();
       const currentSession = sessionRef.current;
       const baseVersion = versions.current.nextBaseVersion(currentSession?.version ?? 1);

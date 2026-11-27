@@ -152,6 +152,7 @@ impl TerminalTheme {
             };
             if let Some(index) = key.trim().strip_prefix("base0")
                 && let Ok(index) = usize::from_str_radix(index, 16)
+                && index < 16
             {
                 base[index] = Rgb::parse(value);
             }
@@ -434,6 +435,7 @@ mod tests {
     fn rejects_incomplete_themes() {
         assert!(TerminalTheme::parse_ghostty("palette = 1=#cc3333").is_err());
         assert!(TerminalTheme::parse_base16("base00: \"101010\"").is_err());
+        assert!(TerminalTheme::parse_base16("base010: \"ffffff\"").is_err());
     }
 
     #[test]

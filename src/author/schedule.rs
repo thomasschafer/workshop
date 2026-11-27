@@ -81,11 +81,14 @@ impl FromStr for Every {
                 "{text:?} isn't how often to run: write a number of hours, days or weeks, such as \"12h\", \"7d\" or \"2w\""
             )
         };
-        let (count, unit) = text.split_at(text.len().saturating_sub(1));
+        let Some(unit) = text.chars().last() else {
+            return Err(wrong());
+        };
+        let count = &text[..text.len() - unit.len_utf8()];
         let unit = match unit {
-            "h" => Unit::Hours,
-            "d" => Unit::Days,
-            "w" => Unit::Weeks,
+            'h' => Unit::Hours,
+            'd' => Unit::Days,
+            'w' => Unit::Weeks,
             _ => return Err(wrong()),
         };
         let count: u32 = count.parse().map_err(|_| wrong())?;
@@ -517,5 +520,12 @@ mod tests {
         assert_eq!(broken.body, "the writer timed out");
         let long = failed("My pack", &"x".repeat(500));
         assert_eq!(long.body.chars().count(), 160);
+    }
+
+    #[test]
+    fn rejects_empty_and_multibyte_utf8_intervals_without_panicking() {
+        assert!("".parse::<Every>().is_err());
+        assert!("7日".parse::<Every>().is_err());
+        assert!("é".parse::<Every>().is_err());
     }
 }

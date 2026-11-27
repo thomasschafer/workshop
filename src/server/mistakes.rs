@@ -25,7 +25,7 @@ pub(super) struct Goals {
 pub(super) async fn goals(State(app): State<Shared>, Query(at): Query<Where>) -> ApiResult<Goals> {
     let clock = at.clock()?;
     Ok(Json(Goals {
-        goals: app.learning.goals(clock.now)?,
+        goals: app.learning.goals(clock)?,
     }))
 }
 

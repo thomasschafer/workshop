@@ -372,4 +372,69 @@ describe("Outbox", () => {
     expect(sentBatches[0]?.mistake_tags.map((t) => t.mistake_id)).toEqual(["m1"]);
     expect(sentBatches[1]?.mistake_tags.map((t) => t.mistake_id)).toEqual(["m2"]);
   });
+
+  it("stops loudly instead of spinning when storage cannot persist the cleared outbox", async () => {
+    vi.useFakeTimers();
+    try {
+      const inner = memoryStorage();
+      let failWrites = false;
+      const flakyStorage: Storage = {
+        get length() {
+          return inner.length;
+        },
+        clear: () => inner.clear(),
+        getItem: (k: string) => inner.getItem(k),
+        key: (i: number) => inner.key(i),
+        removeItem: (k: string) => inner.removeItem(k),
+        setItem: (k: string, v: string) => {
+          if (failWrites && k === "workshop:outbox") {
+            throw new DOMException("Quota exceeded", "QuotaExceededError");
+          }
+          inner.setItem(k, v);
+        },
+      };
+
+      const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          mistake_tags: { id: string }[];
+        };
+        return new Response(
+          JSON.stringify({
+            deck: emptyDeck,
+            coding_results: [],
+            mistake_tag_results: body.mistake_tags.map((t) => ({ id: t.id, ok: true })),
+          }),
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const ob = new Outbox(flakyStorage);
+      ob.enqueueCodingEvent(
+        {
+          kind: "finished",
+          id: "stuck-1",
+          item: "sample/a",
+          base_version: null,
+          rating: "good",
+          plan: null,
+          duration_ms: 0,
+          answered_at: 1000,
+        },
+        false,
+      );
+      failWrites = true;
+
+      await ob.flush();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(ob.issues().some((i) => i.item === "sync" && i.kind === "error")).toBe(true);
+
+      // Once storage recovers, the scheduled backoff retry succeeds cleanly.
+      failWrites = false;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(ob.pending).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
