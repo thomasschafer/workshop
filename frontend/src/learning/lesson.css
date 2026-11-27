@@ -1,0 +1,280 @@
+/* Lesson screen and track lessons list, built phone-first and matching practice.css. */
+
+.learn-lessons {
+  margin-top: 20px;
+}
+
+.lesson-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lesson-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+
+.lesson-item-name {
+  font-weight: 600;
+}
+
+.lesson-item-detail {
+  font-size: 13px;
+}
+
+.lesson-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lesson-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lesson-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.lesson-segment-title {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+.lesson-meta,
+.lesson-step-label,
+.lesson-requires-note {
+  margin: 0;
+  font-size: 13px;
+}
+
+.lesson-not-sure {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+/* Segment progress indicator: compact bars, each tappable up to the furthest segment reached. */
+.lesson-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lesson-progress-label {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lesson-progress-bars {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: 6px;
+}
+
+.lesson-progress-bars li {
+  flex: 1;
+}
+
+.lesson-progress-bar {
+  display: block;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  background: none;
+}
+
+.lesson-progress-bar::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.lesson-progress-bar.done::before,
+.lesson-progress-bar.reached::before {
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+.lesson-progress-bar.current::before {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.lesson-progress-bar:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+/* Embedded SVG and PNG figures inside lesson segments. */
+.lesson-figure {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+.lesson-figure svg,
+.lesson-inline-figure svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.lesson-figure img,
+.lesson-image-png {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 4px;
+}
+
+/* Predict-then-reveal check after a segment. */
+.lesson-check {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.lesson-check > .tracks-heading {
+  margin: 0;
+}
+
+.lesson-check .learn-choice.right:disabled,
+.lesson-check .learn-choice.wrong:disabled {
+  opacity: 0.9;
+}
+
+.lesson-explain-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lesson-explain-actions .pill {
+  min-height: 48px;
+}
+
+/* Bottom navigation between segments. */
+.lesson-nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.lesson-nav .pill {
+  min-height: 48px;
+}
+
+.lesson-nav .lesson-continue {
+  flex: 1;
+}
+
+/* Learner's own explanation shown alongside the explain answer when comparing offline or ungraded. */
+.lesson-your-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.lesson-your-answer > .tracks-heading,
+.lesson-your-answer > p {
+  margin: 0;
+}
+
+.lesson-your-answer > p {
+  white-space: pre-wrap;
+}
+
+/* Recap: guesses and further reading. */
+.lesson-recap-guesses,
+.lesson-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lesson-recap-guesses > .tracks-heading,
+.lesson-sources > .tracks-heading {
+  margin: 0;
+}
+
+.lesson-recap-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lesson-recap-guess {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.lesson-recap-guess.right {
+  border-left-color: var(--ok);
+}
+
+.lesson-recap-picked,
+.lesson-recap-answer {
+  margin: 0;
+  font-size: 14px;
+}
+
+.lesson-recap-answer {
+  font-weight: 600;
+}
+
+.lesson-source-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lesson-source-list a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}

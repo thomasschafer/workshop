@@ -66,6 +66,61 @@ export type DeckItem = ItemBase &
       ))
   );
 
+export interface DeckLessonSource {
+  title: string;
+  url: string;
+}
+
+export interface DeckLessonGuess {
+  prompt: string;
+  choices: string[];
+  /** The right choice, counting from 0. */
+  answer: number;
+}
+
+export interface DeckLessonCheck {
+  prompt: string;
+  choices: string[];
+  /** The right choice, counting from 0. */
+  answer: number;
+  explanation: string;
+}
+
+export interface DeckLessonSegment {
+  title: string;
+  body: string;
+  check: DeckLessonCheck | null;
+}
+
+export type DeckLessonImage = { kind: "svg"; svg: string } | { kind: "png"; data_url: string };
+
+export interface DeckLesson {
+  /** `pack/item`. */
+  key: string;
+  track: TrackId;
+  title: string;
+  skills: string[];
+  /** What the lesson covers, in Markdown. */
+  prompt: string;
+  source: string | null;
+  minutes: number;
+  /** Full `pack/item` keys of lessons in the same pack to do first. */
+  requires: string[];
+  sources: DeckLessonSource[];
+  guesses: DeckLessonGuess[];
+  segments: DeckLessonSegment[];
+  explain: string;
+  explain_answer: string;
+  /** Images referenced in segments, keyed by their relative path inside the lesson's directory. */
+  images: Record<string, DeckLessonImage>;
+}
+
+export interface LessonCompletion {
+  id: string;
+  lesson: string;
+  completed_at: number;
+}
+
 export interface Limits {
   daily_reviews: number;
   /** The most new items to start in a day. Decks saved on a device by an older Workshop don't
@@ -102,11 +157,16 @@ export interface Deck {
     progress?: DeckProgress | null;
   }[];
   items: DeckItem[];
+  /** Lessons in the packs, with their embedded images. Missing from decks saved by an older Workshop. */
+  lessons?: DeckLesson[];
   schedules: Record<string, ItemSchedule>;
   flags: Record<string, { at: number; note: string | null }>;
   /** Where each item that's ever been retired stands. Decks saved on a device by an older
    * Workshop don't have it. */
   retirements?: Record<string, Retirement>;
+  /** Completion timestamps (ms since 1970) per lesson key. Missing from decks saved by an older
+   * Workshop. */
+  lesson_completions?: Record<string, number[]>;
   skills: { id: string; name: string; mastery: number; items: number; attempted: number }[];
   /** The skills recent mistakes point to, whose new items come first. Decks saved on a device
    * by an older Workshop don't have it. */

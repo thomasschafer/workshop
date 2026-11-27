@@ -44,6 +44,7 @@ describe("pathOf", () => {
       { screen: "home" },
       { screen: "advent-of-code" },
       { screen: "practice", track: "pack:estimation" },
+      { screen: "lesson", item: "sample/binary-heaps" },
       { screen: "coding", item: null },
       { screen: "coding", item: "sample/islands" },
       { screen: "mistakes" },
@@ -94,5 +95,14 @@ describe("routeFor", () => {
       screen: "practice",
       track: "mental-maths",
     });
+  });
+
+  it("opens a lesson at its own address and falls back to home for invalid paths", () => {
+    expect(routeOf("/lessons/sample/binary-heaps", "")).toEqual({
+      screen: "lesson",
+      item: "sample/binary-heaps",
+    });
+    expect(routeOf("/lessons/", "")).toEqual({ screen: "home" });
+    expect(routeOf("/lessons/sample/Bad/extra", "")).toEqual({ screen: "home" });
   });
 });

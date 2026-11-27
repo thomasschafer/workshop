@@ -75,7 +75,9 @@ describe("Learning", () => {
     const reloaded = new Learning(storage);
     expect(reloaded.attempts).toEqual([first]);
     await reloaded.sync();
-    expect(sent).toEqual([{ attempts: [first], flags: [], retirements: [] }]);
+    expect(sent).toEqual([
+      { attempts: [first], flags: [], retirements: [], lesson_completions: [] },
+    ]);
     expect(reloaded.attempts).toEqual([]);
     expect(reloaded.deck).toEqual(DECK);
     expect(reloaded.syncStatus).toMatchObject({ pending: 0, offline: false });
@@ -125,7 +127,7 @@ describe("Learning", () => {
     // It's the server's already, so there's nothing to send.
     expect(reloaded.syncStatus.pending).toBe(0);
     await reloaded.sync();
-    expect(sent).toEqual([{ attempts: [], flags: [], retirements: [] }]);
+    expect(sent).toEqual([{ attempts: [], flags: [], retirements: [], lesson_completions: [] }]);
     expect(reloaded.attempts).toEqual([]);
   });
 
@@ -246,7 +248,14 @@ describe("Learning", () => {
     const reloaded = new Learning(storage);
     expect(reloaded.syncStatus.pending).toBe(1);
     await reloaded.sync();
-    expect(sent).toEqual([{ attempts: [easy], flags: [], retirements: offline.retirementChanges }]);
+    expect(sent).toEqual([
+      {
+        attempts: [easy],
+        flags: [],
+        retirements: offline.retirementChanges,
+        lesson_completions: [],
+      },
+    ]);
     expect(reloaded.retirementChanges).toEqual([]);
     expect(reloaded.syncStatus.pending).toBe(0);
 
@@ -276,7 +285,52 @@ describe("Learning", () => {
     const learning = new Learning(storage);
     expect(learning.syncStatus.pending).toBe(1);
     await learning.sync();
-    expect(sent).toEqual([{ attempts: [first], flags: [], retirements: [] }]);
+    expect(sent).toEqual([
+      { attempts: [first], flags: [], retirements: [], lesson_completions: [] },
+    ]);
+  });
+
+  it("keeps lesson completions offline until synced", async () => {
+    const storage = new MemoryStorage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    const offline = new Learning(storage);
+    const completion = {
+      id: newId(),
+      lesson: "sample/binary-heaps",
+      completed_at: Date.now(),
+    };
+    offline.completeLesson(completion);
+    // Duplicate id is ignored.
+    offline.completeLesson(completion);
+    await offline.sync();
+    expect(offline.syncStatus).toMatchObject({ pending: 1, offline: true, error: null });
+
+    const sent: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify({
+            ...DECK,
+            lesson_completions: { "sample/binary-heaps": [completion.completed_at] },
+          }),
+        );
+      }),
+    );
+    const reloaded = new Learning(storage);
+    expect(reloaded.lessonCompletions).toEqual([completion]);
+    await reloaded.sync();
+    expect(sent).toEqual([
+      { attempts: [], flags: [], retirements: [], lesson_completions: [completion] },
+    ]);
+    expect(reloaded.lessonCompletions).toEqual([]);
+    expect(reloaded.syncStatus).toMatchObject({ pending: 0, offline: false });
   });
 
   it("keeps attempts the server refuses, saying why", async () => {

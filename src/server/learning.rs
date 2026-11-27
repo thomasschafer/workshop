@@ -81,6 +81,12 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let deck = json(response).await;
         assert_eq!(deck["items"].as_array().unwrap().len(), 51);
+        assert_eq!(deck["lessons"].as_array().unwrap().len(), 1);
+        assert_eq!(deck["lessons"][0]["key"], "sample/binary-heaps");
+        assert_eq!(
+            deck["lessons"][0]["images"]["heap-array.svg"]["kind"],
+            "svg"
+        );
         assert_eq!(deck["limits"]["daily_reviews"], 40);
         assert_eq!(deck["limits"]["daily_new"], 10);
         assert_eq!(deck["progress"]["new_today"], 0);
@@ -102,6 +108,25 @@ mod tests {
         assert_eq!(again.status(), StatusCode::OK);
         let again = json(again).await;
         assert_eq!(again["schedules"]["sample/binary-heap-costs"]["reviews"], 1);
+
+        let completion = serde_json::json!({
+            "lesson_completions": [{
+                "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a22",
+                "lesson": "sample/binary-heaps",
+                "completed_at": now,
+            }],
+        });
+        let done = json(send(&router, sync_request(&completion)).await).await;
+        assert_eq!(
+            done["lesson_completions"]["sample/binary-heaps"],
+            serde_json::json!([now])
+        );
+        // Sent again, it's recorded once.
+        let done_again = json(send(&router, sync_request(&completion)).await).await;
+        assert_eq!(
+            done_again["lesson_completions"]["sample/binary-heaps"],
+            serde_json::json!([now])
+        );
     }
 
     #[tokio::test]

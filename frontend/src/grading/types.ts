@@ -2,7 +2,7 @@
 
 import type { Attempt } from "../learning/types";
 
-export type Work = "design" | "plan" | "card" | "explanation";
+export type Work = "design" | "plan" | "card" | "explanation" | "lesson";
 
 export interface Marked {
   /** From 0 to 1. */

@@ -4138,6 +4138,7 @@ version = "0.8.1"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.23.1",
  "clap",
  "dirs",
  "futures-util",

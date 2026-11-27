@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  completedLessons,
   dayStart,
   flagged,
+  lessonsInTrack,
   newId,
   nextInstance,
   progress,
   queue,
   retired,
   step,
+  unmetRequires,
   weekStart,
 } from "./local";
 import { DAY_MS, review } from "./schedule";
-import type { Attempt, Deck, DeckItem, RetirementChange } from "./types";
+import type { Attempt, Deck, DeckItem, DeckLesson, RetirementChange } from "./types";
 
 // 2026-09-21, a Monday, at 23:30 UTC.
 const LATE_MONDAY = 1_790_033_400_000;
@@ -414,5 +417,47 @@ describe("retirements", () => {
     // Once it's done again, its schedule says when it's due.
     const again = [attempt("p/a", LATE_MONDAY - 30_000)];
     expect(queue(d, "review", again, [], back, LATE_MONDAY, 0).due).toEqual([]);
+  });
+});
+
+describe("lessons", () => {
+  const lesson = (key: string, title: string, requires: string[] = []): DeckLesson => ({
+    key,
+    track: "review",
+    title,
+    skills: ["data-structures"],
+    prompt: "Summary",
+    source: null,
+    minutes: 4,
+    requires,
+    sources: [{ title: "Ref", url: "https://example.com" }],
+    guesses: [],
+    segments: [{ title: "One", body: "Body", check: null }],
+    explain: "Why?",
+    explain_answer: "Because.",
+    images: {},
+  });
+
+  it("merges deck and pending completions and identifies unmet prerequisites", () => {
+    const first = lesson("p/first", "First lesson");
+    const second = lesson("p/second", "Second lesson", ["p/first"]);
+    const other = { ...lesson("p/other", "Other"), track: "coding" as const };
+    const d = deck([], {
+      lessons: [first, second, other],
+      lesson_completions: { "p/first": [1000] },
+    });
+
+    expect(lessonsInTrack(d, "review").map((l) => l.key)).toEqual(["p/first", "p/second"]);
+    expect(lessonsInTrack(d, "coding").map((l) => l.key)).toEqual(["p/other"]);
+
+    const merged = completedLessons(d, [
+      { id: newId(), lesson: "p/first", completed_at: 2000 },
+      { id: newId(), lesson: "p/second", completed_at: 3000 },
+    ]);
+    expect(merged["p/first"]).toEqual([1000, 2000]);
+    expect(merged["p/second"]).toEqual([3000]);
+
+    expect(unmetRequires(d, second, {})).toEqual([{ key: "p/first", title: "First lesson" }]);
+    expect(unmetRequires(d, second, merged)).toEqual([]);
   });
 });

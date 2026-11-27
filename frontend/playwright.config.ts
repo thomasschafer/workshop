@@ -12,9 +12,12 @@ import {
   createCodingHome,
   createHome,
   createLearningHome,
+  createLessonsHome,
   HOME,
   LEARNING_HOME,
   LEARNING_PORT,
+  LESSONS_HOME,
+  LESSONS_PORT,
   PORT,
 } from "./e2e/fixture";
 
@@ -26,6 +29,7 @@ if (process.env.WORKSHOP_E2E_HOME_READY === undefined) {
   createCodingHome();
   createAuthorHome();
   createCodebaseHome();
+  createLessonsHome();
   process.env.WORKSHOP_E2E_HOME_READY = "1";
 }
 
@@ -69,6 +73,7 @@ export default defineConfig({
     { home: CODING_HOME, port: CODING_PORT },
     { home: AUTHOR_HOME, port: AUTHOR_PORT },
     { home: CODEBASE_HOME, port: CODEBASE_PORT },
+    { home: LESSONS_HOME, port: LESSONS_PORT },
   ].map(({ home, port }) => ({
     command: `${binary} serve`,
     env: {

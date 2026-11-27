@@ -153,7 +153,9 @@ pub(super) async fn mark(
             .record_marked(attempt.clone(), &findings, now)?;
         (due(&app, &key)?, Some(attempt))
     } else {
-        app.learning.store().record_mistakes(&findings)?;
+        if body.work.logs_mistakes() {
+            app.learning.store().record_mistakes(&findings)?;
+        }
         (None, None)
     };
     if body.work == Work::Design {
@@ -749,5 +751,31 @@ mod tests {
         assert_eq!(reviewed["cleared"], true);
         let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
         assert_eq!(deck["flags"], serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn marks_a_lesson_without_scheduling_or_logging_mistakes() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = app(dir.path());
+        let body = serde_json::json!({
+            "id": "5f0c2a8e-4a51-4c3e-9d0b-1f6b2f0f8a91",
+            "work": "lesson",
+            "text": "Because the tree is complete, children are at 2i+1 and 2i+2 and height is log n.",
+        });
+        let marked = json(
+            send(
+                &router,
+                request("POST", "/api/items/sample/binary-heaps/mark", Some(body)),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(marked["marked"]["score"], 0.65);
+        assert_eq!(marked["due"], serde_json::Value::Null);
+        assert_eq!(marked["attempt"], serde_json::Value::Null);
+        let deck = json(send(&router, request("GET", "/api/learning/deck", None)).await).await;
+        assert!(deck["schedules"].get("sample/binary-heaps").is_none());
+        let log = json(send(&router, request("GET", "/api/mistakes", None)).await).await;
+        assert_eq!(log["mistakes"], serde_json::json!([]));
     }
 }

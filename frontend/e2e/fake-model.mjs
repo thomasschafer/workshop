@@ -237,6 +237,42 @@ if (prompt.includes("<change>") && prompt.includes("<work>")) {
   process.exit(0);
 }
 
+// The grader, marking a lesson's explain-in-your-own-words answer.
+if (prompt.includes("<lesson>") && prompt.includes("<work>")) {
+  const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";
+  const thorough = work.toLowerCase().includes("complete") || work.toLowerCase().includes("height");
+  await reply([
+    JSON.stringify({
+      score: thorough ? 0.9 : 0.6,
+      points: [
+        {
+          point: "Explains the answer accurately, in any words",
+          met: "yes",
+          comment: "",
+        },
+        {
+          point: "Covers the key points in the explain answer",
+          met: thorough ? "yes" : "partly",
+          comment: thorough ? "" : "Mention how completeness keeps the height O(log n).",
+        },
+        {
+          point: "Says nothing that contradicts the lesson",
+          met: "yes",
+          comment: "",
+        },
+      ],
+      findings: [],
+      feedback: thorough
+        ? "Clear explanation of both the flat array layout and why updates stay O(log n)."
+        : "Good start; also tie the complete tree shape to the **log n** height.",
+      ...(prompt.includes("explained this aloud")
+        ? { clarity: { score: 0.85, feedback: "Clear and easy to follow." } }
+        : {}),
+    }),
+  ]);
+  process.exit(0);
+}
+
 // The grader, marking written work or checking a card.
 if (prompt.includes("<work>")) {
   const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";

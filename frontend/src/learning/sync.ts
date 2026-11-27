@@ -13,7 +13,7 @@ import {
 import { errorMessage } from "../errors";
 import { outbox, type UnifiedSyncResponse } from "../offline/outbox";
 import { newId, utcOffset } from "./local";
-import type { Attempt, Deck, FlagChange, RetirementChange } from "./types";
+import type { Attempt, Deck, FlagChange, LessonCompletion, RetirementChange } from "./types";
 
 const STORAGE_KEY = "workshop:learning";
 
@@ -28,6 +28,8 @@ interface Saved {
   flags: FlagChange[];
   /** Missing from what an older Workshop saved on the device. */
   retirements?: RetirementChange[];
+  /** Lesson completions waiting to reach the server. Missing from older saved state. */
+  lesson_completions?: LessonCompletion[];
   /**
    * Recorded by the server itself since the deck came, as when the grader marks an answer, so
    * not to send. Missing from what an older Workshop saved on the device.
@@ -87,7 +89,12 @@ export class Learning {
   private pending(): number {
     const attempts = new Set(this.saved.attempts.map((a) => a.id));
     const changes = this.retirementChanges.filter((change) => !attempts.has(change.id));
-    return this.saved.attempts.length + this.saved.flags.length + changes.length;
+    return (
+      this.saved.attempts.length +
+      this.saved.flags.length +
+      changes.length +
+      this.lessonCompletions.length
+    );
   }
 
   get deck(): Deck | null {
@@ -109,6 +116,10 @@ export class Learning {
 
   get retirementChanges(): RetirementChange[] {
     return this.saved.retirements ?? [];
+  }
+
+  get lessonCompletions(): LessonCompletion[] {
+    return this.saved.lesson_completions ?? [];
   }
 
   get syncStatus(): SyncStatus {
@@ -192,6 +203,17 @@ export class Learning {
     void this.sync();
   }
 
+  /** Saves a lesson completion on the device straight away, then sends it when it can. */
+  completeLesson(completion: LessonCompletion): void {
+    if (this.lessonCompletions.some((c) => c.id === completion.id)) return;
+    this.saved = {
+      ...this.saved,
+      lesson_completions: [...this.lessonCompletions, completion],
+    };
+    this.save();
+    void this.sync();
+  }
+
   /**
    * Sends what's waiting and takes the deck the server sends back. Resolves once that's done or
    * has failed: failures are kept in the status, and tried again later.
@@ -220,6 +242,7 @@ export class Learning {
     const attempts = this.saved.attempts;
     const flags = this.saved.flags;
     const retirements = this.retirementChanges;
+    const lessonCompletions = this.lessonCompletions;
     // The server had these before this began, so the deck it sends back has them.
     const recorded = this.recorded;
     const pendingOutbox =
@@ -237,6 +260,7 @@ export class Learning {
             attempts,
             flags,
             retirements,
+            lesson_completions: lessonCompletions,
             coding_events: outboxBatch.coding_events,
             mistake_tags: outboxBatch.mistake_tags,
           },
@@ -251,18 +275,21 @@ export class Learning {
           attempts,
           flags,
           retirements,
+          lesson_completions: lessonCompletions,
         });
       }
       // Anything done while this was on its way is still to send.
       const sentAttempts = new Set(attempts.map((a) => a.id));
       const sentFlags = new Set(flags.map((f) => f.id));
       const sentRetirements = new Set(retirements.map((r) => r.id));
+      const sentCompletions = new Set(lessonCompletions.map((c) => c.id));
       const inDeck = new Set(recorded.map((a) => a.id));
       this.saved = {
         deck,
         attempts: this.saved.attempts.filter((a) => !sentAttempts.has(a.id)),
         flags: this.saved.flags.filter((f) => !sentFlags.has(f.id)),
         retirements: this.retirementChanges.filter((r) => !sentRetirements.has(r.id)),
+        lesson_completions: this.lessonCompletions.filter((c) => !sentCompletions.has(c.id)),
         recorded: this.recorded.filter((a) => !inDeck.has(a.id)),
       };
       this.retryMs = RETRY_MS;

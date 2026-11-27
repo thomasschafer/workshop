@@ -17,6 +17,7 @@ import { describeTolerance, displayApproximate, displayNumber, grade } from "./g
 import { limitsOf, newId, nextInstance, progress, queue, retired, step, utcOffset } from "./local";
 import { sameOutput } from "./output";
 import "./practice.css";
+import { TrackLessons } from "./lesson";
 import { RetiredList } from "./retired";
 import { learning, type SyncStatus } from "./sync";
 import type { Attempt, Deck, DeckItem, Instance, Rating } from "./types";
@@ -63,6 +64,7 @@ export function Practice({
   serverDictation,
   onHome,
   onOpenProblem,
+  onOpenLesson,
 }: {
   track: TrackId;
   /** Whether Whisper is ready on the server, for explaining answers aloud. */
@@ -70,6 +72,8 @@ export function Practice({
   onHome: () => void;
   /** Opens one of the track's coding problems, by its key. */
   onOpenProblem: (item: string) => void;
+  /** Opens one of the track's lessons, by its key. */
+  onOpenLesson: (item: string) => void;
 }) {
   const state = useLearning();
   const deck = state.deck;
@@ -232,6 +236,7 @@ export function Practice({
               onHome={onHome}
               onBringBack={bringBack}
             />
+            <TrackLessons deck={deck} track={track} onOpen={onOpenLesson} />
             <TrackProblems track={track} onOpen={onOpenProblem} />
           </>
         )}

@@ -91,6 +91,18 @@ impl Retirement {
     }
 }
 
+/// One completion of a lesson, recorded when the learner reaches its recap.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LessonCompletion {
+    /// Made by the device it happened on, unique to this completion.
+    pub id: String,
+    /// The lesson, as `pack/item`.
+    pub lesson: String,
+    /// When the learner reached the recap, in milliseconds since 1970.
+    pub completed_at: i64,
+}
+
 /// How much was done since a moment, such as the start of the day.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Activity {
@@ -109,7 +121,7 @@ pub struct Store {
 }
 
 /// The schema's version, in SQLite's `user_version`.
-const VERSION: i64 = 4;
+const VERSION: i64 = 5;
 
 const SCHEMA: &str = "
 CREATE TABLE attempts (
@@ -182,6 +194,16 @@ CREATE INDEX retirement_changes_by_item ON retirement_changes (item, at, id);
 -- Changes to the log that need to know what's in the packs, made once they're next read.
 CREATE TABLE pending (task TEXT PRIMARY KEY);
 INSERT INTO pending (task) VALUES ('retire-past-easy');
+",
+    "
+-- Completions of lessons, each time the learner reaches a lesson's recap.
+CREATE TABLE lesson_completions (
+    id TEXT PRIMARY KEY,
+    lesson TEXT NOT NULL,
+    completed_at INTEGER NOT NULL,
+    received_at INTEGER NOT NULL
+);
+CREATE INDEX lesson_completions_by_lesson ON lesson_completions (lesson, completed_at, id);
 ",
 ];
 
@@ -661,6 +683,90 @@ impl Store {
         let rows = statement.query_map([item], row_to_attempt)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
+
+    /// Adds lesson completions to the log, ignoring any already there. One with the id of one
+    /// already there but different in any other way is refused, along with the rest.
+    pub fn record_lesson_completions(
+        &self,
+        completions: &[LessonCompletion],
+        now: i64,
+    ) -> Result<()> {
+        for completion in completions {
+            validate_id(&completion.id)?;
+            if completion.lesson.is_empty() {
+                bail!("lesson completion {} isn't for any lesson", completion.id);
+            }
+            if !(EARLIEST..=now + FUTURE_SLACK_MS).contains(&completion.completed_at) {
+                bail!(
+                    "lesson completion {} says it was made at {}, which this device's clock can't be right about",
+                    completion.id,
+                    completion.completed_at
+                );
+            }
+        }
+        let mut connection = self.connection();
+        let transaction = connection.transaction()?;
+        for completion in completions {
+            let existing: Option<LessonCompletion> = transaction
+                .query_row(
+                    "SELECT id, lesson, completed_at FROM lesson_completions WHERE id = ?",
+                    [&completion.id],
+                    row_to_lesson_completion,
+                )
+                .optional()?;
+            match existing {
+                Some(existing) if existing == *completion => continue,
+                Some(_) => bail!(
+                    "lesson completion {} was sent before with different details",
+                    completion.id
+                ),
+                None => {}
+            }
+            transaction.execute(
+                "INSERT INTO lesson_completions (id, lesson, completed_at, received_at)
+                 VALUES (?, ?, ?, ?)",
+                params![
+                    completion.id,
+                    completion.lesson,
+                    completion.completed_at,
+                    now,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Every lesson completion, in the order they were made.
+    pub fn lesson_completions(&self) -> Result<Vec<LessonCompletion>> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT id, lesson, completed_at
+             FROM lesson_completions ORDER BY completed_at, id",
+        )?;
+        let rows = statement.query_map([], row_to_lesson_completion)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Completion timestamps (ms since 1970) per lesson key, in chronological order.
+    pub fn lesson_completions_by_lesson(&self) -> Result<BTreeMap<String, Vec<i64>>> {
+        let mut by_lesson: BTreeMap<String, Vec<i64>> = BTreeMap::new();
+        for completion in self.lesson_completions()? {
+            by_lesson
+                .entry(completion.lesson)
+                .or_default()
+                .push(completion.completed_at);
+        }
+        Ok(by_lesson)
+    }
+}
+
+fn row_to_lesson_completion(row: &rusqlite::Row<'_>) -> rusqlite::Result<LessonCompletion> {
+    Ok(LessonCompletion {
+        id: row.get(0)?,
+        lesson: row.get(1)?,
+        completed_at: row.get(2)?,
+    })
 }
 
 fn insert_retirements(connection: &Connection, changes: &[RetirementChange]) -> Result<()> {
@@ -1186,5 +1292,80 @@ mod tests {
         drop(connection);
         let err = Store::open(&path).err().unwrap();
         assert!(format!("{err:#}").contains("newer Workshop"));
+    }
+
+    #[test]
+    fn records_lesson_completions_idempotently_and_multiple_times() {
+        let store = Store::in_memory().unwrap();
+        let first = LessonCompletion {
+            id: "lesson-comp-1".to_owned(),
+            lesson: "sample/binary-heaps".to_owned(),
+            completed_at: NOW - DAY_MS,
+        };
+        let second = LessonCompletion {
+            id: "lesson-comp-2".to_owned(),
+            lesson: "sample/binary-heaps".to_owned(),
+            completed_at: NOW,
+        };
+        store
+            .record_lesson_completions(&[second.clone(), first.clone()], NOW)
+            .unwrap();
+        // Sending the same completion again is ignored.
+        store
+            .record_lesson_completions(std::slice::from_ref(&first), NOW)
+            .unwrap();
+        assert_eq!(
+            store.lesson_completions().unwrap(),
+            vec![first.clone(), second]
+        );
+        assert_eq!(
+            store.lesson_completions_by_lesson().unwrap(),
+            BTreeMap::from([("sample/binary-heaps".to_owned(), vec![NOW - DAY_MS, NOW])])
+        );
+
+        // Same id with different details is refused.
+        let changed = LessonCompletion {
+            completed_at: NOW + 1,
+            ..first
+        };
+        let err = store
+            .record_lesson_completions(&[changed], NOW)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("different details"), "{err}");
+
+        // Invalid id, empty lesson, or implausible timestamp is refused.
+        for (bad, expected) in [
+            (
+                LessonCompletion {
+                    id: "short".to_owned(),
+                    lesson: "sample/binary-heaps".to_owned(),
+                    completed_at: NOW,
+                },
+                "isn't an id",
+            ),
+            (
+                LessonCompletion {
+                    id: "lesson-comp-3".to_owned(),
+                    lesson: String::new(),
+                    completed_at: NOW,
+                },
+                "any lesson",
+            ),
+            (
+                LessonCompletion {
+                    id: "lesson-comp-4".to_owned(),
+                    lesson: "sample/binary-heaps".to_owned(),
+                    completed_at: 0,
+                },
+                "clock",
+            ),
+        ] {
+            let err = store
+                .record_lesson_completions(&[bad], NOW)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(expected), "{err}");
+        }
     }
 }

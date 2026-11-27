@@ -89,6 +89,7 @@ workshop-tracks.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true
+base64.workspace = true
 clap.workspace = true
 dirs.workspace = true
 futures-util.workspace = true

@@ -56,16 +56,25 @@ pub enum Work {
     FollowUps,
     /// Review comments on a change to a codebase, against the defects planted in it.
     Review,
+    /// A lesson's explain-in-your-own-words question, against its explain answer and segments.
+    Lesson,
 }
 
 impl Work {
     /// Whether marking it counts as an attempt at the item. A coding problem's attempt is its
-    /// own, when it's finished, so its plan and explanation only add to the mistake log.
+    /// own, when it's finished, so its plan and explanation only add to the mistake log. A
+    /// lesson is a first meeting with the material, so it neither counts as an attempt nor logs
+    /// mistakes.
     pub fn is_attempt(self) -> bool {
         matches!(
             self,
             Self::Design | Self::Card | Self::Round | Self::FollowUps | Self::Review
         )
+    }
+
+    /// Whether findings from marking this work go into the mistake log.
+    pub fn logs_mistakes(self) -> bool {
+        !matches!(self, Self::Lesson)
     }
 }
 
@@ -276,6 +285,14 @@ fn own_rubric(
                 }),
             ))
         }
+        (Work::Lesson, Content::Lesson(lesson)) => Ok((
+            vec![
+                "Explains the answer accurately, in any words".to_owned(),
+                "Covers the key points in the explain answer".to_owned(),
+                "Says nothing that contradicts the lesson".to_owned(),
+            ],
+            Some(lesson.explain_answer.clone()),
+        )),
         _ => bail!("{} can't be marked as that kind of work", item.label()),
     }
 }
@@ -297,11 +314,27 @@ pub fn mark_prompt(
             coding.statement(through)
         }
         (_, Some(_)) => bail!("only a coding problem comes in parts"),
+        (Content::Lesson(lesson), None) => lesson.explain.clone(),
         (_, None) => item.prompt.clone(),
     };
     let mut out = format!("<question>\n{}\n</question>\n\n", question.trim());
-    // Work in a codebase is marked knowing the project, as it's given.
+    // Work in a codebase is marked knowing the project, as it's given, and a lesson knowing its
+    // segments.
     match &item.content {
+        Content::Lesson(lesson) => {
+            let mut body = String::new();
+            for segment in &lesson.segments {
+                body.push_str(&format!(
+                    "## {}\n\n{}\n\n",
+                    segment.title,
+                    segment.body.trim()
+                ));
+            }
+            out.push_str(&format!(
+                "This question comes at the end of a short lesson the learner just read:\n\n<lesson>\n{}\n</lesson>\n\n",
+                body.trim_end()
+            ));
+        }
         Content::Coding(coding) if let Some(project) = coding.project() => {
             let through = answer.part.unwrap_or(coding.last());
             let files = project
@@ -1308,5 +1341,39 @@ mod tests {
             "{prompt}"
         );
         assert!(!prompt.contains("test_longest"), "{prompt}");
+    }
+
+    #[test]
+    fn builds_a_marking_prompt_for_a_lesson_explain_question() {
+        let pack = Pack::sample();
+        let types = pack.manifest.all_error_types();
+        let lesson = pack.item("binary-heaps").unwrap();
+        let prompt = mark_prompt(
+            lesson,
+            Work::Lesson,
+            Answer::written("It is complete so indices work without pointers and height is log n."),
+            &types,
+        )
+        .unwrap();
+        assert!(
+            prompt.contains("<question>\nWhy can a binary heap live in a plain array"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("<lesson>\n## The heap property and array layout"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("<reference>\nA binary heap is a complete binary tree"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("Covers the key points in the explain answer"),
+            "{prompt}"
+        );
+        assert!(!Work::Lesson.is_attempt());
+        assert!(!Work::Lesson.logs_mistakes());
+        let card = pack.item("binary-heap-costs").unwrap();
+        assert!(mark_prompt(card, Work::Lesson, Answer::written("x"), &types).is_err());
     }
 }

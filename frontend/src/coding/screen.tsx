@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "preact/hooks";
 import { type Bootstrap, ConnectionError, TimeoutError } from "../api";
 import { errorMessage } from "../errors";
 import { useConnection } from "../hooks/useConnection";
+import { TrackLessons } from "../learning/lesson";
 import { ItemView, SyncChip, useLearning } from "../learning/practice";
 import "../learning/practice.css";
 import { newId, retirements } from "../learning/local";
@@ -29,6 +30,7 @@ export function CodingScreen({
   item,
   onHome,
   onOpen,
+  onOpenLesson,
   onTrack,
 }: {
   boot: Bootstrap;
@@ -36,6 +38,8 @@ export function CodingScreen({
   onHome: () => void;
   /** Opens an item, or the list for null. */
   onOpen: (item: string | null) => void;
+  /** Opens a lesson in the Coding track, by its key. */
+  onOpenLesson: (item: string) => void;
   /** Goes to another track, such as the one a problem is in. */
   onTrack: (track: TrackId) => void;
 }) {
@@ -46,7 +50,8 @@ export function CodingScreen({
     void refreshCachedBundles();
     return subscribeCachedBundles(() => setBundleTick((t) => t + 1));
   }, []);
-  if (item === null) return <CodingList onHome={onHome} onOpen={onOpen} />;
+  if (item === null)
+    return <CodingList onHome={onHome} onOpen={onOpen} onOpenLesson={onOpenLesson} />;
   // Code to read is in the deck, so it works offline; problems need the server.
   const reading = learning.deck?.items.find((i) => i.key === item && i.kind === "reading");
   if (reading) {
@@ -165,7 +170,15 @@ function statusOf(item: Listed): string {
  * The track's problems and code to read, with what's in progress and due first. Offline, only
  * the code to read can be done, from the deck the device keeps.
  */
-function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: string) => void }) {
+function CodingList({
+  onHome,
+  onOpen,
+  onOpenLesson,
+}: {
+  onHome: () => void;
+  onOpen: (item: string) => void;
+  onOpenLesson: (item: string) => void;
+}) {
   const online = useConnection();
   const learning = useLearning();
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -346,6 +359,7 @@ function CodingList({ onHome, onOpen }: { onHome: () => void; onOpen: (item: str
         ) : !items ? (
           <p class="muted">Loading…</p>
         ) : null}
+        {deck ? <TrackLessons deck={deck} track="coding" onOpen={onOpenLesson} /> : null}
       </main>
     </div>
   );

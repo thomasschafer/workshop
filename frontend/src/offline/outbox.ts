@@ -471,6 +471,7 @@ export class Outbox {
             attempts: [],
             flags: [],
             retirements: [],
+            lesson_completions: [],
             coding_events: batch.coding_events,
             mistake_tags: batch.mistake_tags,
           },

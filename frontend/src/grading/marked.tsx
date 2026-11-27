@@ -6,7 +6,14 @@ const MET = { yes: "Met", partly: "Partly", no: "Not met" } as const;
 
 /** How the grader marked a piece of work: the score, each rubric point, what it found wrong and
  * what to do next. */
-export function MarkedView({ marked }: { marked: Marked }) {
+export function MarkedView({
+  marked,
+  logMistakes = true,
+}: {
+  marked: Marked;
+  /** Whether findings are logged to the mistake log. False for lessons. */
+  logMistakes?: boolean;
+}) {
   return (
     <section class="marked" aria-label="Marked">
       <p class="marked-score">{Math.round(marked.score * 100)}%</p>
@@ -41,7 +48,9 @@ export function MarkedView({ marked }: { marked: Marked }) {
       ) : null}
       {marked.findings.length > 0 ? (
         <>
-          <h3 class="tracks-heading">Mistakes, kept in your log</h3>
+          <h3 class="tracks-heading">
+            {logMistakes ? "Mistakes, kept in your log" : "To watch out for"}
+          </h3>
           <ul class="marked-findings">
             {marked.findings.map((finding) => (
               <li key={finding.detail}>{finding.detail}</li>

@@ -89,7 +89,7 @@ prompt = "prompts/examiner-steady.md"
 
 A track's `icon` is shown beside its name. It's one of the icons the built-in tracks use, `star`, `code`, `dice`, `network`, `timer`, `sigma` and `history`, or one of `layers`, `approximately`, `book`, `chart`, `flask`, `languages`, `lightbulb`, `puzzle`, `radical` and `shapes`. Without one, a pack's track has `layers`.
 
-A pack's track can hold cards, mental maths, probability questions, code to read, coding problems and lessons. Its short items are practised one after another, as in the built-in tracks, and its coding problems are listed once there's nothing left to practise for now, each worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
+A pack's track can hold cards, mental maths, probability questions, code to read, coding problems and lessons. Its short items are practised one after another, as in the built-in tracks, and once there's nothing left to practise for now its lessons and coding problems are listed, the problems worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
 
 `continue = false` keeps a track to itself, for something to practise only when you choose to, such as a language you're picking up on the side. Its items are only offered when you open the track: Continue never picks them, even when you've got a while, and they aren't made into timed rounds. It has daily limits of its own, the same size as `daily_reviews` and `daily_new` under `[learning]`, so practising it doesn't use up the rest's, and the rest doesn't use up its. Its time doesn't count towards the week's target either. Its items are scheduled, and their mistakes and progress towards goals recorded, as any others are. Without it, a track is in Continue, as the built-in ones are.
 
@@ -131,7 +131,7 @@ Every item can have:
 | `source` | Where it came from, in your own words, such as for questions imported from elsewhere. Workshop shows it but doesn't interpret it. |
 | `minutes` | Roughly how long it takes. Defaults by kind (4 for a lesson). A timed round of it lasts this long, and at least 10 minutes. |
 | `difficulty` | How hard it is, from 1, a warm-up, through 3, typical of its kind, to 5, among the hardest of its kind. Optional, and most useful for coding problems: the author writes new problems at the difficulty each skill has reached (see [docs/author.md](author.md)), and takes a problem without one as 3. |
-| `lesson` | Optional, for short items (`card`, `mental-maths`, `probability` and `reading`): the id of the lesson in this pack that teaches it. The app teaches a lesson before offering its items as new. |
+| `lesson` | Optional, for short items (`card`, `mental-maths`, `probability` and `reading`): the id of the lesson in this pack that teaches it. |
 | `segment` | Optional, with `lesson`: the segment of that lesson that covers the item, counting from 1. |
 
 Items that can't be read are left out, and Workshop says which and why. `workshop pack check` finds them too.
@@ -646,7 +646,9 @@ A design prompt is worked through as a design session of five stages: clarifying
 
 ### Lessons
 
-A short piece that teaches a topic in two to five minutes on a phone, before its questions. The app teaches a lesson before offering short items linked to it with `lesson`, and can send a learner back to the lesson, or to a specific `segment`, when an item isn't known yet. Lessons aren't scheduled for review themselves: their cards and other short items are.
+A short piece that teaches a topic in two to five minutes on a phone, before its questions. A track's lessons are listed in a Lessons section on its practice screen (once there's nothing left to practise for now), each showing its title, roughly how long it takes, whether it's been done, and any lessons in `requires` not done yet. Lessons aren't scheduled for review themselves, and don't count towards mastery: their cards and other short items do.
+
+A lesson is kept on the device in the deck with its images, so it works offline. Opening one walks through its title and prompt, any unscored guesses (with "Not sure" and answers held back until the recap), its segments one at a time with inline diagrams and checks (with earlier segments to go back to), the `## Explain` question (typed, dictated or explained aloud, marked by the grader online against `## Explain answer` and the segments without logging mistakes or scheduling, or compared against `## Explain answer` offline or by choice), and the recap showing each guess beside the right answer and `[[sources]]` as "Read more" links. Progress is saved on the device as you go, and reaching the recap records the completion on the device and syncs it to the server; a lesson can be done again and each time is recorded.
 
 A lesson can be a single Markdown file, or a directory with an `item.md` when it includes images. Lessons have no fixed default track of their own: a lesson goes in the pack's `track` if it has one, or its own `track`, and otherwise in the Review track, as cards do. `minutes` defaults to 4.
 

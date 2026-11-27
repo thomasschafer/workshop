@@ -5,6 +5,7 @@ export type Route =
   | { screen: "home" }
   | { screen: "advent-of-code" }
   | { screen: "practice"; track: TrackId }
+  | { screen: "lesson"; item: string }
   | { screen: "coding"; item: string | null }
   | { screen: "design"; item: string | null }
   | { screen: "rounds"; item: string | null }
@@ -17,6 +18,7 @@ export type Route =
 const HOME_PATH = "/";
 const ADVENT_OF_CODE_PATH = "/advent-of-code";
 const PRACTICE_PATH = "/practice/";
+const LESSONS_PATH = "/lessons";
 const CODING_PATH = "/coding";
 const DESIGN_PATH = "/design";
 const ROUNDS_PATH = "/rounds";
@@ -38,6 +40,12 @@ export function routeOf(pathname: string, search: string): Route {
     // Which tracks exist is the server's to say: a track that isn't one shows as having nothing.
     if (/^[a-z0-9-]+$|^pack:[a-z0-9-]+$/.test(track)) {
       return { screen: "practice", track: track as TrackId };
+    }
+  }
+  if (pathname.startsWith(`${LESSONS_PATH}/`)) {
+    const [pack, item, ...rest] = pathname.slice(LESSONS_PATH.length + 1).split("/");
+    if (pack && item && rest.length === 0 && SLUG.test(pack) && SLUG.test(item)) {
+      return { screen: "lesson", item: `${pack}/${item}` };
     }
   }
   for (const [base, screen] of [
@@ -73,6 +81,8 @@ export function pathOf(route: Route): string {
       return ADVENT_OF_CODE_PATH;
     case "practice":
       return `${PRACTICE_PATH}${encodeURIComponent(route.track)}`;
+    case "lesson":
+      return `${LESSONS_PATH}/${route.item}`;
     case "coding":
       return route.item === null ? CODING_PATH : `${CODING_PATH}/${route.item}`;
     case "design":

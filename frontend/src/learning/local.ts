@@ -8,9 +8,11 @@ import type {
   Attempt,
   Deck,
   DeckItem,
+  DeckLesson,
   FlagChange,
   Instance,
   ItemSchedule,
+  LessonCompletion,
   Retirement,
   RetirementChange,
 } from "./types";
@@ -85,6 +87,43 @@ export function retired(deck: Deck, track: TrackId, changes: RetirementChange[])
   return deck.items.filter(
     (item) => item.track === track && standing[item.key]?.state === "retired",
   );
+}
+
+/** Completion timestamps per lesson key, merging the deck's with completions waiting to sync. */
+export function completedLessons(
+  deck: Deck,
+  pending: LessonCompletion[],
+): Record<string, number[]> {
+  const result: Record<string, number[]> = {};
+  for (const [key, times] of Object.entries(deck.lesson_completions ?? {})) {
+    result[key] = [...times];
+  }
+  for (const completion of pending) {
+    const list = result[completion.lesson] ?? [];
+    list.push(completion.completed_at);
+    result[completion.lesson] = list;
+  }
+  for (const list of Object.values(result)) {
+    list.sort((a, b) => a - b);
+  }
+  return result;
+}
+
+/** A track's lessons, in the deck's order. */
+export function lessonsInTrack(deck: Deck, track: TrackId): DeckLesson[] {
+  return (deck.lessons ?? []).filter((lesson) => lesson.track === track);
+}
+
+/** Prerequisites of `lesson` that have not been completed yet, with their titles. */
+export function unmetRequires(
+  deck: Deck,
+  lesson: DeckLesson,
+  completed: Record<string, number[]>,
+): { key: string; title: string }[] {
+  const byKey = new Map((deck.lessons ?? []).map((l) => [l.key, l]));
+  return lesson.requires
+    .filter((req) => (completed[req]?.length ?? 0) === 0)
+    .map((req) => ({ key: req, title: byKey.get(req)?.title ?? req }));
 }
 
 /**

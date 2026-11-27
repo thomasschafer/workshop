@@ -11,13 +11,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use workshop_learning::{
-    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, Limits, Progress, Rating, Retirement,
-    RetirementChange, SkillMastery, Store, TrackPlan,
+    Attempt, Clock, Flag, FlagChange, ItemRef, ItemSchedule, LessonCompletion, Limits, Progress,
+    Rating, Retirement, RetirementChange, SkillMastery, Store, TrackPlan,
 };
 use workshop_pack::number::Tolerance;
-use workshop_pack::{Content, FollowUps, Item, Pack};
+use workshop_pack::{Content, FollowUps, ImageData, Item, Lesson, Pack};
 use workshop_tracks::{Priority, Step, Track, TrackIcon, TrackId};
 
 use crate::config::LearningConfig;
@@ -46,10 +47,13 @@ pub struct Deck {
     pub week_start: i64,
     pub tracks: Vec<DeckTrack>,
     pub items: Vec<DeckItem>,
+    pub lessons: Vec<DeckLesson>,
     pub schedules: BTreeMap<String, ItemSchedule>,
     pub flags: BTreeMap<String, Flag>,
     /// Where each item that's ever been retired stands, so the app leaves retired ones out.
     pub retirements: BTreeMap<String, Retirement>,
+    /// Completion timestamps (ms since 1970) per lesson key, in chronological order.
+    pub lesson_completions: BTreeMap<String, Vec<i64>>,
     pub skills: Vec<DeckSkill>,
     /// The skills recent mistakes point to, whose new items come first.
     pub focus: Vec<String>,
@@ -122,6 +126,67 @@ pub enum DeckContent {
     },
 }
 
+/// A lesson in the deck, carrying its segments, checks, guesses, sources and embedded images so
+/// it can be worked through offline.
+#[derive(Debug, Serialize)]
+pub struct DeckLesson {
+    /// `pack/item`.
+    pub key: String,
+    pub track: TrackId,
+    pub title: String,
+    pub skills: Vec<String>,
+    /// What the lesson covers, in Markdown.
+    pub prompt: String,
+    pub source: Option<String>,
+    pub minutes: u32,
+    /// Full `pack/item` keys of lessons in the same pack to do first.
+    pub requires: Vec<String>,
+    pub sources: Vec<DeckLessonSource>,
+    pub guesses: Vec<DeckLessonGuess>,
+    pub segments: Vec<DeckLessonSegment>,
+    pub explain: String,
+    pub explain_answer: String,
+    /// Images referenced in segments, keyed by their relative path inside the lesson's directory.
+    pub images: BTreeMap<String, DeckLessonImage>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeckLessonSource {
+    pub title: String,
+    pub url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeckLessonGuess {
+    pub prompt: String,
+    pub choices: Vec<String>,
+    /// The right choice, counting from 0.
+    pub answer: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeckLessonCheck {
+    pub prompt: String,
+    pub choices: Vec<String>,
+    /// The right choice, counting from 0.
+    pub answer: usize,
+    pub explanation: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeckLessonSegment {
+    pub title: String,
+    pub body: String,
+    pub check: Option<DeckLessonCheck>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum DeckLessonImage {
+    Svg { svg: String },
+    Png { data_url: String },
+}
+
 /// What a device sends when it syncs: what was done since it last did.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -134,6 +199,9 @@ pub struct SyncRequest {
     /// that retired it, and items brought back.
     #[serde(default)]
     pub retirements: Vec<RetirementChange>,
+    /// Lessons completed since the last sync.
+    #[serde(default)]
+    pub lesson_completions: Vec<LessonCompletion>,
 }
 
 /// The learning tracks for the home screen, and the week's practice so far.
@@ -323,9 +391,17 @@ impl Learning {
             })
             .collect();
         let practised = practised(&packs);
+        let lesson_items = lessons(&packs);
+        let deck_lessons: Vec<DeckLesson> = lesson_items
+            .iter()
+            .map(deck_lesson)
+            .collect::<Result<Vec<_>>>()?;
         let apart = Apart::new(&packs, &practised);
         let (progress, mut apart_progress) = self.progress(clock, &apart)?;
-        let tracks = track_names(&packs, &practised)
+        let mut all_track_items = Vec::with_capacity(practised.len() + lesson_items.len());
+        all_track_items.extend(&practised);
+        all_track_items.extend(&lesson_items);
+        let tracks = track_names(&packs, all_track_items)
             .into_iter()
             .map(|(id, (name, icon))| DeckTrack {
                 kept_apart: apart.tracks.contains(&id),
@@ -337,6 +413,14 @@ impl Learning {
             .collect();
         let keys: std::collections::BTreeSet<&str> =
             shorts.iter().map(|s| s.key.as_str()).collect();
+        let lesson_keys: std::collections::BTreeSet<&str> =
+            lesson_items.iter().map(|l| l.key.as_str()).collect();
+        let lesson_completions = self
+            .store
+            .lesson_completions_by_lesson()?
+            .into_iter()
+            .filter(|(key, _)| lesson_keys.contains(key.as_str()))
+            .collect();
         let follow_ups = self
             .follow_ups_under_way()?
             .into_iter()
@@ -349,6 +433,7 @@ impl Learning {
             week_start: clock.week_start(),
             tracks,
             items,
+            lessons: deck_lessons,
             schedules: schedules
                 .into_iter()
                 .filter(|(key, _)| keys.contains(key.as_str()))
@@ -358,6 +443,7 @@ impl Learning {
                 .into_iter()
                 .filter(|(key, _)| keys.contains(key.as_str()))
                 .collect(),
+            lesson_completions,
             skills,
             focus: self.focus(&packs, clock.now)?,
             follow_ups,
@@ -371,6 +457,8 @@ impl Learning {
         let retirements = self.retirements_to_record(&request.attempts, &request.retirements)?;
         self.record_with(&request.attempts, &retirements, clock.now)?;
         self.store.record_flags(&request.flags)?;
+        self.store
+            .record_lesson_completions(&request.lesson_completions, clock.now)?;
         self.deck(clock)
     }
 
@@ -755,6 +843,10 @@ fn shorts(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| item.kind.is_short())
 }
 
+fn lessons(packs: &[Pack]) -> Vec<Short<'_>> {
+    items_where(packs, |item| item.kind == workshop_pack::Kind::Lesson)
+}
+
 /// The items there's practice of: the short ones, coding problems, work in a codebase and design
 /// prompts. Lessons aren't scheduled or counted towards mastery.
 fn practised(packs: &[Pack]) -> Vec<Short<'_>> {
@@ -797,9 +889,12 @@ fn item_refs<'a>(shorts: &'a [Short<'a>]) -> Vec<ItemRef<'a>> {
 
 /// The tracks with these items in them, in the order the home screen shows them, and their
 /// names and icons. Two packs' tracks with the same id are one track.
-fn track_names(packs: &[Pack], shorts: &[Short<'_>]) -> BTreeMap<TrackId, (String, TrackIcon)> {
+fn track_names<'a>(
+    packs: &[Pack],
+    shorts: impl IntoIterator<Item = &'a Short<'a>>,
+) -> BTreeMap<TrackId, (String, TrackIcon)> {
     shorts
-        .iter()
+        .into_iter()
         .map(|short| {
             let id = short.item.track.clone();
             let label = track_label(packs, &id);
@@ -893,6 +988,86 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
         source: item.source.clone(),
         minutes: item.minutes,
         content,
+    })
+}
+
+fn deck_lesson(short: &Short<'_>) -> Result<DeckLesson> {
+    let item = short.item;
+    let Content::Lesson(Lesson {
+        requires,
+        sources,
+        guesses,
+        segments,
+        explain,
+        explain_answer,
+    }) = &item.content
+    else {
+        unreachable!("only lessons are built as deck lessons");
+    };
+    let pack_id = short
+        .key
+        .split_once('/')
+        .map(|(pack, _)| pack)
+        .context("lesson key should have pack/item form")?;
+    let mut images = BTreeMap::new();
+    for segment in segments {
+        for image in &segment.images {
+            images
+                .entry(image.file.clone())
+                .or_insert_with(|| match &image.data {
+                    ImageData::Svg(svg) => DeckLessonImage::Svg { svg: svg.clone() },
+                    ImageData::Png(bytes) => {
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                        DeckLessonImage::Png {
+                            data_url: format!("data:image/png;base64,{encoded}"),
+                        }
+                    }
+                });
+        }
+    }
+    Ok(DeckLesson {
+        key: short.key.clone(),
+        track: item.track.clone(),
+        title: item.label(),
+        skills: item.skills.clone(),
+        prompt: item.prompt.clone(),
+        source: item.source.clone(),
+        minutes: item.minutes,
+        requires: requires
+            .iter()
+            .map(|req| format!("{pack_id}/{req}"))
+            .collect(),
+        sources: sources
+            .iter()
+            .map(|s| DeckLessonSource {
+                title: s.title.clone(),
+                url: s.url.clone(),
+            })
+            .collect(),
+        guesses: guesses
+            .iter()
+            .map(|g| DeckLessonGuess {
+                prompt: g.prompt.clone(),
+                choices: g.choices.clone(),
+                answer: g.answer,
+            })
+            .collect(),
+        segments: segments
+            .iter()
+            .map(|s| DeckLessonSegment {
+                title: s.title.clone(),
+                body: s.body.clone(),
+                check: s.check.as_ref().map(|c| DeckLessonCheck {
+                    prompt: c.prompt.clone(),
+                    choices: c.choices.clone(),
+                    answer: c.answer,
+                    explanation: c.explanation.clone(),
+                }),
+            })
+            .collect(),
+        explain: explain.clone(),
+        explain_answer: explain_answer.clone(),
+        images,
     })
 }
 
@@ -1959,7 +2134,109 @@ mod tests {
         )
         .unwrap();
         assert!(only_learning.deck(clock(NOW)).unwrap().items.is_empty());
+        assert_eq!(only_learning.deck(clock(NOW)).unwrap().lessons.len(), 1);
         assert!(only_learning.skill_mastery(NOW).unwrap().is_empty());
         assert!(only_learning.planned(clock(NOW)).unwrap().names.is_empty());
+    }
+
+    #[test]
+    fn includes_lessons_with_images_and_syncs_completions() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("pack");
+        std::fs::create_dir_all(pack.join("items/lessons/first")).unwrap();
+        std::fs::create_dir_all(pack.join("items/lessons/second")).unwrap();
+        std::fs::write(
+            pack.join("pack.toml"),
+            "id = \"p\"\nname = \"P\"\n[[skills]]\nid = \"s\"\nname = \"S\"\n",
+        )
+        .unwrap();
+        // Minimal valid 1x1 PNG header + bytes.
+        let png_bytes = b"\x89PNG\r\n\x1a\nfake";
+        std::fs::write(pack.join("items/lessons/first/pic.png"), png_bytes).unwrap();
+        std::fs::write(
+            pack.join("items/lessons/first/diagram.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" stroke="currentColor"/></svg>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pack.join("items/lessons/first/item.md"),
+            "+++\nkind = \"lesson\"\ntitle = \"First\"\nskills = [\"s\"]\n[[sources]]\ntitle = \"Docs\"\nurl = \"https://example.com\"\n+++\nSummary.\n## One\nText.\n\n![A svg](diagram.svg)\n\n![A png](pic.png)\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            pack.join("items/lessons/second/item.md"),
+            "+++\nkind = \"lesson\"\ntitle = \"Second\"\nskills = [\"s\"]\nrequires = [\"first\"]\n[[sources]]\ntitle = \"Docs\"\nurl = \"https://example.com\"\n+++\nSummary two.\n## One\nText.\n## Explain\nWhy?\n## Explain answer\nBecause.\n",
+        )
+        .unwrap();
+
+        let learning = Learning::open(
+            &LearningConfig {
+                packs: vec![pack],
+                sample_pack: false,
+                daily_reviews: 10,
+                daily_new: 10,
+                weekly_minutes: 60,
+                desired_retention: 0.9,
+            },
+            &dir.path().join("data"),
+        )
+        .unwrap();
+
+        let deck = learning.deck(clock(NOW)).unwrap();
+        assert_eq!(deck.lessons.len(), 2);
+        let first = deck.lessons.iter().find(|l| l.key == "p/first").unwrap();
+        assert!(matches!(
+            first.images.get("diagram.svg"),
+            Some(DeckLessonImage::Svg { svg }) if svg.contains("<svg")
+        ));
+        let expected_png = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png_bytes)
+        );
+        assert!(matches!(
+            first.images.get("pic.png"),
+            Some(DeckLessonImage::Png { data_url }) if data_url == &expected_png
+        ));
+        let second = deck.lessons.iter().find(|l| l.key == "p/second").unwrap();
+        assert_eq!(second.requires, vec!["p/first"]);
+        assert!(deck.lesson_completions.is_empty());
+
+        let c1 = LessonCompletion {
+            id: "lesson-done-1".to_owned(),
+            lesson: "p/first".to_owned(),
+            completed_at: NOW - 1000,
+        };
+        let c2 = LessonCompletion {
+            id: "lesson-done-2".to_owned(),
+            lesson: "p/first".to_owned(),
+            completed_at: NOW,
+        };
+        let synced = learning
+            .sync(
+                &SyncRequest {
+                    lesson_completions: vec![c1.clone(), c2.clone()],
+                    ..Default::default()
+                },
+                clock(NOW),
+            )
+            .unwrap();
+        assert_eq!(
+            synced.lesson_completions.get("p/first"),
+            Some(&vec![NOW - 1000, NOW])
+        );
+        // Re-sending the same completions is idempotent.
+        let again = learning
+            .sync(
+                &SyncRequest {
+                    lesson_completions: vec![c1],
+                    ..Default::default()
+                },
+                clock(NOW),
+            )
+            .unwrap();
+        assert_eq!(
+            again.lesson_completions.get("p/first"),
+            Some(&vec![NOW - 1000, NOW])
+        );
     }
 }

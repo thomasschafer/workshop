@@ -4,6 +4,7 @@ import { App } from "../app";
 import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
 import { DesignScreen } from "../grading/design";
+import { LessonScreen } from "../learning/lesson";
 import { Practice } from "../learning/practice";
 import { onNotificationOpen } from "../notifications";
 import { writeCachedBootstrap } from "../offline/bootstrap";
@@ -205,6 +206,21 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             serverDictation={boot.server_dictation}
             onHome={goHome}
             onOpenProblem={(item) => void go({ kind: "coding", item })}
+            onOpenLesson={(item) => open({ screen: "lesson", item })}
+          />
+        );
+      case "lesson":
+        return (
+          <LessonScreen
+            key={route.item}
+            itemKey={route.item}
+            serverDictation={boot.server_dictation}
+            onHome={goHome}
+            onTrack={(track) =>
+              void go(
+                track === "coding" ? { kind: "coding", item: null } : { kind: "practice", track },
+              )
+            }
           />
         );
       case "coding":
@@ -214,6 +230,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             item={route.item}
             onHome={goHome}
             onOpen={(item) => void go({ kind: "coding", item })}
+            onOpenLesson={(item) => open({ screen: "lesson", item })}
             onTrack={(track) => void go({ kind: "practice", track })}
           />
         );

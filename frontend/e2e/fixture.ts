@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-const SERVERS = 5;
+const SERVERS = 6;
 const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
 const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
@@ -41,6 +41,10 @@ export const AUTHOR_HOME = `${CHECKOUT_HOME}-author`;
 /** A fifth, for work in a codebase from the sample pack, whose files and reviews are its own. */
 export const CODEBASE_PORT = port(4);
 export const CODEBASE_HOME = `${CHECKOUT_HOME}-codebase`;
+
+/** A sixth, for lessons: the sample pack plus a small pack with prerequisites and a PNG diagram. */
+export const LESSONS_PORT = port(5);
+export const LESSONS_HOME = `${CHECKOUT_HOME}-lessons`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -290,6 +294,97 @@ export function createCodebaseHome(): void {
     stars: {},
     model: "fake",
   });
+}
+
+/** A 1x1 solid blue PNG, for testing embedded PNG data URLs offline in lesson segments. */
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+/**
+ * A home for lessons: the sample pack (with daily_new = 1 so answering one card in Review lands
+ * straight on the Lessons list) plus a tiny pack with a prerequisite lesson and a PNG image.
+ */
+export function createLessonsHome(): void {
+  const study = join(LESSONS_HOME, "study");
+  writeHome({
+    home: LESSONS_HOME,
+    port: LESSONS_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
+    model: "fake",
+    extra: `[learning]\ndaily_new = 1\npacks = [${JSON.stringify(study)}]\nsample_pack = true\n`,
+  });
+  const textFiles: Record<string, string> = {
+    "pack.toml": `id = "study"
+name = "Study"
+
+[[skills]]
+id = "arrays"
+name = "Arrays"
+`,
+    "items/lessons/arrays-intro/item.md": `+++
+kind = "lesson"
+title = "Contiguous memory in arrays"
+skills = ["arrays"]
+minutes = 2
+
+[[sources]]
+title = "Array data structure overview"
+url = "https://example.com/arrays"
++++
+Why indexing an array by position takes constant time.
+
+## Direct indexing
+
+Elements sit side by side in memory, so element \`i\` is at \`base + i * size\`.
+
+![A small diagram of contiguous memory cells](cells.png)
+
+## Explain
+
+Why does looking up element \`i\` take O(1) time regardless of array length?
+
+## Explain answer
+
+Because elements are stored contiguously with fixed width, the address is computed directly with one addition and multiplication rather than walking from the start.
+`,
+    "items/lessons/arrays-growth/item.md": `+++
+kind = "lesson"
+title = "Resizing a dynamic array"
+skills = ["arrays"]
+requires = ["arrays-intro"]
+minutes = 3
+
+[[sources]]
+title = "Dynamic array notes"
+url = "https://example.com/dynamic-arrays"
++++
+How doubling capacity keeps appends fast on average.
+
+## Doubling capacity
+
+When a dynamic array runs out of space, it allocates twice as much memory and copies existing elements over.
+
+## Explain
+
+Why is doubling capacity better than adding one slot at a time?
+
+## Explain answer
+
+Doubling spaces out copies exponentially so each element is copied only a constant number of times on average, giving O(1) amortised append instead of O(n).
+`,
+  };
+  for (const [path, text] of Object.entries(textFiles)) {
+    const file = join(study, path);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, text);
+  }
+  writeFileSync(join(study, "items/lessons/arrays-intro/cells.png"), TINY_PNG);
 }
 
 /** The pack of the Coding track's home that keeps its own track, Drills, out of Continue. */
