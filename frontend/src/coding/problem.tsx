@@ -467,9 +467,8 @@ export function ProblemView({
   const lastRun = useRef("");
   const tutor = useConversation(
     `workshop:tutor:${itemKey}`,
-    (turns, replyId, onDelta) => {
-      change((s) => ({ ...s, hints: s.hints + 1 }));
-      return codingApi.tutor(
+    (turns, replyId, onDelta, signal) =>
+      codingApi.tutor(
         itemKey,
         {
           model,
@@ -482,9 +481,10 @@ export function ProblemView({
           reply_id: replyId,
         },
         onDelta,
-      );
-    },
+        signal,
+      ),
     "Open a problem before asking about it.",
+    () => change((s) => ({ ...s, hints: s.hints + 1 })),
   );
 
   const header = (
@@ -609,11 +609,19 @@ export function ProblemView({
       onReloaded={(fresh) => {
         confirmedVersion.current = fresh.session.version ?? confirmedVersion.current;
         localExpectedVersion.current = confirmedVersion.current;
-        void updateCachedCodingSession(itemKey, fresh.session);
-        setOpened(fresh);
-        sessionRef.current = fresh.session;
-        setSession(fresh.session);
-        writeUnsaved(itemKey, null);
+        const hints = Math.max(fresh.session.hints, sessionRef.current?.hints ?? 0);
+        const adopted = hints > fresh.session.hints ? { ...fresh.session, hints } : fresh.session;
+        void updateCachedCodingSession(itemKey, adopted);
+        setOpened({ ...fresh, session: adopted });
+        sessionRef.current = adopted;
+        setSession(adopted);
+        if (adopted.hints > fresh.session.hints) {
+          writeUnsaved(itemKey, { session: adopted, at: Date.now() });
+          saver.schedule(adopted);
+        } else {
+          saver.discard();
+          writeUnsaved(itemKey, null);
+        }
       }}
       onProject={(update) =>
         setOpened((current) =>

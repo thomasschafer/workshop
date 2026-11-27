@@ -243,6 +243,7 @@ pub fn router(app: Shared) -> Router {
         .route("/edit", post(edit::edit_code))
         .route("/discuss", post(discuss::discuss))
         .route("/replies/{id}", get(replies::reply))
+        .route("/replies/{id}/cancel", post(replies::cancel))
         .route("/git/sync", post(git::git_sync))
         .route("/log", post(client::client_log))
         .route("/lsp", get(lsp::lsp))

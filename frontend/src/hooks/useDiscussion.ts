@@ -13,7 +13,7 @@ export interface DiscussContext {
 export function useDiscussion(puzzle: Puzzle | null, model: string, context: () => DiscussContext) {
   return useConversation(
     puzzle ? `workshop:discuss:${puzzle.year}:${puzzle.day}` : null,
-    (turns, replyId, onDelta) => {
+    (turns, replyId, onDelta, signal) => {
       if (!puzzle) throw new Error("Open a puzzle before discussing it.");
       const { code, notes, errors, lastRun } = context();
       return api.discuss(
@@ -29,6 +29,7 @@ export function useDiscussion(puzzle: Puzzle | null, model: string, context: () 
           reply_id: replyId,
         },
         onDelta,
+        signal,
       );
     },
     "Open a puzzle before discussing it.",

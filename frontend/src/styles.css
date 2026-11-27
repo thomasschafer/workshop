@@ -258,6 +258,8 @@ html[data-tab-turn] .content {
 .code-pane {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow-x: clip;
   display: flex;
   flex-direction: column;
 }
@@ -409,6 +411,8 @@ html[data-tab-turn] .content {
 .editor {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow-x: clip;
   /* CodeMirror raises its panels, such as Helix's status line, to z-index 300; this keeps them
      within the editor, under modals and sheets. */
   isolation: isolate;
@@ -602,6 +606,23 @@ html[data-tab-turn] .content {
 .turn-retry {
   align-self: flex-end;
   padding: 0 4px;
+}
+
+.turn-thinking {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.turn-thinking > .turn {
+  flex: 1;
+  min-width: 0;
+}
+
+.turn-cancel {
+  flex: none;
+  padding: 8px 4px;
 }
 
 .turn.user {

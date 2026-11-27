@@ -388,6 +388,14 @@ export class LatestSaver<T> {
     clearTimeout(this.timer);
   }
 
+  /** Drops any pending unsent value, as when a fresher state was adopted from the server. */
+  discard(): void {
+    clearTimeout(this.timer);
+    this.latest = null;
+    this.landed = this.scheduled;
+    this.lastError = null;
+  }
+
   schedule(value: T): void {
     this.scheduled++;
     this.latest = { value, count: this.scheduled };

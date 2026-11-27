@@ -3192,3 +3192,134 @@ test("cold-starts offline and on a stalled link from / and opens cached AoC puzz
   }
   await context.close();
 });
+
+test("cancels a coach's reply from the card or in Discuss, returning the question to the input", async ({
+  browser,
+}) => {
+  const { context, phone: computer } = await openOnPhone(browser, "default", "computer");
+  await computer.getByRole("button", { name: "Discuss", exact: true }).click();
+  const input = computer.getByPlaceholder("Or type a question");
+
+  // Cancelling from the utterance card stops the reply and returns the question to the input box.
+  await computer.locator(".typed input").fill("answer slowly from card");
+  await computer.locator(".typed input").press("Enter");
+  const workingCard = computer.locator(".card.working");
+  await expect(workingCard).toContainText("answer slowly from card");
+  await expect(computer.locator(".turn.coach.writing")).toHaveText("Slowly, ");
+  await workingCard.getByRole("button", { name: "Cancel" }).click();
+  await expect(workingCard).toHaveCount(0);
+  await expect(input).toHaveValue("answer slowly from card");
+  await expect(computer.locator(".turn")).toHaveCount(0);
+  // Past when the slow fake model would have finished writing.
+  await computer.waitForTimeout(3500);
+  await expect(computer.locator(".turn")).toHaveCount(0);
+  await expect(computer.locator(".card.done")).toHaveCount(0);
+
+  // Cancelling from the Discuss Cancel button stops the reply too and returns the question.
+  await input.fill("answer slowly in discuss");
+  await input.press("Enter");
+  await expect(computer.locator(".turn.coach.writing")).toHaveText("Slowly, ");
+  await computer.locator(".pane.discuss").getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    computer.locator(".pane.discuss").getByRole("button", { name: "Cancel" }),
+  ).toHaveCount(0);
+  await expect(workingCard).toHaveCount(0);
+  await expect(input).toHaveValue("answer slowly in discuss");
+  await expect(computer.locator(".turn")).toHaveCount(0);
+  await computer.waitForTimeout(3500);
+  await expect(computer.locator(".turn")).toHaveCount(0);
+  await expect(computer.locator(".card.done")).toHaveCount(0);
+
+  await context.close();
+});
+
+test("keeps Settings and Run within an iPhone screen when the editor holds a long line", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    ...devices["iPhone 14"],
+    baseURL: `http://127.0.0.1:${PORT}`,
+  });
+  const phone = await context.newPage();
+  await phone.addInitScript(() => {
+    localStorage.setItem("workshop:keybindings", "helix");
+    localStorage.setItem("workshop:lineWrapping", "false");
+  });
+  const token = readFileSync(join(HOME, "config", "token"), "utf8").trim();
+  await phone.goto(`/advent-of-code?token=${token}`);
+  const picker = phone.locator(".picker");
+  await expect(picker.or(phone.locator(".puzzle-button")).first()).toBeVisible({ timeout: 15_000 });
+  if (!(await picker.isVisible())) await phone.locator(".puzzle-button").click();
+  await phone.getByRole("button", { name: "2017", exact: true }).click();
+  await expect(picker).toContainText("5 stars in 2017");
+  await phone.locator(".day", { hasText: /^4$/ }).click();
+  await phone.getByRole("navigation").getByRole("button", { name: "Code" }).click();
+  await expect(phone.locator(".cm-content")).toContainText("def part1");
+  const saved = () => readFileSync(solution, "utf8");
+  const original = saved();
+
+  // Put a very long line in the code, move Helix's cursor to its far right end, then scroll the
+  // editor back to column 0 (as after scrolling back to read the start of the file).
+  const longLine = `# ${"very_long_identifier_".repeat(14)}`;
+  const line = await phone.locator(".cm-line").first().boundingBox();
+  if (line === null) throw new Error("there's no code line to tap");
+  await phone.touchscreen.tap(line.x + 20, line.y + line.height / 2);
+  await expect(phone.locator(".cm-helix-keyboard")).toBeFocused();
+  await phone.keyboard.type(`ggO${longLine}`);
+  await phone.keyboard.press("Escape");
+  await phone.keyboard.type("gl");
+  await phone.locator(".cm-scroller").evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  // Let requestMeasure update the hidden keyboard field's position.
+  await phone.waitForTimeout(100);
+
+  const viewport = phone.viewportSize();
+  if (viewport === null) throw new Error("the phone has no viewport");
+  const overflow = await phone.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    scrollHeight: document.documentElement.scrollHeight,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth);
+  expect(overflow.scrollHeight).toBeLessThanOrEqual(overflow.innerHeight);
+
+  // Settings fits the width of the screen once its opening animation settles.
+  await phone.getByRole("button", { name: "Settings" }).tap();
+  const settingsDialog = phone.getByRole("dialog", { name: "Settings" });
+  await expect(settingsDialog).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await settingsDialog.boundingBox();
+      return box ? Math.round(box.width) : 0;
+    })
+    .toBe(viewport.width);
+  const settingsBox = await settingsDialog.boundingBox();
+  if (settingsBox === null) throw new Error("Settings isn't shown");
+  expect(settingsBox.x).toBeGreaterThanOrEqual(-1);
+  await settingsDialog.getByRole("button", { name: "Close" }).tap();
+  await expect(settingsDialog).toHaveCount(0);
+
+  // Run sheet appears fully on screen without scrolling down.
+  await phone.getByRole("button", { name: "Run" }).tap();
+  const runDialog = phone.getByRole("dialog", { name: "Run" });
+  await expect(runDialog).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await runDialog.boundingBox();
+      if (!box) return false;
+      return (
+        box.y >= 0 && box.y + box.height <= viewport.height + 1 && box.width <= viewport.width + 1
+      );
+    })
+    .toBe(true);
+  await runDialog.getByRole("button", { name: "Close" }).tap();
+  await expect(runDialog).toHaveCount(0);
+
+  // Refocus the editor after closing the dialogs, then undo the test line.
+  await phone.touchscreen.tap(line.x + 20, line.y + line.height / 2);
+  await expect(phone.locator(".cm-helix-keyboard")).toBeFocused();
+  await undoUntilSaved(phone, () => phone.keyboard.type("u"), original);
+  await context.close();
+});

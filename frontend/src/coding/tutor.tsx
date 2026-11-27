@@ -37,6 +37,7 @@ export function TutorSheet({
         onDraft={conversation.setDraft}
         onModel={onModel}
         onSend={(text) => void conversation.send(text)}
+        onCancel={conversation.cancel}
         onRetry={() => void conversation.retry()}
         onClear={conversation.clear}
         intro="Stuck? Ask for a hint. The tutor sees the problem, your plan and your code, and nudges you towards the next step without giving the solution away."

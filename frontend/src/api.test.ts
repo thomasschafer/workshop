@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConnectionError, connection, request, sentence, TimeoutError } from "./api";
+import {
+  askCoach,
+  ConnectionError,
+  connection,
+  followReply,
+  ReplyCancelled,
+  ReplyLost,
+  request,
+  sentence,
+  TimeoutError,
+} from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -54,5 +64,56 @@ describe("request timeouts and reachability", () => {
     expect(connection.isOnline).toBe(true);
     expect(connection.isSlow).toBe(false);
     expect(connection.snapshot().lastRttMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("coach reply streaming and cancellation", () => {
+  it("does not turn an aborted read into ReplyLost", async () => {
+    const encoder = new TextEncoder();
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const body = new ReadableStream<Uint8Array>({
+          start(stream) {
+            stream.enqueue(encoder.encode(`${JSON.stringify({ delta: "Start " })}\n`));
+          },
+        });
+        return new Response(body, { status: 200 });
+      }),
+    );
+
+    const deltas: string[] = [];
+    const pending = askCoach(
+      "/discuss",
+      { reply_id: "r1" },
+      (d) => {
+        deltas.push(d);
+        controller.abort();
+      },
+      controller.signal,
+    );
+    await expect(pending).rejects.toSatisfy(
+      (err: unknown) => err instanceof Error && !(err instanceof ReplyLost),
+    );
+    expect(deltas).toEqual(["Start "]);
+  });
+
+  it("rejects with ReplyCancelled when the server ends the stream as cancelled", async () => {
+    const encoder = new TextEncoder();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const body = new ReadableStream<Uint8Array>({
+          start(stream) {
+            stream.enqueue(encoder.encode(`${JSON.stringify({ cancelled: true })}\n`));
+            stream.close();
+          },
+        });
+        return new Response(body, { status: 200 });
+      }),
+    );
+
+    await expect(followReply("r2", () => {})).rejects.toBeInstanceOf(ReplyCancelled);
   });
 });

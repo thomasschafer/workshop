@@ -8,10 +8,11 @@ use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::header;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 
 use super::error::{ApiError, bad_request, not_found};
 use super::state::Shared;
@@ -25,16 +26,24 @@ pub(super) struct Finished {
     pub(super) model: Option<String>,
 }
 
+#[derive(Clone)]
+enum End {
+    Done(Finished),
+    Error(String),
+    Cancelled,
+}
+
 /// A reply as far as it's been written.
 #[derive(Clone, Default)]
 struct Progress {
     text: String,
-    end: Option<Result<Finished, String>>,
+    end: Option<End>,
 }
 
 struct Kept {
     asked: Instant,
     progress: watch::Sender<Progress>,
+    cancel: CancellationToken,
 }
 
 /// The replies asked for in the last hour, by the id the app gave each.
@@ -50,7 +59,15 @@ impl Writer {
     }
 
     pub(super) fn finish(self, end: Result<Finished, String>) {
+        let end = match end {
+            Ok(done) => End::Done(done),
+            Err(error) => End::Error(error),
+        };
         self.0.send_modify(|p| p.end = Some(end));
+    }
+
+    pub(super) fn cancel(self) {
+        self.0.send_modify(|p| p.end = Some(End::Cancelled));
     }
 }
 
@@ -62,7 +79,9 @@ impl Drop for Writer {
             if p.end.is_some() {
                 return false;
             }
-            p.end = Some(Err("The reply stopped before it was finished.".to_owned()));
+            p.end = Some(End::Error(
+                "The reply stopped before it was finished.".to_owned(),
+            ));
             true
         });
     }
@@ -77,7 +96,7 @@ impl Replies {
     }
 
     /// Starts keeping a new reply under `id`, which must not have been used already.
-    pub(super) fn start(&self, id: &str) -> Result<Writer, ApiError> {
+    pub(super) fn start(&self, id: &str) -> Result<(Writer, CancellationToken), ApiError> {
         if id.is_empty() || id.len() > 64 {
             return Err(bad_request("A reply's id must be 1 to 64 characters."));
         }
@@ -89,14 +108,24 @@ impl Replies {
             )));
         }
         let progress = watch::Sender::new(Progress::default());
+        let cancel = CancellationToken::new();
         kept.insert(
             id.to_owned(),
             Kept {
                 asked: Instant::now(),
                 progress: progress.clone(),
+                cancel: cancel.clone(),
             },
         );
-        Ok(Writer(progress))
+        Ok((Writer(progress), cancel))
+    }
+
+    /// Signals a reply in progress to stop. Harmless if unknown or already finished.
+    pub(super) fn cancel(&self, id: &str) {
+        let kept = self.0.lock().expect("replies lock poisoned");
+        if let Some(entry) = kept.get(id) {
+            entry.cancel.cancel();
+        }
     }
 
     /// The reply kept under `id`, from the start, as it's written.
@@ -112,7 +141,8 @@ impl Replies {
 }
 
 /// A reply as newline-delimited JSON, from the start however much is already written:
-/// `{"delta": text}` as it's written, then `{"done": {text, model}}` or `{"error": message}`.
+/// `{"delta": text}` as it's written, then `{"done": {text, model}}`, `{"cancelled": true}` or
+/// `{"error": message}`.
 fn stream(progress: watch::Receiver<Progress>) -> Response {
     let lines = futures_util::stream::unfold(Some((progress, 0)), |state| async move {
         let (mut progress, sent) = state?;
@@ -120,15 +150,21 @@ fn stream(progress: watch::Receiver<Progress>) -> Response {
             let now = progress.borrow_and_update().clone();
             let line =
                 |value: serde_json::Value| Ok::<_, std::convert::Infallible>(format!("{value}\n"));
+            if matches!(now.end, Some(End::Cancelled)) {
+                return Some((line(serde_json::json!({ "cancelled": true })), None));
+            }
             if now.text.len() > sent {
                 let delta = serde_json::json!({ "delta": &now.text[sent..] });
                 return Some((line(delta), Some((progress, now.text.len()))));
             }
             match now.end {
-                Some(Ok(done)) => return Some((line(serde_json::json!({ "done": done })), None)),
-                Some(Err(error)) => {
+                Some(End::Done(done)) => {
+                    return Some((line(serde_json::json!({ "done": done })), None));
+                }
+                Some(End::Error(error)) => {
                     return Some((line(serde_json::json!({ "error": error })), None));
                 }
+                Some(End::Cancelled) => unreachable!(),
                 // Every writer ends its reply, even one that's dropped, so this only fails for a
                 // reply let go of before it ended, which none is.
                 None => progress.changed().await.ok()?,
@@ -153,6 +189,12 @@ pub(super) async fn reply(
     app.replies.follow(&id)
 }
 
+/// Stops a reply in progress. Harmless if the reply has already ended or isn't known.
+pub(super) async fn cancel(State(app): State<Shared>, Path(id): Path<String>) -> StatusCode {
+    app.replies.cancel(&id);
+    StatusCode::NO_CONTENT
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
@@ -173,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn picks_a_reply_up_from_the_start_and_follows_it_to_the_end() {
         let replies = Replies::default();
-        let writer = replies.start("a").unwrap();
+        let (writer, _cancel) = replies.start("a").unwrap();
         writer.delta("Look at ");
         let following = replies.follow("a").unwrap();
         writer.delta("the loop.");
@@ -202,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn a_writer_that_goes_without_finishing_ends_its_reply_with_an_error() {
         let replies = Replies::default();
-        let writer = replies.start("a").unwrap();
+        let (writer, _cancel) = replies.start("a").unwrap();
         let following = replies.follow("a").unwrap();
         drop(writer);
         let lines = lines(following).await;
@@ -210,6 +252,28 @@ mod tests {
             lines,
             [serde_json::json!({ "error": "The reply stopped before it was finished." })]
         );
+    }
+
+    #[tokio::test]
+    async fn cancelling_signals_the_writer_and_ends_followers_as_cancelled() {
+        let replies = Replies::default();
+        let (writer, cancel) = replies.start("a").unwrap();
+        let following = replies.follow("a").unwrap();
+        assert!(!cancel.is_cancelled());
+        replies.cancel("a");
+        assert!(cancel.is_cancelled());
+        writer.delta("ignored after cancel");
+        writer.cancel();
+        assert_eq!(
+            lines(following).await,
+            [serde_json::json!({ "cancelled": true })]
+        );
+        assert_eq!(
+            lines(replies.follow("a").unwrap()).await,
+            [serde_json::json!({ "cancelled": true })]
+        );
+        // Cancelling an unknown reply is a no-op.
+        replies.cancel("missing");
     }
 
     #[test]

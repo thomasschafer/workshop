@@ -458,4 +458,15 @@ describe("LatestSaver", () => {
     expect(errors).toEqual([]);
     saver.close();
   });
+
+  it("drops a pending unsent value when discarded", async () => {
+    const save = vi.fn().mockResolvedValue(null);
+    const saver = new LatestSaver<string>(save, 500, () => {});
+    saver.schedule("stale");
+    saver.discard();
+    await saver.flush();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).not.toHaveBeenCalled();
+    saver.close();
+  });
 });

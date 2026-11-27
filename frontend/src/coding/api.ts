@@ -122,5 +122,6 @@ export const codingApi = {
       reply_id: string;
     },
     onDelta: (text: string) => void,
-  ) => askCoach(`${item(key)}/tutor`, body, onDelta),
+    signal?: AbortSignal,
+  ) => askCoach(`${item(key)}/tutor`, body, onDelta, signal),
 };

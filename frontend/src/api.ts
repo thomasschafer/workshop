@@ -722,55 +722,91 @@ export async function streamLines(
   path: string,
   body: unknown,
   onLine: (value: unknown) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const response = await send(method, path, body, { timeoutMs: 0 });
+  const response = await send(method, path, body, {
+    timeoutMs: 0,
+    ...(signal ? { signal } : {}),
+  });
   if (!response.body) throw new Error("The server's reply couldn't be read as it arrived.");
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-  let buffered = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffered += value;
-    for (let end = buffered.indexOf("\n"); end !== -1; end = buffered.indexOf("\n")) {
-      const line = buffered.slice(0, end);
-      buffered = buffered.slice(end + 1);
-      if (line.trim()) onLine(JSON.parse(line));
+  const onAbort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  if (signal) {
+    if (signal.aborted) {
+      onAbort();
+      throw new DOMException("Aborted", "AbortError");
     }
+    signal.addEventListener("abort", onAbort, { once: true });
   }
-  if (buffered.trim()) onLine(JSON.parse(buffered));
+  let buffered = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      buffered += value;
+      for (let end = buffered.indexOf("\n"); end !== -1; end = buffered.indexOf("\n")) {
+        const line = buffered.slice(0, end);
+        buffered = buffered.slice(end + 1);
+        if (line.trim()) onLine(JSON.parse(line));
+      }
+    }
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (buffered.trim()) onLine(JSON.parse(buffered));
+  } finally {
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 type ReplyEvent =
   | { delta: string }
   | { done: { text: string; model: string | null } }
+  | { cancelled: true }
   | { error: string };
 
 /** A coach's reply, or as much as arrived, lost with the connection; it can be picked up again. */
 export class ReplyLost extends Error {}
 
+/** A coach's reply that the server reports as cancelled. */
+export class ReplyCancelled extends Error {}
+
 /**
  * Reads a coach's reply, handing over its text as it's written. Rejects with `ReplyLost` if the
- * connection goes before it's finished, or with any other error for a reply that failed.
+ * connection goes before it's finished, `ReplyCancelled` if the server cancelled it, or with any
+ * other error for a reply that failed or was aborted.
  */
 async function readReply(
   method: string,
   path: string,
   body: unknown,
   onDelta: (text: string) => void,
+  signal?: AbortSignal,
 ): Promise<{ text: string; model: string | null }> {
   let reply: { text: string; model: string | null } | null = null;
   let failed: string | null = null;
+  let cancelled = false;
   try {
-    await streamLines(method, path, body, (line) => {
-      const event = line as ReplyEvent;
-      if ("delta" in event) onDelta(event.delta);
-      else if ("done" in event) reply = event.done;
-      else failed = sentence(event.error);
-    });
+    await streamLines(
+      method,
+      path,
+      body,
+      (line) => {
+        const event = line as ReplyEvent;
+        if ("delta" in event) onDelta(event.delta);
+        else if ("done" in event) reply = event.done;
+        else if ("cancelled" in event) cancelled = true;
+        else failed = sentence(event.error);
+      },
+      signal,
+    );
   } catch (e) {
-    // The server said no, rather than the connection going.
-    if (e instanceof ApiError) throw e;
+    // Aborted by the caller, or the server said no, rather than the connection going.
+    if (signal?.aborted || e instanceof ApiError) throw e;
   }
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (cancelled) throw new ReplyCancelled("Cancelled.");
   if (failed !== null) throw new Error(failed);
   if (reply === null) throw new ReplyLost("Lost the connection before the reply was finished.");
   return reply;
@@ -781,11 +817,19 @@ export const askCoach = (
   path: string,
   body: { reply_id: string },
   onDelta: (text: string) => void,
-) => readReply("POST", path, body, onDelta);
+  signal?: AbortSignal,
+) => readReply("POST", path, body, onDelta, signal);
 
 /** Picks up a reply asked for earlier, from the start. */
-export const followReply = (id: string, onDelta: (text: string) => void) =>
-  readReply("GET", `/replies/${encodeURIComponent(id)}`, undefined, onDelta);
+export const followReply = (id: string, onDelta: (text: string) => void, signal?: AbortSignal) =>
+  readReply("GET", `/replies/${encodeURIComponent(id)}`, undefined, onDelta, signal);
+
+/** Tells the server to stop a reply in progress. */
+export const cancelReply = (id: string) =>
+  request<null>("POST", `/replies/${encodeURIComponent(id)}/cancel`, undefined, {
+    keepalive: true,
+    timeoutMs: 3_000,
+  });
 
 const day = (p: Puzzle) => `/puzzles/${p.year}/${p.day}`;
 
@@ -923,7 +967,8 @@ export const api = {
       reply_id: string;
     },
     onDelta: (text: string) => void,
-  ) => askCoach("/discuss", body, onDelta),
+    signal?: AbortSignal,
+  ) => askCoach("/discuss", body, onDelta, signal),
   /** Fire-and-forget: records phone-side events in the server's log file. */
   log: (kind: "error" | "command" | "speech", message: string) => {
     request<null>("POST", "/log", { kind, message }, { timeoutMs: 3_000 }).catch(() => {});

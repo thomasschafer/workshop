@@ -388,7 +388,13 @@ class HelixView implements PluginValue, Host {
       read: (view) => {
         const coords = view.coordsAtPos(helixCursor(view.state), 1);
         const box = view.dom.getBoundingClientRect();
-        return coords ? { left: coords.left - box.left, top: coords.top - box.top } : null;
+        if (!coords) return null;
+        const maxLeft = Math.max(0, box.width - field.el.offsetWidth);
+        const maxTop = Math.max(0, box.height - field.el.offsetHeight);
+        return {
+          left: Math.min(Math.max(0, coords.left - box.left), maxLeft),
+          top: Math.min(Math.max(0, coords.top - box.top), maxTop),
+        };
       },
       write: (at) => {
         if (at === null) return;

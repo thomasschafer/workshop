@@ -730,9 +730,18 @@ export function App({
       return { kind: "done", tone: "info", text: "Added to notes" };
     }
     if (tab === "discuss") {
+      if (context.signal.aborted) return { kind: "cancelled" };
       api.log("speech", `discuss: ${job.text}`);
       context.working("Asking the coach");
-      await discussion.send(job.text);
+      const onAbort = () => discussion.cancel();
+      context.signal.addEventListener("abort", onAbort, { once: true });
+      let outcome: "replied" | "cancelled" | "failed";
+      try {
+        outcome = await discussion.send(job.text);
+      } finally {
+        context.signal.removeEventListener("abort", onAbort);
+      }
+      if (context.signal.aborted || outcome === "cancelled") return { kind: "cancelled" };
       return { kind: "done", tone: "info", text: "Answered in Discuss" };
     }
     if (command) {
@@ -1086,6 +1095,7 @@ export function App({
             onDraft={discussion.setDraft}
             onModel={setDiscussModel}
             onSend={(text) => enqueue(text)}
+            onCancel={discussion.cancel}
             onRetry={() => void discussion.retry()}
             onClear={discussion.clear}
           />

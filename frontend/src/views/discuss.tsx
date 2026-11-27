@@ -33,6 +33,7 @@ interface Props {
   onDraft: (draft: string) => void;
   onModel: (model: string) => void;
   onSend: (text: string) => void;
+  onCancel: () => void;
   onRetry: () => void;
   onClear: () => void;
   /** What's said before the conversation starts, about what the coach can help with. */
@@ -51,6 +52,7 @@ export function DiscussView({
   onDraft,
   onModel,
   onSend,
+  onCancel,
   onRetry,
   onClear,
   intro = "Stuck? Ask about the puzzle, your code or your notes. The coach can see them all, won't edit anything, and won't give the answer away unless you ask.",
@@ -118,11 +120,16 @@ export function DiscussView({
           ),
         )}
         {thinking ? (
-          partial ? (
-            <Reply text={partial} writing />
-          ) : (
-            <div class="turn coach muted">Thinking…</div>
-          )
+          <div class="turn-thinking">
+            {partial ? (
+              <Reply text={partial} writing />
+            ) : (
+              <div class="turn coach muted">Thinking…</div>
+            )}
+            <button type="button" class="text-button turn-cancel" onClick={onCancel}>
+              Cancel
+            </button>
+          </div>
         ) : null}
         {unanswered ? (
           <button type="button" class="text-button turn-retry" onClick={onRetry}>
