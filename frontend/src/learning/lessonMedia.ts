@@ -27,6 +27,28 @@ export function isSafeHttpUrl(url: string): boolean {
   return /^https?:\/\/\S+$/i.test(url.trim());
 }
 
+/** Whether two lesson image maps carry the same assets, regardless of object identity. */
+export function sameLessonImages(
+  a: Record<string, DeckLessonImage>,
+  b: Record<string, DeckLessonImage>,
+): boolean {
+  if (a === b) return true;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    if (!Object.hasOwn(b, key)) return false;
+    const left = a[key];
+    const right = b[key];
+    if (!left || !right || left.kind !== right.kind) return false;
+    if (left.kind === "svg") {
+      if (right.kind !== "svg" || left.svg !== right.svg) return false;
+    } else if (right.kind !== "png" || left.data_url !== right.data_url) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function safeDecode(value: string): string {
   try {
     return decodeURIComponent(value);

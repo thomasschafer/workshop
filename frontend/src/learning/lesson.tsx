@@ -10,7 +10,7 @@ import { TrackIcon } from "../tracks/icons";
 import type { TrackId } from "../tracks/types";
 import { DictateButton } from "../views/dictate";
 import "./lesson.css";
-import { isSafeHttpUrl, renderLessonHtmlInto } from "./lessonMedia";
+import { isSafeHttpUrl, renderLessonHtmlInto, sameLessonImages } from "./lessonMedia";
 import {
   advanceFromSegment,
   answerGuess,
@@ -43,16 +43,26 @@ function LessonMarkdown({
 }) {
   const render = useMarkdown();
   const hostRef = useRef<HTMLDivElement>(null);
-  const renderedRef = useRef<{ html: string; images: Record<string, DeckLessonImage> } | null>(
-    null,
-  );
+  const renderedRef = useRef<{
+    host: HTMLDivElement;
+    html: string;
+    images: Record<string, DeckLessonImage>;
+  } | null>(null);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host || render === null) return;
     const html = render(text);
-    if (renderedRef.current?.html === html && renderedRef.current.images === images) return;
-    renderedRef.current = { html, images };
+    // Syncing replaces the deck with a freshly parsed copy whose `images` object has identical
+    // entries; compare by value so diagrams aren't torn down and re-inserted mid-segment.
+    if (
+      renderedRef.current?.host === host &&
+      renderedRef.current.html === html &&
+      sameLessonImages(renderedRef.current.images, images)
+    ) {
+      return;
+    }
+    renderedRef.current = { host, html, images };
     renderLessonHtmlInto(host, html, images);
   }, [render, text, images]);
 
