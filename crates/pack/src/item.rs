@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use workshop_tracks::TrackId;
 
 use crate::code::{Coding, CodingFields, MAX_PARTS, PartText, Reading, ReadingFields};
+use crate::lab::{Lab, LabFields};
 use crate::lesson::{Lesson, LessonFields, LessonRef};
 use crate::manifest::{Manifest, is_slug};
 use crate::number::{self, Tolerance};
@@ -35,13 +36,16 @@ pub enum Kind {
     Codebase,
     /// A short piece that teaches a topic in a few minutes before its questions.
     Lesson,
+    /// A hands-on exercise the learner carries out on a machine of their own, recording what
+    /// they ran and saw, marked by the grader against what each step should show.
+    Lab,
 }
 
 impl Kind {
     /// The track an item of this kind is in, unless it says otherwise.
     pub fn default_track(self) -> TrackId {
         match self {
-            Self::Card | Self::Lesson => TrackId::Review,
+            Self::Card | Self::Lesson | Self::Lab => TrackId::Review,
             Self::MentalMaths => TrackId::MentalMaths,
             Self::Probability => TrackId::Probability,
             Self::Coding | Self::Reading | Self::Codebase => TrackId::Coding,
@@ -65,6 +69,7 @@ impl Kind {
             Self::Lesson => 4,
             Self::Coding | Self::Codebase => 20,
             Self::Design => 30,
+            Self::Lab => 40,
         }
     }
 
@@ -134,6 +139,9 @@ impl Kind {
             // Lessons have arbitrary segment headings plus `Explain` and `Explain answer`, handled
             // by `split_lesson_sections`.
             Self::Lesson => &[("Explain", true), ("Explain answer", true)],
+            // Labs have arbitrary step headings too, between `Setup` and `Explain`, handled by
+            // `split_lesson_sections` and `Lab::new`.
+            Self::Lab => &[("Setup", true), ("Explain", true), ("Explain answer", true)],
         }
     }
 }
@@ -186,6 +194,7 @@ pub enum Content {
         brief: Option<String>,
     },
     Lesson(Lesson),
+    Lab(Lab),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -430,6 +439,13 @@ impl Item {
                     .to_owned(),
             );
         }
+        // A lab is listed, and worked through, from a track's practice screen, which the Coding
+        // and System design tracks don't have.
+        if common.kind == Kind::Lab && matches!(track, TrackId::Coding | TrackId::SystemDesign) {
+            return Err(format!(
+                "a lab is listed in its track's practice screen, so it can't be in the {track} track"
+            ));
+        }
         if common.minutes == Some(0) {
             return Err("minutes should be at least 1".to_owned());
         }
@@ -442,7 +458,17 @@ impl Item {
                 DIFFICULTY.end()
             ));
         }
-        let lesson = match (common.lesson, common.segment) {
+        // A lab's `lesson` is one to do before it's offered, rather than one that teaches it.
+        let (lab_lesson, common_lesson) = match (common.kind, common.lesson) {
+            (Kind::Lab, lesson) if common.segment.is_none() => (lesson, None),
+            (Kind::Lab, _) => {
+                return Err(
+                    "a lab can name a `lesson` to do first, but not a `segment` of it".to_owned(),
+                );
+            }
+            (_, lesson) => (None, lesson),
+        };
+        let lesson = match (common_lesson, common.segment) {
             (None, None) => None,
             (Some(_), _) | (None, Some(_)) if !common.kind.is_short() => {
                 return Err(
@@ -478,7 +504,12 @@ impl Item {
         };
 
         let kind_fields = toml::Value::Table(table);
-        let (prompt, content) = if common.kind == Kind::Lesson {
+        let (prompt, content) = if common.kind == Kind::Lab {
+            let (prompt, sections) = split_lesson_sections(body)?;
+            let fields: LabFields = kind_fields.try_into().map_err(|err| err.to_string())?;
+            let lab = Lab::new(fields, lab_lesson, &prompt, sections)?;
+            (prompt, Content::Lab(lab))
+        } else if common.kind == Kind::Lesson {
             let (prompt, sections) = split_lesson_sections(body)?;
             let fields: LessonFields = kind_fields.try_into().map_err(|err| err.to_string())?;
             let lesson = Lesson::new(fields, &prompt, sections, &read_bytes)?;
@@ -592,7 +623,7 @@ impl Item {
                         brief: section("Brief"),
                     }
                 }
-                Kind::Lesson => unreachable!("handled above"),
+                Kind::Lesson | Kind::Lab => unreachable!("handled above"),
             };
             (prompt, content)
         };
@@ -804,6 +835,7 @@ pub(crate) fn kind_name(kind: Kind) -> &'static str {
         Kind::Design => "design",
         Kind::Codebase => "codebase",
         Kind::Lesson => "lesson",
+        Kind::Lab => "lab",
     }
 }
 
@@ -2145,6 +2177,210 @@ Because the tree is complete with no gaps.
 
         for (source, expected) in cases {
             let err = parse_lesson_in(source).unwrap_err();
+            assert!(
+                err.contains(expected),
+                "expected {expected:?} in error {err:?} for:\n{source}"
+            );
+        }
+    }
+
+    /// A lab's front matter, with `extra` fields before its sources.
+    fn lab_front(extra: &str) -> String {
+        format!(
+            "kind = \"lab\"\ntitle = \"Watching page faults\"\nskills = [\"arithmetic\"]\n{extra}[[sources]]\ntitle = \"perf-stat(1)\"\nurl = \"https://man7.org/linux/man-pages/man1/perf-stat.1.html\"\n"
+        )
+    }
+
+    fn lab_with(front: &str, body: &str) -> String {
+        format!("+++\n{front}+++\n{body}")
+    }
+
+    /// A lab's body, with `steps` between its setup and its explain question.
+    fn lab_body(steps: &str) -> String {
+        format!(
+            "Count a program's page faults.\n\n## Setup\n\nA Linux machine with `perf`.\n\n{steps}## Explain\n\nWhy is the second run quicker?\n\n## Explain answer\n\nIts pages are in memory already.\n"
+        )
+    }
+
+    const LAB_STEP: &str = "## Count the faults\n\nRun:\n\n```sh\nperf stat -e minor-faults ./alloc\n# ### Expected isn't a heading in here\n```\n\nRecord the count.\n\n### Expected\n\nAbout one minor fault for each page touched.\n\n";
+
+    #[test]
+    fn reads_a_lab() {
+        let source = lab_with(
+            &lab_front("lesson = \"heaps\"\n"),
+            &lab_body(&format!(
+                "{LAB_STEP}## Make a major fault\n\nDrop the page cache, then run it again.\n\n### Expected\n\nA major fault, as the page is read from disk.\n\n### Why\n\nIt's not in memory.\n\n"
+            )),
+        );
+        let item = parse(&source).unwrap();
+        assert_eq!(item.kind, Kind::Lab);
+        // A lab is in the Review track unless it says, takes 40 minutes, and its `lesson` is one
+        // to do first rather than one that teaches it.
+        assert_eq!(item.track, TrackId::Review);
+        assert_eq!(item.minutes, 40);
+        assert_eq!(item.lesson, None);
+        assert_eq!(item.prompt, "Count a program's page faults.");
+        let Content::Lab(lab) = &item.content else {
+            panic!("not a lab: {:?}", item.content);
+        };
+        assert_eq!(lab.lesson.as_deref(), Some("heaps"));
+        assert_eq!(lab.sources[0].title, "perf-stat(1)");
+        assert_eq!(lab.setup, "A Linux machine with `perf`.");
+        assert_eq!(lab.steps.len(), 2);
+        assert_eq!(lab.steps[0].title, "Count the faults");
+        assert!(lab.steps[0].body.starts_with("Run:"));
+        assert!(lab.steps[0].body.contains("# ### Expected isn't a heading"));
+        assert!(lab.steps[0].body.ends_with("Record the count."));
+        assert_eq!(
+            lab.steps[0].expected,
+            "About one minor fault for each page touched."
+        );
+        // Headings after `### Expected` are part of it.
+        assert!(
+            lab.steps[1]
+                .expected
+                .ends_with("### Why\n\nIt's not in memory.")
+        );
+        assert_eq!(lab.explain, "Why is the second run quicker?");
+        assert_eq!(lab.explain_answer, "Its pages are in memory already.");
+        assert!(
+            lab.summary().contains("checked for form only"),
+            "{}",
+            lab.summary()
+        );
+
+        // In the pack's track, or its own, as lessons are, and as long as it says.
+        let own = parse(&lab_with(
+            &lab_front("track = \"estimation\"\nminutes = 25\n"),
+            &lab_body(LAB_STEP),
+        ))
+        .unwrap();
+        assert_eq!(own.track, TrackId::Pack("estimation".parse().unwrap()));
+        assert_eq!(own.minutes, 25);
+    }
+
+    #[test]
+    fn says_what_is_wrong_with_a_lab() {
+        let nine_steps: String = (1..=9)
+            .map(|n| format!("## Step {n}\n\nDo it.\n\n### Expected\n\nIt works.\n\n"))
+            .collect();
+        let no_sources = "kind = \"lab\"\nskills = [\"arithmetic\"]\n";
+        let cases: Vec<(String, &str)> = vec![
+            (lab_with(no_sources, &lab_body(LAB_STEP)), "[[sources]]"),
+            (
+                lab_with(
+                    &lab_front(""),
+                    "Count faults.\n\n## Count\n\nDo it.\n\n### Expected\n\nFaults.\n\n## Explain\n\nWhy?\n\n## Explain answer\n\nBecause.\n",
+                ),
+                "starts with a `## Setup`",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    "Count faults.\n\n## Setup\n\nA machine.\n\n## Explain\n\nWhy?\n\n## Explain answer\n\nBecause.\n",
+                ),
+                "at least one step",
+            ),
+            (
+                lab_with(&lab_front(""), &lab_body(&nine_steps)),
+                "at most 8 steps",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    &lab_body("## Count\n\nDo it, and record it.\n\n"),
+                ),
+                "needs an `### Expected`",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    &lab_body("## Count\n\n### Expected\n\nFaults.\n\n"),
+                ),
+                "says nothing to do",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    &lab_body("## Count\n\nDo it.\n\n### Expected\n\n"),
+                ),
+                "empty `### Expected`",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    &lab_body(
+                        "## Count\n\nDo it.\n\n### Expected\n\nOne.\n\n### Expected\n\nTwo.\n\n",
+                    ),
+                ),
+                "more than one `### Expected`",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    "Count faults.\n\n## Setup\n\nA machine.\n\n### Expected\n\nNo.\n\n## Count\n\nDo it.\n\n### Expected\n\nFaults.\n\n## Explain\n\nWhy?\n\n## Explain answer\n\nBecause.\n",
+                ),
+                "only steps have one",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    "Count faults.\n\n## Setup\n\nA machine.\n\n## Explain\n\nWhy?\n\n## Count\n\nDo it.\n\n### Expected\n\nFaults.\n\n## Explain answer\n\nBecause.\n",
+                ),
+                "comes after `## Explain`",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    "Count faults.\n\n## Setup\n\nA machine.\n\n## Count\n\nDo it.\n\n### Expected\n\nFaults.\n\n## Explain answer\n\nBecause.\n",
+                ),
+                "needs a `## Explain` section",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    "Count faults.\n\n## Setup\n\nA machine.\n\n## Count\n\nDo it.\n\n### Expected\n\nFaults.\n\n## Explain\n\nWhy?\n",
+                ),
+                "needs a `## Explain answer` section",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    &lab_body("## Count\n\nDo it.\n\n## Count\n\nAgain.\n\n"),
+                ),
+                "there twice",
+            ),
+            (
+                lab_with(
+                    &lab_front(""),
+                    &lab_body(
+                        "## Count\n\nSee ![the output](out.png).\n\n### Expected\n\nFaults.\n\n",
+                    ),
+                ),
+                "can't include images",
+            ),
+            (
+                lab_with(
+                    &lab_front("lesson = \"heaps\"\nsegment = 1\n"),
+                    &lab_body(LAB_STEP),
+                ),
+                "not a `segment`",
+            ),
+            (
+                lab_with(&lab_front("lesson = \"Heaps!\"\n"), &lab_body(LAB_STEP)),
+                "lowercase letters",
+            ),
+            (
+                lab_with(&lab_front("rubric = [\"x\"]\n"), &lab_body(LAB_STEP)),
+                "unknown field",
+            ),
+            (
+                lab_with(&lab_front("track = \"coding\"\n"), &lab_body(LAB_STEP)),
+                "can't be in the coding track",
+            ),
+        ];
+        for (source, expected) in &cases {
+            let err = parse(source).unwrap_err();
             assert!(
                 err.contains(expected),
                 "expected {expected:?} in error {err:?} for:\n{source}"

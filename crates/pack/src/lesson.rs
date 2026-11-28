@@ -157,9 +157,33 @@ pub(crate) struct LessonFields {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawSource {
+pub(crate) struct RawSource {
     title: String,
     url: String,
+}
+
+/// Reads an item's `[[sources]]`, of which there must be at least one, each with a title and an
+/// `http` or `https` URL. `what` is what the item is, such as "a lesson".
+pub(crate) fn read_sources(raw: Vec<RawSource>, what: &str) -> Result<Vec<LessonSource>, String> {
+    if raw.is_empty() {
+        return Err(format!("{what} needs at least one `[[sources]]` entry"));
+    }
+    let mut sources = Vec::with_capacity(raw.len());
+    for (i, source) in raw.into_iter().enumerate() {
+        let n = i + 1;
+        let title = source.title.trim().to_owned();
+        if title.is_empty() {
+            return Err(format!("source {n}'s title is empty"));
+        }
+        let url = source.url.trim().to_owned();
+        if !is_http_url(&url) {
+            return Err(format!(
+                "source {n}'s url {url:?} should be an http or https URL"
+            ));
+        }
+        sources.push(LessonSource { title, url });
+    }
+    Ok(sources)
 }
 
 #[derive(Deserialize)]
@@ -202,25 +226,7 @@ impl Lesson {
             }
         }
 
-        // Validate `[[sources]]`.
-        if fields.sources.is_empty() {
-            return Err("a lesson needs at least one `[[sources]]` entry".to_owned());
-        }
-        let mut sources = Vec::with_capacity(fields.sources.len());
-        for (i, source) in fields.sources.into_iter().enumerate() {
-            let n = i + 1;
-            let title = source.title.trim().to_owned();
-            if title.is_empty() {
-                return Err(format!("source {n}'s title is empty"));
-            }
-            let url = source.url.trim().to_owned();
-            if !is_http_url(&url) {
-                return Err(format!(
-                    "source {n}'s url {url:?} should be an http or https URL"
-                ));
-            }
-            sources.push(LessonSource { title, url });
-        }
+        let sources = read_sources(fields.sources, "a lesson")?;
 
         // Validate `[[guesses]]`.
         if fields.guesses.len() > MAX_GUESSES {
@@ -514,7 +520,7 @@ fn load_segment_images(
 }
 
 /// Finds Markdown images `![alt](target)` outside fenced code blocks and inline code spans.
-fn markdown_images(text: &str) -> Vec<(String, String)> {
+pub(crate) fn markdown_images(text: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
     let mut in_fence: Option<char> = None;
     for line in text.lines() {

@@ -49,6 +49,8 @@ export type Destination =
   | { kind: "coding"; item: string | null }
   /** Design prompts: one of them, as `pack/item`, or the list of them. */
   | { kind: "design"; item: string | null }
+  /** A lab, as `pack/item`, worked through on the learner's own machine. */
+  | { kind: "lab"; item: string }
   /** Timed rounds: one of an item, as `pack/item`, under way or to start, or the list of them. */
   | { kind: "round"; item: string | null };
 

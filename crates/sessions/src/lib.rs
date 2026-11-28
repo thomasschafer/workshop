@@ -1,6 +1,6 @@
 //! Long items, done in a sitting rather than a few minutes at a time: guided design sessions,
-//! and timed rounds with the examiner, with the brief a design prompt's questions are answered
-//! from. Each is saved as it goes, so the learner can stop and
+//! labs carried out on the learner's own machine, and timed rounds with the examiner, with the
+//! brief a design prompt's questions are answered from. Each is saved as it goes, so the learner can stop and
 //! carry on later, on any device.
 //!
 //! This crate keeps where each one is and the rules it follows. Talking to the coach, the
@@ -8,6 +8,7 @@
 
 pub mod brief;
 pub mod design;
+pub mod lab;
 pub mod round;
 mod saved;
 

@@ -2,17 +2,20 @@ import { Markdown } from "../learning/practice";
 import "./grading.css";
 import type { Marked } from "./types";
 
-const MET = { yes: "Met", partly: "Partly", no: "Not met" } as const;
+export const MET = { yes: "Met", partly: "Partly", no: "Not met" } as const;
 
 /** How the grader marked a piece of work: the score, each rubric point, what it found wrong and
  * what to do next. */
 export function MarkedView({
   marked,
   logMistakes = true,
+  showPoints = true,
 }: {
   marked: Marked;
   /** Whether findings are logged to the mistake log. False for lessons. */
   logMistakes?: boolean;
+  /** Whether to list the rubric's points, which a lab shows with each of its steps instead. */
+  showPoints?: boolean;
 }) {
   return (
     <section class="marked" aria-label="Marked">
@@ -26,15 +29,17 @@ export function MarkedView({
           <Markdown text={marked.clarity.feedback} />
         </section>
       ) : null}
-      <ul class="marked-points">
-        {marked.points.map((point) => (
-          <li key={point.point} class={`marked-point ${point.met}`}>
-            <span class="marked-met">{MET[point.met]}</span>
-            <span>{point.point}</span>
-            {point.comment ? <span class="muted">{point.comment}</span> : null}
-          </li>
-        ))}
-      </ul>
+      {showPoints ? (
+        <ul class="marked-points">
+          {marked.points.map((point) => (
+            <li key={point.point} class={`marked-point ${point.met}`}>
+              <span class="marked-met">{MET[point.met]}</span>
+              <span>{point.point}</span>
+              {point.comment ? <span class="muted">{point.comment}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {marked.questioning ? <QuestioningView questioning={marked.questioning} /> : null}
       {marked.missed && marked.missed.length > 0 ? (
         <>

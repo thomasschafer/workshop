@@ -9,6 +9,10 @@ import type {
   DesignSession,
   Exchange,
   FlaggedCard,
+  LabEdit,
+  LabMarked,
+  LabOpened,
+  LabSession,
   MarkedReply,
   Review,
   Stage,
@@ -55,6 +59,15 @@ export const gradingApi = {
     request<DesignMarked>("POST", `/design/${path(key)}/finish`, { id }, { timeoutMs: 0 }).then(
       counted,
     ),
+  lab: (key: string) => request<LabOpened>("GET", `/labs/${path(key)}`),
+  /** Starts a lab, or carries on with the one started; `again` starts it afresh. */
+  startLab: (key: string, again = false) =>
+    request<LabOpened>("POST", `/labs/${path(key)}/start`, { again }),
+  saveLab: (key: string, edit: LabEdit, keepalive = false) =>
+    request<LabSession>("PUT", `/labs/${path(key)}/session`, edit, { keepalive }),
+  /** Has the grader mark the whole lab, which ends it; `id` is the attempt's. */
+  finishLab: (key: string, id: string) =>
+    request<LabMarked>("POST", `/labs/${path(key)}/finish`, { id }, { timeoutMs: 0 }).then(counted),
   /**
    * Marks work with the grader, written or, if `spoken`, what was heard explaining it aloud;
    * `id` is the attempt's, for work that counts as one.

@@ -97,6 +97,58 @@ export interface DesignOpened {
   previous: string | null;
 }
 
+// Labs mirror crates/sessions/src/lab.rs, and their routes src/server/labs.rs.
+
+/** Where the learner is with a lab. Screen 0 is the setup, then each step from 1, then the
+ * question at the end. */
+export interface LabSession {
+  at: number;
+  /** The furthest screen reached, which any screen up to can be gone back to. */
+  reached: number;
+  /** What was recorded at each step, one for each. */
+  records: string[];
+  explanation: string;
+  started_at: number;
+  updated_at: number;
+  /** Whether the lab's steps have changed since it was started, so it has to start again. */
+  stale: boolean;
+}
+
+/** The learner's changes to a lab. */
+export interface LabEdit {
+  at: number;
+  records: string[];
+  explanation: string;
+}
+
+export interface LabOpened {
+  key: string;
+  label: string;
+  prompt: string;
+  skills: string[];
+  minutes: number;
+  source: string | null;
+  setup: string;
+  /** Each step, without what it should show, which is shown once it's marked. */
+  steps: { title: string; body: string }[];
+  /** The question at the end. */
+  explain: string;
+  /** The lesson to do first, if it names one. */
+  lesson: { key: string; title: string; done: boolean } | null;
+  session: LabSession | null;
+  /** What was recorded last time, if it's been done before. */
+  previous: string | null;
+}
+
+type MarkedPoint = Marked["points"][number];
+
+/** A lab marked: each step's expected result beside what was recorded, and the question's. */
+export interface LabMarked extends MarkedReply {
+  steps: { title: string; expected: string; recorded: string; point: MarkedPoint }[];
+  explain: { question: string; answer: string; given: string; point: MarkedPoint };
+  sources: { title: string; url: string }[];
+}
+
 // A card's follow-up questions mirror src/follow_ups.rs, and their routes
 // src/server/follow_ups.rs.
 

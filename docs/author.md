@@ -27,6 +27,10 @@ Each lesson is written as a bundle with between three and six new short items th
 
 Because a lesson has nothing to solve blind, the reviewer audits it instead, given the lesson (including SVG diagram source) and its accompanying items, still with no tools: it checks every factual claim, objecting to any it believes wrong or misleading and to any it isn't sure of that's stated as certain; each guess's and check's answer and explanation; the `## Explain answer`; that the sources appear real and relevant without fetching them; and that any SVG diagram shows what the text says. Any objection goes through the same discussion rounds with the writer as practice items, and the lesson's items are still solved and reviewed blind.
 
+## Labs
+
+The author doesn't write labs (as [docs/packs.md](packs.md#labs) describes them) yet: a lab is carried out on the learner's own machine, so neither its check nor the reviewer can show it's right. A lab the writer writes anyway is left out of the run, and the summary says so.
+
 ## Problems in parts, and in API mode
 
 The writer can write coding problems in parts, where each part adds requirements to the last and the learner keeps their code from one to the next, and problems in API mode, where the learner writes a class or functions in Python that the tests call, as [docs/packs.md](packs.md#problems-in-parts) describes. They suit skills about designing code that's easy to change, such as data structures with state, an editor's buffer or an inventory, more than a single algorithm. Every part must pass its check, as `workshop pack check` runs it: each part's references must pass its tests and the earlier parts' it doesn't replace, and agree with the brute forces that apply. The reviewer solves the whole problem, every part, blind.

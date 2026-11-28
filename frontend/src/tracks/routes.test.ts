@@ -50,6 +50,7 @@ describe("pathOf", () => {
       { screen: "mistakes" },
       { screen: "design", item: null },
       { screen: "design", item: "sample/link-shortener" },
+      { screen: "lab", item: "sample/dict-and-list-lookups" },
       { screen: "rounds", item: null },
       { screen: "rounds", item: "sample/two-dice-seven" },
       { screen: "goals", goal: null },
@@ -88,6 +89,20 @@ describe("routeFor", () => {
       item: "sample/islands",
     });
     expect(routeFor({ kind: "round", item: null })).toEqual({ screen: "rounds", item: null });
+  });
+
+  it("opens a lab at its own address", () => {
+    expect(routeFor({ kind: "lab", item: "sample/dict-and-list-lookups" })).toEqual({
+      screen: "lab",
+      item: "sample/dict-and-list-lookups",
+    });
+    expect(routeOf("/labs/sample/dict-and-list-lookups", "")).toEqual({
+      screen: "lab",
+      item: "sample/dict-and-list-lookups",
+    });
+    // An address that isn't a lab's is the home screen.
+    expect(routeOf("/labs/Sample/x", "")).toEqual({ screen: "home" });
+    expect(routeOf("/labs/sample", "")).toEqual({ screen: "home" });
   });
 
   it("practises a track on its own screen", () => {

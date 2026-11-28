@@ -49,6 +49,9 @@ pub struct Deck {
     pub tracks: Vec<DeckTrack>,
     pub items: Vec<DeckItem>,
     pub lessons: Vec<DeckLesson>,
+    /// The labs, to list in their tracks. Working through one needs the server, so only what
+    /// the list shows is here.
+    pub labs: Vec<DeckLab>,
     pub schedules: BTreeMap<String, ItemSchedule>,
     pub flags: BTreeMap<String, Flag>,
     /// Where each item that's ever been retired stands, so the app leaves retired ones out.
@@ -133,6 +136,20 @@ pub enum DeckContent {
         question: workshop_pack::Question,
         explanation: String,
     },
+}
+
+/// A lab, as its track lists it.
+#[derive(Debug, Serialize)]
+pub struct DeckLab {
+    /// `pack/item`.
+    pub key: String,
+    pub track: TrackId,
+    pub title: String,
+    pub minutes: u32,
+    /// Full `pack/lesson` key of the lesson to do first, if it names one.
+    pub lesson: Option<String>,
+    /// Whether it's been done, and marked, at least once.
+    pub done: bool,
 }
 
 /// A lesson in the deck, carrying its segments, checks, guesses, sources and embedded images so
@@ -469,6 +486,25 @@ impl Learning {
             .iter()
             .map(deck_lesson)
             .collect::<Result<Vec<_>>>()?;
+        let labs = practised
+            .iter()
+            .filter_map(|short| {
+                let Content::Lab(lab) = &short.item.content else {
+                    return None;
+                };
+                Some(DeckLab {
+                    key: short.key.clone(),
+                    track: short.item.track.clone(),
+                    title: short.item.label(),
+                    minutes: short.item.minutes,
+                    lesson: lab
+                        .lesson
+                        .as_ref()
+                        .map(|lesson| format!("{}/{lesson}", pack_of(&short.key))),
+                    done: counts.get(&short.key).is_some_and(|&n| n > 0),
+                })
+            })
+            .collect();
         let mut all_track_items = Vec::with_capacity(practised.len() + lesson_items.len());
         all_track_items.extend(&practised);
         all_track_items.extend(&lesson_items);
@@ -519,6 +555,7 @@ impl Learning {
             tracks,
             items,
             lessons: deck_lessons,
+            labs,
             schedules: schedules
                 .into_iter()
                 .filter(|(key, _)| keys.contains(key.as_str()))
@@ -934,6 +971,11 @@ impl Learning {
                 .collect();
             plans.extend(plan(&in_track, &track_lessons, *progress));
         }
+        let lessons_done = lesson_completions
+            .iter()
+            .filter(|(_, done)| !done.is_empty())
+            .map(|(key, _)| key.clone())
+            .collect();
         let names = track_names(&packs, &items);
         let skill_names = packs
             .iter()
@@ -953,20 +995,22 @@ impl Learning {
             retirements,
             names,
             kept_apart: apart.tracks,
+            lessons_done,
             packs,
         })
     }
 
     /// The tracks of short items, from a plan, with any coding problems in them and the
-    /// problems in progress, and the cards with follow-up questions under way, and of design
-    /// prompts, with the design sessions in progress. The Coding track, whose problems are
-    /// worked on over several steps, is the coding module's.
+    /// problems in progress, the cards with follow-up questions under way, and the labs, with
+    /// those under way, and of design prompts, with the design sessions in progress. The Coding
+    /// track, whose problems are worked on over several steps, is the coding module's.
     pub fn tracks(
         &self,
         planned: &Planned,
         clock: Clock,
         designs: &BTreeMap<String, workshop_sessions::design::Session>,
         problems: &BTreeMap<String, crate::coding::Started>,
+        labs: &BTreeMap<String, workshop_sessions::lab::Session>,
     ) -> Tracks {
         let empty = workshop_learning::TrackPlan::default();
         let tracks = planned
@@ -994,10 +1038,10 @@ impl Learning {
                 .flatten()
                 .min_by_key(|step| step.priority);
                 Track {
-                    summary: summary(plan, clock, followed_up.len()),
+                    summary: summary(&without_labs(plan, planned), clock, followed_up.len()),
                     destination: Destination::Practice { track: id.clone() },
                     next,
-                    long: None,
+                    long: lab_step(id, plan, planned, labs),
                     in_continue: !planned.kept_apart.contains(id),
                     id: id.clone(),
                     name: name.clone(),
@@ -1033,6 +1077,8 @@ pub struct Planned {
     pub names: BTreeMap<TrackId, (String, TrackIcon)>,
     /// The packs' tracks kept out of Continue, whose items are only offered in them.
     pub kept_apart: BTreeSet<TrackId>,
+    /// The lessons done at least once, as `pack/lesson`.
+    pub lessons_done: BTreeSet<String>,
     pub week: Week,
     pub problems: Vec<String>,
 }
@@ -1045,8 +1091,8 @@ fn lessons(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| item.kind == workshop_pack::Kind::Lesson)
 }
 
-/// The items there's practice of: the short ones, coding problems, work in a codebase and design
-/// prompts. Lessons aren't scheduled or counted towards mastery.
+/// The items there's practice of: the short ones, coding problems, work in a codebase, design
+/// prompts and labs. Lessons aren't scheduled or counted towards mastery.
 fn practised(packs: &[Pack]) -> Vec<Short<'_>> {
     items_where(packs, |item| {
         item.kind.is_short()
@@ -1055,8 +1101,16 @@ fn practised(packs: &[Pack]) -> Vec<Short<'_>> {
                 workshop_pack::Kind::Coding
                     | workshop_pack::Kind::Codebase
                     | workshop_pack::Kind::Design
+                    | workshop_pack::Kind::Lab
             )
     })
+}
+
+/// The pack of an item's `pack/item` key.
+fn pack_of(key: &str) -> &str {
+    key.split_once('/')
+        .map(|(pack, _)| pack)
+        .expect("an item's key is `pack/item`")
 }
 
 fn items_where(packs: &[Pack], keep: impl Fn(&Item) -> bool) -> Vec<Short<'_>> {
@@ -1225,7 +1279,11 @@ fn deck_item(short: &Short<'_>, attempts: u64) -> Result<DeckItem> {
             question: reading.question.clone(),
             explanation: reading.explanation.clone(),
         },
-        Content::Coding(_) | Content::Design { .. } | Content::Review(_) | Content::Lesson(_) => {
+        Content::Coding(_)
+        | Content::Design { .. }
+        | Content::Review(_)
+        | Content::Lesson(_)
+        | Content::Lab(_) => {
             unreachable!("only short items are in the deck")
         }
     };
@@ -1392,6 +1450,86 @@ fn design_track(
         parts.push("Nothing due".to_owned());
     }
     Track::built_in(TrackId::SystemDesign, parts.join(" · "), destination, None).with_long(long)
+}
+
+/// A track's plan without its labs, which its practice screen lists apart from what's due and
+/// new, so the track's summary counts what's practised in it.
+fn without_labs(plan: &TrackPlan, planned: &Planned) -> TrackPlan {
+    let not_lab = |key: &&String| {
+        planned
+            .item(key)
+            .is_none_or(|item| item.kind != workshop_pack::Kind::Lab)
+    };
+    TrackPlan {
+        due: plan.due.iter().filter(not_lab).cloned().collect(),
+        new: plan.new.iter().filter(not_lab).cloned().collect(),
+        new_waiting: plan.new_waiting.iter().filter(not_lab).cloned().collect(),
+        ..plan.clone()
+    }
+}
+
+/// The lab a track suggests for when the learner has a while, as labs take one: the one under
+/// way that was worked on most recently, then one that's due, then something new whose lesson,
+/// if it names one, has been done.
+fn lab_step(
+    id: &TrackId,
+    plan: &TrackPlan,
+    planned: &Planned,
+    labs: &BTreeMap<String, workshop_sessions::lab::Session>,
+) -> Option<Step<Destination>> {
+    let lab = |key: &str| {
+        planned
+            .item(key)
+            .filter(|item| item.track == *id)
+            .and_then(|item| match &item.content {
+                Content::Lab(lab) => Some((item, lab)),
+                _ => None,
+            })
+    };
+    let unfinished = labs
+        .iter()
+        .filter(|(key, _)| lab(key).is_some())
+        .max_by_key(|(_, session)| session.updated_at)
+        .map(|(key, session)| {
+            let place = match session.at {
+                0 => "the setup".to_owned(),
+                at if at > session.steps() => "the question at the end".to_owned(),
+                at => format!("step {at}"),
+            };
+            (
+                key,
+                Priority::Unfinished,
+                format!("Where you left off: {place}"),
+            )
+        });
+    let ready = |key: &&String| {
+        lab(key).is_some_and(|(_, lab)| {
+            lab.lesson.as_ref().is_none_or(|lesson| {
+                planned
+                    .lessons_done
+                    .contains(&format!("{}/{lesson}", pack_of(key)))
+            })
+        })
+    };
+    unfinished
+        .or_else(|| {
+            plan.due
+                .iter()
+                .find(|key| lab(key).is_some())
+                .map(|key| (key, Priority::Due, "Lab · due for review".to_owned()))
+        })
+        .or_else(|| {
+            plan.new
+                .iter()
+                .find(ready)
+                .map(|key| (key, Priority::New, "Lab · something new".to_owned()))
+        })
+        .map(|(key, priority, reason)| Step {
+            title: planned.item(key).map_or_else(|| key.clone(), Item::label),
+            reason,
+            priority,
+            destination: Destination::Lab { item: key.clone() },
+        })
 }
 
 /// What a track's items are called, one and many.
@@ -1697,7 +1835,13 @@ mod tests {
         assert_eq!(planned.week.minutes, 0);
 
         // Offered when it's opened, but never by Continue, nor as a timed round.
-        let tracks = learning.tracks(&planned, next_day, &BTreeMap::new(), &BTreeMap::new());
+        let tracks = learning.tracks(
+            &planned,
+            next_day,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
         let track = tracks.tracks.iter().find(|t| t.id == drill).unwrap();
         assert!(!track.in_continue);
         assert_eq!(track.next.as_ref().unwrap().priority, Priority::Due);
@@ -1751,7 +1895,13 @@ mod tests {
         let found = crate::coding::find(&packs, "apart", "add").unwrap();
         // With nothing begun, the short items come first.
         let planned = learning.planned(clock(NOW)).unwrap();
-        let tracks = learning.tracks(&planned, clock(NOW), &BTreeMap::new(), &BTreeMap::new());
+        let tracks = learning.tracks(
+            &planned,
+            clock(NOW),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
         let track = tracks.tracks.iter().find(|t| t.id == drill).unwrap();
         assert_eq!(
             track.next.as_ref().unwrap().destination,
@@ -1762,7 +1912,13 @@ mod tests {
         // A problem started is carried on with from the track, and isn't the Coding track's.
         problems.start(&found, &[], false, None, NOW).unwrap();
         let sessions = problems.started().unwrap();
-        let tracks = learning.tracks(&planned, clock(NOW), &BTreeMap::new(), &sessions);
+        let tracks = learning.tracks(
+            &planned,
+            clock(NOW),
+            &BTreeMap::new(),
+            &sessions,
+            &BTreeMap::new(),
+        );
         let next = tracks
             .tracks
             .iter()
@@ -1804,7 +1960,13 @@ mod tests {
 
     fn tracks_at(learning: &Learning, clock: Clock) -> Tracks {
         let planned = learning.planned(clock).unwrap();
-        learning.tracks(&planned, clock, &BTreeMap::new(), &BTreeMap::new())
+        learning.tracks(
+            &planned,
+            clock,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
     }
 
     fn attempt(id: &str, item: &str, at: i64, rating: Rating) -> Attempt {
@@ -2055,7 +2217,13 @@ mod tests {
         let probability = &planned.plans[&TrackId::Probability];
         let first = planned.item(&probability.new[0]).unwrap();
         assert!(first.skills.contains(&"probability.conditional".to_owned()));
-        let tracks = learning.tracks(&planned, clock(NOW + 1), &BTreeMap::new(), &BTreeMap::new());
+        let tracks = learning.tracks(
+            &planned,
+            clock(NOW + 1),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
         let next = tracks
             .tracks
             .iter()

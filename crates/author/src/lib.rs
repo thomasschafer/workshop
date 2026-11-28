@@ -329,7 +329,20 @@ pub async fn run<M: Models>(
     let mut drafts_removed = changes.drafts_removed;
 
     let candidates = new_items(&original, &copy)?;
-    let mut units = group_into_units(&copy, candidates)?;
+    // Labs are carried out on the learner's own machine, so neither the checks nor the reviewer
+    // can show one is right: the author doesn't write them yet.
+    let mut candidates_kept = Vec::with_capacity(candidates.len());
+    for mut candidate in candidates {
+        if load_item(&copy, &candidate.path).is_ok_and(|item| item.kind == workshop_pack::Kind::Lab)
+        {
+            remove_item(&copy, &candidate)?;
+            candidate.reason = Some("the author doesn't write labs".to_owned());
+            report.dropped.push(candidate);
+        } else {
+            candidates_kept.push(candidate);
+        }
+    }
+    let mut units = group_into_units(&copy, candidates_kept)?;
 
     // Cap each lesson bundle at MAX_LESSON_ITEMS new items.
     for unit in &mut units {

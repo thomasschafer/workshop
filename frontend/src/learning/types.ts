@@ -160,6 +160,18 @@ export interface DeckProgress {
   minutes_this_week: number;
 }
 
+/** A lab, as its track lists it. Mirrors `DeckLab` in src/learning.rs. */
+export interface DeckLab {
+  key: string;
+  track: TrackId;
+  title: string;
+  minutes: number;
+  /** The `pack/lesson` key of the lesson to do first, if it names one. */
+  lesson: string | null;
+  /** Whether it's been done, and marked, at least once. */
+  done: boolean;
+}
+
 export interface Deck {
   limits: Limits;
   /** What's been done today and this week, but in tracks kept apart. */
@@ -181,6 +193,9 @@ export interface Deck {
   items: DeckItem[];
   /** Lessons in the packs, with their embedded images. Missing from decks saved by an older Workshop. */
   lessons?: DeckLesson[];
+  /** Labs in the packs, to list in their tracks; working through one needs the server. Missing
+   * from decks saved by an older Workshop. */
+  labs?: DeckLab[];
   schedules: Record<string, ItemSchedule>;
   flags: Record<string, { at: number; note: string | null }>;
   /** Where each item that's ever been retired stands. Decks saved on a device by an older

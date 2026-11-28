@@ -284,6 +284,49 @@ async fn keeps_to_the_cap_and_puts_back_what_it_may_not_change() {
 }
 
 #[tokio::test]
+async fn leaves_out_any_lab_the_writer_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(
+        |copy: &Path, _: &str, _| {
+            std::fs::write(
+                copy.join("items/rolling.md"),
+                "+++\nkind = \"lab\"\nskills = [\"dice.sums\"]\n[[sources]]\ntitle = \"Dice\"\nurl = \"https://example.com/dice\"\n+++\nRoll two dice and count.\n\n## Setup\n\nTwo dice.\n\n## Roll them\n\nRoll a hundred times.\n\n### Expected\n\nSeven most often.\n\n## Explain\n\nWhy seven?\n\n## Explain answer\n\nIt has the most pairs.\n",
+            )
+            .unwrap();
+            std::fs::write(
+                copy.join("items/pips.md"),
+                card("How many pips on a die?", "21."),
+            )
+            .unwrap();
+            "{\"items\": []}".to_owned()
+        },
+        reviewer("21", vec![agrees()]),
+    );
+    let (report, _) = run_with(dir.path(), &fake, LIMITS).await;
+    let accepted: Vec<&str> = report.accepted.iter().map(|w| w.path.as_str()).collect();
+    assert_eq!(accepted, ["items/pips.md"]);
+    let dropped: Vec<(&str, Option<&str>)> = report
+        .dropped
+        .iter()
+        .map(|w| (w.path.as_str(), w.reason.as_deref()))
+        .collect();
+    assert_eq!(
+        dropped,
+        [("items/rolling.md", Some("the author doesn't write labs"))]
+    );
+    assert!(!dir.path().join("work/pack/items/rolling.md").exists());
+    // Nothing about it reached the reviewer.
+    assert!(
+        !fake
+            .reviews
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|review| review.contains("Roll two dice"))
+    );
+}
+
+#[tokio::test]
 async fn has_the_writer_fix_an_item_that_fails_its_check() {
     let dir = tempfile::tempdir().unwrap();
     let fake = Fake::new(

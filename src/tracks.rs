@@ -27,6 +27,8 @@ pub enum Destination {
     /// Design prompts, each worked through as a design session: one, as `pack/item`, or the
     /// list of them.
     Design { item: Option<String> },
+    /// A lab, as `pack/item`, worked through on the learner's own machine.
+    Lab { item: String },
     /// Timed rounds: one of an item, as `pack/item`, under way or to start, or the list of
     /// them.
     Round { item: Option<String> },

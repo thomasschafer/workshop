@@ -115,6 +115,7 @@ export function Practice({
   onHome,
   onOpenProblem,
   onOpenLesson,
+  onOpenLab,
 }: {
   track: TrackId;
   /** Whether Whisper is ready on the server, for explaining answers aloud. */
@@ -128,6 +129,8 @@ export function Practice({
   onOpenProblem: (item: string) => void;
   /** Opens a lesson, optionally at a single segment or auto-started from the flow. */
   onOpenLesson: (item: string, options?: OpenLessonOptions) => void;
+  /** Opens one of the track's labs, by its key. */
+  onOpenLab: (item: string) => void;
 }) {
   const state = useLearning();
   const deck = state.deck;
@@ -438,6 +441,7 @@ export function Practice({
               onBringBack={bringBack}
             />
             <TrackLessons deck={deck} track={track} onOpen={(item) => onOpenLesson(item)} />
+            <TrackLabs deck={deck} track={track} onOpen={onOpenLab} />
             <TrackProblems track={track} onOpen={onOpenProblem} />
           </>
         )}
@@ -1505,6 +1509,59 @@ function Done({
         items={retired(deck, track, state.retirementChanges)}
         onBringBack={onBringBack}
       />
+    </section>
+  );
+}
+
+/**
+ * A track's labs, each with how long it roughly takes, whether it's been done, and any lesson it
+ * asks to be done first. They're listed from the deck, offline too, but working through one needs
+ * the server, which offline the list says.
+ */
+function TrackLabs({
+  deck,
+  track,
+  onOpen,
+}: {
+  deck: Deck;
+  track: TrackId;
+  onOpen: (key: string) => void;
+}) {
+  const state = useLearning();
+  const online = useConnection();
+  const labs = (deck.labs ?? []).filter((lab) => lab.track === track);
+  if (labs.length === 0) return null;
+  const completed = completedLessons(deck, state.lessonCompletions);
+  const lessonTitle = (key: string) =>
+    (deck.lessons ?? []).find((lesson) => lesson.key === key)?.title ?? key;
+  return (
+    <section class="learn-labs" aria-labelledby="labs-heading">
+      <h2 id="labs-heading" class="tracks-heading">
+        Labs
+      </h2>
+      {!online ? (
+        <p class="muted" role="status">
+          Labs need the server, which can't be reached.
+        </p>
+      ) : null}
+      <ul class="lesson-list">
+        {labs.map((lab) => {
+          const done = lab.done || state.attempts.some((attempt) => attempt.item === lab.key);
+          const first =
+            lab.lesson && (completed[lab.lesson]?.length ?? 0) === 0 ? lab.lesson : null;
+          return (
+            <li key={lab.key}>
+              <button type="button" class="lesson-item" onClick={() => onOpen(lab.key)}>
+                <span class="lesson-item-name">{lab.title}</span>
+                <span class="lesson-item-detail muted">
+                  {done ? "Done" : "Not done"} · ~{lab.minutes} min
+                  {first ? ` · Do first: ${lessonTitle(first)}` : ""}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

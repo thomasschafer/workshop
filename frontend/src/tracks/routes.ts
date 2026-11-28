@@ -9,6 +9,8 @@ export type Route =
   | { screen: "lesson"; item: string; segment?: number }
   | { screen: "coding"; item: string | null }
   | { screen: "design"; item: string | null }
+  /** A lab, as `pack/item`. */
+  | { screen: "lab"; item: string }
   | { screen: "rounds"; item: string | null }
   | { screen: "mistakes" }
   /** Progress towards a goal of the packs', by its id, or the list of goals. */
@@ -22,6 +24,7 @@ const PRACTICE_PATH = "/practice/";
 const LESSONS_PATH = "/lessons";
 const CODING_PATH = "/coding";
 const DESIGN_PATH = "/design";
+const LABS_PATH = "/labs";
 const ROUNDS_PATH = "/rounds";
 const MISTAKES_PATH = "/mistakes";
 const GOALS_PATH = "/goals";
@@ -51,6 +54,12 @@ export function routeOf(pathname: string, search: string): Route {
         return { screen: "lesson", item: `${pack}/${item}`, segment: Number(segParam) - 1 };
       }
       return { screen: "lesson", item: `${pack}/${item}` };
+    }
+  }
+  if (pathname.startsWith(`${LABS_PATH}/`)) {
+    const [pack, item, ...rest] = pathname.slice(LABS_PATH.length + 1).split("/");
+    if (pack && item && rest.length === 0 && SLUG.test(pack) && SLUG.test(item)) {
+      return { screen: "lab", item: `${pack}/${item}` };
     }
   }
   for (const [base, screen] of [
@@ -94,6 +103,8 @@ export function pathOf(route: Route): string {
       return route.item === null ? CODING_PATH : `${CODING_PATH}/${route.item}`;
     case "design":
       return route.item === null ? DESIGN_PATH : `${DESIGN_PATH}/${route.item}`;
+    case "lab":
+      return `${LABS_PATH}/${route.item}`;
     case "rounds":
       return route.item === null ? ROUNDS_PATH : `${ROUNDS_PATH}/${route.item}`;
     case "mistakes":
@@ -119,6 +130,8 @@ export function routeFor(destination: Destination): Route {
       return { screen: "coding", item: destination.item };
     case "design":
       return { screen: "design", item: destination.item };
+    case "lab":
+      return { screen: "lab", item: destination.item };
     case "round":
       return { screen: "rounds", item: destination.item };
   }

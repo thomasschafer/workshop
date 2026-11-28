@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 const checkout = createHash("sha256")
   .update(resolve(import.meta.dirname))
   .digest();
-const SERVERS = 8;
+const SERVERS = 9;
 const FIRST_PORT = 20_000 + (checkout.readUInt16BE(0) % Math.floor(10_000 / SERVERS)) * SERVERS;
 const CHECKOUT_HOME = join(tmpdir(), `workshop-e2e-${checkout.toString("hex").slice(0, 12)}`);
 
@@ -53,6 +53,10 @@ export const GOALS_HOME = `${CHECKOUT_HOME}-goals`;
 /** An eighth, for skipping lessons with "I know this", each in a track of its own. */
 export const SKIP_PORT = port(7);
 export const SKIP_HOME = `${CHECKOUT_HOME}-skip`;
+
+/** A ninth, for labs: a pack with a lab of its own track, whose lesson is in another. */
+export const LABS_PORT = port(8);
+export const LABS_HOME = `${CHECKOUT_HOME}-labs`;
 
 const PUZZLE = `<html><body><main>
 <article class="day-desc"><h2>--- Day 4: Counting Lines ---</h2>
@@ -919,6 +923,140 @@ Yes, when ties take from the left run first.
   };
   for (const [path, text] of Object.entries(files)) {
     const file = join(skim, path);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, text);
+  }
+}
+
+/** The lab in the labs home, as `pack/item`, and the lesson it asks to be done first. */
+export const LAB = "bench/page-faults";
+export const LAB_LESSON = "bench/memory-pages";
+
+/**
+ * A home for labs, with a pack whose lab of three steps is in a track of its own, Systems, and
+ * whose lesson, to be done first, is in another, Memory.
+ */
+export function createLabsHome(): void {
+  const bench = join(LABS_HOME, "bench");
+  writeHome({
+    home: LABS_HOME,
+    port: LABS_PORT,
+    year: 2017,
+    day: 4,
+    puzzle: PUZZLE,
+    input: "a\n",
+    stars: {},
+    model: "fake",
+    extra: `[learning]\ndaily_new = 10\ndaily_lessons = 10\npacks = [${JSON.stringify(bench)}]\nsample_pack = false\n`,
+  });
+  const files: Record<string, string> = {
+    "pack.toml": `id = "bench"
+name = "Bench"
+
+[[skills]]
+id = "os.memory"
+name = "Memory"
+
+[[tracks]]
+id = "systems"
+name = "Systems"
+summary = "Hands on a running system"
+
+[[tracks]]
+id = "memory"
+name = "Memory"
+summary = "How memory is managed"
+`,
+    "items/lessons/memory-pages.md": `+++
+kind = "lesson"
+title = "How memory is paged"
+skills = ["os.memory"]
+track = "memory"
+
+[[sources]]
+title = "Operating systems notes"
+url = "https://example.com/paging"
++++
+How a process's memory is mapped a page at a time.
+
+## Pages
+
+Memory is mapped in pages, each touched for the first time with a fault.
+
+## Explain
+
+Why does touching new memory fault?
+
+## Explain answer
+
+Its page isn't mapped until it's first touched.
+`,
+    "items/labs/page-faults.md": `+++
+kind = "lab"
+title = "Watching page faults happen"
+skills = ["os.memory"]
+track = "systems"
+lesson = "memory-pages"
+minutes = 30
+
+[[sources]]
+title = "perf-stat(1)"
+url = "https://man7.org/linux/man-pages/man1/perf-stat.1.html"
++++
+Count a program's page faults, and make each kind happen on purpose.
+
+## Setup
+
+A Linux machine where you can run \`perf\`, such as a virtual machine.
+
+## Count the faults of a fresh allocation
+
+Run a program that touches 100 MB it has just allocated, and count its faults:
+
+\`\`\`sh
+perf stat -e minor-faults,major-faults ./touch 100
+\`\`\`
+
+Record both counts.
+
+### Expected
+
+About 25,600 minor faults, one for each 4 KB page touched, and no major ones.
+
+## Run it again
+
+Run the same command again, and record both counts.
+
+### Expected
+
+About as many minor faults again, as each run maps its memory afresh.
+
+## Make a major fault
+
+Drop the page cache, then run a program whose file isn't in memory:
+
+\`\`\`sh
+sync; echo 3 | sudo tee /proc/sys/vm/drop_caches
+perf stat -e major-faults ./read-file big.dat
+\`\`\`
+
+Record the count.
+
+### Expected
+
+Some major faults, as the file's pages are read from disk.
+
+## Explain
+
+Why are the first run's faults minor rather than major?
+
+## Explain answer
+
+The memory is new, so its pages are filled with zeros without reading the disk.
+`,
+  };
+  for (const [path, text] of Object.entries(files)) {
+    const file = join(bench, path);
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, text);
   }

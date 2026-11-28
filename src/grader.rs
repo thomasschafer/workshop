@@ -58,6 +58,9 @@ pub enum Work {
     Review,
     /// A lesson's explain-in-your-own-words question, against its explain answer and segments.
     Lesson,
+    /// A lab the learner carried out on a machine of their own: what they recorded they ran and
+    /// saw at each step, against what it should show, and their answer to its question.
+    Lab,
 }
 
 impl Work {
@@ -68,7 +71,7 @@ impl Work {
     pub fn is_attempt(self) -> bool {
         matches!(
             self,
-            Self::Design | Self::Card | Self::Round | Self::FollowUps | Self::Review
+            Self::Design | Self::Card | Self::Round | Self::FollowUps | Self::Review | Self::Lab
         )
     }
 
@@ -285,6 +288,37 @@ fn own_rubric(
                 }),
             ))
         }
+        (Work::Lab, Content::Lab(lab)) => {
+            let mut points: Vec<String> = lab
+                .steps
+                .iter()
+                .enumerate()
+                .map(|(at, step)| {
+                    format!(
+                        "{} {}: what was recorded shows the expected result, and that they understood it",
+                        lab_step_id(at),
+                        step.title
+                    )
+                })
+                .collect();
+            points.push(format!(
+                "{LAB_EXPLAIN_ID} Answers the question at the end soundly, in their own words"
+            ));
+            let mut reference = String::new();
+            for (at, step) in lab.steps.iter().enumerate() {
+                reference.push_str(&format!(
+                    "{} {}, expected:\n\n{}\n\n",
+                    lab_step_id(at),
+                    step.title,
+                    step.expected.trim()
+                ));
+            }
+            reference.push_str(&format!(
+                "{LAB_EXPLAIN_ID} What a good answer to the question at the end covers:\n\n{}",
+                lab.explain_answer.trim()
+            ));
+            Ok((points, Some(reference)))
+        }
         (Work::Lesson, Content::Lesson(lesson)) => Ok((
             vec![
                 "Explains the answer accurately, in any words".to_owned(),
@@ -333,6 +367,23 @@ pub fn mark_prompt(
             out.push_str(&format!(
                 "This question comes at the end of a short lesson the learner just read:\n\n<lesson>\n{}\n</lesson>\n\n",
                 body.trim_end()
+            ));
+        }
+        Content::Lab(lab) => {
+            let mut steps = String::new();
+            for (at, step) in lab.steps.iter().enumerate() {
+                steps.push_str(&format!(
+                    "## {} {}\n\n{}\n\n",
+                    lab_step_id(at),
+                    step.title,
+                    step.body.trim()
+                ));
+            }
+            out.push_str(&format!(
+                "The question is a lab, which the learner carried out on a machine of their own, following these steps after its setup:\n\n<lab>\n## Setup\n\n{}\n\n{}## {LAB_EXPLAIN_ID} The question at the end\n\n{}\n</lab>\n\nThe work is what they recorded they ran and saw at each step, then their answer to the question at the end. The rubric has a point for each step and one for that answer, each with an id, such as [S1]; give each point back as it's written, starting with its id. Machines differ, so judge whether what they recorded shows what the step's expected result describes, and that they understood it, rather than whether its numbers match exactly. A step with nothing recorded isn't met.\n\n",
+                lab.setup.trim(),
+                steps,
+                lab.explain.trim()
             ));
         }
         Content::Coding(coding) if let Some(project) = coding.project() => {
@@ -669,28 +720,8 @@ pub fn parse_marked(reply: &str, error_types: &[ErrorType], answer: &Answer<'_>)
 /// in part counting half, less [`FALSE_ALARM_COST`] for each false alarm. The defects not found
 /// at all are kept, for the mistake log.
 pub fn score_review(marked: Marked, review: &workshop_pack::Review) -> Result<Marked> {
-    // Points are matched with defects by their ids, whatever order the grader gives them in.
-    let mut points: Vec<Option<Point>> = vec![None; review.defects.len()];
-    for point in &marked.points {
-        let at = (0..review.defects.len())
-            .find(|&at| point.point.trim_start().starts_with(&defect_id(at)))
-            .with_context(|| {
-                format!(
-                    "the grader marked a point that isn't one of the defects: {:?}",
-                    point.point
-                )
-            })?;
-        if points[at].replace(point.clone()).is_some() {
-            bail!("the grader marked {} twice", defect_id(at));
-        }
-    }
-    let points: Vec<Point> = points
-        .into_iter()
-        .enumerate()
-        .map(|(at, point)| {
-            point.with_context(|| format!("the grader didn't mark {}", defect_id(at)))
-        })
-        .collect::<Result<_>>()?;
+    let ids: Vec<String> = (0..review.defects.len()).map(defect_id).collect();
+    let points = points_by_id(&marked.points, &ids)?;
     let marked = Marked { points, ..marked };
     let found: f64 = marked
         .points
@@ -724,6 +755,51 @@ fn defect_id(at: usize) -> String {
     format!("[D{}]", at + 1)
 }
 
+/// What a lab's step is called in its rubric, which the grader gives back with its mark: `[S1]`,
+/// counting from 1.
+fn lab_step_id(at: usize) -> String {
+    format!("[S{}]", at + 1)
+}
+
+/// What a lab's question at the end is called in its rubric.
+const LAB_EXPLAIN_ID: &str = "[E]";
+
+/// The grader's points in the order of `ids`, each the one it gave back starting with that id,
+/// whatever order it gave them in. Fails unless every id is marked exactly once, and nothing
+/// else is.
+fn points_by_id(points: &[Point], ids: &[String]) -> Result<Vec<Point>> {
+    let mut found: Vec<Option<Point>> = vec![None; ids.len()];
+    for point in points {
+        let at = ids
+            .iter()
+            .position(|id| point.point.trim_start().starts_with(id.as_str()))
+            .with_context(|| {
+                format!(
+                    "the grader marked a point that isn't one of the rubric's: {:?}",
+                    point.point
+                )
+            })?;
+        if found[at].replace(point.clone()).is_some() {
+            bail!("the grader marked {} twice", ids[at]);
+        }
+    }
+    found
+        .into_iter()
+        .zip(ids)
+        .map(|(point, id)| point.with_context(|| format!("the grader didn't mark {id}")))
+        .collect()
+}
+
+/// A lab's marking with its points in order: one for each step, then the question at the end.
+fn order_lab(marked: Marked, lab: &workshop_pack::Lab) -> Result<Marked> {
+    let ids: Vec<String> = (0..lab.steps.len())
+        .map(lab_step_id)
+        .chain([LAB_EXPLAIN_ID.to_owned()])
+        .collect();
+    let points = points_by_id(&marked.points, &ids)?;
+    Ok(Marked { points, ..marked })
+}
+
 /// Marks a piece of work with the grader.
 pub async fn mark(
     runner: &ProviderRunner,
@@ -745,6 +821,7 @@ pub async fn mark(
     let marked = parse_marked(&reply.text, error_types, &answer)?;
     match &item.content {
         Content::Review(review) => score_review(marked, review),
+        Content::Lab(lab) => order_lab(marked, lab),
         _ => Ok(marked),
     }
 }
@@ -1287,7 +1364,7 @@ mod tests {
             ),
             (
                 vec![point("[D1] a"), point("b"), point("[D3] c")],
-                "isn't one of the defects",
+                "isn't one of the rubric's",
             ),
         ] {
             let wrong = Marked {
@@ -1297,6 +1374,80 @@ mod tests {
             let err = score_review(wrong, review).unwrap_err();
             assert!(err.to_string().contains(says), "{err}");
         }
+    }
+
+    #[test]
+    fn marks_a_lab_step_by_step_against_what_each_should_show() {
+        let pack = Pack::sample();
+        let types = workshop_pack::error_types::built_in();
+        let item = pack.item("dict-and-list-lookups").unwrap();
+        let Content::Lab(lab) = &item.content else {
+            panic!("not a lab");
+        };
+        assert!(Work::Lab.is_attempt());
+        assert!(Work::Lab.logs_mistakes());
+        let work = "## Step 1: Time a lookup in a list and a dict\n\n7 usec and 19 nsec";
+        let prompt = mark_prompt(item, Work::Lab, Answer::written(work), &types).unwrap();
+        // A point for each step, and one for the question at the end, each with an id.
+        assert!(
+            prompt.contains("- [S1] Time a lookup in a list and a dict: what was recorded shows"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("- [S3] Look up a value that isn't there:"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("- [E] Answers the question at the end"),
+            "{prompt}"
+        );
+        // The grader knows the steps, and what each should show, and the explain answer.
+        assert!(
+            prompt.contains("<lab>\n## Setup\n\nAny computer with Python"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("python3 -m timeit"), "{prompt}");
+        assert!(
+            prompt.contains("[S2] Grow them tenfold, and again, expected:"),
+            "{prompt}"
+        );
+        assert!(prompt.contains(lab.steps[1].expected.trim()), "{prompt}");
+        assert!(prompt.contains(lab.explain_answer.trim()), "{prompt}");
+        assert!(
+            prompt.contains(&format!("<work>\n{work}\n</work>")),
+            "{prompt}"
+        );
+        assert!(prompt.contains("Machines differ"), "{prompt}");
+        // A lab is marked only as a lab, and only a lab is.
+        assert!(mark_prompt(item, Work::Design, Answer::written(work), &types).is_err());
+        assert!(
+            mark_prompt(
+                pack.item("link-shortener").unwrap(),
+                Work::Lab,
+                Answer::written(work),
+                &types
+            )
+            .is_err()
+        );
+
+        // Given back in another order, the points are put in the lab's.
+        let reply = r#"{"score": 0.7, "points": [{"point": "[E] Answers", "met": "partly"}, {"point": "[S2] Grow", "met": "no"}, {"point": "[S1] Time", "met": "yes"}, {"point": "[S3] Look", "met": "yes"}], "findings": [], "feedback": "Run the bigger ones."}"#;
+        let marked = parse_marked(reply, &types, &Answer::written(work)).unwrap();
+        let ordered = order_lab(marked.clone(), lab).unwrap();
+        let ids: Vec<&str> = ordered
+            .points
+            .iter()
+            .map(|p| &p.point[..p.point.find(' ').unwrap()])
+            .collect();
+        assert_eq!(ids, ["[S1]", "[S2]", "[S3]", "[E]"]);
+        assert!((ordered.score - 0.7).abs() < 1e-9);
+        // Every step, and the question at the end, must be marked.
+        let without = Marked {
+            points: marked.points[..3].to_vec(),
+            ..marked
+        };
+        let err = order_lab(without, lab).unwrap_err();
+        assert!(err.to_string().contains("didn't mark [S3]"), "{err}");
     }
 
     #[test]

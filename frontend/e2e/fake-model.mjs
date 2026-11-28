@@ -237,6 +237,42 @@ if (prompt.includes("<change>") && prompt.includes("<work>")) {
   process.exit(0);
 }
 
+// The grader, marking a lab: a step is met when something was recorded for it, and the question
+// at the end when the answer says "zero". The score is the share met.
+if (prompt.includes("<lab>") && prompt.includes("<work>")) {
+  const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";
+  const recorded = work
+    .split(/^## /m)
+    .filter((section) => section.startsWith("Step "))
+    .map((section) => !section.includes("(Nothing recorded.)"));
+  const answer = work.split(/^## Explain: .*$/m)[1] ?? "";
+  const points = (prompt.match(/<rubric>\n([\s\S]*?)<\/rubric>/)?.[1] ?? "")
+    .split("\n")
+    .filter((line) => line.startsWith("- "))
+    .map((line) => {
+      const step = line.match(/^- \[S(\d+)\]/)?.[1];
+      const met = step ? recorded[Number(step) - 1] : answer.includes("zero");
+      return {
+        point: line.slice(2),
+        met: met ? "yes" : "no",
+        comment: met ? "" : step ? "Nothing was recorded here." : "Say where the zeros come from.",
+      };
+    });
+  const met = points.filter((point) => point.met === "yes").length;
+  await reply([
+    JSON.stringify({
+      score: points.length > 0 ? met / points.length : 0,
+      points,
+      findings:
+        met === points.length
+          ? []
+          : [{ error_type: "missed-edge-case", detail: "Left a step of the lab unrecorded" }],
+      feedback: "Record **every** step, with its numbers.",
+    }),
+  ]);
+  process.exit(0);
+}
+
 // The grader, marking a lesson's explain-in-your-own-words answer.
 if (prompt.includes("<lesson>") && prompt.includes("<work>")) {
   const work = prompt.match(/<work>\n([\s\S]*?)\n<\/work>/)?.[1] ?? "";

@@ -226,3 +226,123 @@ textarea.explain-heard {
 .follow-ups-done summary {
   padding: 8px 0;
 }
+
+/* Labs, carried out on the learner's own machine a step at a time. */
+.learn-labs {
+  margin-top: 20px;
+}
+
+.lab-intro,
+.lab-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lab-intro p {
+  margin: 0;
+}
+
+.lab-title,
+.lab-screen-name {
+  margin: 0;
+  font-size: 18px;
+}
+
+.lab-meta {
+  font-size: 14px;
+}
+
+.lab-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.lab-text .markdown > :first-child {
+  margin-top: 0;
+}
+
+.lab-text .markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.lab-code {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lab-code pre {
+  margin: 0;
+}
+
+.lab-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.lab-copy .pill {
+  padding: 2px 12px;
+  font-size: 14px;
+}
+
+/* What was run and seen is often pasted output, so it's set like code and kept to its lines. */
+.lab-record {
+  min-height: 12rem;
+  font-family: var(--mono);
+  font-size: 14px;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.lab-stop {
+  align-self: flex-start;
+}
+
+.lab-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lab-result {
+  gap: 6px;
+  padding-left: 12px;
+}
+
+.lab-result > p,
+.lab-result > h4 {
+  margin: 0;
+}
+
+.lab-result-name {
+  margin: 0;
+  font-size: 16px;
+}
+
+.lab-recorded {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 13px;
+  /* Kept to its lines, as output's columns only line up there; it scrolls instead. */
+  white-space: pre;
+}
+
+.lab-given {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

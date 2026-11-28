@@ -2,7 +2,7 @@
 name = "workshop-sessions"
 version = "0.0.0"
 edition.workspace = true
-description = "Long items done in a sitting, saved as they go: guided design sessions and timed rounds"
+description = "Long items done in a sitting, saved as they go: guided design sessions, labs and timed rounds"
 license.workspace = true
 repository.workspace = true
 publish = false

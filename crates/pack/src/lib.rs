@@ -11,6 +11,7 @@ pub mod diff;
 pub mod drafts;
 pub mod error_types;
 mod item;
+pub mod lab;
 pub mod lesson;
 mod manifest;
 pub mod mental;
@@ -37,6 +38,7 @@ pub use item::{
     Content, DIFFICULTY, FollowUps, Item, Kind, MentalMaths, Param, Probability, Simulation,
     replace_section, split_front_matter,
 };
+pub use lab::{Lab, LabStep};
 pub use lesson::{
     Check, Guess, ImageData, Lesson, LessonImage, LessonRef, LessonSource, Segment, TopicRef,
 };
@@ -487,8 +489,27 @@ fn check_item(item: &Item, pack: &Pack) -> Option<(Verdict, Vec<String>)> {
     match &item.content {
         Content::Coding(_) | Content::Reading(_) => None,
         Content::Lesson(lesson) => Some(check_lesson(item, lesson, pack)),
+        Content::Lab(lab) => Some((check_lab(lab, pack).into(), Vec::new())),
         _ => Some((check_without_programs(item).into(), Vec::new())),
     }
+}
+
+/// A lab's check, which can only be of its form, as the learner carries it out on a machine of
+/// their own: that the lesson it asks to be done first is one of the pack's.
+fn check_lab(lab: &Lab, pack: &Pack) -> Result<String, String> {
+    if let Some(id) = &lab.lesson {
+        match pack.item(id) {
+            None => return Err(format!("lesson {id:?} isn't in the pack")),
+            Some(other) if other.kind != Kind::Lesson => {
+                return Err(format!(
+                    "lesson {id:?} is a {} item, not a lesson",
+                    item::kind_name(other.kind)
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(lab.summary())
 }
 
 fn check_lesson_link(item: &Item, pack: &Pack) -> Result<(), String> {
@@ -613,6 +634,7 @@ fn check_without_programs(item: &Item) -> Result<String, String> {
             unreachable!("checked by running their programs")
         }
         Content::Lesson(_) => unreachable!("checked by check_lesson"),
+        Content::Lab(_) => unreachable!("checked by check_lab"),
         // Reading it applied the change, and found each defect where it says.
         Content::Review(review) => Ok(format!(
             "the change to {} applies, and its {} {} where {} say{}",
@@ -957,6 +979,52 @@ mod tests {
         assert!(pack.problems[1].message.contains("already items/a.md's"));
         assert!(!pack.check(&NotRun).await.passed());
         assert!(Pack::from_files(files(&[("items/a.md", card)])).is_err());
+    }
+
+    #[tokio::test]
+    async fn checks_a_labs_form_and_the_lesson_it_asks_for_first() {
+        let lab = |lesson: &str| {
+            format!(
+                "+++\nkind = \"lab\"\nskills = [\"dice\"]\nlesson = \"{lesson}\"\n[[sources]]\ntitle = \"Dice\"\nurl = \"https://example.com/dice\"\n+++\nRoll dice and count.\n\n## Setup\n\nSome dice.\n\n## Roll them\n\nRoll ten times.\n\n### Expected\n\nEach face about as often.\n\n## Explain\n\nWhy?\n\n## Explain answer\n\nThey're fair.\n"
+            )
+        };
+        let lesson = "+++\nkind = \"lesson\"\nskills = [\"dice\"]\n[[sources]]\ntitle = \"Dice\"\nurl = \"https://example.com/dice\"\n+++\nDice.\n\n## Faces\n\nSix of them.\n\n## Explain\n\nWhy?\n\n## Explain answer\n\nThey're cubes.\n";
+        let card = "+++\nkind = \"card\"\nskills = [\"dice\"]\n+++\nQ\n## Answer\nA\n";
+        let pack = Pack::from_files(files(&[
+            ("pack.toml", MANIFEST),
+            ("items/faces.md", lesson),
+            ("items/a-card.md", card),
+            ("items/good.md", &lab("faces")),
+            ("items/missing.md", &lab("nowhere")),
+            ("items/not-a-lesson.md", &lab("a-card")),
+        ]))
+        .unwrap();
+        let report = pack.check(&NotRun).await;
+        let verdict = |path: &str| {
+            report
+                .items
+                .iter()
+                .find(|item| item.path == path)
+                .unwrap()
+                .verdict
+                .clone()
+        };
+        // Workshop can't carry a lab out, and says so.
+        assert_eq!(
+            verdict("items/good.md"),
+            Verdict::Passed(
+                "a lab of 1 step, after the lesson faces: checked for form only, as it's carried out on the learner's own machine"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            verdict("items/missing.md"),
+            Verdict::Failed("lesson \"nowhere\" isn't in the pack".to_owned())
+        );
+        assert_eq!(
+            verdict("items/not-a-lesson.md"),
+            Verdict::Failed("lesson \"a-card\" is a card item, not a lesson".to_owned())
+        );
     }
 
     #[tokio::test]

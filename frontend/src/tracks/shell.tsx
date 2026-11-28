@@ -4,8 +4,10 @@ import { App } from "../app";
 import { CodingScreen } from "../coding/screen";
 import { errorMessage } from "../errors";
 import { DesignScreen } from "../grading/design";
+import { LabScreen } from "../grading/lab";
 import { LessonScreen } from "../learning/lesson";
 import { type OpenLessonOptions, Practice, type PracticeFlow } from "../learning/practice";
+import { learning } from "../learning/sync";
 import { onNotificationOpen } from "../notifications";
 import { writeCachedBootstrap } from "../offline/bootstrap";
 import { PackScreen } from "../pack/screen";
@@ -216,6 +218,22 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             onOpen={(item) => open({ screen: "design", item })}
           />
         );
+      case "lab":
+        return (
+          <LabScreen
+            key={route.item}
+            itemKey={route.item}
+            serverDictation={boot.server_dictation}
+            onHome={goHome}
+            onBack={() => {
+              // Back to the lab's track, which lists it, if the deck says which that is.
+              const track = learning().deck?.labs?.find((lab) => lab.key === route.item)?.track;
+              if (track) void go({ kind: "practice", track });
+              else goHome();
+            }}
+            onOpenLesson={(item) => openLesson(item)}
+          />
+        );
       case "rounds":
         return (
           <RoundsScreen
@@ -248,6 +266,7 @@ export function Shell({ boot: initialBoot }: { boot: Bootstrap }) {
             onHome={goHome}
             onOpenProblem={(item) => void go({ kind: "coding", item })}
             onOpenLesson={openLesson}
+            onOpenLab={(item) => void go({ kind: "lab", item })}
           />
         );
       }

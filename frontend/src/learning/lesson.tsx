@@ -238,7 +238,7 @@ function withDictated(text: string, heard: string): string {
 }
 
 /** A lesson's sources, as further reading. */
-function ReadMore({ sources }: { sources: DeckLessonSource[] }) {
+export function ReadMore({ sources }: { sources: DeckLessonSource[] }) {
   return (
     <section class="lesson-sources" aria-labelledby="read-more-heading">
       <h3 id="read-more-heading" class="tracks-heading">

@@ -68,7 +68,9 @@ pub fn from_attempt(item: &Item, attempt: &Attempt) -> Option<NewMistake> {
             "Couldn't solve or recall it".to_owned(),
             Some("wrong-approach"),
         ),
-        Content::Design { .. } => ("Marked as forgotten".to_owned(), Some("concept-gap")),
+        Content::Design { .. } | Content::Lab(_) => {
+            ("Marked as forgotten".to_owned(), Some("concept-gap"))
+        }
         Content::Review(_) => (
             "Missed what's wrong with the change".to_owned(),
             Some("missed-defect"),

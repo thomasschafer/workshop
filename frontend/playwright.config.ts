@@ -12,12 +12,15 @@ import {
   createCodingHome,
   createGoalsHome,
   createHome,
+  createLabsHome,
   createLearningHome,
   createLessonsHome,
   createSkipHome,
   GOALS_HOME,
   GOALS_PORT,
   HOME,
+  LABS_HOME,
+  LABS_PORT,
   LEARNING_HOME,
   LEARNING_PORT,
   LESSONS_HOME,
@@ -38,6 +41,7 @@ if (process.env.WORKSHOP_E2E_HOME_READY === undefined) {
   createLessonsHome();
   createGoalsHome();
   createSkipHome();
+  createLabsHome();
   process.env.WORKSHOP_E2E_HOME_READY = "1";
 }
 
@@ -84,6 +88,7 @@ export default defineConfig({
     { home: LESSONS_HOME, port: LESSONS_PORT },
     { home: GOALS_HOME, port: GOALS_PORT },
     { home: SKIP_HOME, port: SKIP_PORT },
+    { home: LABS_HOME, port: LABS_PORT },
   ].map(({ home, port }) => ({
     command: `${binary} serve`,
     env: {

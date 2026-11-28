@@ -15,6 +15,7 @@ mod git;
 mod grading;
 mod home;
 mod install;
+mod labs;
 mod learning;
 mod lsp;
 mod mistakes;
@@ -69,6 +70,10 @@ pub fn router(app: Shared) -> Router {
         .route("/design/{pack}/{item}/session", put(design::save))
         .route("/design/{pack}/{item}/coach", post(design::coach_turn))
         .route("/design/{pack}/{item}/finish", post(design::finish))
+        .route("/labs/{pack}/{item}", get(labs::open))
+        .route("/labs/{pack}/{item}/start", post(labs::start))
+        .route("/labs/{pack}/{item}/session", put(labs::save))
+        .route("/labs/{pack}/{item}/finish", post(labs::finish))
         .route("/rounds", get(rounds::overview))
         .route("/rounds/{pack}/{item}/open", post(rounds::open))
         .route("/rounds/{pack}/{item}/start", post(rounds::start))

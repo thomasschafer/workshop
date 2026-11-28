@@ -92,6 +92,11 @@ pub(super) async fn mark(
             "A review is marked when it's submitted, with its comments.",
         ));
     }
+    if body.work == Work::Lab {
+        return Err(bad_request(
+            "A lab is marked when it's finished, with what was recorded at each step.",
+        ));
+    }
     // An explanation of a solution is marked with the solution it explains: its code, or in a
     // project, the learner's changes to it.
     let (code, changes) = if body.work == Work::Explanation {

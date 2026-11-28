@@ -23,6 +23,7 @@ my-pack/
     lessons/binary-heaps/  a short lesson, with any diagrams in its directory
       item.md
       heap-array.svg
+    labs/page-faults.md  a hands-on exercise, carried out on the learner's own machine
     reading/lifetimes.md
   drafts/
     three-dice.md        a question waiting to be made into an item
@@ -95,7 +96,7 @@ prompt = "prompts/examiner-steady.md"
 
 A track's `icon` is shown beside its name. It's one of the icons the built-in tracks use, `star`, `code`, `dice`, `network`, `timer`, `sigma` and `history`, or one of `layers`, `approximately`, `book`, `chart`, `flask`, `languages`, `lightbulb`, `puzzle`, `radical` and `shapes`. Without one, a pack's track has `layers`.
 
-A pack's track can hold cards, mental maths, probability questions, code to read, coding problems and lessons. Its short items are practised one after another, as in the built-in tracks, and once there's nothing left to practise for now its lessons and coding problems are listed, the problems worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
+A pack's track can hold cards, mental maths, probability questions, code to read, coding problems, lessons and labs. Its short items are practised one after another, as in the built-in tracks, and once there's nothing left to practise for now its lessons, labs and coding problems are listed, the problems worked through in steps and reviewed with twists as the Coding track's are. Design prompts are only worked through in the System design track, so they can't be in a pack's own.
 
 `continue = false` keeps a track to itself, for something to practise only when you choose to, such as a language you're picking up on the side. Its items are only offered when you open the track: Continue never picks them, even when you've got a while, and they aren't made into timed rounds. It has daily limits of its own, the same size as `daily_reviews`, `daily_new` and `daily_lessons` under `[learning]`, so practising it doesn't use up the rest's, and the rest doesn't use up its. Its time doesn't count towards the week's target either. Its items are scheduled, and their mistakes and progress towards goals recorded, as any others are. Without it, a track is in Continue, as the built-in ones are.
 
@@ -138,15 +139,15 @@ Every item can have:
 
 | Field | |
 | --- | --- |
-| `kind` | `card`, `mental-maths`, `probability`, `coding`, `codebase`, `reading`, `design` or `lesson`. Required. |
+| `kind` | `card`, `mental-maths`, `probability`, `coding`, `codebase`, `reading`, `design`, `lesson` or `lab`. Required. |
 | `skills` | The skills it practises, from `pack.toml`. Required. |
 | `id` | Lowercase letters and digits, in words joined by hyphens. Defaults to the file's name, or the directory's for an `item.md`. Your history is kept by id, so changing it starts the item afresh. |
 | `title` | What it's called in lists, if not the start of its prompt. |
-| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults to the pack's `track`, if it has one, and otherwise by kind: work in a codebase is in the Coding track, and lessons are in the Review track. |
+| `track` | A built-in track (`review`, `mental-maths`, `probability`, `coding`, `system-design`) or one of the pack's. Defaults to the pack's `track`, if it has one, and otherwise by kind: work in a codebase is in the Coding track, and lessons and labs are in the Review track. |
 | `source` | Where it came from, in your own words, such as for questions imported from elsewhere. Workshop shows it but doesn't interpret it. |
-| `minutes` | Roughly how long it takes. Defaults by kind (4 for a lesson). A timed round of it lasts this long, and at least 10 minutes. |
+| `minutes` | Roughly how long it takes. Defaults by kind (4 for a lesson, 40 for a lab). A timed round of it lasts this long, and at least 10 minutes. |
 | `difficulty` | How hard it is, from 1, a warm-up, through 3, typical of its kind, to 5, among the hardest of its kind. Optional, and most useful for coding problems: the author writes new problems at the difficulty each skill has reached (see [docs/author.md](author.md)), and takes a problem without one as 3. |
-| `lesson` | Optional, for short items (`card`, `mental-maths`, `probability` and `reading`): the id of the lesson in this pack that teaches it. The item waits to be offered as new until the learner's next day after that lesson is first done, offers "Teach me" before it's answered, and offers "Revisit the lesson" after two consecutive lapses. |
+| `lesson` | Optional, for short items (`card`, `mental-maths`, `probability` and `reading`): the id of the lesson in this pack that teaches it. A lab can name one too, as a lesson to do first (see [Labs](#labs)). The item waits to be offered as new until the learner's next day after that lesson is first done, offers "Teach me" before it's answered, and offers "Revisit the lesson" after two consecutive lapses. |
 | `segment` | Optional, with `lesson`: the segment of that lesson that covers the item, counting from 1. When "Teach me" is used after the lesson has been done, or "Revisit the lesson" is chosen after two lapses, Workshop opens just this segment and its check instead of the whole lesson. |
 
 Items that can't be read are left out, and Workshop says which and why. `workshop pack check` finds them too.
@@ -743,6 +744,68 @@ A short item with `lesson` isn't offered as new (and is left out of new-item cou
 - Topics: checks that every skill's topics have well-formed ids, none listed twice, and that a lesson's `topic` is one of its skills' topics.
 - Cross-item links: checks that every id in `requires` exists and is a lesson, that `requires` doesn't form a cycle, and that every short item's `lesson` and `segment` refer to an existing lesson and segment in the pack.
 
+### Labs
+
+A hands-on exercise that teaches what only hands on a real system can, such as inspecting a running process, tracing its system calls, profiling it or watching page faults happen. The learner carries a lab out on a machine of their own, such as a Linux virtual machine, following its steps, records what they ran and saw at each, and the grader marks it. Workshop never runs anything for a lab.
+
+A lab is a single Markdown file, or a directory with an `item.md`. It's in the pack's `track` if it has one, or its own `track`, and otherwise in the Review track, as lessons are; as it's listed on its track's practice screen, it can't be in the Coding or System design track. `minutes` defaults to 40.
+
+````markdown
++++
+kind = "lab"
+title = "Watching page faults happen"
+skills = ["os.memory"]
+lesson = "virtual-memory"       # optional: a lesson in this pack to do first
+minutes = 40                    # optional; defaults to 40
+
+[[sources]]
+title = "perf-stat(1)"
+url = "https://man7.org/linux/man-pages/man1/perf-stat.1.html"
++++
+Count a program's minor and major page faults, and make each kind happen on purpose.
+
+## Setup
+
+A Linux machine where you can install packages and run `perf`, such as a virtual machine...
+
+## Count the faults of a fresh allocation
+
+What to do, with commands in code blocks, and what to record...
+
+### Expected
+
+What a right observation shows and why, for the grader, and shown to the learner afterwards.
+
+## Make a major fault
+
+...
+
+### Expected
+
+...
+
+## Explain
+
+One question about what the lab showed, to answer in the learner's own words.
+
+## Explain answer
+
+What a good answer covers.
+````
+
+The prompt, before the first `## ` heading, says what the lab is about. Then come `## Setup` (required, first): what the learner needs before they start; between one and eight steps, each a `## ` section under a heading of its own, saying what to do, with commands in code blocks the app lets the learner copy, and what to record, ending in a `### Expected` (required) that says what a right observation shows and why; and `## Explain` and `## Explain answer` (both required, after the steps), a question about what the lab showed and what a good answer covers. Anything after a step's `### Expected` is part of it. Headings inside code blocks don't count. No two sections can share a heading, and a lab can't include images.
+
+Fields in the front matter:
+
+- `[[sources]]` (required, at least one): where the lab's facts come from, as for lessons, shown as "Read more" links once it's marked.
+- `lesson` (optional): the id of a lesson in this pack to do first. Continue only offers the lab once that lesson's been done, and its track's list says to do it first. Unlike a short item's `lesson`, it takes no `segment`, and doesn't hold the lab back until the next day.
+
+A lab is worked through on the server, so it needs it: the setup first, then a step at a time, each with a box for what the learner ran and saw, typed, dictated or pasted, then the explain question. Everything is saved as it's written, so a lab can be stopped part-way and carried on later, or on another device, and steps can be gone back to. At the end, the grader marks the whole lab against each step's `### Expected` and the explain answer: for each step, whether what was recorded shows the expected result, and an understanding of it, with brief feedback, and an overall score. The learner then sees each step's expected result beside what they recorded. That counts as an attempt, rated from its score as a design session's is and scheduled the same way, and what the grader finds goes in the mistake log. A lab can be done again. What each step should show, and the explain answer, are never sent to the app before it's marked.
+
+A track's labs are listed in a Labs section on its practice screen, as lessons are. Continue only offers a lab when the learner has said they've got a while, as for design sessions, and one under way comes first.
+
+`workshop pack check` can't carry a lab out, so it checks only its form: its sections and sources as above, and that its `lesson` is a lesson in the pack. It says so for each lab, as "checked for form only".
+
 ## Timed rounds
 
 Coding problems, probability questions and design prompts can also be done as timed rounds, in the Timed rounds track: the problem against a visible clock, as in a live session, with the examiner. The learner keeps their working in one place, typed or dictated, and talks with the examiner as they go; it answers questions without giving the method away and, once they have an answer, asks follow-ups that extend or change the problem. In a round of a design prompt, it answers questions about the requirements from the prompt's brief, as a design session's coach does, with a brief made up as the round starts for a prompt without one, and the grader marks what was asked too. A round lasts the item's `minutes`, and at least 10. A coding problem in parts is done whole in a round, every part at once. When time runs out, or the learner ends it, the grader marks the working and what was said against a rubric: a design prompt's own, and for a coding problem or a probability question, one Workshop has for rounds of each, judged against the item's approach or solution. Answering the examiner's follow-ups well is a point in each. That counts as an attempt, and what the grader finds goes in the mistake log.
@@ -802,4 +865,4 @@ loop {
 workshop pack check ~/my-pack
 ```
 
-reads every item, runs each one's check, and lists what's wrong, exiting with an error if anything is. Warnings (such as a lesson segment over 180 words or a fixed colour in an SVG) are listed without failing the check. Items that can't be checked here, such as C++ without a compiler, are listed as skipped, with what to install, and don't count as wrong. Without a path, it checks the packs in your config, and the sample pack if there are none or `sample_pack` is set. CI runs it on the sample pack.
+reads every item, runs each one's check (only a lab's form, as Workshop can't carry a lab out), and lists what's wrong, exiting with an error if anything is. Warnings (such as a lesson segment over 180 words or a fixed colour in an SVG) are listed without failing the check. Items that can't be checked here, such as C++ without a compiler, are listed as skipped, with what to install, and don't count as wrong. Without a path, it checks the packs in your config, and the sample pack if there are none or `sample_pack` is set. CI runs it on the sample pack.
